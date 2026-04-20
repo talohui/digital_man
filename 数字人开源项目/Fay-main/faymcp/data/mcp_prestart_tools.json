@@ -1,0 +1,27 @@
+{
+    "4": {
+        "query_yueshen": {
+            "params": {
+                "embedding_api_key": "",
+                "embedding_base_url": "",
+                "embedding_model": "",
+                "query": "{{question}}",
+                "top_k": 5,
+                "where": {}
+            },
+            "include_history": true,
+            "allow_function_call": false
+        }
+    },
+    "7": {
+        "query_lingshan_rag": {
+            "params": {
+                "query": "{{question}}",
+                "top_k": 5,
+                "use_llm": false
+            },
+            "include_history": true,
+            "allow_function_call": false
+        }
+    }
+}

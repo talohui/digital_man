@@ -1,0 +1,52 @@
+{
+    "5": {
+        "now": true,
+        "add": false,
+        "upper": false,
+        "echo": false,
+        "ping": false,
+        "ingest_yueshen": false,
+        "yueshen_stats": false
+    },
+    "1": {
+        "add": true,
+        "upper": false,
+        "echo": false,
+        "ping": false,
+        "now": true,
+        "display_media": true
+    },
+    "2": {
+        "('meta', None)": true,
+        "('nextCursor', None)": true,
+        "browser_snapshot": false
+    },
+    "3": {
+        "get_file_info": false,
+        "list_allowed_directories": true,
+        "edit_file": false,
+        "list_directory": false,
+        "directory_tree": false,
+        "create_directory": false,
+        "read_text_file": false,
+        "read_multiple_files": false,
+        "read_media_file": false,
+        "read_file": false,
+        "move_file": false,
+        "list_directory_with_sizes": false,
+        "search_files": false,
+        "write_file": false
+    },
+    "4": {
+        "ingest_yueshen": false,
+        "yueshen_stats": false,
+        "query_yueshen": false
+    },
+    "6": {
+        "list_windows": true
+    },
+    "7": {
+        "lingshan_rag_status": false,
+        "query_lingshan_rag": true
+    }
+}

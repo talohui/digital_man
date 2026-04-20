@@ -1,0 +1,9 @@
+# Maven 构建产物
+target/
+
+# H2 数据库文件（运行时数据，不上传）
+*.mv.db
+*.trace.db
+
+# macOS
+.DS_Store

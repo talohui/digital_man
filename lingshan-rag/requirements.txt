@@ -1,0 +1,6 @@
+python-docx
+markdownify
+chromadb
+sentence-transformers
+tqdm
+mcp
