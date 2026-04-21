@@ -1,0 +1,101 @@
+version: '3'
+
+networks:
+  dataease-network:
+    driver: bridge
+
+services:
+
+  # ── MySQL ──────────────────────────────────────────────────────────────────
+  mysql-de:
+    image: registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5
+    container_name: mysql-de
+    restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-hlocalhost", "-u${DE_MYSQL_USER}", "-p${DE_MYSQL_PASSWORD}", "--protocol", "tcp"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DE_MYSQL_PASSWORD}
+    volumes:
+      - ./conf/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./conf/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./data/mysql:/var/lib/mysql
+    networks:
+      - dataease-network
+
+  # ── etcd（APISIX 依赖）──────────────────────────────────────────────────────
+  apisix-etcd:
+    image: registry.cn-qingdao.aliyuncs.com/dataease/etcd:3.5.10
+    container_name: apisix-etcd
+    restart: always
+    environment:
+      ETCD_ENABLE_V2: "true"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://apisix-etcd:2379"
+    volumes:
+      - ./data/etcd:/bitnami/etcd
+    networks:
+      - dataease-network
+
+  # ── APISIX ─────────────────────────────────────────────────────────────────
+  apisix:
+    image: registry.cn-qingdao.aliyuncs.com/dataease/apisix:3.14.1-debian
+    container_name: apisix
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./conf/apisix.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./conf/cas-auth.lua:/usr/local/apisix/apisix/plugins/cas-auth.lua
+      - ./conf/openid-connect.lua:/usr/local/apisix/apisix/plugins/openid-connect.lua
+      - ./conf/hmac-auth.lua:/usr/local/apisix/apisix/plugins/hmac-auth.lua
+      - ./data/apisix/logs:/usr/local/apisix/logs
+    depends_on:
+      - apisix-etcd
+    ports:
+      - "${DE_APISIX_PORT}:9080"
+    networks:
+      - dataease-network
+
+  # ── DataEase ───────────────────────────────────────────────────────────────
+  dataease:
+    image: registry.cn-qingdao.aliyuncs.com/dataease/dataease:${DE_TAG}
+    container_name: dataease
+    restart: always
+    ports:
+      - "${DE_PORT}:8100"
+    environment:
+      DE_MYSQL_HOST: mysql-de
+      DE_MYSQL_PORT: ${DE_MYSQL_PORT}
+      DE_MYSQL_DB: ${DE_MYSQL_DB}
+      DE_MYSQL_USER: ${DE_MYSQL_USER}
+      DE_MYSQL_PASSWORD: ${DE_MYSQL_PASSWORD}
+      DE_MYSQL_PARAMS: ${DE_MYSQL_PARAMS}
+      DE_CONTEXT_PATH: ${DE_CONTEXT_PATH}
+      DE_LOGIN_TIMEOUT: ${DE_LOGIN_TIMEOUT}
+      DE_EXPORT_VIEWS_LIMIT: ${DE_EXPORT_VIEWS_LIMIT}
+      DE_EXPORT_DATASET_LIMIT: ${DE_EXPORT_DATASET_LIMIT}
+      DE_ORIGIN_LIST: ${DE_ORIGIN_LIST}
+      DE_SERVERS: ${DE_SERVERS}
+      DE_APISIX_KEY: ${DE_APISIX_KEY}
+      DE_PLAYWRIGHT_SERVER: ${DE_PLAYWRIGHT_SERVER}
+    volumes:
+      - ./conf/application.yml:/opt/apps/config/application.yml
+      - ./data/de/logs:/opt/dataease2.0/logs
+      - ./data/de/static-resource:/opt/dataease2.0/data/static-resource
+      - ./data/de/cache:/opt/dataease2.0/cache
+      - ./data/de/geo:/opt/dataease2.0/data/geo
+      - ./data/de/map:/opt/dataease2.0/data/map
+      - ./data/de/exportData:/opt/dataease2.0/data/exportData
+    depends_on:
+      mysql-de:
+        condition: service_healthy
+      apisix:
+        condition: service_started
+    extra_hosts:
+      # Mac Docker Desktop 访问宿主机服务（analytics-server:5002）
+      - "host.docker.internal:host-gateway"
+    networks:
+      - dataease-network
