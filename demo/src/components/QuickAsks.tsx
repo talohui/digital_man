@@ -2,7 +2,7 @@ import { MessageOutlined } from '@ant-design/icons'
 import { Button, Card, Space, Typography } from 'antd'
 import { useChatStore } from '../store/useChatStore'
 
-const questions = [
+const defaultQuestions = [
   '灵山大佛有多高？',
   '九龙灌浴几点开始？',
   '梵宫里有什么好玩的？',
@@ -11,7 +11,17 @@ const questions = [
   '怎么去抱佛脚？'
 ]
 
-function QuickAsks() {
+type QuickAsksProps = {
+  questions?: string[]
+  title?: string
+  subtitle?: string
+}
+
+function QuickAsks({
+  questions = defaultQuestions,
+  title = '一键发起热门导览问题',
+  subtitle = '猜你想问'
+}: QuickAsksProps) {
   const sendQuickAsk = useChatStore((state) => state.sendQuickAsk)
 
   return (
@@ -19,10 +29,10 @@ function QuickAsks() {
       <Space direction="vertical" size={14} style={{ width: '100%' }}>
         <div>
           <Typography.Text className="section-kicker">
-            猜你想问
+            {subtitle}
           </Typography.Text>
           <Typography.Title level={5} className="quick-asks-card__title">
-            一键发起热门导览问题
+            {title}
           </Typography.Title>
         </div>
 
