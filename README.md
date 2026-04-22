@@ -10,14 +10,16 @@
 
 ## 项目结构
 
-```
+```text
 软件杯/
 ├── demo/                        前端（React 18 + Vite + TypeScript）
 ├── analytics-server/            行为分析后端（Spring Boot 3.3 + H2）
 ├── gorse-docker/                Gorse 路线推荐集群（Docker）
 ├── lingshan-rag/                RAG 知识库 + MCP Server（Python）
 ├── 数字人开源项目/Fay-main/      Fay 数字人框架（Python）
+├── dataease-docker/             DataEase v2 本地 Docker 配置
 ├── SETUP.md                     环境搭建指南（⬅ 先看这个）
+├── HANDOFF.md                   当前交接状态
 ├── 地图导览_Gorse_v1_操作说明.md  地图导览 + Gorse v1 操作文档
 ├── 实现文档.md                   完整技术实现文档
 └── README.md
@@ -32,6 +34,7 @@
 | 知识库 | ChromaDB + sentence-transformers + MCP | stdio |
 | 行为分析 | Spring Boot 3.3 + H2 + 情感分析 Strategy 模式 | 5002 |
 | 路线推荐 | Gorse + MySQL（Docker） | 8087 / 8088 |
+| B 端大屏 | DataEase v2 + APISIX + MySQL（Docker） | 9080 / 8100 |
 
 ## 主要功能
 
@@ -41,10 +44,13 @@
 - 💬 景区知识问答（RAG + Qwen LLM）
 - 🗺️ 首页标签选路 + 地图导览 + 景点讲解页
 - 🎯 Gorse v1 路线推荐（后端适配层 + fallback）
-- 📊 /admin 数据大屏（情感趋势、热门问题、响应时延）
+- 📊 React `/admin` 运营大屏（情感趋势、热门问题、响应时延）
+- 📈 DataEase 本地 B 端大屏（API 数据源 + KPI 卡片 + 趋势图）
+- 📮 双通道行为埋点（PostHog Cloud + analytics-server）
 
 ## 文档
 
 - **环境搭建**：[SETUP.md](./SETUP.md)
+- **交接状态**：[HANDOFF.md](./HANDOFF.md)
 - **地图导览/Gorse 操作**：[地图导览_Gorse_v1_操作说明.md](./地图导览_Gorse_v1_操作说明.md)
 - **技术实现**：[实现文档.md](./实现文档.md)
