@@ -10,6 +10,7 @@
 | Node.js | 18+ | 前端 |
 | Java | 17 | analytics-server |
 | Maven | 3.8+ | Java 构建 |
+| Docker Desktop | 最新版 | Gorse + DataEase |
 | Chrome/Edge | 最新版 | 运行 demo（Live2D + 语音识别） |
 
 ---
@@ -64,7 +65,7 @@ ASR_mode=funasr
 
 ## 第三步：启动所有服务
 
-**开 4 个终端窗口，分别执行：**
+**开 5 个终端窗口，分别执行：**
 
 ### 终端 1 — Fay（数字人引擎）
 
@@ -84,7 +85,24 @@ mvn spring-boot:run
 
 启动成功标志：`Started AnalyticsApplication on port 5002`
 
-### 终端 3 — 前端 demo
+### 终端 3 — Gorse（路线推荐）
+
+```bash
+cd gorse-docker
+
+# 首次执行一次
+cp .env.example .env
+
+# 建议直接用独立版 compose
+/usr/local/bin/docker-compose up -d
+```
+
+启动成功标志：
+
+- `curl -s http://127.0.0.1:8087/api/health/live` 返回 `"Ready": true`
+- 访问 `http://127.0.0.1:8088` 会跳到登录页
+
+### 终端 4 — 前端 demo
 
 ```bash
 cd demo
@@ -94,7 +112,7 @@ npm run dev
 
 启动成功标志：`Local: http://localhost:5173/`
 
-### 终端 4（可选）— 验证 lingshan-rag MCP
+### 终端 5（可选）— 验证 lingshan-rag MCP
 
 ```bash
 cd lingshan-rag
@@ -111,6 +129,9 @@ python mcp_server/server.py
 2. 点击"灵山大佛有多高？"— 应该收到 AI 回答并播放语音
 3. 访问 `http://localhost:5173/admin` — 查看数据大屏
 4. 访问 `http://127.0.0.1:5002/api/summary` — 确认后端有数据
+5. 访问 `http://127.0.0.1:8087/api/health/live` — 确认 Gorse 已 ready
+6. 打开首页后选择标签并点击“进入地图导览”，确认能进入 `/map`
+7. 点击地图页景点进入 `/spot/:spotId`，确认景点页还能继续和数字人对话
 
 ---
 
@@ -131,6 +152,29 @@ python mcp_server/server.py
 **Q：前端报 CORS 错误**
 - 确认 analytics-server（5002）和 Fay（5001）都已正常启动
 
+**Q：地图页提示缺少腾讯地图 Key**
+- 在 `demo/.env.local` 中补齐：
+```bash
+VITE_TMAP_WEB_KEY=你的腾讯地图WebKey
+VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划Key
+```
+
+**Q：Gorse master 不断重启**
+- 先确认当前仓库里的 `gorse-docker/docker-compose.yml` 没有给 `master` 配 `--cache-path`
+- 再执行：
+```bash
+cd gorse-docker
+/usr/local/bin/docker-compose down -v
+/usr/local/bin/docker-compose up -d
+```
+
+**Q：Gorse health 还是 `Ready: false`**
+- 如果 `master` 已经正常，但 `server` 还没恢复，执行：
+```bash
+cd gorse-docker
+/usr/local/bin/docker-compose restart server worker
+```
+
 ---
 
 ## 目录说明
@@ -139,9 +183,11 @@ python mcp_server/server.py
 软件杯/
 ├── demo/                   前端（React 18 + Live2D）
 ├── analytics-server/       行为分析后端（Spring Boot）
+├── gorse-docker/           Gorse 路线推荐集群
 ├── lingshan-rag/           RAG 知识库 + MCP Server（Python）
 ├── 数字人开源项目/Fay-main/ Fay 数字人框架（Python）
 ├── SETUP.md                本文件
+├── 地图导览_Gorse_v1_操作说明.md  地图导览与 Gorse 操作文档
 ├── README.md               项目简介
 └── 实现文档.md              完整技术文档
 ```

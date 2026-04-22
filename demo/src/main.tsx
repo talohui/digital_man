@@ -29,15 +29,15 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#b7791f',
-          colorInfo: '#b7791f',
-          colorSuccess: '#4f772d',
-          colorWarning: '#c05621',
-          colorBgBase: '#f5ede1',
-          colorTextBase: '#3f3324',
+          colorPrimary: '#1b5e20',
+          colorInfo: '#1b5e20',
+          colorSuccess: '#2f7d35',
+          colorWarning: '#d97706',
+          colorBgBase: '#fafaed',
+          colorTextBase: '#2c3e50',
           borderRadius: 18,
           fontFamily:
-            '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
+            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
         }
       }}
     >

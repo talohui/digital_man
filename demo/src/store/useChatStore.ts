@@ -19,6 +19,13 @@ export interface ChatMessage {
   createdAt: string
 }
 
+export interface GuideContext {
+  routeName?: string
+  spotName?: string
+  spotIntro?: string
+  spotNarrative?: string
+}
+
 interface ChatState {
   inputText: string
   isRecording: boolean
@@ -30,6 +37,7 @@ interface ChatState {
   // 数字人相关
   robotState: RobotState
   mouthOpen: number
+  guideContext: GuideContext | null
   _lastSendTime: number   // 记录用户发消息的时刻，用于计算 AI 响应时长
   setInputText: (value: string) => void
   appendMessage: (role: ChatRole, content: string) => void
@@ -40,6 +48,8 @@ interface ChatState {
   sendQuickAsk: (question: string) => Promise<void>
   startRecord: () => void
   stopRecord: () => void
+  setGuideContext: (context: GuideContext) => void
+  clearGuideContext: () => void
   // 数字人控制
   setRobotState: (state: RobotState) => void
   setMouthOpen: (value: number) => void
@@ -92,6 +102,24 @@ const initialMessages: ChatMessage[] = [
 let audioChain: Promise<void> = Promise.resolve()
 let pendingAudioCount = 0
 
+const buildGuidePrompt = (content: string, guideContext: GuideContext | null) => {
+  if (!guideContext?.spotName) {
+    return content
+  }
+
+  return [
+    '你是灵山胜境的数字人讲解员，请优先围绕当前景点和当前路线回答游客问题。',
+    guideContext.routeName ? `当前路线：${guideContext.routeName}` : '',
+    guideContext.spotName ? `当前景点：${guideContext.spotName}` : '',
+    guideContext.spotIntro ? `景点简介：${guideContext.spotIntro}` : '',
+    guideContext.spotNarrative ? `当前讲解重点：${guideContext.spotNarrative}` : '',
+    '如果游客问题偏离景点，也请先简短回答，再自然地把话题拉回当前导览场景。',
+    `游客问题：${content}`
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   inputText: '',
   isRecording: false,
@@ -102,6 +130,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   lastError: '',
   robotState: 'normal',
   mouthOpen: 0,
+  guideContext: null,
   _lastSendTime: 0,
   setInputText: (value) => set({ inputText: value }),
   appendMessage: (role, content) =>
@@ -170,7 +199,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ inputText: '', isSending: true, lastError: '', robotState: 'thinking', _lastSendTime })
 
     try {
-      const response = await sendTextToFay(content)
+      const response = await sendTextToFay(buildGuidePrompt(content, get().guideContext))
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -212,6 +241,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
     captureVoiceEnd()                     // 埋点：录音结束
   },
+  setGuideContext: (guideContext) => set({ guideContext }),
+  clearGuideContext: () => set({ guideContext: null }),
   setRobotState: (state) => set({ robotState: state }),
   setMouthOpen: (value) => set({ mouthOpen: value }),
   enqueueAudio: (url) => {

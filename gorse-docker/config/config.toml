@@ -1,0 +1,42 @@
+[master]
+http_host = "0.0.0.0"
+http_port = 8088
+n_jobs = 1
+dashboard_user_name = "admin"
+dashboard_password = "admin123"
+
+[server]
+default_n = 3
+api_key = "lingshan-gorse-local-key"
+auto_insert_user = true
+auto_insert_item = true
+cache_expire = "10s"
+
+[recommend]
+cache_size = 100
+cache_expire = "72h"
+context_size = 20
+
+[recommend.data_source]
+positive_feedback_types = ["select_route"]
+read_feedback_types = ["impression_route"]
+positive_feedback_ttl = 0
+item_ttl = 0
+
+[recommend.collaborative]
+type = "mf"
+fit_period = "10m"
+fit_epoch = 20
+optimize_period = "60m"
+optimize_trials = 3
+
+[recommend.ranker]
+type = "fm"
+fit_period = "10m"
+fit_epoch = 20
+optimize_period = "60m"
+optimize_trials = 3
+recommenders = ["latest"]
+
+[recommend.fallback]
+recommenders = ["latest"]

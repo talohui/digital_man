@@ -14,9 +14,11 @@
 软件杯/
 ├── demo/                        前端（React 18 + Vite + TypeScript）
 ├── analytics-server/            行为分析后端（Spring Boot 3.3 + H2）
+├── gorse-docker/                Gorse 路线推荐集群（Docker）
 ├── lingshan-rag/                RAG 知识库 + MCP Server（Python）
 ├── 数字人开源项目/Fay-main/      Fay 数字人框架（Python）
 ├── SETUP.md                     环境搭建指南（⬅ 先看这个）
+├── 地图导览_Gorse_v1_操作说明.md  地图导览 + Gorse v1 操作文档
 ├── 实现文档.md                   完整技术实现文档
 └── README.md
 ```
@@ -29,6 +31,7 @@
 | 数字人引擎 | Fay（Python + 阿里百炼 Qwen + 阿里云 TTS） | 5001 / WS:10003 |
 | 知识库 | ChromaDB + sentence-transformers + MCP | stdio |
 | 行为分析 | Spring Boot 3.3 + H2 + 情感分析 Strategy 模式 | 5002 |
+| 路线推荐 | Gorse + MySQL（Docker） | 8087 / 8088 |
 
 ## 主要功能
 
@@ -36,9 +39,12 @@
 - 🔊 TTS 音频实时播放 + Web Audio 嘴型驱动
 - 🎤 浏览器 ASR 语音输入（Chrome/Edge）
 - 💬 景区知识问答（RAG + Qwen LLM）
+- 🗺️ 首页标签选路 + 地图导览 + 景点讲解页
+- 🎯 Gorse v1 路线推荐（后端适配层 + fallback）
 - 📊 /admin 数据大屏（情感趋势、热门问题、响应时延）
 
 ## 文档
 
 - **环境搭建**：[SETUP.md](./SETUP.md)
+- **地图导览/Gorse 操作**：[地图导览_Gorse_v1_操作说明.md](./地图导览_Gorse_v1_操作说明.md)
 - **技术实现**：[实现文档.md](./实现文档.md)

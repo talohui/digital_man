@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { CompassOutlined, EnvironmentOutlined, SoundOutlined } from '@ant-design/icons'
 import { Card, Col, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
@@ -32,13 +33,24 @@ const stateLabel: Record<RobotState, string> = {
   thinking: '灵山小灵思考中'
 }
 
-function Live2DStage() {
+type StageHighlight = {
+  title: string
+  value: string
+  icon: ReactNode
+}
+
+type Live2DStageProps = {
+  highlightsOverride?: StageHighlight[]
+}
+
+function Live2DStage({ highlightsOverride }: Live2DStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string>('')
   const robotState = useChatStore((s) => s.robotState)
   const mouthOpen = useChatStore((s) => s.mouthOpen)
+  const visibleHighlights = highlightsOverride ?? highlights
 
   // 挂载 Pixi + 加载模型
   useEffect(() => {
@@ -159,7 +171,7 @@ function Live2DStage() {
       </div>
 
       <Row gutter={[12, 12]}>
-        {highlights.map((item) => (
+        {visibleHighlights.map((item) => (
           <Col span={8} key={item.title}>
             <div className="stage-card__metric">
               <Space size={8}>

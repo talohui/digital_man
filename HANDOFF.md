@@ -2,7 +2,7 @@
 
 > 当前负责人：german-spalo  
 > 仓库：https://github.com/talohui/digital_man  
-> 更新时间：2026-04-21（最新调试记录见下方"DataEase 排查详情"）
+> 更新时间：2026-04-22（最新进展见下方“地图导览 + Gorse v1 最新状态”）
 
 ---
 
@@ -12,6 +12,7 @@
 /Users/MR/Desktop/软件杯/               ← 主仓库根目录
 ├── demo/                               前端 React 18 + Vite（端口 5173）
 ├── analytics-server/                   Spring Boot 行为分析后端（端口 5002）
+├── gorse-docker/                       Gorse 路线推荐集群（REST:8087，Dashboard:8088）
 ├── lingshan-rag/                       Python RAG 知识库 + MCP Server
 ├── 数字人开源项目/Fay-main/             Fay 数字人引擎（HTTP:5001，WS:10003）
 ├── dataease-docker/                    DataEase v2 Docker 启动目录（端口 8100）
@@ -34,13 +35,17 @@ python fay_booter.py
 cd /Users/MR/Desktop/软件杯/analytics-server
 mvn spring-boot:run
 
-# 3. 前端 demo
+# 3. Gorse（路线推荐）
+cd /Users/MR/Desktop/软件杯/gorse-docker
+/usr/local/bin/docker-compose up -d
+
+# 4. 前端 demo
 cd /Users/MR/Desktop/软件杯/demo
 npm run dev
 # 访问 http://localhost:5173
 # 管理大屏 http://localhost:5173/admin
 
-# 4. DataEase（Docker，已配置好）
+# 5. DataEase（Docker，已配置好）
 cd /Users/MR/Desktop/软件杯/dataease-docker
 docker compose up -d
 # 访问 http://localhost:8100
@@ -49,6 +54,104 @@ docker compose up -d
 ---
 
 ## 当前进度
+
+### ✅ 2026-04-22 新增完成：地图导览 + Gorse v1
+
+- `demo` 已接入首页标签推荐、`/map` 地图导览页、`/spot/:spotId` 景点讲解页
+- 地图原型中的路线、景点、叙事、腾讯地图加载和步行算路逻辑已迁入 `demo`
+- `useChatStore` 已支持 `guideContext`，景点页发给 Fay 的内容会自动附带当前路线/景点上下文
+- `analytics-server` 已新增：
+  - `POST /api/guide/recommendations`
+  - `POST /api/guide/feedback`
+  - Gorse seed、用户标签 upsert、推荐兜底 fallback
+- `gorse-docker` 已创建并验证跑通：
+  - `8087` Gorse REST
+  - `8088` Gorse dashboard
+- 已确认真 Gorse 链路可用：
+  - analytics-server 启动时成功 seed `3 routes / 6 seed users / 12 feedback rows`
+  - 推荐接口已出现 `Gorse 根据相似游客偏好...` 的真实返回
+  - 反馈接口已成功写入 `select_route`
+
+### 地图导览 + Gorse v1 最新状态
+
+#### 代码位置
+
+- 前端主入口：
+  - `demo/src/pages/HomePage.tsx`
+  - `demo/src/pages/GuideMapPage.tsx`
+  - `demo/src/pages/SpotGuidePage.tsx`
+- 前端导览状态与数据：
+  - `demo/src/store/useGuideStore.ts`
+  - `demo/src/data/guideData.ts`
+  - `demo/src/api/guide.ts`
+- 聊天上下文：
+  - `demo/src/store/useChatStore.ts`
+  - `demo/src/components/QuickAsks.tsx`
+  - `demo/src/components/Live2DStage.tsx`
+- 地图工具：
+  - `demo/src/lib/loadTMap.ts`
+  - `demo/src/lib/routePlanning.ts`
+- 后端 Gorse 适配：
+  - `analytics-server/src/main/java/com/lingshan/analytics/controller/GuideController.java`
+  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRecommendationService.java`
+  - `analytics-server/src/main/java/com/lingshan/analytics/service/GorseClient.java`
+  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRouteCatalog.java`
+- Gorse 集群目录：
+  - `gorse-docker/docker-compose.yml`
+  - `gorse-docker/config/config.toml`
+  - `gorse-docker/.env`
+
+#### 启动顺序
+
+```bash
+# 1. Fay
+cd /Users/MR/Desktop/软件杯/数字人开源项目/Fay-main
+python fay_booter.py
+
+# 2. Gorse
+cd /Users/MR/Desktop/软件杯/gorse-docker
+/usr/local/bin/docker-compose up -d
+
+# 3. analytics-server
+cd /Users/MR/Desktop/软件杯/analytics-server
+mvn spring-boot:run
+
+# 4. demo
+cd /Users/MR/Desktop/软件杯/demo
+npm run dev
+```
+
+#### 关键验证
+
+- Gorse REST 健康检查：
+  - `curl -s http://127.0.0.1:8087/api/health/live`
+  - 应返回 `"Ready": true`
+- Gorse dashboard：
+  - 打开 `http://127.0.0.1:8088`
+  - 默认登录：`admin / admin123`
+- 推荐接口：
+  - `curl -s -X POST http://127.0.0.1:5002/api/guide/recommendations -H 'Content-Type: application/json' -d '{"userId":"guest-test","selectedTags":["祈福静心","文化探秘"]}'`
+- 反馈接口：
+  - `curl -s -X POST http://127.0.0.1:5002/api/guide/feedback -H 'Content-Type: application/json' -d '{"userId":"guest-test","routeId":"historical_culture","action":"select_route"}'`
+
+#### 当前已知操作要点
+
+- `demo` 地图页依赖腾讯地图 key，需在 `demo/.env.local` 配置：
+  - `VITE_TMAP_WEB_KEY=...`
+  - `VITE_TMAP_ROUTE_KEY=...`
+- 启动 Gorse 时优先用独立版 compose：
+  - `/usr/local/bin/docker-compose up -d`
+- 当前 `gorse-master` 不能带 `--cache-path` 启动参数，否则会反复崩溃
+- 如果队友重建 Gorse 后发现 `master` 正常、`server` 仍不 ready，执行一次：
+
+```bash
+cd /Users/MR/Desktop/软件杯/gorse-docker
+/usr/local/bin/docker-compose restart server worker
+```
+
+#### 一份更细的操作说明
+
+- 查看：`/Users/MR/Desktop/软件杯/地图导览_Gorse_v1_操作说明.md`
 
 ### ✅ 已完成
 

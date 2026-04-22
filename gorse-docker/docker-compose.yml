@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql/mysql-server:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  master:
+    image: zhenghaoz/gorse-master:latest
+    restart: unless-stopped
+    environment:
+      GORSE_CACHE_STORE: mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}
+      GORSE_DATA_STORE: mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}
+      GORSE_SERVER_API_KEY: ${GORSE_API_KEY}
+      GORSE_MASTER_DASHBOARD_USER_NAME: ${GORSE_DASHBOARD_USER}
+      GORSE_MASTER_DASHBOARD_PASSWORD: ${GORSE_DASHBOARD_PASSWORD}
+    command: >
+      -c /etc/gorse/config.toml
+      --log-path /var/log/gorse/master.log
+    volumes:
+      - ./config/config.toml:/etc/gorse/config.toml
+      - gorse_log:/var/log/gorse
+      - master_data:/var/lib/gorse
+    ports:
+      - "8088:8088"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  server:
+    image: zhenghaoz/gorse-server:latest
+    restart: unless-stopped
+    command: >
+      --master-host master --master-port 8086
+      --http-host 0.0.0.0 --http-port 8087
+      --log-path /var/log/gorse/server.log
+      --cache-path /var/lib/gorse/server_cache.data
+    volumes:
+      - gorse_log:/var/log/gorse
+      - server_data:/var/lib/gorse
+    ports:
+      - "8087:8087"
+    depends_on:
+      - master
+
+  worker:
+    image: zhenghaoz/gorse-worker:latest
+    restart: unless-stopped
+    command: >
+      --master-host master --master-port 8086
+      --http-host 0.0.0.0 --http-port 8089
+      --log-path /var/log/gorse/worker.log
+      --cache-path /var/lib/gorse/worker_cache.data
+      -j 2
+    volumes:
+      - gorse_log:/var/log/gorse
+      - worker_data:/var/lib/gorse
+    depends_on:
+      - master
+
+volumes:
+  mysql_data:
+  master_data:
+  server_data:
+  worker_data:
+  gorse_log:
