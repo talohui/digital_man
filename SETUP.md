@@ -10,6 +10,7 @@
 | Node.js | 18+ | 前端 |
 | Java | 17 | analytics-server |
 | Maven | 3.8+ | Java 构建 |
+| Docker Desktop | 最新版 | DataEase / APISIX / MySQL |
 | Chrome/Edge | 最新版 | 运行 demo（Live2D + 语音识别） |
 
 ---
@@ -103,14 +104,45 @@ python mcp_server/server.py
 # Ctrl+C 退出，Fay 会自动管理这个进程
 ```
 
+### 可选：启用 PostHog Cloud 埋点
+
+在 `demo/.env.local` 中写入：
+
+```bash
+VITE_POSTHOG_KEY=phc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+注意：
+
+- 必须是 `VITE_POSTHOG_KEY=...` 的键值对格式
+- `.env.local` 不进 Git
+- 不配置时，前端仍会继续把事件发给 `analytics-server`
+
+### 可选：启动 DataEase 本地 B 端大屏
+
+```bash
+cd dataease-docker
+./start.sh
+```
+
+推荐入口：`http://localhost:9080`
+
+说明：
+
+- `dataease-docker/.env` 为本地配置文件，不进 Git
+- 首次启动时若本地没有 `.env`，`start.sh` 会从 `.env.example` 自动生成
+- `dataease-docker/data/` 是本地运行目录，不进 Git
+
 ---
 
 ## 第四步：验证
 
 1. **Chrome 打开** `http://localhost:5173`，看到数字人画面加载
-2. 点击"灵山大佛有多高？"— 应该收到 AI 回答并播放语音
-3. 访问 `http://localhost:5173/admin` — 查看数据大屏
-4. 访问 `http://127.0.0.1:5002/api/summary` — 确认后端有数据
+2. 点击“灵山大佛有多高？”— 应该收到 AI 回答并播放语音
+3. 访问 `http://localhost:5173/admin` — 查看 React 运营大屏
+4. 访问 `http://127.0.0.1:5002/api/summary` — 确认行为分析后端有数据
+5. 如果启用了 PostHog，浏览器 DevTools `Network` 中应能看到 PostHog 上报请求
+6. 如果启用了 DataEase，访问 `http://localhost:9080` — 确认 DataEase 登录页可打开
 
 ---
 
@@ -131,6 +163,15 @@ python mcp_server/server.py
 **Q：前端报 CORS 错误**
 - 确认 analytics-server（5002）和 Fay（5001）都已正常启动
 
+**Q：DataEase 打不开**
+- 确认 Docker Desktop 已启动
+- 在 `dataease-docker/` 下执行 `docker compose ps`
+- 推荐通过 `http://localhost:9080` 访问，而不是直接用 `8100`
+
+**Q：PostHog 没有上报**
+- 检查 `demo/.env.local` 是否写成 `VITE_POSTHOG_KEY=...`
+- 修改 `.env.local` 后需要重启 `npm run dev`
+
 ---
 
 ## 目录说明
@@ -141,7 +182,9 @@ python mcp_server/server.py
 ├── analytics-server/       行为分析后端（Spring Boot）
 ├── lingshan-rag/           RAG 知识库 + MCP Server（Python）
 ├── 数字人开源项目/Fay-main/ Fay 数字人框架（Python）
+├── dataease-docker/        DataEase 本地 Docker 配置
 ├── SETUP.md                本文件
+├── HANDOFF.md              当前交接状态
 ├── README.md               项目简介
 └── 实现文档.md              完整技术文档
 ```
