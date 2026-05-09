@@ -2,7 +2,7 @@
 
 > 当前负责人：german-spalo
 > 仓库：https://github.com/talohui/digital_man
-> 更新时间：2026-04-22
+> 更新时间：2026-05-09
 
 ---
 
@@ -10,11 +10,11 @@
 
 ```text
 /Users/MR/Desktop/软件杯/
-├── demo/                               前端 React 18 + Vite（5173）
+├── demo/                               前端 React 18 + Vite（默认 5173，可自动切到 5174+）
 ├── analytics-server/                   Spring Boot 行为分析后端（5002）
 ├── gorse-docker/                       Gorse 路线推荐集群（8087 / 8088）
 ├── lingshan-rag/                       Python RAG 知识库 + MCP Server
-├── 数字人开源项目/Fay-main/             Fay 数字人引擎（HTTP:5001，WS:10003）
+├── 数字人开源项目/Fay-main/             Fay 数字人引擎（HTTP:5000，WS:10003）
 ├── dataease-docker/                    DataEase v2 本地 Docker 配置（9080 / 8100）
 ├── SETUP.md                            环境搭建指南
 ├── HANDOFF.md                          本文件
@@ -43,7 +43,7 @@
 
 ### 仍需注意
 
-- `dataease-docker/data/`、`dataease-docker/.env`、`gorse-docker/.env` 都是本地运行文件，不进 Git
+- `dataease-docker/data/`、`dataease-docker/.env`、`gorse-docker/.env`、`数字人开源项目/Fay-main/system.conf` 都是本地运行文件，不进 Git
 - 如果换新机器，DataEase 的数据源 / 数据集 / 大屏需要按本文档重新在 UI 中建一次
 - 地图页依赖腾讯地图 key，队友本地必须自行补齐 `demo/.env.local`
 
@@ -54,7 +54,7 @@
 ```bash
 # 1. Fay
 cd /Users/MR/Desktop/软件杯/数字人开源项目/Fay-main
-python fay_booter.py
+python main.py start
 
 # 2. Gorse
 cd /Users/MR/Desktop/软件杯/gorse-docker
@@ -79,11 +79,11 @@ cd /Users/MR/Desktop/软件杯/dataease-docker
 
 | 服务 | 地址 | 说明 |
 |---|---|---|
-| Fay | `http://127.0.0.1:5001` | 数字人 HTTP 接口 |
+| Fay | `http://127.0.0.1:5000` | 数字人 HTTP 接口 |
 | Fay WS | `ws://127.0.0.1:10003` | 数字人消息 / 音频推送 |
 | analytics-server | `http://127.0.0.1:5002` | 行为分析 REST API |
-| 前端主页 | `http://localhost:5173` | 用户交互页面 |
-| React `/admin` | `http://localhost:5173/admin` | 自建运营大屏 |
+| 前端主页 | `http://127.0.0.1:5173` | 默认用户交互页面 |
+| React `/admin` | `http://127.0.0.1:5173/admin` | 默认自建运营大屏 |
 | Gorse REST | `http://127.0.0.1:8087` | 路线推荐 REST |
 | Gorse Dashboard | `http://127.0.0.1:8088` | Dashboard 登录页 |
 | DataEase | `http://localhost:9080` | 推荐入口，经 APISIX 转发 |
@@ -142,12 +142,19 @@ cd /Users/MR/Desktop/软件杯/dataease-docker
 - analytics-server 启动时成功 seed `3 routes / 6 seed users / 12 feedback rows`
 - `POST /api/guide/recommendations` 已能返回 3 条路线
 - `POST /api/guide/feedback` 已能写入 `select_route`
+- Fay 已实测切回百炼：
+  - `gpt_base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
+  - `gpt_model_engine=qwen-turbo`
+  - 真实 `POST /v1/chat/completions` 可返回正常回答
 
 ### 已知操作要点
 
 - 腾讯地图 key 需配置在 `demo/.env.local`
+- Fay 必须读本地 `数字人开源项目/Fay-main/system.conf`，不要依赖社区公共配置
+- Fay 主 HTTP 端口是 `5000`，不是 `5001`
 - 启动 Gorse 时优先用 `/usr/local/bin/docker-compose`
 - `gorse-master` 不能带 `--cache-path`
+- 如果 `5173` 被占用，Vite 会自动切到 `5174` 或更高端口，以终端 `Local:` 输出为准
 - 如果 `master` 正常但 `server` 仍不 ready，执行：
 
 ```bash

@@ -1875,8 +1875,20 @@ def run():
             pass
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     from werkzeug.serving import make_server
-    server = make_server('0.0.0.0', 5000, __app, threaded=True)
-    server.serve_forever()
+    last_error = None
+    for attempt in range(10):
+        try:
+            server = make_server('0.0.0.0', 5000, __app, threaded=True)
+            server.serve_forever()
+            return
+        except OSError as exc:
+            last_error = exc
+            if getattr(exc, 'errno', None) != 48 or attempt == 9:
+                break
+            util.log(1, f"端口 5000 暂时被占用，1 秒后重试 ({attempt + 1}/10)")
+            time.sleep(1)
+    if last_error is not None:
+        raise last_error
 
 def start():
     MyThread(target=run).start()

@@ -1,5 +1,8 @@
 #作用是音频录制，对于aliyun asr来说，边录制边stt，但对于其他来说，是先保存成文件再推送给asr模型，通过实现子类的方式（fay_booter.py 上有实现）来管理音频流的来源
-import audioop
+try:
+    import audioop
+except ModuleNotFoundError:
+    audioop = None
 import math
 import time
 import threading
@@ -18,6 +21,19 @@ import wave
 from core import fay_core
 from core import interact
 from core import stream_manager
+
+
+def _calculate_rms(data, sample_width):
+    if audioop is not None:
+        return audioop.rms(data, sample_width)
+    if sample_width != 2:
+        raise ValueError(f"Unsupported sample width without audioop: {sample_width}")
+    samples = np.frombuffer(data, dtype=np.int16)
+    if samples.size == 0:
+        return 0
+    return int(np.sqrt(np.mean(np.square(samples.astype(np.float64)))))
+
+
 # 麦克风启动时间 (秒)
 _ATTACK = 0.1
 
@@ -277,7 +293,7 @@ class Recorder:
                 continue
 
             #计算音量是否满足激活拾音
-            level = audioop.rms(data, 2)
+            level = _calculate_rms(data, 2)
             if len(self.__history_data) >= 10:#保存激活前的音频，以免信息掉失
                 self.__history_data.pop(0)
             if len(self.__history_level) >= 500:

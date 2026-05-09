@@ -1,207 +1,258 @@
 # 环境搭建指南
 
-> 队友 clone 后按此步骤操作，约 15 分钟完成。
+> 目标：让队友在一台新机器上，尽量少猜配置就能把 `Fay + Gorse + analytics-server + demo` 跑起来。
 
-## 前置条件
+## 1. 前置条件
 
-| 工具 | 版本 | 说明 |
+| 工具 | 建议版本 | 用途 |
 |---|---|---|
-| Python | 3.10+ | Fay + lingshan-rag 运行环境 |
-| Node.js | 18+ | 前端 |
+| Python | 3.10+，已实测 3.14 | Fay + lingshan-rag |
+| Node.js | 18+ | demo 前端 |
 | Java | 17 | analytics-server |
-| Maven | 3.8+ | Java 构建 |
-| Docker Desktop | 最新版 | Gorse + DataEase / APISIX / MySQL |
-| Chrome/Edge | 最新版 | 运行 demo（Live2D + 语音识别） |
+| Maven | 3.8+ | analytics-server 构建 |
+| Docker Desktop | 最新版 | Gorse + DataEase |
+| Chrome / Edge | 最新版 | 前端联调 |
 
----
+说明：
 
-## 第一步：安装 Python 依赖
+- Python 3.13+ 已兼容 `audioop` 缺失问题，`requirements.txt` 已补 `audioop-lts`
+- macOS 如果 `5000` 端口被系统占用，先关闭 `AirPlay Receiver`
 
-Fay 和 lingshan-rag 共用同一个 Python 环境：
+## 2. 必要配置
 
-```bash
-pip install -r 数字人开源项目/Fay-main/requirements.txt
-pip install -r lingshan-rag/requirements.txt
-```
+### 2.1 Fay 配置
 
-> 如果 `sentence-transformers` 安装慢，可以先跳过再看 lingshan-rag 是否正常启动。
-
----
-
-## 第二步：配置 Fay API Key
+在 `数字人开源项目/Fay-main/` 下准备本地 `system.conf`：
 
 ```bash
 cd 数字人开源项目/Fay-main
 cp system.conf.bak system.conf
 ```
 
-在 `system.conf` 中填写：
+至少要填写：
 
 ```ini
-gpt_api_key=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+gpt_api_key=你的百炼Key
 gpt_base_url=https://dashscope.aliyuncs.com/compatible-mode/v1
-gpt_model_engine=qwen-max
+gpt_model_engine=qwen-turbo
 
-ali_tss_key_id=LTAI5tXxxxxxxxxxxxxxxxxx
-ali_tss_key_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-ali_tss_app_key=xxxxxxxxxxxxxxxxx
+ali_tss_key_id=你的阿里云TTS KeyId
+ali_tss_key_secret=你的阿里云TTS KeySecret
+ali_tss_app_key=你的阿里云TTS AppKey
 
 ASR_mode=funasr
+embedding_api_model=text-embedding-v3
 ```
 
-> `system.conf` 不进 Git。
+注意：
 
----
+- `system.conf` 不进 Git
+- 不要依赖“社区公共配置”，否则可能退回到别人的 SiliconFlow 账号
+- 正常启动后，Fay 日志里应该看到：
+  - `model=qwen-turbo`
+  - `base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
 
-## 第三步：启动所有服务
+### 2.2 demo 环境变量
 
-建议按下面顺序启动。
-
-### 终端 1 — Fay
+在 `demo/.env.local` 写入：
 
 ```bash
-cd 数字人开源项目/Fay-main
-python fay_booter.py
+VITE_POSTHOG_KEY=你的 PostHog Key
+VITE_TMAP_WEB_KEY=你的腾讯地图 Web Key
+VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划 Key
 ```
 
-### 终端 2 — Gorse
+说明：
+
+- 地图页依赖腾讯地图 key
+- 没配地图 key 时，首页推荐和后端接口仍可联调，但 `/map` 无法正常出图
+
+### 2.3 Gorse 环境变量
 
 ```bash
 cd gorse-docker
 cp .env.example .env
+```
+
+默认本地开发直接用 `.env.example` 的值即可。
+
+## 3. 一次性安装依赖
+
+### 3.1 Python
+
+```bash
+pip install -r 数字人开源项目/Fay-main/requirements.txt
+pip install -r lingshan-rag/requirements.txt
+```
+
+### 3.2 Node
+
+```bash
+cd demo
+npm install --legacy-peer-deps
+```
+
+说明：
+
+- 这版 `demo` 本地安装用 `--legacy-peer-deps` 更稳
+
+## 4. 启动顺序
+
+严格按下面顺序启动。
+
+### 终端 1：启动 Fay
+
+```bash
+cd 数字人开源项目/Fay-main
+python main.py start
+```
+
+正常标志：
+
+- 控制台出现 `请通过浏览器访问 http://127.0.0.1:5000/ 管理您的Fay`
+- 后续出现 `服务启动完成!`
+- 终端能看到：
+  - `model=qwen-turbo`
+  - `base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
+
+### 终端 2：启动 Gorse
+
+```bash
+cd gorse-docker
 /usr/local/bin/docker-compose up -d
 ```
 
-启动成功标志：
+正常标志：
 
-- `curl -s http://127.0.0.1:8087/api/health/live` 返回 `"Ready": true`
-- 访问 `http://127.0.0.1:8088` 会跳到登录页
+```bash
+curl -s http://127.0.0.1:8087/api/health/live
+```
 
-### 终端 3 — analytics-server
+返回里应包含：
+
+```json
+{
+  "Ready": true,
+  "DataStoreConnected": true,
+  "CacheStoreConnected": true
+}
+```
+
+Dashboard：
+
+- 地址：`http://127.0.0.1:8088`
+- 用户名：`admin`
+- 密码：`admin123`
+
+### 终端 3：启动 analytics-server
 
 ```bash
 cd analytics-server
 mvn spring-boot:run
 ```
 
-### 终端 4 — 前端 demo
+正常标志：
+
+```bash
+curl -s http://127.0.0.1:5002/api/summary
+```
+
+能返回 JSON 即可。
+
+### 终端 4：启动 demo
 
 ```bash
 cd demo
-npm install
-npm run dev
+npm run dev -- --host 127.0.0.1
 ```
 
-### 终端 5（可选）— 验证 lingshan-rag MCP
+说明：
+
+- 默认端口是 `5173`
+- 如果 `5173` 被占用，Vite 会自动切到 `5174` 或更高端口
+- 最终以前端终端打印的 `Local:` 地址为准
+
+### 终端 5：可选启动 lingshan-rag
 
 ```bash
 cd lingshan-rag
 python mcp_server/server.py
 ```
 
-### 可选：启用 PostHog Cloud 埋点
+## 5. 联调验证流程
 
-在 `demo/.env.local` 写入：
+按这个顺序验证最省时间：
 
-```bash
-VITE_POSTHOG_KEY=phc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+1. 打开前端 `Local:` 地址
+2. 首页点击一个快捷问题，确认 Fay 能正常回复
+3. 访问 `http://127.0.0.1:5002/api/summary`，确认 analytics-server 正常
+4. 访问 `http://127.0.0.1:8087/api/health/live`，确认 Gorse ready
+5. 首页选择标签，确认推荐卡能刷新
+6. 点击“进入地图导览”，确认能进入 `/map`
+7. 在地图页点击景点，确认能进入 `/spot/:spotId`
+8. 在景点页继续提问，确认回答围绕当前景点展开
 
-### 可选：配置腾讯地图 Key
+## 6. 常见问题
 
-在 `demo/.env.local` 补齐：
+**Q：Fay 启动了，但前端仍提示 WebSocket 连接失败**
 
-```bash
-VITE_TMAP_WEB_KEY=你的腾讯地图WebKey
-VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划Key
-```
+- 确认 Fay HTTP 是 `5000`，不是 `5001`
+- 确认 `ws://127.0.0.1:10003` 已监听
+- 先看 Fay 终端有没有 `服务启动完成!`
 
-### 可选：启动 DataEase 本地 B 端大屏
+**Q：Fay 回复“抱歉，我的大脑暂时开了小差，请稍后再试一下。”**
 
-```bash
-cd dataease-docker
-./start.sh
-```
+- 先看 `system.conf` 是否真的生效
+- 正常情况下日志会显示百炼地址，而不是 SiliconFlow
+- 如果日志里不是百炼，说明 Fay 没读到本地 `system.conf`
 
-推荐入口：`http://localhost:9080`
+**Q：macOS 上 `5000` 端口被占用**
 
----
+- 关闭 `系统设置 -> 通用 -> 隔空投送与接力 -> AirPlay 接收器`
+- 然后重新执行 `python main.py start`
 
-## 第四步：验证
+**Q：前端打不开 `5173`**
 
-1. 打开 `http://localhost:5173`，确认首页数字人正常加载。
-2. 点击“灵山大佛有多高？”，确认能收到回答并播放语音。
-3. 打开 `http://localhost:5173/admin`，确认 React 运营大屏正常。
-4. 访问 `http://127.0.0.1:5002/api/summary`，确认 analytics-server 正常。
-5. 访问 `http://127.0.0.1:8087/api/health/live`，确认 Gorse 已 ready。
-6. 首页选择标签并点击“进入地图导览”，确认能进入 `/map`。
-7. 点击地图页景点进入 `/spot/:spotId`，确认景点页还能继续和数字人对话。
-8. 如果启用了 DataEase，访问 `http://localhost:9080`，确认登录页可打开。
+- 看 `npm run dev` 终端里打印的 `Local:` 地址
+- 如果 `5173` 被占用，通常会自动切到 `5174`
 
----
+**Q：Gorse health 不是 `Ready: true`**
 
-## 常见问题
-
-**Q：Fay 启动后问问题没有回答**
-- 检查 `system.conf` 的 `gpt_api_key` 是否填写正确
-- 访问 `http://127.0.0.1:5000` Fay 控制台查看日志
-
-**Q：没有语音播放**
-- 检查 `ali_tss_key_id / key_secret / app_key` 是否正确
-- 可以临时用 `tts_module=ms_tts`
-
-**Q：lingshan-rag 相关报错**
-- 进入 Fay 控制台检查 MCP 服务
-- 如果报 `ModuleNotFoundError`，重新执行 `pip install -r lingshan-rag/requirements.txt`
-
-**Q：前端报 CORS 错误**
-- 确认 analytics-server（5002）和 Fay（5001）都已启动
-
-**Q：地图页提示缺少腾讯地图 Key**
-- 在 `demo/.env.local` 中补齐 `VITE_TMAP_WEB_KEY` 和 `VITE_TMAP_ROUTE_KEY`
-
-**Q：Gorse master 不断重启**
-- 确认 `gorse-docker/docker-compose.yml` 没有给 `master` 配 `--cache-path`
-- 再执行：
+- 先执行：
 
 ```bash
 cd gorse-docker
-/usr/local/bin/docker-compose down -v
-/usr/local/bin/docker-compose up -d
+/usr/local/bin/docker-compose ps
 ```
 
-**Q：Gorse health 还是 `Ready: false`**
-- 如果 `master` 已正常但 `server` 没恢复，执行：
+- 如果 `master` 正常但 `server` 不 ready，再执行：
 
 ```bash
-cd gorse-docker
 /usr/local/bin/docker-compose restart server worker
 ```
 
-**Q：DataEase 打不开**
-- 确认 Docker Desktop 已启动
-- 在 `dataease-docker/` 下执行 `docker compose ps`
-- 推荐通过 `http://localhost:9080` 访问，而不是直接用 `8100`
+**Q：analytics-server 启动失败**
 
-**Q：PostHog 没有上报**
-- 检查 `demo/.env.local` 是否写成 `VITE_POSTHOG_KEY=...`
-- 修改后需要重启 `npm run dev`
+- 先确认是不是已经有一个旧实例在跑
+- 如果是 H2 文件库冲突，通常是重复启动了第二个实例
 
----
+## 7. 关键地址速查
 
-## 目录说明
+| 服务 | 地址 | 说明 |
+|---|---|---|
+| Fay 控制台 | `http://127.0.0.1:5000` | 主 HTTP 服务 |
+| Fay WS | `ws://127.0.0.1:10003` | 数字人推流 |
+| analytics-server | `http://127.0.0.1:5002` | 行为分析与导览推荐 |
+| Gorse REST | `http://127.0.0.1:8087` | 推荐引擎 REST |
+| Gorse Dashboard | `http://127.0.0.1:8088` | Dashboard |
+| demo | `http://127.0.0.1:5173` | 默认前端地址 |
+| demo 备选 | `http://127.0.0.1:5174` | `5173` 被占用时常见端口 |
 
-```text
-软件杯/
-├── demo/                   前端（React 18 + Live2D）
-├── analytics-server/       行为分析后端（Spring Boot）
-├── gorse-docker/           Gorse 路线推荐集群
-├── lingshan-rag/           RAG 知识库 + MCP Server（Python）
-├── 数字人开源项目/Fay-main/ Fay 数字人框架（Python）
-├── dataease-docker/        DataEase 本地 Docker 配置
-├── SETUP.md                本文件
-├── HANDOFF.md              当前交接状态
-├── 地图导览_Gorse_v1_操作说明.md  地图导览与 Gorse 操作文档
-├── README.md               项目简介
-└── 实现文档.md              完整技术文档
-```
+## 8. 最短结论
+
+队友只要记住这四件事，基本就能跑起来：
+
+1. Fay 用 `python main.py start`，不是 `python fay_booter.py`
+2. Fay 主 HTTP 端口是 `5000`
+3. Gorse 用 `/usr/local/bin/docker-compose up -d`
+4. demo 最终地址以 Vite 终端输出为准，不一定永远是 `5173`

@@ -218,8 +218,16 @@ def accept_audio_device_output_connect():
     global deviceSocketServer
     global __running
     global DeviceInputListenerDict
-    deviceSocketServer = socket.socket(socket.AF_INET,socket.SOCK_STREAM) 
-    deviceSocketServer.bind(("0.0.0.0",10001))   
+    deviceSocketServer = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    for attempt in range(10):
+        try:
+            deviceSocketServer.bind(("0.0.0.0",10001))
+            break
+        except OSError as exc:
+            if exc.errno != 48 or attempt == 9:
+                raise
+            util.log(1, f"端口 10001 暂时被占用，1 秒后重试 ({attempt + 1}/10)")
+            time.sleep(1)
     deviceSocketServer.listen(1)
     MyThread(target = device_socket_keep_alive).start() # 开启心跳包检测
     addr = None        
