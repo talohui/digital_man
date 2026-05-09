@@ -1,6 +1,6 @@
 // src/api/fay.ts
-export const FAY_HTTP = 'http://127.0.0.1:5001'
-export const FAY_WS = 'ws://127.0.0.1:10003'
+export const FAY_HTTP = import.meta.env.VITE_FAY_HTTP?.trim() || 'http://127.0.0.1:5000'
+export const FAY_WS = import.meta.env.VITE_FAY_WS?.trim() || 'ws://127.0.0.1:10003'
 
 export interface FayMessage {
   // 根据实际抓包结构调整

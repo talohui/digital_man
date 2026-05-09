@@ -3,6 +3,7 @@ from asyncio import AbstractEventLoop
 import websockets
 import asyncio
 import json
+import time
 from abc import abstractmethod
 from websockets.legacy.server import Serve
 
@@ -195,9 +196,28 @@ class MyServer:
         if self.__server:
             util.log(1, 'server already exist')
             return
-        self.__server = websockets.serve(self.__handler, self.__host, self.__port, ping_interval=10, ping_timeout=5)
-        asyncio.get_event_loop().run_until_complete(self.__server)
-        asyncio.get_event_loop().run_forever()
+        last_error = None
+        for attempt in range(10):
+            try:
+                self.__server = websockets.serve(
+                    self.__handler,
+                    self.__host,
+                    self.__port,
+                    ping_interval=10,
+                    ping_timeout=5
+                )
+                asyncio.get_event_loop().run_until_complete(self.__server)
+                asyncio.get_event_loop().run_forever()
+                return
+            except OSError as exc:
+                last_error = exc
+                self.__server = None
+                if exc.errno != 48 or attempt == 9:
+                    break
+                util.log(1, f"端口 {self.__port} 暂时被占用，1 秒后重试 ({attempt + 1}/10)")
+                time.sleep(1)
+        if last_error is not None:
+            raise last_error
 
     # 往要发送的命令列表中，添加命令
     def add_cmd(self, content):

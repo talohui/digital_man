@@ -33,3 +33,4 @@ python-docx
 python-pptx
 chromadb
 sentence_transformers
+audioop-lts; python_version >= "3.13"

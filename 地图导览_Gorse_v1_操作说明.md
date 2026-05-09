@@ -1,143 +1,97 @@
 # 地图导览 + Gorse v1 操作说明
 
-这份文档给队友快速说明当前“地图导览 + 真 Gorse v1”集成的实际状态、启动方式和排错点。
+> 这份文档给接手队友用。目标不是解释原理，而是让大家能尽快把这一版跑起来、验证一遍、定位常见问题。
 
----
+## 1. 这版已经接通什么
 
-## 1. 当前状态
+当前分支已经完成下面这条链路：
 
-目前已经完成并验证：
+`首页 Live2D + 聊天 -> 标签选择 -> Gorse 返回 3 条路线 -> 进入 /map -> 点击景点 -> 进入 /spot/:spotId -> 围绕当前景点继续和数字人对话`
 
-- `demo` 首页保留 Live2D + 聊天，并新增路线推荐模块
-- 已新增页面：
-  - `/map`
-  - `/spot/:spotId`
-- `analytics-server` 已作为推荐适配层，对前端屏蔽 Gorse API key 和 seed 细节
-- `gorse-docker` 已成功跑通：
-  - REST: `http://127.0.0.1:8087`
-  - Dashboard: `http://127.0.0.1:8088`
-- Gorse 真链路已验证：
-  - 后端启动时 seed `3 条路线 + 6 个种子用户 + 12 条反馈`
-  - 推荐接口已返回带 `Gorse 根据相似游客偏好...` 的结果
-  - 反馈接口已能写入 `select_route`
+已经实测通过的点：
 
----
+- `demo` 首页新增路线推荐模块
+- 新增 `/map` 和 `/spot/:spotId`
+- `analytics-server` 已接入 Gorse 适配层
+- `gorse-docker` 已能正常提供 `8087 / 8088`
+- Fay 已切回本地百炼配置，聊天链路已验证可用
 
-## 2. 主要代码位置
+## 2. 启动前先确认
 
-### 前端
+### 2.1 Fay 本地配置
 
-- 首页推荐页：
-  - `demo/src/pages/HomePage.tsx`
-- 地图导览页：
-  - `demo/src/pages/GuideMapPage.tsx`
-- 景点讲解页：
-  - `demo/src/pages/SpotGuidePage.tsx`
-- 导览状态：
-  - `demo/src/store/useGuideStore.ts`
-- 路线与景点数据：
-  - `demo/src/data/guideData.ts`
-- 推荐接口调用：
-  - `demo/src/api/guide.ts`
-- 聊天上下文包装：
-  - `demo/src/store/useChatStore.ts`
+`数字人开源项目/Fay-main/system.conf` 必须存在，而且必须是你们自己的本地配置。
 
-### 后端
+不要依赖社区公共配置。
+如果 Fay 没读到本地 `system.conf`，它可能退回到别人的公共账号，导致：
 
-- 推荐接口：
-  - `analytics-server/src/main/java/com/lingshan/analytics/controller/GuideController.java`
-- 推荐服务：
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRecommendationService.java`
-- Gorse client：
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GorseClient.java`
-- 路线目录常量：
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRouteCatalog.java`
+- 用到错误的模型供应商
+- 聊天额度不足
+- `embeddings` 报 `403`
 
-### Gorse
+正常日志应该出现：
 
-- `gorse-docker/docker-compose.yml`
-- `gorse-docker/config/config.toml`
-- `gorse-docker/.env`
+```text
+model=qwen-turbo
+base_url=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
 
----
+### 2.2 demo 环境变量
 
-## 3. 启动顺序
-
-推荐按这个顺序启动：
+`demo/.env.local` 至少要有：
 
 ```bash
-# 1. Fay
-cd /Users/MR/Desktop/软件杯/数字人开源项目/Fay-main
+VITE_POSTHOG_KEY=你的 PostHog Key
+VITE_TMAP_WEB_KEY=你的腾讯地图 Web Key
+VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划 Key
+```
+
+### 2.3 Gorse 本地环境文件
+
+```bash
+cd gorse-docker
+cp .env.example .env
+```
+
+## 3. 最短启动顺序
+
+建议开 4 个终端。
+
+### 终端 1：Fay
+
+```bash
+cd 数字人开源项目/Fay-main
+python main.py start
+```
+
+不要用：
+
+```bash
 python fay_booter.py
+```
 
-# 2. Gorse
-cd /Users/MR/Desktop/软件杯/gorse-docker
+当前主流程统一用 `python main.py start`。
+
+正常标志：
+
+- 终端出现 `请通过浏览器访问 http://127.0.0.1:5000/ 管理您的Fay`
+- 后面出现 `服务启动完成!`
+- `ws://127.0.0.1:10003` 正常监听
+
+### 终端 2：Gorse
+
+```bash
+cd gorse-docker
 /usr/local/bin/docker-compose up -d
-
-# 3. analytics-server
-cd /Users/MR/Desktop/软件杯/analytics-server
-mvn spring-boot:run
-
-# 4. demo
-cd /Users/MR/Desktop/软件杯/demo
-npm run dev
 ```
 
----
-
-## 4. 前端本地环境变量
-
-地图导览需要腾讯地图 key。
-
-在 `demo/.env.local` 里至少配置：
-
-```bash
-VITE_TMAP_WEB_KEY=你的腾讯地图WebKey
-VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划Key
-```
-
-如果没配，地图页会提示缺少腾讯地图 key，但首页推荐和聊天仍然能跑。
-
----
-
-## 5. 后端与推荐接口
-
-### 推荐接口
-
-```bash
-curl -s -X POST http://127.0.0.1:5002/api/guide/recommendations \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":"guest-test","selectedTags":["祈福静心","文化探秘"]}'
-```
-
-### 反馈接口
-
-```bash
-curl -s -X POST http://127.0.0.1:5002/api/guide/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":"guest-test","routeId":"historical_culture","action":"select_route"}'
-```
-
-### 正常预期
-
-- Gorse 正常时：
-  - 返回中会出现 `Gorse 根据相似游客偏好...`
-- Gorse 异常时：
-  - 后端自动回退到本地 tag overlap
-  - 接口仍然返回 3 条路线
-  - `feedback` 不会再因为 Gorse 不可用而报 500
-
----
-
-## 6. Gorse 自检
-
-### 健康检查
+验证：
 
 ```bash
 curl -s http://127.0.0.1:8087/api/health/live
 ```
 
-正常应看到：
+应返回：
 
 ```json
 {
@@ -147,88 +101,167 @@ curl -s http://127.0.0.1:8087/api/health/live
 }
 ```
 
-### Dashboard
+Dashboard：
 
 - 地址：`http://127.0.0.1:8088`
-- 默认账号：`admin`
-- 默认密码：`admin123`
+- 用户名：`admin`
+- 密码：`admin123`
 
----
-
-## 7. 已知坑位
-
-### 1. 优先用 `/usr/local/bin/docker-compose`
-
-这台机器上 `docker compose` 和凭证助手环境不稳定，建议直接用：
+### 终端 3：analytics-server
 
 ```bash
-/usr/local/bin/docker-compose up -d
+cd analytics-server
+mvn spring-boot:run
 ```
 
-### 2. `gorse-master` 不能带 `--cache-path`
-
-这个坑已经修进当前 `docker-compose.yml` 了。
-
-如果有人后续改 compose，把 `master` 的 `--cache-path` 又加回去，`master` 会反复重启。
-
-### 3. `master` 好了但 `server` 不 ready
-
-如果出现：
-
-- `master` 已经 `Up`
-- `8087/api/health/live` 仍是 `Ready: false`
-- `server` 日志一直刷 `error reading server preface: EOF`
-
-执行：
+验证：
 
 ```bash
-cd /Users/MR/Desktop/软件杯/gorse-docker
-/usr/local/bin/docker-compose restart server worker
+curl -s http://127.0.0.1:5002/api/summary
 ```
 
-### 4. 想重建整套 Gorse
+### 终端 4：demo
 
 ```bash
-cd /Users/MR/Desktop/软件杯/gorse-docker
-/usr/local/bin/docker-compose down -v
-/usr/local/bin/docker-compose up -d
+cd demo
+npm run dev -- --host 127.0.0.1
 ```
 
 说明：
 
-- `down -v` 会删除这套 Gorse 的 Docker volumes
-- 不会影响 `demo`、`analytics-server`、`Fay`
+- 默认会尝试 `5173`
+- 如果 `5173` 被占用，会自动切到 `5174` 或更高
+- 以终端里 `Local:` 打印的地址为准
 
----
+## 4. 建议验证路线
 
-## 8. 队友最短验证路线
+把这套流程完整走一遍：
 
-如果只想快速验证这一版是否可演示：
+1. 打开前端首页
+2. 首页点击一个快捷问题，确认 Fay 能回答
+3. 选择 1 到 2 个标签，确认路线卡刷新
+4. 点击“进入地图导览”，进入 `/map`
+5. 切换路线，确认标题、marker、polyline、底部抽屉同步更新
+6. 点击一个景点进入 `/spot/:spotId`
+7. 在景点页提问，确认 UI 显示原问题，但回答围绕当前景点
 
-1. 启动 `gorse-docker`
-2. 启动 `analytics-server`
-3. 启动 `demo`
-4. 打开 `http://localhost:5173`
-5. 首页点标签，看路线卡变化
-6. 点击路线进入 `/map`
-7. 从地图页进入 `/spot/:spotId`
-8. 在景点页继续问问题，确认 UI 显示原问题，但回答围绕当前景点展开
+## 5. 核心接口
 
----
+### 推荐接口
 
-## 9. 这版的边界
+```bash
+curl -s -X POST http://127.0.0.1:5002/api/guide/recommendations \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"guest-test","selectedTags":["祈福静心","文化探秘"]}'
+```
 
-今晚这版只做“路线推荐”：
+正常预期：
 
-- Gorse item 只建模路线，不建模景点
-- 景点讲解继续复用 `demo` 的 Live2D + ChatPanel + Fay 通信链路
-- Fay/RAG 没有改协议，只是前端在景点页包装了上下文 prompt
+- 总能返回 3 条路线
+- Gorse 正常时，`reason` 里会出现类似 `Gorse 根据相似游客偏好...`
+- Gorse 异常时，会自动回退到本地 tag overlap
 
-所以后续如果要继续做：
+### 反馈接口
 
-- 景点级推荐
-- 更复杂的协同过滤
-- 推荐原因解释增强
-- dashboard 上展示路线反馈数据
+```bash
+curl -s -X POST http://127.0.0.1:5002/api/guide/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"guest-test","routeId":"historical_culture","action":"select_route"}'
+```
 
-都可以在这版基础上继续叠加。
+正常预期：
+
+- 返回 `{"ok":true}`
+- Gorse dashboard / API 里能看到对应反馈
+
+## 6. 当前关键代码位置
+
+### 前端
+
+- `demo/src/pages/HomePage.tsx`
+- `demo/src/pages/GuideMapPage.tsx`
+- `demo/src/pages/SpotGuidePage.tsx`
+- `demo/src/store/useGuideStore.ts`
+- `demo/src/data/guideData.ts`
+- `demo/src/api/guide.ts`
+- `demo/src/api/fay.ts`
+- `demo/src/store/useChatStore.ts`
+
+### 后端
+
+- `analytics-server/src/main/java/com/lingshan/analytics/controller/GuideController.java`
+- `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRecommendationService.java`
+- `analytics-server/src/main/java/com/lingshan/analytics/service/GorseClient.java`
+- `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRouteCatalog.java`
+
+### Gorse
+
+- `gorse-docker/docker-compose.yml`
+- `gorse-docker/config/config.toml`
+- `gorse-docker/.env.example`
+
+### Fay
+
+- `数字人开源项目/Fay-main/core/recorder.py`
+- `数字人开源项目/Fay-main/core/wsa_server.py`
+- `数字人开源项目/Fay-main/gui/flask_server.py`
+- `数字人开源项目/Fay-main/fay_booter.py`
+- `数字人开源项目/Fay-main/requirements.txt`
+
+## 7. 这次已经补过的坑
+
+### Fay
+
+- 前端默认 HTTP 地址已改成 `5000`
+- Python 3.13+ 的 `audioop` 缺失已兼容
+- Fay 启动时几个关键端口加了重试，降低“端口刚释放就启动失败”的概率
+
+### Gorse
+
+- `master` 的 `--cache-path` 已移除
+- `server` 不 ready 时可直接 `restart server worker`
+
+## 8. 常见问题
+
+**Q：前端提示 Fay WebSocket 连接失败**
+
+- 先看 Fay 终端是否已经打印 `服务启动完成!`
+- 确认 Fay HTTP 是 `5000`
+- 确认 `10003` 已监听
+
+**Q：Fay 回复“抱歉，我的大脑暂时开了小差，请稍后再试一下。”**
+
+- 大概率是主聊天模型调用失败
+- 第一件事先看日志是不是还在用公共 SiliconFlow 配置
+- 如果不是百炼地址，说明本地 `system.conf` 没生效
+
+**Q：Gorse 健康检查不通**
+
+- 先看：
+
+```bash
+cd gorse-docker
+/usr/local/bin/docker-compose ps
+```
+
+- 如果 `master` 是 `Up`，但 `Ready` 仍是 `false`，再执行：
+
+```bash
+/usr/local/bin/docker-compose restart server worker
+```
+
+**Q：前端不是 5173**
+
+- 这是正常现象
+- 以 `npm run dev` 终端里的 `Local:` 地址为准
+
+**Q：macOS 占了 5000**
+
+- 关闭 `AirPlay Receiver`
+- 然后重新执行 `python main.py start`
+
+## 9. 一句话给队友
+
+如果队友只记住一句：
+
+先让 Fay 读到本地百炼 `system.conf`，再按 `Fay -> Gorse -> analytics-server -> demo` 的顺序启动，最后以前端终端打印的 `Local:` 地址为准。

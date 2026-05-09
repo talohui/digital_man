@@ -25,6 +25,22 @@ cp .env.example .env
 
 - REST API: `http://127.0.0.1:8087`
 - Dashboard: `http://127.0.0.1:8088`
+- 默认账号：`admin`
+- 默认密码：`admin123`
+
+## 与主链路的关系
+
+这套 Gorse 不直接被前端调用。
+
+真实链路是：
+
+`demo -> analytics-server -> Gorse`
+
+也就是说：
+
+- 前端只打 `analytics-server`
+- `analytics-server` 负责 seed、写反馈、请求推荐、fallback
+- Gorse 只负责路线推荐模型
 
 ## 本版固定配置
 
@@ -79,7 +95,6 @@ GORSE_API_KEY=lingshan-gorse-local-key
 所以 dashboard 起起来后，应该能直接看到路线 item、用户和反馈，不会是全空冷启动。
 
 ## 默认登录信息
-
 - Dashboard: `http://127.0.0.1:8088`
 - Username: `admin`
 - Password: `admin123`
