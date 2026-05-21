@@ -20,7 +20,69 @@
 
 ---
 
-## 1.5 Windows 复现专章（队友重点看这里）
+## 1.4 macOS 复现专章（Mac 队友看这里）
+
+本仓库就是在 macOS 上开发的，仓库里存的配置（RAG 绝对路径等）默认就是 Mac 路径，**大多数情况开箱即用**。下面是 Mac 上的关键点。
+
+### A. 拉代码
+
+```bash
+git clone <仓库地址> 软件杯
+cd 软件杯
+```
+
+> 若你的本地路径和原作者不同（原作者是 `/Users/MR/Desktop/软件杯`），见 B 步要改一处 RAG 路径。
+
+### B. RAG 绝对路径（路径不同才需改）
+
+打开 `数字人开源项目/Fay-main/faymcp/data/mcp_servers.json`，找到 **id 7「灵山RAG知识库」**，确认 `args` 和 `cwd` 是你本机的真实路径：
+
+```json
+"args": ["/Users/你的用户名/.../软件杯/lingshan-rag/mcp_server/server.py"],
+"cwd": "/Users/你的用户名/.../软件杯/lingshan-rag",
+```
+
+> 如果你 clone 到的路径恰好就是 `/Users/MR/Desktop/软件杯`，这步可跳过。
+> 不改对的话，数字人能聊天但**回答会脱离灵山知识库**（RAG 子进程起不来）。
+
+### C. 安装依赖
+
+```bash
+# Python（建议虚拟环境）
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r 数字人开源项目/Fay-main/requirements.txt
+pip install -r lingshan-rag/requirements.txt
+
+# 前端
+cd demo && npm install --legacy-peer-deps && cd ..
+```
+
+### D. 配置文件
+
+- `system.conf`：仓库已带可用版本（私密仓库，含 Key），无需手填。需重置时 `cp system.conf.bak system.conf`。
+- `demo/.env.local`：腾讯地图等前端 Key 仍需各自填写（见 §2.2）。
+- Gorse：`cd gorse-docker && cp .env.example .env`。
+
+### E. 启动命令（Mac 原生）
+
+| 用途 | 命令 |
+|---|---|
+| 启动 Fay | `cd 数字人开源项目/Fay-main && python main.py start` |
+| 启动 Gorse | `cd gorse-docker && /usr/local/bin/docker-compose up -d` |
+| 启动 analytics | `cd analytics-server && mvn spring-boot:run` |
+| 启动 demo | `cd demo && npm run dev -- --host 127.0.0.1` |
+| 清 Fay 缓存配置 | `rm -f cache_data/system.conf cache_data/config.json` |
+
+### F. Mac 专属坑
+
+- **`5000` 端口被占用**：多半是系统的 AirPlay 接收器。关闭：`系统设置 → 通用 → 隔空投送与接力 → AirPlay 接收器`，再启动 Fay。
+- **改配置不生效**：Fay 首启会把 `system.conf` 复制进 `cache_data/`。改了模型/Key 后先 `rm -f cache_data/system.conf cache_data/config.json` 再重启。
+- **改了 `rag_utils.py` 或 `mcp_servers.json`**：要**整体重启 Fay**（结束 python 进程再起），软重启不会重载 RAG 子进程。
+
+---
+
+## 1.5 Windows 复现专章（Windows 队友看这里）
 
 本仓库主要在 macOS 上开发，下面把 **Windows 上必须改的点**集中列出。其余步骤与后文一致，只是命令换成 Windows 写法。
 
