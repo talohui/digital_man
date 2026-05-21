@@ -38,6 +38,20 @@ export type GuideRecommendationCard = {
   durationLabel: string
   tags: GuideTag[]
   reason: string
+  matchScore?: number
+  routePersona?: string
+  whyRecommended?: string
+  lightAlternativeId?: string | null
+}
+
+export type UserProfileSnapshot = {
+  userId: string
+  primaryPersona: string | null
+  primaryPersonaLabel: string | null
+  primaryScore: number
+  secondaryPreferences: string[]
+  interestVector: Record<string, number>
+  profileVersion: number
 }
 
 export const scenicCenter: LatLngPoint = {

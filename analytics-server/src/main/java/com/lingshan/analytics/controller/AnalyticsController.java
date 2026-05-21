@@ -51,4 +51,14 @@ public class AnalyticsController {
     public Map<String, Object> realtime() {
         return service.getRealtime();
     }
+
+    @GetMapping("/satisfaction/summary")
+    public Map<String, Object> satisfactionSummary(@RequestParam(defaultValue = "1") int days) {
+        return service.getSatisfactionSummary(days);
+    }
+
+    @GetMapping("/satisfaction/trend")
+    public List<Map<String, Object>> satisfactionTrend(@RequestParam(defaultValue = "7") int days) {
+        return service.getSatisfactionTrend(days);
+    }
 }

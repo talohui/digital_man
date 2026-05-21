@@ -20,12 +20,21 @@ SPOT_NAMES = [
     "梵宫",
     "五印坛城",
     "祥符禅寺",
+    "佛手广场",
     "天下第一掌",
     "百子戏弥勒",
     "阿育王柱",
     "降魔浮雕",
     "佛足坛",
     "灵山胜境",
+    "五智门",
+    "五明桥",
+    "菩提大道",
+    "灵山大照壁",
+    "曼飞龙塔",
+    "灵山精舍",
+    "佛教文化博览馆",
+    "拈花湾",
 ]
 SERVICE_HINTS = ["餐饮", "住宿", "门票", "交通", "停车", "开放", "开放时间", "素斋"]
 INTENT_PATTERNS = {
@@ -36,7 +45,10 @@ INTENT_PATTERNS = {
         "餐饮", "素斋", "自助", "多少钱", "价格", "几点",
         "最佳", "什么时候", "时间",
     ],
-    "讲解知识": ["寓意", "文化意义", "讲解"],
+    "讲解知识": [
+        "寓意", "文化意义", "讲解", "故事", "讲什么", "讲的什么",
+        "典故", "传说", "由来", "含义", "象征", "意义",
+    ],
 }
 # 命中这些景点别名也视为有效信号（文档里真实存在但不在主 SPOT_NAMES 列表的景点/区域）
 EXTRA_PLACE_HINTS = [
@@ -256,7 +268,13 @@ def split_sentences(text: str) -> list[str]:
     # survive as one giant "sentence".
     coarse_parts = re.split(r"(?:\r?\n)+|\s{2,}", cleaned)
     # Also break before inline structural labels that mark a new item.
-    LABEL_RE = re.compile(r"(?<!^)(?=(?:路线规划|讲解重点|特色体验|适合人群|推荐理由)：)")
+    # 含结构化数据集字段(景区名称/景点ID/具体位置/文化内涵...),让"文化内涵：佛陀诞生"
+    # 这类真正承载答案的字段独立成句,而不是和"景点名称：X"挤在一起。
+    LABEL_RE = re.compile(
+        r"(?<!^)(?=(?:路线规划|讲解重点|特色体验|适合人群|推荐理由"
+        r"|景区名称|景点ID|景点名称|具体位置|核心功能|文化内涵|历史渊源"
+        r"|建筑/景观参数|建筑景观参数|景观参数|演艺/开放信息|开放信息)：)"
+    )
     expanded = []
     for part in coarse_parts:
         expanded.extend(LABEL_RE.split(part))
@@ -268,6 +286,24 @@ def split_sentences(text: str) -> list[str]:
             if len(sentence) >= 8:
                 sentences.append(sentence)
     return sentences
+
+
+_METADATA_NOISE_PREFIXES = ("景区名称", "景点ID", "景点名称", "标签", "主题", "来源文档", "章节路径")
+_LOCATION_PREFIXES = ("具体位置", "位置")
+
+
+def is_metadata_noise_sentence(sentence: str, query: str, query_intent: str) -> bool:
+    """结构化数据块里"景点名称：X""景点ID：Y"这类只是元信息,不是答案。
+    "具体位置：..."仅在用户确实问位置/服务时保留。"""
+    s = sentence.lstrip(" #")
+    if any(s.startswith(p) for p in _METADATA_NOISE_PREFIXES):
+        return True
+    if any(s.startswith(p) for p in _LOCATION_PREFIXES):
+        wants_location = query_intent == "服务信息" or any(
+            kw in query for kw in ["在哪", "位置", "哪里", "怎么走", "怎么去", "如何到"]
+        )
+        return not wants_location
+    return False
 
 
 def extract_query_keywords(query: str) -> set[str]:
@@ -308,6 +344,13 @@ def extract_route_plan(text: str) -> str:
     return route
 
 
+_ATTRIBUTE_HINTS = [
+    "铜", "高", "宽", "长", "面积", "占地", "台阶", "手印", "年",
+    "建成", "落成", "吨", "米", "造价", "重", "规模", "尺寸", "用铜",
+]
+_NUMERIC_QUERY_HINTS = ["多少", "多高", "多大", "多宽", "多长", "几", "面积", "占地", "尺寸", "用铜", "造价", "重"]
+
+
 def score_sentence(sentence: str, query: str, query_keywords: set[str], query_spot_name: str, query_intent: str) -> float:
     score = 0.0
     if query_spot_name and query_spot_name in sentence:
@@ -315,6 +358,13 @@ def score_sentence(sentence: str, query: str, query_keywords: set[str], query_sp
     for keyword in query_keywords:
         if keyword and keyword in sentence:
             score += 1.0
+    # 属性词命中:query 里出现的属性名(铜/高/面积/手印/台阶/年...)若也在句子里,强加分。
+    for attr in _ATTRIBUTE_HINTS:
+        if attr in query and attr in sentence:
+            score += 2.0
+    # 数字诉求:问"多少/多高/面积/用铜..."时,含阿拉伯数字的句子优先。
+    if any(h in query for h in _NUMERIC_QUERY_HINTS) and re.search(r"\d", sentence):
+        score += 1.5
     if query_intent == "景点特色" and any(keyword in sentence for keyword in FEATURE_DETAIL_KEYWORDS):
         score += 2.0
     if query_intent == "服务信息" and any(keyword in sentence for keyword in SERVICE_HINTS):
@@ -336,6 +386,8 @@ def extract_best_sentences(query: str, hits: list[dict], max_sentences: int = 3)
 
     for hit in hits[:3]:
         for sentence in split_sentences(hit["text"]):
+            if is_metadata_noise_sentence(sentence, query, query_intent):
+                continue
             score = score_sentence(sentence, query, query_keywords, query_spot_name, query_intent)
             if score > 0:
                 scored.append((score, sentence))
@@ -356,12 +408,16 @@ def extract_best_sentences(query: str, hits: list[dict], max_sentences: int = 3)
     # 这保证在三级小节 chunk（比如"五印坛城 > 建筑风格"）里 section 包含景点名但
     # 正文里不再重复景点名时，依然能把正文前几句返回出来。
     if not sentences and hits:
-        for sentence in split_sentences(hits[0]["text"])[:max_sentences]:
+        for sentence in split_sentences(hits[0]["text"]):
+            if is_metadata_noise_sentence(sentence, query, query_intent):
+                continue
             normalized = normalize_text(sentence)
             if normalized in seen:
                 continue
             seen.add(normalized)
             sentences.append(sentence)
+            if len(sentences) >= max_sentences:
+                break
     return sentences
 
 
@@ -373,7 +429,8 @@ def build_feature_answer(query: str, hits: list[dict]) -> str:
     # 只有在 query 是宽泛"梵宫特色"时才走模板；如果 query 里带具体子词（吉祥颂、
     # 素斋、圣坛、穹顶等），让它走正常句子提取，否则硬点模板会把子问题答案抹掉。
     specific_subtopic = any(kw in query for kw in ["吉祥颂", "圣坛", "穹顶", "素斋", "木雕", "壁画", "琉璃", "华藏"])
-    if query_spot_name == "梵宫" and not specific_subtopic:
+    param_question = any(kw in query for kw in ["面积", "多大", "占地", "造价", "规模", "多少", "几", "铜", "高", "建成", "落成", "年"])
+    if query_spot_name == "梵宫" and not specific_subtopic and not param_question:
         if any(keyword in joined_text for keyword in ["卢浮宫", "菩提伽耶塔", "石窟艺术"]):
             points.append("整体被称为“佛教艺术的卢浮宫”，融合了菩提伽耶塔风格与中国石窟艺术")
         if any(keyword in joined_text for keyword in ["穹顶天象图", "华藏世界", "东阳木雕", "敦煌壁画", "琉璃"]):
@@ -385,6 +442,27 @@ def build_feature_answer(query: str, hits: list[dict]) -> str:
 
     if points:
         return f"{query_spot_name}的主要特色是" + "；".join(points[:3]) + "。"
+
+    # 参数/数字类问题:优先返回含"属性词 + 数字"的那一句,避免被特色句盖过。
+    if param_question:
+        query_intent_local = detect_query_intent(query)
+        attr_in_query = [a for a in _ATTRIBUTE_HINTS if a in query]
+        best = None
+        for hit in hits[:3]:
+            for sentence in split_sentences(hit["text"]):
+                if is_metadata_noise_sentence(sentence, query, query_intent_local):
+                    continue
+                if not re.search(r"\d", sentence):
+                    continue
+                hit_attr = any(a in sentence for a in attr_in_query) if attr_in_query else True
+                if hit_attr:
+                    best = sentence
+                    break
+            if best:
+                break
+        if best:
+            prefix = f"{query_spot_name}的相关参数是" if query_spot_name else "相关参数是"
+            return prefix + best + "。"
 
     sentences = extract_best_sentences(query, hits, max_sentences=3)
     if not sentences:
@@ -438,7 +516,7 @@ def build_service_answer(query: str, hits: list[dict]) -> str:
 
 CULTURE_SENTENCE_KEYWORDS = [
     "寓意", "象征", "文化", "佛教", "讲解", "含义", "故事",
-    "五方五佛", "手印", "台阶", "传承", "缘起", "渊源",
+    "五方五佛", "手印", "施无畏", "与愿", "台阶", "传承", "缘起", "渊源",
 ]
 ROUTE_SENTENCE_MARKERS = ["路线规划", "入园", "出口", "→", "小时", "行程", "全景游", "深度游"]
 
@@ -462,15 +540,24 @@ def build_culture_answer(query: str, hits: list[dict]) -> str:
     query_spot_name = extract_query_spot_name(query)
     culture_hits = filter_culture_sentences(hits, query_spot_name)
 
+    query_intent = detect_query_intent(query)
     scored = []
     for hit in culture_hits[:3]:
         for sentence in split_sentences(hit["text"]):
             if any(marker in sentence for marker in ROUTE_SENTENCE_MARKERS):
                 continue
+            if is_metadata_noise_sentence(sentence, query, query_intent):
+                continue
             score = 0.0
             if query_spot_name and query_spot_name in sentence:
                 score += 2.0
             score += sum(1.0 for kw in CULTURE_SENTENCE_KEYWORDS if kw in sentence)
+            # 属性词命中(台阶/手印/施无畏...)+ 数字诉求加分,和 score_sentence 对齐
+            for attr in _ATTRIBUTE_HINTS:
+                if attr in query and attr in sentence:
+                    score += 3.0
+            if any(h in query for h in _NUMERIC_QUERY_HINTS) and re.search(r"\d", sentence):
+                score += 1.0
             if 15 <= len(sentence) <= 90:
                 score += 0.5
             elif len(sentence) > 120:
@@ -669,6 +756,7 @@ LITERAL_MATCH_VOCAB = (
         "菩提大道", "转经廊", "银杏", "古井", "江南第一钟", "抱佛脚",
         "天下第一掌", "佛手广场", "五方五佛", "手印",
         "建造工艺", "建筑规模", "建筑风格",
+        "台阶", "施无畏", "与愿", "降魔", "成道", "八相",
     }
 )
 
@@ -685,10 +773,21 @@ def extract_literal_tokens(query: str) -> list[str]:
     return kept
 
 
+_NARRATIVE_INTENT_HINTS = ["故事", "讲什么", "讲的什么", "典故", "传说", "由来", "含义", "寓意", "象征", "文化意义", "意义"]
+_PARAM_INTENT_HINTS = ["多大", "多高", "多宽", "多长", "尺寸", "参数", "面积", "占地", "高多少", "价格", "多少钱", "几点", "开放时间", "在哪", "位置", "哪里", "多少", "用铜", "造价", "建成", "落成"]
+
+
+def _is_structured_data_chunk(text: str) -> bool:
+    head = text.lstrip(" #\n")
+    return head.startswith("景区名称") or head.startswith("景点名称")
+
+
 def rerank_hits(query: str, hits: list[dict]) -> list[dict]:
     query_spot_name = extract_query_spot_name(query)
     query_intent = detect_query_intent(query)
     literal_tokens = extract_literal_tokens(query)
+    narrative_intent = any(h in query for h in _NARRATIVE_INTENT_HINTS)
+    param_intent = any(h in query for h in _PARAM_INTENT_HINTS)
 
     reranked = []
     for hit in hits:
@@ -698,6 +797,7 @@ def rerank_hits(query: str, hits: list[dict]) -> list[dict]:
         topic = metadata.get("topic", "")
         text = hit["text"]
         feature_haystack = f"{section_path}\n{text}"
+        structured_chunk = _is_structured_data_chunk(text)
 
         score = -float(hit["distance"])
         match_reasons = ["vector_distance"]
@@ -705,6 +805,11 @@ def rerank_hits(query: str, hits: list[dict]) -> list[dict]:
         if query_spot_name and metadata_spot_name == query_spot_name:
             score += 0.25
             match_reasons.append("spot_name_exact")
+        # 问具体景点却命中通用/泛化块(无 spot_name 且 section 不含该景点)→ 降权,
+        # 让景点专属块(佛教意义/核心艺术等)排到通用"深度传承"块前面。
+        if query_spot_name and not metadata_spot_name and query_spot_name not in section_path:
+            score -= 0.12
+            match_reasons.append("generic_chunk_penalty")
         if query_spot_name and query_spot_name in section_path:
             score += 0.15
             match_reasons.append("spot_name_in_section")
@@ -752,7 +857,7 @@ def rerank_hits(query: str, hits: list[dict]) -> list[dict]:
             if "交流平台" in section_path:
                 score -= 0.08
                 match_reasons.append("platform_background_penalty")
-            if "其他特色景点" in section_path:
+            if "其他特色景点" in section_path and not metadata_spot_name:
                 score -= 0.18
                 match_reasons.append("mixed_spot_penalty")
 
@@ -770,6 +875,18 @@ def rerank_hits(query: str, hits: list[dict]) -> list[dict]:
             if literal_boost > 0:
                 score += min(literal_boost, 0.60)
                 match_reasons.append(f"literal_match(sec={section_hits},text={text_hits})")
+
+        # 属性意图加权:问"故事/含义/讲解"偏叙事块,问"尺寸/参数/位置/价格"偏结构化块。
+        if narrative_intent:
+            if topic in {"历史文化", "讲解知识"}:
+                score += 0.15
+                match_reasons.append("narrative_topic_boost")
+            if structured_chunk:
+                score -= 0.10
+                match_reasons.append("structured_chunk_penalty(narrative)")
+        if param_intent and structured_chunk:
+            score += 0.12
+            match_reasons.append("structured_chunk_boost(param)")
 
         reranked.append(
             {

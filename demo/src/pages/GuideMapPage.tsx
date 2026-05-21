@@ -1,6 +1,8 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
+import { Modal, Rate } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { captureRateRoute } from '../lib/analytics'
 import {
   getDefaultSpotId,
   getGuideRouteById,
@@ -244,6 +246,16 @@ function GuideMapPage() {
     }
   }, [mapStatus, route, routeSpots])
 
+  const [rateOpen, setRateOpen] = useState(false)
+  const [rateStars, setRateStars] = useState(0)
+
+  const closeRate = (submitted: boolean) => {
+    if (submitted && rateStars > 0) captureRateRoute(route.id, rateStars)
+    setRateOpen(false)
+    setRateStars(0)
+    navigate('/')
+  }
+
   const handleRouteSwitch = (routeId: string) => {
     setActiveRouteId(routeId)
     setShowRoutePanel(false)
@@ -262,7 +274,7 @@ function GuideMapPage() {
       <div className="ui-overlay guide-map-overlay">
         <div className="guide-map-topbar">
           <div className="glass-card guide-map-pill">
-            <button className="guide-icon-button" onClick={() => navigate('/')}>
+            <button className="guide-icon-button" onClick={() => setRateOpen(true)}>
               <ArrowLeftOutlined />
             </button>
             <div className="guide-map-pill__body">
@@ -357,6 +369,39 @@ function GuideMapPage() {
           </div>
         </div>
       ) : null}
+
+      <Modal
+        open={rateOpen}
+        title={null}
+        footer={null}
+        closable={false}
+        centered
+        width={420}
+        onCancel={() => closeRate(false)}
+        maskClosable
+      >
+        <div className="rate-modal">
+          <p className="rate-modal__eyebrow">本次导览反馈</p>
+          <h3 className="rate-modal__title">{route.name} 给你的体验如何?</h3>
+          <p className="rate-modal__sub">你的评分会同步影响管理大屏的满意度指标</p>
+          <div className="rate-modal__rate">
+            <Rate value={rateStars} onChange={setRateStars} allowClear={false} style={{ fontSize: 36 }} />
+            <span className="rate-modal__hint">
+              {['', '不太满意', '一般', '还行', '满意', '非常满意'][rateStars] || '点亮星星给个评价'}
+            </span>
+          </div>
+          <div className="rate-modal__actions">
+            <button className="rate-modal__skip" onClick={() => closeRate(false)}>跳过</button>
+            <button
+              className="btn-primary rate-modal__submit"
+              onClick={() => closeRate(true)}
+              disabled={rateStars === 0}
+            >
+              提交并返回
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

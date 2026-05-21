@@ -2,9 +2,12 @@ import {
   ArrowLeftOutlined,
   ClockCircleOutlined,
   CompassOutlined,
-  EnvironmentOutlined
+  DislikeOutlined,
+  EnvironmentOutlined,
+  LikeOutlined
 } from '@ant-design/icons'
-import { useEffect } from 'react'
+import { Modal } from 'antd'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ChatPanel from '../components/ChatPanel'
 import Live2DStage from '../components/Live2DStage'
@@ -18,6 +21,7 @@ import {
 } from '../data/guideData'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
+import { captureRateSpot, captureSpotEnter, captureSpotLeave } from '../lib/analytics'
 
 function SpotGuidePage() {
   const navigate = useNavigate()
@@ -45,10 +49,22 @@ function SpotGuidePage() {
       spotNarrative: stop?.narrative ?? spot.intro
     })
 
+    captureSpotEnter(currentSpotId, route.id)
+    const enteredAt = Date.now()
+
     return () => {
+      captureSpotLeave(currentSpotId, Date.now() - enteredAt)
       clearGuideContext()
     }
-  }, [clearGuideContext, currentSpotId, route.name, setGuideContext, setSelectedSpotId, spot, stop?.narrative])
+  }, [clearGuideContext, currentSpotId, route.id, route.name, setGuideContext, setSelectedSpotId, spot, stop?.narrative])
+
+  const [rateOpen, setRateOpen] = useState(false)
+
+  const submitThumb = (value: 1 | -1) => {
+    captureRateSpot(currentSpotId, value)
+    setRateOpen(false)
+    navigate('/map')
+  }
 
   const handleNext = () => {
     if (!nextSpot) {
@@ -63,7 +79,7 @@ function SpotGuidePage() {
   return (
     <div className="spot-guide-page">
       <div className="spot-guide-context">
-        <button className="guide-icon-button guide-icon-button--light" onClick={() => navigate('/map')}>
+        <button className="guide-icon-button guide-icon-button--light" onClick={() => setRateOpen(true)}>
           <ArrowLeftOutlined />
         </button>
 
@@ -114,13 +130,43 @@ function SpotGuidePage() {
       </main>
 
       <div className="spot-guide-actions">
-        <button className="btn-secondary" onClick={() => navigate('/map')}>
+        <button className="btn-secondary" onClick={() => setRateOpen(true)}>
           回到地图
         </button>
         <button className="btn-primary" onClick={handleNext}>
           {nextSpot ? `去下一站：${nextSpot.name}` : '返回地图继续导览'}
         </button>
       </div>
+
+      <Modal
+        open={rateOpen}
+        title={null}
+        footer={null}
+        closable={false}
+        centered
+        width={420}
+        onCancel={() => { setRateOpen(false); navigate('/map') }}
+        maskClosable
+      >
+        <div className="rate-modal">
+          <p className="rate-modal__eyebrow">景点反馈</p>
+          <h3 className="rate-modal__title">{spot.name} 这一站还不错吗?</h3>
+          <p className="rate-modal__sub">一键回流到管理大屏,帮我们持续优化讲解</p>
+          <div className="rate-modal__thumbs">
+            <button className="rate-modal__thumb rate-modal__thumb--up" onClick={() => submitThumb(1)}>
+              <LikeOutlined />
+              <span>喜欢</span>
+            </button>
+            <button className="rate-modal__thumb rate-modal__thumb--down" onClick={() => submitThumb(-1)}>
+              <DislikeOutlined />
+              <span>一般</span>
+            </button>
+          </div>
+          <button className="rate-modal__skip" onClick={() => { setRateOpen(false); navigate('/map') }}>
+            稍后再说
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

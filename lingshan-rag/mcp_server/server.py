@@ -3,9 +3,16 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+# 阿里云百炼 LLM 配置（与 Fay system.conf 保持一致）
+# 注：私密仓库，Key 直接内置作为独立运行兜底；Fay 启动时仍可由 mcp_servers.json 的 env 块覆盖
+os.environ.setdefault("LINGSHAN_LLM_API_KEY", "sk-0fefe3da4be348c399d0d55cd39abdae")
+os.environ.setdefault("LINGSHAN_LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+os.environ.setdefault("LINGSHAN_LLM_MODEL", "qwen-plus")
 
 from mcp.server.fastmcp import FastMCP
 
@@ -50,6 +57,9 @@ def query_lingshan_rag(query: str, top_k: int = 5, use_llm: bool = True) -> dict
     return {
         "query": result["query"],
         "answer": result["answer"],
+        # 回传 top-3 命中原文,让 Fay 的 Qwen 基于真实知识库片段 grounding,
+        # 而不是只拿到一句弱本地答案后凭参数记忆补全(幻觉根因)。
+        "context": _format_context(result.get("hits") or []),
         "references": result["references"],
         "used_llm": result["used_llm"],
         "llm_error": result["llm_error"],
@@ -61,6 +71,20 @@ def query_lingshan_rag(query: str, top_k: int = 5, use_llm: bool = True) -> dict
         else None,
         "retrieval_count": len(result["hits"]),
     }
+
+
+def _format_context(hits: list, limit: int = 3) -> str:
+    """把 top-N 命中 chunk 拼成可读知识库原文,供数字人 grounding。"""
+    blocks = []
+    for hit in hits[:limit]:
+        meta = hit.get("metadata") or {}
+        path = meta.get("section_path", "")
+        text = (hit.get("text") or "").strip()
+        if not text:
+            continue
+        head = f"【{path}】\n" if path else ""
+        blocks.append(head + text)
+    return "\n\n".join(blocks)
 
 
 if __name__ == "__main__":

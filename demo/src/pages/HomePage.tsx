@@ -1,14 +1,17 @@
-import { ArrowRightOutlined, CompassOutlined, LoadingOutlined } from '@ant-design/icons'
+import { CompassOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Col, Row, Space, Typography } from 'antd'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
 import ChatPanel from '../components/ChatPanel'
 import Live2DStage from '../components/Live2DStage'
+import ProfileBadge from '../components/ProfileBadge'
 import QuickAsks from '../components/QuickAsks'
+import RouteCard from '../components/RouteCard'
 import SceneHeader from '../components/SceneHeader'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
+import { captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
 
 const { Paragraph, Text, Title } = Typography
 
@@ -16,6 +19,7 @@ function HomePage() {
   const navigate = useNavigate()
   const selectedTags = useGuideStore((state) => state.selectedTags)
   const candidateRoutes = useGuideStore((state) => state.candidateRoutes)
+  const userProfile = useGuideStore((state) => state.userProfile)
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const isLoading = useGuideStore((state) => state.isLoading)
   const lastError = useGuideStore((state) => state.lastError)
@@ -38,8 +42,15 @@ function HomePage() {
     void refreshRecommendations()
   }, [refreshRecommendations, selectedTagsKey])
 
+  useEffect(() => {
+    if (candidateRoutes.length > 0) {
+      captureRouteExpose(candidateRoutes.map((r) => r.id))
+    }
+  }, [candidateRoutes])
+
   const handleEnterMap = (routeId: string) => {
     const userId = ensureUserId()
+    captureRouteClick(routeId)
     setActiveRouteId(routeId)
     void sendGuideFeedback({
       userId,
@@ -47,6 +58,11 @@ function HomePage() {
       action: 'select_route'
     })
     navigate('/map')
+  }
+
+  const handleTagToggle = (tag: string) => {
+    captureTagToggle(tag, !selectedTags.includes(tag))
+    toggleTag(tag)
   }
 
   return (
@@ -80,7 +96,7 @@ function HomePage() {
                   <span
                     key={tag}
                     className={`tag-chip ${selectedTags.includes(tag) ? 'active' : ''}`}
-                    onClick={() => toggleTag(tag)}
+                    onClick={() => handleTagToggle(tag)}
                   >
                     {tag}
                   </span>
@@ -103,50 +119,34 @@ function HomePage() {
               {lastError ? <small>当前已自动回退到本地推荐规则</small> : null}
             </div>
 
+            <div className="guide-home-panel__profile-slot">
+              <ProfileBadge profile={userProfile} />
+            </div>
+
             {mainRoute ? (
-              <article className={`glass-card guide-route-card guide-route-card--main ${activeRouteId === mainRoute.id ? 'guide-route-card--active' : ''}`}>
-                <div className="guide-route-card__head">
-                  <div>
-                    <h2>{mainRoute.name}</h2>
-                    <p>{mainRoute.durationLabel}</p>
-                  </div>
-                  <span className="guide-route-card__badge">力荐</span>
-                </div>
-
-                <p className="guide-route-card__reason">{mainRoute.reason}</p>
-                <p className="guide-route-card__desc">{mainRoute.description}</p>
-
-                <div className="guide-route-card__tags">
-                  {mainRoute.tags.map((tag) => (
-                    <span key={tag} className="guide-route-card__tag">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-
-                <button className="btn-primary" onClick={() => handleEnterMap(mainRoute.id)}>
-                  进入地图导览
-                  <ArrowRightOutlined />
-                </button>
-              </article>
+              <RouteCard
+                route={mainRoute}
+                isMain
+                isActive={activeRouteId === mainRoute.id}
+                onSelect={() => handleEnterMap(mainRoute.id)}
+                onSwitchLight={
+                  mainRoute.lightAlternativeId
+                    ? () => handleEnterMap(mainRoute.lightAlternativeId as string)
+                    : undefined
+                }
+              />
             ) : null}
 
             <div className="guide-secondary-list">
               <p className="guide-secondary-list__title">其他候选路线</p>
               <div className="guide-secondary-scroll">
                 {secondaryRoutes.map((route) => (
-                  <article
+                  <RouteCard
                     key={route.id}
-                    className={`glass-card clickable-card guide-route-card guide-route-card--secondary ${activeRouteId === route.id ? 'guide-route-card--active' : ''}`}
-                    onClick={() => handleEnterMap(route.id)}
-                  >
-                    <div className="guide-route-card__head guide-route-card__head--compact">
-                      <h3>{route.name}</h3>
-                      <span>进入导览</span>
-                    </div>
-                    <p className="guide-route-card__reason">{route.reason}</p>
-                    <p className="guide-route-card__desc">{route.durationLabel}</p>
-                  </article>
+                    route={route}
+                    isActive={activeRouteId === route.id}
+                    onSelect={() => handleEnterMap(route.id)}
+                  />
                 ))}
               </div>
             </div>

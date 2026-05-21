@@ -9,6 +9,7 @@
  */
 
 import posthog from 'posthog-js'
+import { useGuideStore } from '../store/useGuideStore'
 
 // ---- 配置 ----
 // 注册 https://app.posthog.com 后在 .env.local 里设置 VITE_POSTHOG_KEY=phc_xxx
@@ -28,19 +29,29 @@ export const EVENT = {
   VOICE_END:        'voice_end',
   AUDIO_PLAY_START: 'audio_play_start',
   AUDIO_PLAY_END:   'audio_play_end',
+  ROUTE_EXPOSE:     'route_expose',
+  ROUTE_CLICK:      'route_click',
+  SPOT_ENTER:       'spot_enter',
+  SPOT_LEAVE:       'spot_leave',
+  RATE_ROUTE:       'rate_route',
+  RATE_SPOT:        'rate_spot',
+  TAG_TOGGLE:       'tag_toggle',
 } as const
 
 // ---- 内部：推送到 analytics-server ----
 function pushToServer(eventName: string, properties: Record<string, unknown>): void {
+  const store = useGuideStore.getState()
+  const session_id = store.ensureSessionId()
+  const user_id    = store.ensureUserId()
   fetch(ANALYTICS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       event: eventName,
-      properties,
+      properties: { session_id, user_id, ...properties },
       timestamp: new Date().toISOString(),
     }),
-    keepalive: true,           // 页面关闭时仍能发出
+    keepalive: true,
   }).catch(() => {/* analytics-server 未启动时静默忽略 */})
 }
 
@@ -98,4 +109,32 @@ export function captureVoiceStart(): void {
 /** 录音结束 */
 export function captureVoiceEnd(): void {
   capture(EVENT.VOICE_END, {})
+}
+
+export function captureRouteExpose(routeIds: string[]): void {
+  capture(EVENT.ROUTE_EXPOSE, { route_ids: routeIds })
+}
+
+export function captureRouteClick(routeId: string): void {
+  capture(EVENT.ROUTE_CLICK, { target_id: routeId })
+}
+
+export function captureSpotEnter(spotId: string, routeId?: string): void {
+  capture(EVENT.SPOT_ENTER, { target_id: spotId, route_id: routeId })
+}
+
+export function captureSpotLeave(spotId: string, dwellMs: number): void {
+  capture(EVENT.SPOT_LEAVE, { target_id: spotId, dwell_ms: dwellMs })
+}
+
+export function captureRateRoute(routeId: string, stars: number): void {
+  capture(EVENT.RATE_ROUTE, { target_id: routeId, value: stars })
+}
+
+export function captureRateSpot(spotId: string, thumb: 1 | -1): void {
+  capture(EVENT.RATE_SPOT, { target_id: spotId, value: thumb })
+}
+
+export function captureTagToggle(tag: string, on: boolean): void {
+  capture(EVENT.TAG_TOGGLE, { tag, on })
 }

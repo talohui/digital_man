@@ -33,14 +33,15 @@ volcano_tts_cluster=volcano_tts
 #可为空，为空时读取选择的音色
 volcano_tts_voice_type=
 
-#key
+#key —— 灵山项目：填你的阿里云百炼 API Key（sk-xxxx），不要提交到 git
 gpt_api_key=
-#gpt base url 如：https://api.openai.com/v1、https://rwkv.ai-creator.net/chntuned/v1、https://api.fastgpt.in/api/v1、https://api.moonshot.cn/v1
-gpt_base_url=
-#gpt model engine 如：glm4、deepseek、qwen3-4b等
-gpt_model_engine=
-# Embedding API 配置（复用 LLM 的 url 和 key）
-embedding_api_model=
+#gpt base url —— 灵山项目使用阿里云百炼 OpenAI 兼容端点
+gpt_base_url=https://dashscope.aliyuncs.com/compatible-mode/v1
+#gpt model engine —— 灵山项目推荐 qwen-plus（非思考模型，流式正常，~10-25s/轮）
+#                    ⚠️ 勿用 qwen3.5 系列(122b/flash/27b)，都是思考模型，在 Fay 流式链路会每轮挂起约 60s 超时重试
+gpt_model_engine=qwen-plus
+# Embedding API 配置（复用 LLM 的 url 和 key）；灵山项目用百炼 text-embedding-v3
+embedding_api_model=text-embedding-v3
 #gpt(fastgpt)代理(可为空，填写例子：127.0.0.1:7890)
 proxy_config=
 

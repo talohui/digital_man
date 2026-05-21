@@ -18,6 +18,80 @@
 - Python 3.13+ 已兼容 `audioop` 缺失问题，`requirements.txt` 已补 `audioop-lts`
 - macOS 如果 `5000` 端口被系统占用，先关闭 `AirPlay Receiver`
 
+---
+
+## 1.5 Windows 复现专章（队友重点看这里）
+
+本仓库主要在 macOS 上开发，下面把 **Windows 上必须改的点**集中列出。其余步骤与后文一致，只是命令换成 Windows 写法。
+
+### A. 拉代码
+
+```powershell
+git clone <仓库地址> digital_man
+cd digital_man
+```
+
+记住你的仓库绝对路径，例如 `D:\code\digital_man`，后面要用。
+
+### B. 必改：灵山 RAG 的绝对路径（最容易漏）
+
+打开 `数字人开源项目\Fay-main\faymcp\data\mcp_servers.json`，找到 **id 7「灵山RAG知识库」**，把里面两处 macOS 路径改成你的 Windows 路径：
+
+```json
+"args": ["D:/code/digital_man/lingshan-rag/mcp_server/server.py"],
+"cwd": "D:/code/digital_man/lingshan-rag",
+```
+
+> JSON 里用正斜杠 `/` 最稳（`D:/code/...`）。用反斜杠要写成双反斜杠 `D:\\code\\...`。
+> 不改这里，数字人能聊天但**回答会脱离灵山知识库**（RAG 子进程起不来）。
+
+### C. 安装依赖
+
+```powershell
+# Python（建议用虚拟环境）
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r 数字人开源项目\Fay-main\requirements.txt
+pip install -r lingshan-rag\requirements.txt
+
+# 前端
+cd demo
+npm install --legacy-peer-deps
+cd ..
+```
+
+### D. 配置文件
+
+- `system.conf`：仓库已带可用版本（私密仓库，含 Key），无需手填。若需重置，`copy system.conf.bak system.conf`。
+- `demo\.env.local`：腾讯地图等前端 Key 仍需各自填写（见 §2.2）。
+- Gorse：`cd gorse-docker && copy .env.example .env`。
+
+### E. 命令对照（mac → Windows）
+
+| 用途 | macOS（后文） | Windows |
+|---|---|---|
+| 启动 Fay | `python main.py start` | `python main.py start` |
+| 启动 Gorse | `/usr/local/bin/docker-compose up -d` | `docker compose up -d`（Docker Desktop 自带 compose v2） |
+| 启动 analytics | `mvn spring-boot:run` | `mvn spring-boot:run` |
+| 启动 demo | `npm run dev -- --host 127.0.0.1` | `npm run dev -- --host 127.0.0.1` |
+| 清 Fay 缓存配置 | `rm -f cache_data/system.conf` | `del cache_data\system.conf cache_data\config.json` |
+
+### F. 端口提示
+
+- Windows 上 `5000` 一般不会被系统占用（没有 AirPlay），无需特殊处理。
+- 若被别的程序占用，用 `netstat -ano | findstr :5000` 查 PID，再 `taskkill /PID <pid> /F`。
+
+### G. 改配置后让 Fay 真正生效
+
+Fay 首启会把 `system.conf` 复制进 `cache_data\`。**改了模型/Key 不生效**时：
+
+```powershell
+del cache_data\system.conf cache_data\config.json
+python main.py start
+```
+
+改了 `lingshan-rag\scripts\rag_utils.py` 或 `mcp_servers.json` 后，要**整体重启 Fay**（结束 python 进程再起），软重启不会重载 RAG 子进程。
+
 ## 2. 必要配置
 
 ### 2.1 Fay 配置
@@ -29,28 +103,37 @@ cd 数字人开源项目/Fay-main
 cp system.conf.bak system.conf
 ```
 
-至少要填写：
+本仓库已直接提交一份可用的 `system.conf`（私密仓库，含真实 Key），结构如下：
 
 ```ini
-gpt_api_key=你的百炼Key
-gpt_base_url=https://dashscope.aliyuncs.com/compatible-mode/v1
-gpt_model_engine=qwen-turbo
+[key]
+# === LLM 主干：阿里百炼 Qwen ===
+chat_module = openai_api
+gpt_model_engine = qwen-plus
+gpt_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
+gpt_api_key = sk-xxxx
 
-ali_tss_key_id=你的阿里云TTS KeyId
-ali_tss_key_secret=你的阿里云TTS KeySecret
-ali_tss_app_key=你的阿里云TTS AppKey
+# === 大模型（深度任务，同款）===
+big_model_engine = qwen-plus
+big_model_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
+big_model_api_key = sk-xxxx
 
-ASR_mode=funasr
-embedding_api_model=text-embedding-v3
+# === Embeddings：百炼向量服务 ===
+embedding_api_model = text-embedding-v3
+embedding_api_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
+embedding_api_key = sk-xxxx
+
+# === TTS（Edge TTS，免 Key）===
+tts_module = edge-tts
 ```
 
-注意：
+注意（**踩坑点，务必看**）：
 
-- `system.conf` 不进 Git
-- 不要依赖“社区公共配置”，否则可能退回到别人的 SiliconFlow 账号
-- 正常启动后，Fay 日志里应该看到：
-  - `model=qwen-turbo`
-  - `base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 模型固定用 **`qwen-plus`**（非思考模型，流式正常，约 10–25s/轮）。
+- ⚠️ **不要换 qwen3.5 系列（122b / flash / 27b）**：它们都是思考模型，在 Fay 的流式链路里会**每轮挂起约 60s 触发超时重试**，整条链路不可用。
+- `gpt_model_engine` 与 `big_model_engine` 两处都要是 `qwen-plus`。
+- 改完 `system.conf` 后，Fay 会在首次启动时把它复制进 `cache_data/`。**改了配置但没生效时**，删掉 `cache_data/system.conf` 和 `cache_data/config.json` 再重启。
+- 正常启动后日志里应看到 `model=qwen-plus` 和百炼 base_url，而不是 SiliconFlow。
 
 ### 2.2 demo 环境变量
 
@@ -112,7 +195,7 @@ python main.py start
 - 控制台出现 `请通过浏览器访问 http://127.0.0.1:5000/ 管理您的Fay`
 - 后续出现 `服务启动完成!`
 - 终端能看到：
-  - `model=qwen-turbo`
+  - `model=qwen-plus`
   - `base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
 
 ### 终端 2：启动 Gorse
@@ -172,12 +255,41 @@ npm run dev -- --host 127.0.0.1
 - 如果 `5173` 被占用，Vite 会自动切到 `5174` 或更高端口
 - 最终以前端终端打印的 `Local:` 地址为准
 
-### 终端 5：可选启动 lingshan-rag
+### 终端 5：灵山 RAG 知识库（数字人问答的事实来源）
+
+灵山 RAG 以 **MCP 子进程**方式由 Fay 自动拉起，不需要手动开终端。配置在
+`数字人开源项目/Fay-main/faymcp/data/mcp_servers.json` 的 **id 7「灵山RAG知识库」**：
+
+```json
+{
+  "id": 7,
+  "name": "灵山RAG知识库",
+  "command": "python",
+  "args": ["<仓库绝对路径>/lingshan-rag/mcp_server/server.py"],
+  "cwd": "<仓库绝对路径>/lingshan-rag",
+  "env": {
+    "LINGSHAN_LLM_API_KEY": "sk-xxxx",
+    "LINGSHAN_LLM_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "LINGSHAN_LLM_MODEL": "qwen-plus"
+  },
+  "autostart": true
+}
+```
+
+⚠️ **换机器/换系统必改**：`args` 和 `cwd` 里是**绝对路径**，仓库里存的是原作者的 macOS 路径
+`/Users/MR/Desktop/软件杯/lingshan-rag`。**Windows 队友必须改成自己的路径**，例如
+`D:/code/digital_man/lingshan-rag`（详见下方 Windows 专章）。
+
+- 知识库向量库（ChromaDB）已**预构建并提交**（`lingshan-rag/chroma_db/`，集合 `lingshan_guide_v2`），clone 后开箱即用，无需重新跑 embedding。
+- 想独立调试 RAG，可单独运行：
 
 ```bash
 cd lingshan-rag
 python mcp_server/server.py
 ```
+
+- 改了 `lingshan-rag/scripts/rag_utils.py` 后，**必须整体重启 Fay**（软重启不会重载 MCP 子进程）。
+- RAG MCP 默认监听在 `5010`（Fay 启动后自动起）。
 
 ## 5. 联调验证流程
 
@@ -205,6 +317,18 @@ python mcp_server/server.py
 - 先看 `system.conf` 是否真的生效
 - 正常情况下日志会显示百炼地址，而不是 SiliconFlow
 - 如果日志里不是百炼，说明 Fay 没读到本地 `system.conf`
+
+**Q：数字人能聊天，但回答跟灵山知识库对不上 / 在编**
+
+- 多半是灵山 RAG MCP 子进程没起来：检查 `mcp_servers.json` id 7 的绝对路径是否改成了你本机的路径（Windows 必改，见 §1.5-B）
+- 确认 `5010` 端口有监听
+- 改过 `rag_utils.py` 或 `mcp_servers.json` 后要**整体重启 Fay**
+- 如果数字人“复读”了一条旧的错误回答，可能是记忆系统回放：`POST http://127.0.0.1:5000/api/clear-memory` 后重启 Fay
+
+**Q：换了 qwen3.5 模型后，数字人每次回答都卡很久然后报错**
+
+- qwen3.5 系列（122b/flash/27b）是思考模型，在 Fay 流式链路里每轮会挂起约 60s 超时重试
+- 改回 `qwen-plus`（`system.conf` 的 `gpt_model_engine` 和 `big_model_engine` 两处），删 `cache_data` 重启
 
 **Q：macOS 上 `5000` 端口被占用**
 
@@ -242,6 +366,7 @@ cd gorse-docker
 |---|---|---|
 | Fay 控制台 | `http://127.0.0.1:5000` | 主 HTTP 服务 |
 | Fay WS | `ws://127.0.0.1:10003` | 数字人推流 |
+| 灵山 RAG MCP | `http://127.0.0.1:5010` | 由 Fay 自动拉起的知识库子进程 |
 | analytics-server | `http://127.0.0.1:5002` | 行为分析与导览推荐 |
 | Gorse REST | `http://127.0.0.1:8087` | 推荐引擎 REST |
 | Gorse Dashboard | `http://127.0.0.1:8088` | Dashboard |

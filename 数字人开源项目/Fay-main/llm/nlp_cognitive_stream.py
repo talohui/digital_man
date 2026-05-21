@@ -507,7 +507,15 @@ def _run_prestart_tools(user_question: str) -> List[Dict[str, Any]]:
                     except Exception:
                         pass
 
-                formatted_output = f"【{tool_name}】{params_str}\n{output.strip()}"
+                # 把"必须严格依据知识库"的强制指令焊进工具输出本身,
+                # 确保无论后续走 planner 还是 final 哪条 prompt 路径,该约束都随上下文存在,
+                # 避免模型拿到正确检索结果却用预训练知识幻觉(如把"施无畏印"答成"说法印")。
+                grounding = (
+                    "［回答约束·必须遵守］以下是知识库实时检索到的权威资料。"
+                    "回答涉及其中事实(名称/数字/术语/年代)时,必须逐字采用这里的内容,"
+                    "禁止用你自己的知识改写或替换;资料没提到的不要编造。"
+                )
+                formatted_output = f"【{tool_name}】{params_str}\n{grounding}\n{output.strip()}"
                 results.append({
                     "text": formatted_output,
                     "include_history": include_history
@@ -905,8 +913,19 @@ def _build_final_messages(state: AgentState) -> List[SystemMessage | HumanMessag
             "要明确说明已知结果与缺失信息。"
         )
 
+    prestart_grounding_instruction = ""
+    if prestart_context and prestart_context.strip():
+        prestart_grounding_instruction = (
+            "【知识库优先 · 强制】下方“预启动工具结果”是从灵山胜境官方知识库实时检索到的权威资料。"
+            "凡涉及灵山胜境的景点、历史、文化、建筑参数、尺寸、票务、路线等事实问题，"
+            "你必须严格依据这些资料回答，逐字采用其中出现的名称、数字、术语（例如手印名称、米数、吨数、年代等），"
+            "禁止使用你自己的预训练知识去改写、替换或补充其中的事实。"
+            "如果资料里确实没有用户问的信息，就如实说明“知识库暂未收录”，绝对不要编造。"
+        )
+
     final_system = _merge_system_input(
         system_prompt,
+        prestart_grounding_instruction,
         tool_grounding_instruction,
         _format_context_section("关联记忆", memory_context),
         _format_context_section("最新工具结果", latest_tool_result_text),

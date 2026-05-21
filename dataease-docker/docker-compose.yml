@@ -51,7 +51,9 @@ services:
       - ./conf/cas-auth.lua:/usr/local/apisix/apisix/plugins/cas-auth.lua
       - ./conf/openid-connect.lua:/usr/local/apisix/apisix/plugins/openid-connect.lua
       - ./conf/hmac-auth.lua:/usr/local/apisix/apisix/plugins/hmac-auth.lua
-      - ./data/apisix/logs:/usr/local/apisix/logs
+      # macOS Docker bind-mount(virtiofs)不支持 unix socket，worker_events.sock 会建在这里，
+      # 改用 Docker 命名卷(Linux 原生 fs)避免 "bind() ... Operation not supported" 崩溃。
+      - apisix-logs:/usr/local/apisix/logs
     depends_on:
       - apisix-etcd
     ports:
@@ -99,3 +101,6 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - dataease-network
+
+volumes:
+  apisix-logs:

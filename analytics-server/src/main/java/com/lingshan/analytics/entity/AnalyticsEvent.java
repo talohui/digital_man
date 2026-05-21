@@ -6,8 +6,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "analytics_events",
        indexes = {
-           @Index(name = "idx_event", columnList = "event"),
-           @Index(name = "idx_ts",    columnList = "ts")
+           @Index(name = "idx_event",      columnList = "event"),
+           @Index(name = "idx_ts",         columnList = "ts"),
+           @Index(name = "idx_session",    columnList = "sessionId"),
+           @Index(name = "idx_user",       columnList = "userId")
        })
 public class AnalyticsEvent {
 
@@ -36,6 +38,17 @@ public class AnalyticsEvent {
     private String question;
 
     private Boolean isVoice;
+
+    @Column(length = 64)
+    private String sessionId;
+
+    @Column(length = 64)
+    private String userId;
+
+    @Column(length = 64)
+    private String targetId;
+
+    private Double ratingValue;
 
     // ---------- getters & setters ----------
 
@@ -68,4 +81,16 @@ public class AnalyticsEvent {
 
     public Boolean getIsVoice() { return isVoice; }
     public void setIsVoice(Boolean isVoice) { this.isVoice = isVoice; }
+
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    public String getTargetId() { return targetId; }
+    public void setTargetId(String targetId) { this.targetId = targetId; }
+
+    public Double getRatingValue() { return ratingValue; }
+    public void setRatingValue(Double ratingValue) { this.ratingValue = ratingValue; }
 }

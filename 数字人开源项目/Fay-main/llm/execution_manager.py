@@ -189,6 +189,8 @@ def _get_llm_instance(role: str = "small", streaming: bool = True) -> ChatOpenAI
                 streaming=streaming,
                 timeout=120,
                 max_retries=2,
+                # qwen3.x 默认开思考链(reasoning),数字人实时对话要关掉以降低首字延迟
+                extra_body={"enable_thinking": False},
             )
         # 无大模型配置，降级为小模型
         util.log(1, f"[LLM工厂] 请求大模型但未配置 big_model_engine，降级为小模型: {cfg.gpt_model_engine}")
@@ -202,6 +204,8 @@ def _get_llm_instance(role: str = "small", streaming: bool = True) -> ChatOpenAI
         streaming=streaming,
         timeout=60,
         max_retries=1,
+        # qwen3.x 默认开思考链(reasoning),数字人实时对话要关掉以降低首字延迟
+        extra_body={"enable_thinking": False},
     )
 
 

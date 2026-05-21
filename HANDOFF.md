@@ -189,7 +189,7 @@ cd /Users/MR/Desktop/软件杯/gorse-docker
 3. 每张表单独创建单表数据集
 4. 在数据大屏里组合 KPI、趋势图和条形图
 
-### 5 张 API 表 / 数据集
+### 7 张 API 表 / 数据集
 
 | 名称 | URL | 建议刷新频率 |
 |---|---|---|
@@ -198,6 +198,8 @@ cd /Users/MR/Desktop/软件杯/gorse-docker
 | 热门问题 / `popular_questions` | `http://host.docker.internal:5002/api/popular-questions?limit=10` | 5 分钟 |
 | 时延统计 / `latency_stats` | `http://host.docker.internal:5002/api/latency-stats` | 1 分钟 |
 | 实时状态 / `realtime` | `http://host.docker.internal:5002/api/realtime` | 1 分钟 |
+| 满意度总分 / `satisfaction_summary` | `http://host.docker.internal:5002/api/satisfaction/summary?days=1` | 1 分钟 |
+| 满意度趋势 / `satisfaction_trend` | `http://host.docker.internal:5002/api/satisfaction/trend?days=7` | 5 分钟 |
 
 > Docker 内访问宿主机服务必须使用 `host.docker.internal`，不要写 `localhost`。
 
@@ -212,6 +214,9 @@ cd /Users/MR/Desktop/软件杯/gorse-docker
 | 近 5 分钟活跃会话 | 实时状态 | `activeSessions5min` |
 | 情感趋势折线图 | 情感趋势 | `hour` / `positive` / `negative` / `neutral` |
 | 热门问题条形图 | 热门问题 | `question` / `count` |
+| 满意度总分 KPI | 满意度总分 | `scorePct`(0-100)/ `sampleSize` |
+| CSAT 子分 | 满意度总分 | `csatStar` / `csatThumb`(0-1 区间)|
+| 满意度 7 天折线 | 满意度趋势 | `date` / `scorePct` / `sampleSize` |
 
 ---
 
@@ -225,6 +230,10 @@ cd /Users/MR/Desktop/软件杯/gorse-docker
 | analytics | `GET http://127.0.0.1:5002/api/popular-questions?limit=10` | 热门问题 |
 | analytics | `GET http://127.0.0.1:5002/api/latency-stats` | 响应时延 |
 | analytics | `GET http://127.0.0.1:5002/api/realtime` | 实时状态 |
+| analytics | `GET http://127.0.0.1:5002/api/satisfaction/summary?days=1` | 满意度总分(显式 65% + 隐式 35%,贝叶斯平滑) |
+| analytics | `GET http://127.0.0.1:5002/api/satisfaction/trend?days=7` | 满意度 7 天趋势 |
+| persona | `GET http://127.0.0.1:5002/api/profile/{userId}` | 用户画像快照(6 维原子向量 + 主画像) |
+| persona | `GET http://127.0.0.1:5002/api/recommend/explain/{userId}` | 路线推荐 + 画像匹配解释 |
 | guide | `POST http://127.0.0.1:5002/api/guide/recommendations` | 路线推荐 |
 | guide | `POST http://127.0.0.1:5002/api/guide/feedback` | 路线反馈 |
 

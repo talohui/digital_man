@@ -61,6 +61,29 @@ Windows 激活虚拟环境：
 - 向量检索和查询统一使用 `BAAI/bge-large-zh-v1.5`，避免 embedding 不一致。
 - `04_build_chroma.py` 会在重建索引前删除同名 collection，便于重复执行。
 
+### 短专名召回约定（重要）
+
+- 单段落里堆叠多个景点（如旧版「## 其他特色景点」把佛手广场/百子戏弥勒/曼飞龙塔/灵山精舍挤在一起）会导致：
+  1. 切出的 chunk 没有 `spot_name`，向量召回时被「拈花广场」等结构化数据块挤掉；
+  2. rerank 里 `mixed_spot_penalty` 进一步扣分，短专名（佛手广场尺寸等）几乎检索不到。
+- **约定：每个景点单独用 `### 景点名` 子小节**，让 `03_chunk_text.py` 自动带上 `spot_name` / `section_path` metadata，向量召回 + rerank 字面加分才能命中。
+- 该拆分已同步到 **源头** `data/markdown/lingshan_guide.md` 与 `data/cleaned/...`，重跑 `02_clean_text.py` 不会丢失。
+- 新增景点时，需要把景点名同时加入 `03_chunk_text.py` 和 `scripts/rag_utils.py` 的 `SPOT_NAMES`（rag_utils 的 `LITERAL_MATCH_VOCAB` 会自动包含）。
+- `data/faq/faq_seed.jsonl` 为高频精确问法补了佛手广场/天下第一掌/百子戏弥勒/曼飞龙塔/灵山精舍的 FAQ，作为兜底快路径；向量召回修好后非兜底问法也能命中。
+
+### 改动数据后如何生效
+
+修改 markdown / chunk 规则 / SPOT_NAMES 后，必须按顺序重跑并重启 Fay 的 MCP 子进程：
+
+```bash
+python scripts/03_chunk_text.py      # 重切 chunk
+python scripts/04_build_chroma.py    # 重建向量库（同名 collection 会先删后建）
+```
+
+> Fay 通过 STDIO 拉起本服务的子进程会**缓存 FAQ 与 Chroma collection 句柄**，
+> 仅靠 Fay 后台的「重启」按钮不一定真正重启子进程。最可靠是整体重启 Fay
+> （`python main.py start`），让 `autostart` 重新 spawn 一个干净子进程。
+
 ## Fay / MCP 集成
 
 当前仓库已经补充了本地 `STDIO` MCP 服务入口，可直接接入 Fay。
@@ -87,23 +110,27 @@ python mcp_server/server.py
 
 ### 3. 在 Fay 中添加 MCP
 
-Fay 配置推荐填写为：
+本仓库实际路径在 `/Users/MR/Desktop/软件杯/lingshan-rag`。Fay 的 `faymcp/data/mcp_servers.json`
+里已注册（`id=7`，`autostart=true`），并在 `mcp_prestart_tools.json` 里把
+`query_lingshan_rag` 配成 prestart 工具（`{{question}}` 自动注入用户问题），
+因此数字人主对话流（fay_core → nlp_cognitive_stream）每轮会先查知识库再回答。
 
-- MCP 名称：`lingshan_rag`
-- 类型：`STDIO（本地）`
-- 命令：`/Users/MR/Desktop/rag知识库/lingshan-rag/.venv/bin/python`
-- 参数：`/Users/MR/Desktop/rag知识库/lingshan-rag/mcp_server/server.py`
-- 工作目录：`/Users/MR/Desktop/rag知识库/lingshan-rag`
+注册项关键字段：
 
-### 4. Fay 环境变量 JSON
+- 命令：`python`
+- 参数：`/Users/MR/Desktop/软件杯/lingshan-rag/mcp_server/server.py`
+- 工作目录：`/Users/MR/Desktop/软件杯/lingshan-rag`
+- env：`LINGSHAN_LLM_API_KEY` / `LINGSHAN_LLM_BASE_URL` / `LINGSHAN_LLM_MODEL`（百炼）
 
-如果要启用“检索 + 大模型”回答，可在 Fay 的环境变量里填写：
+> 路径用绝对路径。Fay 跑在 git worktree 里时，`../../lingshan-rag/...` 这类相对路径会解析失败。
+
+### 4. Fay 环境变量 JSON（当前使用阿里百炼 Qwen）
 
 ```json
 {
-  "LINGSHAN_LLM_API_KEY": "你的key",
-  "LINGSHAN_LLM_BASE_URL": "https://api.openai.com/v1",
-  "LINGSHAN_LLM_MODEL": "gpt-4o-mini"
+  "LINGSHAN_LLM_API_KEY": "你的百炼key",
+  "LINGSHAN_LLM_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "LINGSHAN_LLM_MODEL": "qwen-turbo"
 }
 ```
 

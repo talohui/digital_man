@@ -1,23 +1,27 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { fetchGuideRecommendations } from '../api/guide'
+import { fetchGuideRecommendations, fetchRecommendExplain } from '../api/guide'
 import {
   GUIDE_TAGS,
   buildLocalGuideRecommendations,
   getDefaultSpotId,
   getGuideRouteById,
-  type GuideRecommendationCard
+  type GuideRecommendationCard,
+  type UserProfileSnapshot
 } from '../data/guideData'
 
 type GuideState = {
   userId: string
+  sessionId: string
   selectedTags: string[]
   candidateRoutes: GuideRecommendationCard[]
+  userProfile: UserProfileSnapshot | null
   activeRouteId: string
   selectedSpotId: string
   isLoading: boolean
   lastError: string
   ensureUserId: () => string
+  ensureSessionId: () => string
   toggleTag: (tag: string) => void
   refreshRecommendations: () => Promise<void>
   setActiveRouteId: (routeId: string) => void
@@ -28,6 +32,10 @@ function createGuestUserId() {
   return `guest-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
 }
 
+function createSessionId() {
+  return `sess-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
+}
+
 const defaultRoutes = buildLocalGuideRecommendations([])
 const defaultRouteId = defaultRoutes[0]?.id ?? 'historical_culture'
 
@@ -35,8 +43,10 @@ export const useGuideStore = create<GuideState>()(
   persist(
     (set, get) => ({
       userId: '',
+      sessionId: '',
       selectedTags: ['祈福静心'],
       candidateRoutes: defaultRoutes,
+      userProfile: null,
       activeRouteId: defaultRouteId,
       selectedSpotId: getDefaultSpotId(defaultRouteId),
       isLoading: false,
@@ -51,6 +61,13 @@ export const useGuideStore = create<GuideState>()(
         const nextUserId = createGuestUserId()
         set({ userId: nextUserId })
         return nextUserId
+      },
+      ensureSessionId: () => {
+        const existing = get().sessionId.trim()
+        if (existing) return existing
+        const next = createSessionId()
+        set({ sessionId: next })
+        return next
       },
       toggleTag: (tag) => {
         if (!GUIDE_TAGS.includes(tag as (typeof GUIDE_TAGS)[number])) {
@@ -69,6 +86,23 @@ export const useGuideStore = create<GuideState>()(
         const userId = get().ensureUserId()
         const { selectedTags, activeRouteId } = get()
         set({ isLoading: true, lastError: '' })
+
+        const explain = await fetchRecommendExplain(userId)
+        if (explain && explain.routes.length > 0) {
+          const nextRouteId =
+            explain.routes.some((route) => route.id === activeRouteId)
+              ? activeRouteId
+              : explain.routes[0].id
+          set({
+            candidateRoutes: explain.routes,
+            userProfile: explain.profile,
+            activeRouteId: nextRouteId,
+            selectedSpotId: getDefaultSpotId(nextRouteId),
+            isLoading: false,
+            lastError: ''
+          })
+          return
+        }
 
         try {
           const response = await fetchGuideRecommendations({ userId, selectedTags })
@@ -110,8 +144,10 @@ export const useGuideStore = create<GuideState>()(
       name: 'lingshan-guide-store',
       partialize: (state) => ({
         userId: state.userId,
+        sessionId: state.sessionId,
         selectedTags: state.selectedTags,
         candidateRoutes: state.candidateRoutes,
+        userProfile: state.userProfile,
         activeRouteId: state.activeRouteId,
         selectedSpotId: state.selectedSpotId
       })

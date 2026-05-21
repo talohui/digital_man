@@ -16,4 +16,8 @@ public interface EventRepository extends JpaRepository<AnalyticsEvent, Long> {
 
     /** 查询某时刻之后的所有事件，按时间倒序（实时事件流用） */
     List<AnalyticsEvent> findByTsAfterOrderByTsDesc(LocalDateTime ts);
+
+    List<AnalyticsEvent> findTop10ByUserIdAndEventOrderByTsDesc(String userId, String event);
+
+    List<AnalyticsEvent> findByEventInAndTsAfter(List<String> events, LocalDateTime ts);
 }

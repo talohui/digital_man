@@ -16,10 +16,14 @@ public class AnalyticsService {
 
     private final EventRepository repository;
     private final SentimentAnalyzer sentimentAnalyzer;
+    private final PersonaEngine personaEngine;
 
-    public AnalyticsService(EventRepository repository, SentimentAnalyzer sentimentAnalyzer) {
+    public AnalyticsService(EventRepository repository,
+                            SentimentAnalyzer sentimentAnalyzer,
+                            PersonaEngine personaEngine) {
         this.repository = repository;
         this.sentimentAnalyzer = sentimentAnalyzer;
+        this.personaEngine = personaEngine;
     }
 
     // ---- 写入事件 ----
@@ -32,6 +36,11 @@ public class AnalyticsService {
         e.setCreatedAt(LocalDateTime.now());
 
         Map<String, Object> props = req.properties() != null ? req.properties() : Map.of();
+
+        if (props.get("session_id") instanceof String sid) e.setSessionId(sid);
+        if (props.get("user_id")    instanceof String uid) e.setUserId(uid);
+        if (props.get("target_id")  instanceof String tid) e.setTargetId(tid);
+        if (props.get("value") instanceof Number rv) e.setRatingValue(rv.doubleValue());
 
         // user_message：做情感分析
         if ("user_message".equals(req.event())) {
@@ -58,6 +67,13 @@ public class AnalyticsService {
         }
 
         repository.save(e);
+
+        String uid = e.getUserId();
+        if (uid != null && !uid.isBlank()) {
+            try {
+                personaEngine.updateFromEvent(uid, req.event(), props);
+            } catch (Exception ignored) { /* 画像更新失败不阻断事件落库 */ }
+        }
     }
 
     // ---- 读取 API ----
@@ -190,6 +206,82 @@ public class AnalyticsService {
         result.put("messages5min",       messages5min);
         result.put("recentEvents",       recentItems);
         return result;
+    }
+
+    public Map<String, Object> getSatisfactionSummary(int days) {
+        LocalDateTime since = LocalDate.now().minusDays(Math.max(1, days) - 1L).atStartOfDay();
+        List<AnalyticsEvent> events = repository.findByEventInAndTsAfter(
+                List.of("rate_route", "rate_spot", "user_message"), since);
+        Map<String, Object> out = computeSatisfaction(events);
+        out.put("date", LocalDate.now().toString());
+        out.put("windowDays", days);
+        return out;
+    }
+
+    public List<Map<String, Object>> getSatisfactionTrend(int days) {
+        LocalDateTime since = LocalDate.now().minusDays(Math.max(1, days) - 1L).atStartOfDay();
+        List<AnalyticsEvent> events = repository.findByEventInAndTsAfter(
+                List.of("rate_route", "rate_spot", "user_message"), since);
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        Map<String, List<AnalyticsEvent>> byDay = events.stream()
+                .collect(Collectors.groupingBy(e -> e.getTs().toLocalDate().format(fmt), TreeMap::new, Collectors.toList()));
+        List<Map<String, Object>> out = new ArrayList<>();
+        byDay.forEach((day, list) -> {
+            Map<String, Object> row = computeSatisfaction(list);
+            row.put("date", day);
+            out.add(row);
+        });
+        return out;
+    }
+
+    private Map<String, Object> computeSatisfaction(List<AnalyticsEvent> events) {
+        double sumStar = 0, cntStar = 0;
+        double sumThumb = 0, cntThumb = 0;
+        long pos = 0, neg = 0, neu = 0;
+        for (AnalyticsEvent e : events) {
+            if ("rate_route".equals(e.getEvent()) && e.getRatingValue() != null) {
+                double c = Math.max(0, Math.min(1, (e.getRatingValue() - 1) / 4.0));
+                sumStar += c;
+                cntStar++;
+            } else if ("rate_spot".equals(e.getEvent()) && e.getRatingValue() != null) {
+                sumThumb += e.getRatingValue() > 0 ? 1.0 : 0.0;
+                cntThumb++;
+            } else if ("user_message".equals(e.getEvent())) {
+                String s = e.getSentiment();
+                if ("positive".equals(s)) pos++;
+                else if ("negative".equals(s)) neg++;
+                else neu++;
+            }
+        }
+        double priorN = 3.0, priorScore = 0.70;
+        double csatStar  = (sumStar  + priorN * priorScore) / (cntStar  + priorN);
+        double csatThumb = (sumThumb + priorN * priorScore) / (cntThumb + priorN);
+        double csat = cntStar + cntThumb == 0 ? priorScore : (csatStar * 0.7 + csatThumb * 0.3);
+
+        long total = pos + neg + neu;
+        double implicit;
+        if (total == 0) {
+            implicit = 0.5;
+        } else {
+            implicit = Math.max(0, Math.min(1, (double) pos / total - 0.5 * (double) neg / total + 0.5));
+        }
+
+        double score = 0.65 * csat + 0.35 * implicit;
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("score",      round4(score));
+        out.put("scorePct",   (int) Math.round(score * 100));
+        out.put("csat",       round4(csat));
+        out.put("csatStar",   round4(csatStar));
+        out.put("csatThumb",  round4(csatThumb));
+        out.put("implicit",   round4(implicit));
+        out.put("starCount",  (long) cntStar);
+        out.put("thumbCount", (long) cntThumb);
+        out.put("sampleSize", (long) (cntStar + cntThumb));
+        out.put("sentimentPositive", pos);
+        out.put("sentimentNegative", neg);
+        out.put("sentimentNeutral",  neu);
+        return out;
     }
 
     // ---- 工具方法 ----
