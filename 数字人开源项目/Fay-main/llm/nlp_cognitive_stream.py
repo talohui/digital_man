@@ -2304,10 +2304,24 @@ def _auto_reply_after_execution(username, finished_exec_state):
         util.log(1, f"自动回复触发失败: {exc}")
 
 
+def _lat_log(text: str) -> None:
+    """延迟测量埋点:仅当环境变量 LINGSHAN_LAT_DEBUG=1 时直写文件，
+    绕开被重定向到 devnull 的 stdout 日志。默认关闭，不影响生产。"""
+    if os.environ.get("LINGSHAN_LAT_DEBUG") != "1":
+        return
+    try:
+        with open("/tmp/lat_timing.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {text}\n")
+    except Exception:
+        pass
+
+
 def question(content, username, observation=None):
     """处理用户提问并返回回复。工具执行统一走后台线程，所有接口行为一致。"""
     global agents, current_username
     current_username = username
+    _t_q0 = time.perf_counter()
+    _first_token_logged = {"done": False}
     full_response_text = ""
     accumulated_text = ""
     default_punctuations = [",", ".", "!", "?", "\n", "\uFF0C", "\u3002", "\uFF01", "\uFF1F"]
@@ -2344,11 +2358,13 @@ def question(content, username, observation=None):
         ("反思记忆", "reflection"),
     ]
     memory_context = ""
+    _t_mem0 = time.perf_counter()
     skip_memory_retrieve = _is_current_only_turn(content, observation)
     if agent.memory_stream and len(agent.memory_stream.seq_nodes) > 0 and content and not skip_memory_retrieve:
         current_time_step = get_current_time_step(username)
         query = content.strip() if isinstance(content, str) else str(content)
-        max_per_type = 10
+        # 注入 planner 提示词的每类记忆条数:10→4,缩小提示词、加快首字与生成
+        max_per_type = 4
         section_texts = []
         try:
             combined = agent.memory_stream.retrieve(
@@ -2380,9 +2396,11 @@ def question(content, username, observation=None):
         memory_context = "\n".join(section_texts)
     else:
         memory_context = ""
+    _lat_log(f"记忆检索耗时 {time.perf_counter() - _t_mem0:.2f}s (skip={skip_memory_retrieve})")
 
     prestart_context = ""
     prestart_stream_text = ""
+    _t_pre0 = time.perf_counter()
     try:
         prestart_results = _run_prestart_tools(content)
         if prestart_results:
@@ -2403,6 +2421,7 @@ def question(content, username, observation=None):
         util.log(1, f"预启动工具执行失败: {exc}")
         prestart_context = f"- 预启动工具执行失败: {exc}"
         prestart_stream_text = f"<prestart>{prestart_context}</prestart>"
+    _lat_log(f"预启动工具(RAG检索)耗时 {time.perf_counter() - _t_pre0:.2f}s")
     
     # 获取当前时间
     current_time = datetime.datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
@@ -2595,6 +2614,9 @@ def question(content, username, observation=None):
             text = str(text)
         if not text and not force_end and not force_first:
             return
+        if not _first_token_logged["done"] and text.strip():
+            _first_token_logged["done"] = True
+            _lat_log(f"首句送达TTS(首字延迟) {time.perf_counter() - _t_q0:.2f}s")
         marked_text = None
         if state_mgr is not None:
             try:
@@ -2906,6 +2928,7 @@ def question(content, username, observation=None):
             MyThread(target=remember_conversation_thread, args=(username, content, final_text)).start()
         except Exception as exc:
             util.log(1, f"记忆线程启动失败: {exc}")
+        _lat_log(f"本轮问答总耗时 {time.perf_counter() - _t_q0:.2f}s  Q={str(content)[:20]}")
         return final_text
 
     # ━━━ 情况1: 有已完成的后台执行结果 ━━━

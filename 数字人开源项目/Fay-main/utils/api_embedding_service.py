@@ -107,8 +107,20 @@ class ApiEmbeddingService:
             self.api_key = api_key
             self.model_name = model_name
             self.embedding_dim = None  # 将在首次调用时动态获取
-            self.timeout = 60  # API 请求超时时间（秒），默认 60 秒
+            # (connect=5s, read=15s) 取代原 60s:连接挂死时快速失败,不再白等
+            self.timeout = (5, 15)
             self.max_retries = 2  # 最大重试次数
+
+            # 持久 Session + keep-alive:复用 TLS 连接,显著减少 SSL EOF 与握手开销
+            # （原先每次 requests.post 都新建连接，是 dashscope SSL_EOF 尖峰的主因）
+            self._session = requests.Session()
+            try:
+                from requests.adapters import HTTPAdapter
+                adapter = HTTPAdapter(pool_connections=4, pool_maxsize=8, max_retries=0)
+                self._session.mount("https://", adapter)
+                self._session.mount("http://", adapter)
+            except Exception:
+                pass
 
             logger.info(f"API Embedding 服务初始化完成")
             logger.info(f"模型: {self.model_name}")
@@ -142,7 +154,7 @@ class ApiEmbeddingService:
                 text_preview = text[:50] + "..." if len(text) > 50 else text
                 logger.info(f"发送 embedding 请求 (尝试 {attempt + 1}/{self.max_retries + 1}): 文本长度={len(text)}, 预览='{text_preview}'")
 
-                response = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
+                response = self._session.post(url, json=payload, headers=headers, timeout=self.timeout)
                 response.raise_for_status()
 
                 result = response.json()
@@ -232,10 +244,10 @@ class ApiEmbeddingService:
                 "input": texts
             }
 
-            # 批量请求使用更长的超时时间
-            batch_timeout = self.timeout * 2  # 批量请求超时时间加倍
-            logger.info(f"发送批量 embedding 请求: 文本数={len(texts)}, 超时={batch_timeout}秒")
-            response = requests.post(url, json=payload, headers=headers, timeout=batch_timeout)
+            # 批量请求使用更长的读超时（connect=5s, read=30s）
+            batch_timeout = (5, 30)
+            logger.info(f"发送批量 embedding 请求: 文本数={len(texts)}, 超时={batch_timeout}")
+            response = self._session.post(url, json=payload, headers=headers, timeout=batch_timeout)
             response.raise_for_status()
 
             result = response.json()

@@ -366,6 +366,21 @@ python mcp_server/server.py
 7. 在地图页点击景点，确认能进入 `/spot/:spotId`
 8. 在景点页继续提问，确认回答围绕当前景点展开
 
+## 5.5 响应速度与性能说明
+
+已对"提问→数字人开口"的链路做过优化，实测每轮总耗时从约 20–26s 降到：
+
+- 简单事实问题（如"灵山大佛多高"）：约 **0.7–2s**
+- 复杂多段问题（如"梵宫主要看什么"）：约 **6–8s**（RAG 内部还要调一次 LLM 合成）
+
+做了三处优化（已在代码里）：
+
+1. **记忆检索 embedding 改持久连接**（`utils/api_embedding_service.py`）：用 `requests.Session` + keep-alive，超时降到 (connect 5s, read 15s)。消除了访问百炼时偶发的 SSL EOF 重试（之前每次新建 TLS 连接，单次重试要白等 ~15s）。
+2. **注入提示词的记忆条数 10→4**（`llm/nlp_cognitive_stream.py`）：缩小 planner 提示词，加快首字与生成。
+3. **灵山 RAG 开启 HuggingFace 离线模式**（`lingshan-rag/mcp_server/server.py` 顶部 `HF_HUB_OFFLINE=1`）：本地 bge 嵌入模型已缓存，跳过启动后首次查询时去 HF Hub 的联网检查——消除了**首条查询约 24–28s 的冷启动尖峰**。
+
+> 调试用：设环境变量 `LINGSHAN_LAT_DEBUG=1` 再启动 Fay，每轮各段耗时会写入 `/tmp/lat_timing.log`（记忆检索 / RAG检索 / 首字延迟 / 总耗时）。默认关闭，不影响生产。
+
 ## 6. 常见问题
 
 **Q：Fay 启动了，但前端仍提示 WebSocket 连接失败**

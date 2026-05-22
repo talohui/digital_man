@@ -8,6 +8,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# HuggingFace 离线模式:本地 SentenceTransformer 嵌入模型已缓存，
+# 跳过启动时去 HF Hub 的联网更新检查（实测可消除首次查询 ~24s 的冷启动尖峰）。
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 # 阿里云百炼 LLM 配置（与 Fay system.conf 保持一致）
 # 注：私密仓库，Key 直接内置作为独立运行兜底；Fay 启动时仍可由 mcp_servers.json 的 env 块覆盖
 os.environ.setdefault("LINGSHAN_LLM_API_KEY", "sk-0fefe3da4be348c399d0d55cd39abdae")
