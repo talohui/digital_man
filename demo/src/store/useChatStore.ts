@@ -41,6 +41,7 @@ interface ChatState {
   _lastSendTime: number   // 记录用户发消息的时刻，用于计算 AI 响应时长
   setInputText: (value: string) => void
   appendMessage: (role: ChatRole, content: string) => void
+  appendToLastAssistant: (chunk: string) => void
   initializeConnection: () => void
   disconnectConnection: () => void
   handleFayMessage: (message: FayMessage) => void
@@ -63,8 +64,25 @@ const createMessage = (role: ChatRole, content: string): ChatMessage => ({
   createdAt: new Date().toISOString()
 })
 
-const getMessageText = (message: FayMessage) => {
-  // 仅当 panelReply 类型是 fay(数字人回答)时才取它的 content
+// 剥掉 Fay 后端流里给 LLM 用的 grounding 标记,避免显示到对话框
+// - <prestart ...>...</prestart>:RAG 预启动注入的知识库上下文(只该给 LLM,不该给用户)
+// - _<isfirst> / _<isend>:句子流的首尾标记
+// - <think>...</think>:思考模型的思考段(若有)
+const stripBackendMarkup = (s: string): string => {
+  let t = s
+  // 已闭合的 prestart 块(支持任意属性,跨行)
+  t = t.replace(/<prestart\b[^>]*>[\s\S]*?<\/prestart>/gi, '')
+  // 流式中未闭合的 prestart 前缀(从 <prestart...> 一直到字符串末尾):避免半截泄漏
+  t = t.replace(/<prestart\b[^>]*>[\s\S]*$/i, '')
+  // 思考段
+  t = t.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+  // 句子流首尾标记
+  t = t.replace(/_<isfirst>|_<isend>/g, '')
+  return t.trim()
+}
+
+// 从 FayMessage 多个候选字段里挑出真正的文本(不做剥除,保留 _<isfirst>/_<isend> 等标记)
+const getRawFayText = (message: FayMessage): string => {
   const panelReplyText =
     message.panelReply?.type === 'fay' && typeof message.panelReply?.content === 'string'
       ? message.panelReply.content
@@ -88,7 +106,7 @@ const getMessageText = (message: FayMessage) => {
       !/\.(jpg|png|wav|mp3)$/i.test(candidate.trim())
   )
 
-  return text ? text.trim() : ''
+  return text ?? ''
 }
 
 const initialMessages: ChatMessage[] = [
@@ -137,6 +155,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       messages: [...state.messages, createMessage(role, content)]
     })),
+  appendToLastAssistant: (chunk) =>
+    set((state) => {
+      const msgs = state.messages
+      if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
+        return { messages: [...msgs, createMessage('assistant', chunk)] }
+      }
+      const last = msgs[msgs.length - 1]
+      const merged = { ...last, content: last.content + chunk }
+      return { messages: [...msgs.slice(0, -1), merged] }
+    }),
   initializeConnection: () => {
     const currentSocket = get().socket
 
@@ -167,11 +195,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ socket: null, wsStatus: 'disconnected' })
   },
   handleFayMessage: (message) => {
-    // 1. 文本气泡
-    const text = getMessageText(message)
-    if (text) {
-      get().appendMessage('assistant', text)
-      captureAiReply(text, get()._lastSendTime)   // 埋点：AI 回复 + 响应时长
+    // 1. 文本气泡 —— 同一轮回答的多个句子合并到一个气泡里
+    //    Fay 流式协议:每句话首块带 _<isfirst>,末块带 _<isend>
+    //    见到 isFirst 时开新气泡;否则把内容追加到最后一个 assistant 气泡
+    const rawText = getRawFayText(message)
+    if (rawText) {
+      const isFirst = /_<isfirst>/.test(rawText)
+      const clean = stripBackendMarkup(rawText)
+      if (!clean) return
+      const last = get().messages[get().messages.length - 1]
+      if (isFirst || !last || last.role !== 'assistant') {
+        get().appendMessage('assistant', clean)
+      } else {
+        get().appendToLastAssistant(clean)
+      }
+      captureAiReply(clean, get()._lastSendTime)
     }
 
     // 2. 数字人状态
