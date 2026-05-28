@@ -34,14 +34,17 @@ export function Scenic3DPreview({
         height,
         minHeight: 240,
         overflow: 'hidden',
-        borderRadius: 8,
-        background: '#eef3f6',
+        borderRadius: 10,
+        background: 'linear-gradient(180deg, #eef6f8 0%, #dfe9ec 62%, #d3dde0 100%)',
       }}
     >
       <Canvas camera={{ position: [4.5, 3.4, 5.2], fov: 42 }}>
-        <color attach="background" args={['#eef3f6']} />
-        <ambientLight intensity={0.78} />
-        <directionalLight position={[4, 6, 3]} intensity={1.2} />
+        <color attach="background" args={['#eaf3f6']} />
+        <fog attach="fog" args={['#eaf3f6', 8, 18]} />
+        <ambientLight intensity={0.68} />
+        <hemisphereLight args={['#ffffff', '#b8c7cd', 0.68]} />
+        <directionalLight position={[4, 6, 3]} intensity={1.35} />
+        <directionalLight position={[-3, 4, -2]} intensity={0.42} />
         <group
           position={transform.position}
           rotation={transform.rotation}
@@ -49,8 +52,17 @@ export function Scenic3DPreview({
         >
           <PlaceholderLandmark poiId={activePoiId} active />
         </group>
-        <gridHelper args={[7, 7, '#9aa8b4', '#d2dbe2']} position={[0, -0.02, 0]} />
-        <OrbitControls enablePan={false} minDistance={3} maxDistance={9} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]}>
+          <circleGeometry args={[4.2, 64]} />
+          <meshStandardMaterial color="#edf1ea" roughness={0.86} />
+        </mesh>
+        <gridHelper args={[7, 7, '#8fa0aa', '#d5dee3']} position={[0, -0.02, 0]} />
+        <OrbitControls
+          enablePan={false}
+          minDistance={3}
+          maxDistance={9}
+          target={[0, 0.7, 0]}
+        />
       </Canvas>
     </div>
   )

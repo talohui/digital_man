@@ -882,3 +882,87 @@
 - 可运行本地 dev server，手动打开 `/three-preview` 验证 Canvas、切换按钮和 OrbitControls。
 - 下一阶段如接入 `GuideMapPage`，建议使用可关闭的 3D 预览面板，并将地图选中 POI 映射到 `Scenic3DPreview` 的 `selectedPoiId`。
 - 接入真实模型前，继续保持 placeholder 兜底，避免模型资源缺失导致页面不可用。
+
+## 2026-05-28 阶段十四：独立 3D 预览测试页轻量优化
+
+### 本次目标
+
+把 `/three-preview` 从简单工程测试页优化成更适合展示和检查 3D 资产的预览页面，提升核心 POI 切换、占位模型辨识度和预览区域观感。本阶段仍不接入地图页。
+
+### 本次约束
+
+- 只优化 `/three-preview` 测试页和相关 3D 预览体验。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改地图路线逻辑。
+- 不接入地图页面 UI。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `src/pages/Scenic3DPreviewPage.tsx`
+- `src/components/scenic3d/Scenic3DPreview.tsx`
+- `src/components/scenic3d/PlaceholderLandmark.tsx`
+- `docs/map-3d-development-log.md`
+
+### 页面优化说明
+
+`Scenic3DPreviewPage.tsx` 改为左右布局：
+
+- 顶部标题改为“灵山胜境 3D 资产预览测试页”。
+- 左侧为 4 个核心 POI 选择列表：
+  - `giant_buddha`：灵山大佛
+  - `jiulong_guanyu`：九龙灌浴
+  - `fan_gong`：梵宫
+  - `wuyin_tancheng`：五印坛城
+- 每个条目显示中文名称、`poiId`、当前状态 `placeholder` 和简短说明。
+- 右侧显示当前选中名称、当前 `selectedPoiId`、`Scenic3DPreview` 和提示文案。
+- 3D 预览区域高度调整为 560px，更适合查看占位模型。
+
+### 组件优化说明
+
+`Scenic3DPreview.tsx`：
+
+- 保持独立可复用，不依赖地图页。
+- 预览容器背景改为浅色展陈风格。
+- Canvas 内增加基础雾效、半球光、辅助方向光和圆形地台。
+- 保留 `OrbitControls`。
+- 不加载真实模型文件。
+
+`PlaceholderLandmark.tsx`：
+
+- 轻量增强四个核心占位模型的形态差异。
+- 灵山大佛增加前平台。
+- 九龙灌浴增加环形锥体，强化水景中心结构。
+- 梵宫增加两侧建筑体块。
+- 五印坛城增加塔顶和中心竖向结构。
+- 不使用复杂动画，不使用贴图，不引入额外依赖。
+
+### 为什么仍不接入 GuideMapPage
+
+本阶段目标是把独立测试页打磨到可以用于检查 3D 占位资产和交互。暂不接入 `GuideMapPage`，可以继续避免 3D 展示、地图选中状态、路线逻辑和页面布局相互影响。后续接入地图页时，只需要把已验证的 `Scenic3DPreview` 作为可关闭面板接入。
+
+### 对现有地图行为的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，没有接入地图页面 UI，没有修改地图路线逻辑，没有新增真实 `.glb`、`.gltf` 模型，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。现有地图行为不受影响。
+
+### 验证方式
+
+- 检查 `/three-preview` 页面布局和 POI 列表代码。
+- 检查 `Scenic3DPreview` 仍独立于地图页。
+- 检查 `PlaceholderLandmark` 不加载贴图和真实模型。
+- 运行 `npm run build`。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出中仍存在 Vite chunk size warning：`dist/assets/index-*.js` 超过 500 kB。这是构建体积提示，不是失败；本阶段未做代码拆分或构建优化。
+
+### 下一步建议
+
+- 启动 dev server 后打开 `/three-preview`，手动检查四个 POI 的模型可见性和 OrbitControls 操作体验。
+- 下一阶段可以考虑给 `/three-preview` 增加截图检查或更明确的资产状态说明。
+- 接入 `GuideMapPage` 前，先确认移动端和小屏布局是否需要单独处理。
