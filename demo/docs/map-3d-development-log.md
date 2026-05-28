@@ -1040,3 +1040,92 @@ Three.js、React Three Fiber 和 Drei 会显著增加前端包体积。先把独
 - 手动打开 `/three-preview`，确认懒加载 fallback 和 3D 预览页面正常。
 - 后续如接入 `GuideMapPage`，继续保持 3D 面板懒加载，避免地图主流程首屏直接加载 Three.js。
 - 可进一步考虑将 Drei/Three 相关逻辑集中在 3D 组件边界内，避免普通页面误引入 3D 依赖。
+
+## 2026-05-29 阶段十六：地图页可开关 3D 预览面板接入
+
+### 本次目标
+
+将已有独立 3D 预览能力以可开关面板形式接入 `GuideMapPage`，让地图页可以预览当前选中景点对应的低模占位模型，为后续地图点位与 Blender 资产绑定做准备。
+
+### 本次约束
+
+- 只在地图页中接入一个可开关的 3D 预览面板。
+- 3D 面板默认关闭。
+- 只有用户点击打开时才显示 3D 预览。
+- 不修改地图路线规划逻辑。
+- 不修改 Marker、Polyline、InfoWindow 的核心逻辑。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### GuideMapPage 接入方式说明
+
+在 `GuideMapPage.tsx` 中新增本地状态：
+
+```ts
+const [show3DPreview, setShow3DPreview] = useState(false)
+```
+
+默认值为 `false`。在现有景点抽屉操作区增加按钮：
+
+- `打开 3D 预览`
+- `关闭 3D 预览`
+
+当 `show3DPreview` 为 `true` 时，在景点抽屉内部显示 3D 面板。面板包含：
+
+- 标题：灵山 3D 预览。
+- 当前景点名称。
+- `Scenic3DPreview` 组件。
+- 提示文字：当前为低模占位预览，后续可替换为 Blender 导出的 `.glb` 模型。
+
+`Scenic3DPreview` 的 `selectedPoiId` 使用当前 `selectedSpot.id`，高度为 320px。
+
+### 懒加载实现说明
+
+本阶段没有静态导入 `Scenic3DPreview`，而是使用：
+
+```ts
+const Scenic3DPreview = lazy(() => import('../components/scenic3d/Scenic3DPreview'))
+```
+
+3D 面板内容使用 `Suspense` 包裹，fallback 为“正在加载 3D 预览...”。构建后生成独立 `Scenic3DPreview-*.js` chunk。
+
+### 为什么 3D 面板默认关闭
+
+Three.js、React Three Fiber 和 Drei 相关代码体积较大。默认关闭可以避免地图页初始交互被 3D 预览影响，也能确保游客进入地图页时仍优先看到腾讯地图、路线、Marker、InfoWindow 和景点抽屉。用户明确点击后才加载和显示 3D 预览，更符合当前阶段的试验性质。
+
+### 对现有地图行为的影响
+
+本阶段没有修改地图路线规划逻辑，没有修改 Marker、Polyline、InfoWindow 的核心逻辑，没有修改地图初始化参数，没有修改导航/讲解页面跳转，也没有新增真实 `.glb`、`.gltf` 模型。
+
+本阶段没有修改数字人、聊天、语音、RAG、Live2D 相关模块。现有地图导览主流程不受影响。
+
+### 验证方式
+
+- 检查 `GuideMapPage.tsx` 中 `Scenic3DPreview` 使用 `lazy` 动态导入。
+- 检查 3D 面板默认关闭。
+- 检查按钮可切换显示状态。
+- 运行 `npm run build`。
+- 检查构建产物中出现独立 `Scenic3DPreview-*.js` chunk。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建结果生成独立 chunk：
+
+- `dist/assets/Scenic3DPreview-*.js`
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/map`，确认默认不显示 3D 面板。
+- 点击“打开 3D 预览”，确认低模占位模型可见且不会影响地图 Marker、Polyline、InfoWindow 和路线切换。
+- 后续可为 `lingshanAssetMap` 扩展更多 POI 映射，逐步把真实 `.glb` 模型替换到核心景点。

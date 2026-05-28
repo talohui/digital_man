@@ -1,6 +1,6 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Modal, Rate } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
 import {
@@ -21,6 +21,8 @@ import { useChatStore } from '../store/useChatStore'
 
 type MapStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'fallback'
+
+const Scenic3DPreview = lazy(() => import('../components/scenic3d/Scenic3DPreview'))
 
 const scenicMarkerIcon = createSvgDataUri(`
   <svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
@@ -68,6 +70,7 @@ function GuideMapPage() {
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('idle')
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutePanel, setShowRoutePanel] = useState(false)
+  const [show3DPreview, setShow3DPreview] = useState(false)
 
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
@@ -357,10 +360,55 @@ function GuideMapPage() {
               <button className="btn-secondary" onClick={() => fitMapToRoute(mapRef.current, routeSpots)}>
                 回到整条路线
               </button>
+              <button className="btn-secondary" onClick={() => setShow3DPreview((current) => !current)}>
+                {show3DPreview ? '关闭 3D 预览' : '打开 3D 预览'}
+              </button>
               <button className="btn-primary" onClick={handlePreviewOpen}>
                 进入数字人讲解
               </button>
             </div>
+
+            {show3DPreview ? (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: 12,
+                  border: '1px solid rgba(13, 148, 136, 0.18)',
+                  borderRadius: 12,
+                  background: 'rgba(255, 255, 255, 0.82)'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 10,
+                    alignItems: 'flex-start'
+                  }}
+                >
+                  <div>
+                    <strong style={{ display: 'block', fontSize: 16 }}>灵山 3D 预览</strong>
+                    <span style={{ color: '#5f756d', fontSize: 13 }}>
+                      当前景点：{selectedSpot.name || '未选择景点'}
+                    </span>
+                  </div>
+                </div>
+                <Suspense fallback={<div style={{ padding: 16 }}>正在加载 3D 预览...</div>}>
+                  <Scenic3DPreview selectedPoiId={selectedSpot.id || 'giant_buddha'} height={320} />
+                </Suspense>
+                <p
+                  style={{
+                    margin: '10px 0 0',
+                    color: '#5f756d',
+                    fontSize: 13,
+                    lineHeight: 1.6
+                  }}
+                >
+                  当前为低模占位预览，后续可替换为 Blender 导出的 .glb 模型。
+                </p>
+              </div>
+            ) : null}
 
             <p className="guide-map-message">{pageMessage}</p>
           </div>
