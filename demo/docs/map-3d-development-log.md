@@ -713,3 +713,96 @@
 - 阶段十二 B 可新增空的 `Scenic3DPreview.tsx` 和 `PlaceholderLandmark.tsx`，不接入真实 `.glb`。
 - 如接入页面，优先使用可关闭的 3D 预览面板，避免影响腾讯地图主流程。
 - 后续真实模型加载前，先建立 `lingshanAssetMap.ts` 占位数据和懒加载策略。
+
+## 2026-05-28 阶段十二 B：独立 3D 占位组件新增
+
+### 本次目标
+
+新增一个可编译、可复用、但暂未接入页面的灵山 3D 预览组件。组件当前只显示低模 placeholder，不加载真实模型，为后续接入地图页和替换 Blender `.glb` 资产做准备。
+
+### 本次约束
+
+- 新增 3D 占位组件文件。
+- 新增 3D 资产映射占位数据文件。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `App.tsx` 或路由。
+- 不修改任何现有页面。
+- 不修改地图路线逻辑。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DPreview.tsx`
+- `src/components/scenic3d/PlaceholderLandmark.tsx`
+- `src/data/scenic3d/lingshanAssetMap.ts`
+- `docs/map-3d-development-log.md`
+
+### 新增资产映射说明
+
+新增 `src/data/scenic3d/lingshanAssetMap.ts`，定义：
+
+- `LingshanAssetStatus`
+- `LingshanAssetBinding`
+- `lingshanAssetMap`
+
+当前先放入 4 个 core_3d 占位点位：
+
+- `giant_buddha`
+- `jiulong_guanyu`
+- `fan_gong`
+- `wuyin_tancheng`
+
+这些资产的 `status` 均为 `placeholder`，暂不填写 `modelUrl`，不依赖真实模型文件。`transform` 只提供简单位置、旋转和缩放，用于后续独立预览组件验证。
+
+### 新增组件说明
+
+新增 `PlaceholderLandmark.tsx`：
+
+- 接收 `poiId` 和 `active`。
+- 使用 React Three Fiber JSX 元素渲染低模占位。
+- `giant_buddha` 使用圆柱基座和简化竖向轮廓。
+- `jiulong_guanyu` 使用圆形水池和中心莲台。
+- `fan_gong` 使用盒体和穹顶占位。
+- `wuyin_tancheng` 使用多层圆柱结构。
+- 其他 POI 使用普通盒体。
+- 不加载贴图，不使用复杂动画。
+
+新增 `Scenic3DPreview.tsx`：
+
+- 接收 `selectedPoiId` 和 `height`。
+- 内部使用 `Canvas`。
+- 添加基础相机、`ambientLight`、`directionalLight` 和 `OrbitControls`。
+- 根据 `selectedPoiId` 显示 `PlaceholderLandmark`。
+- `selectedPoiId` 为空时默认显示 `giant_buddha`。
+- 只使用 inline style 保证独立使用时有高度。
+- 不依赖 `GuideMapPage`、Ant Design 或数字人组件。
+
+### 为什么本阶段仍不接入 GuideMapPage
+
+本阶段目标是先验证 3D 组件本身可以在当前 React + Vite + TypeScript 项目中编译通过。暂不接入 `GuideMapPage`，可以避免把 3D Canvas、地图交互、POI 选择状态和页面布局问题混在一起，后续再单独处理页面接入与交互联动。
+
+### 对现有地图行为的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，没有接入地图页面 UI，没有修改 Marker、Polyline、InfoWindow、路线切换或路线规划逻辑。当前地图行为不受影响。
+
+本阶段没有新增真实 `.glb`、`.gltf` 模型，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。
+
+### 验证方式
+
+- 检查新增 3D 资产映射和组件文件。
+- 运行 `npm run build`。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出中仍存在 Vite chunk size warning：`dist/assets/index-*.js` 超过 500 kB。这是构建体积提示，不是失败；本阶段未做代码拆分或构建优化。
+
+### 下一步建议
+
+- 阶段十二 C 可新增页面接入前的轻量导出或 Story/本地验证入口，但仍建议避免直接改动地图主逻辑。
+- 后续接入 `GuideMapPage` 时，使用可关闭的右侧或底部 3D 面板。
+- 接入真实 `.glb` 前，先保持 placeholder 链路稳定，再逐个替换核心地标模型。
