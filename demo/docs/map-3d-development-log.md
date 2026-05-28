@@ -966,3 +966,77 @@
 - 启动 dev server 后打开 `/three-preview`，手动检查四个 POI 的模型可见性和 OrbitControls 操作体验。
 - 下一阶段可以考虑给 `/three-preview` 增加截图检查或更明确的资产状态说明。
 - 接入 `GuideMapPage` 前，先确认移动端和小屏布局是否需要单独处理。
+
+## 2026-05-29 阶段十五：3D 预览测试页懒加载优化
+
+### 本次目标
+
+优化 `/three-preview` 路由加载方式，让 `Scenic3DPreviewPage` 通过 `React.lazy` 和 `Suspense` 懒加载，避免 Three.js 相关代码直接进入主入口包。
+
+### 本次约束
+
+- 只优化 `/three-preview` 路由加载方式。
+- 不修改 `GuideMapPage.tsx`。
+- 不接入地图页面 UI。
+- 不修改地图路线逻辑。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `src/App.tsx`
+- `docs/map-3d-development-log.md`
+
+### 懒加载实现方式
+
+`src/App.tsx` 中将原来的静态导入：
+
+```ts
+import Scenic3DPreviewPage from './pages/Scenic3DPreviewPage'
+```
+
+改为：
+
+```ts
+const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
+```
+
+并新增 `ThreePreviewRoute`，只在 `/three-preview` 路由 element 内使用 `Suspense` 包裹测试页，fallback 为“正在加载 3D 预览...”。没有重构整个路由系统。
+
+`/three-preview` 路径保持不变。桌面端和移动端分支均继续保留 `/three-preview` 独立测试路由。
+
+### 为什么要先优化 3D 页面加载方式再接入 GuideMapPage
+
+Three.js、React Three Fiber 和 Drei 会显著增加前端包体积。先把独立 3D 测试页改成懒加载，可以验证 3D 代码能够从主入口拆出，降低后续接入地图页时对首页、地图页和数字人相关页面首屏加载的影响。
+
+本阶段先解决加载边界，再考虑地图页接入，可以避免把性能问题、地图交互问题和 3D 渲染问题混在一起。
+
+### 对现有地图行为的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，没有接入地图页面 UI，没有修改地图路线逻辑，没有新增真实 `.glb`、`.gltf` 模型，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。
+
+现有地图 Marker、Polyline、InfoWindow、路线切换和腾讯地图逻辑不受影响。
+
+### 验证方式
+
+- 检查 `src/App.tsx` 中 `/three-preview` 使用 `lazy` 和 `Suspense`。
+- 运行 `npm run build`。
+- 检查构建产物中出现独立 `Scenic3DPreviewPage-*.js` chunk。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建结果生成独立 chunk：
+
+- `dist/assets/Scenic3DPreviewPage-*.js`
+
+主入口 `dist/assets/index-*.js` 约 2.63 MB，3D 测试页 chunk 约 891.86 kB。构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/three-preview`，确认懒加载 fallback 和 3D 预览页面正常。
+- 后续如接入 `GuideMapPage`，继续保持 3D 面板懒加载，避免地图主流程首屏直接加载 Three.js。
+- 可进一步考虑将 Drei/Three 相关逻辑集中在 3D 组件边界内，避免普通页面误引入 3D 依赖。

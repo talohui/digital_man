@@ -1,14 +1,23 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminAvatarPage from './pages/AdminAvatarPage'
 import GuideMapPage from './pages/GuideMapPage'
 import HomePage from './pages/HomePage'
-import Scenic3DPreviewPage from './pages/Scenic3DPreviewPage'
 import SpotGuidePage from './pages/SpotGuidePage'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import MobileShell from './mobile/MobileShell'
 import { useChatStore } from './store/useChatStore'
+
+const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
+
+function ThreePreviewRoute() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>正在加载 3D 预览...</div>}>
+      <Scenic3DPreviewPage />
+    </Suspense>
+  )
+}
 
 function App() {
   const location = useLocation()
@@ -28,7 +37,7 @@ function App() {
   if (isMobile && !isAdminRoute) {
     return (
       <Routes>
-        <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
+        <Route path="/three-preview" element={<ThreePreviewRoute />} />
         <Route path="*" element={<MobileShell />} />
       </Routes>
     )
@@ -39,7 +48,7 @@ function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/map" element={<GuideMapPage />} />
       <Route path="/spot/:spotId" element={<SpotGuidePage />} />
-      <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
+      <Route path="/three-preview" element={<ThreePreviewRoute />} />
       <Route path="/guide" element={<HomePage />} />
       <Route path="/me" element={<HomePage />} />
       <Route path="/admin" element={<AdminDashboard />} />
