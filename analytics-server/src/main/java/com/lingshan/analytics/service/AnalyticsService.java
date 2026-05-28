@@ -1,5 +1,7 @@
 package com.lingshan.analytics.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshan.analytics.dto.EventRequest;
 import com.lingshan.analytics.entity.AnalyticsEvent;
 import com.lingshan.analytics.repository.EventRepository;
@@ -17,13 +19,17 @@ public class AnalyticsService {
     private final EventRepository repository;
     private final SentimentAnalyzer sentimentAnalyzer;
     private final PersonaEngine personaEngine;
+    private final VisitorBehaviorService visitorBehaviorService;
+    private final ObjectMapper mapper = new ObjectMapper();
 
     public AnalyticsService(EventRepository repository,
                             SentimentAnalyzer sentimentAnalyzer,
-                            PersonaEngine personaEngine) {
+                            PersonaEngine personaEngine,
+                            VisitorBehaviorService visitorBehaviorService) {
         this.repository = repository;
         this.sentimentAnalyzer = sentimentAnalyzer;
         this.personaEngine = personaEngine;
+        this.visitorBehaviorService = visitorBehaviorService;
     }
 
     // ---- 写入事件 ----
@@ -74,6 +80,14 @@ public class AnalyticsService {
                 personaEngine.updateFromEvent(uid, req.event(), props);
             } catch (Exception ignored) { /* 画像更新失败不阻断事件落库 */ }
         }
+
+        try {
+            if ("ticket_purchase".equals(e.getEvent())) {
+                visitorBehaviorService.recordTicketPurchase(props, e.getTs(), uid);
+            } else if ("purchase".equals(e.getEvent())) {
+                visitorBehaviorService.recordPurchase(props, e.getTs());
+            }
+        } catch (Exception ignored) { /* 游客行为聚合失败不阻断事件落库 */ }
     }
 
     // ---- 读取 API ----
@@ -303,16 +317,11 @@ public class AnalyticsService {
 
     private String toJsonString(Map<String, Object> props) {
         if (props == null) return "{}";
-        StringBuilder sb = new StringBuilder("{");
-        props.forEach((k, v) -> {
-            sb.append("\"").append(k).append("\":");
-            if (v instanceof String s) sb.append("\"").append(s.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
-            else sb.append(v);
-            sb.append(",");
-        });
-        if (sb.length() > 1 && sb.charAt(sb.length() - 1) == ',') sb.setLength(sb.length() - 1);
-        sb.append("}");
-        return sb.toString();
+        try {
+            return mapper.writeValueAsString(props);
+        } catch (JsonProcessingException ignored) {
+            return "{}";
+        }
     }
 
     private double round1(double v) { return Math.round(v * 10.0)    / 10.0; }

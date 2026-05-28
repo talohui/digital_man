@@ -23,6 +23,13 @@
 .tools/
 dataease-docker/data/
 dataease-docker/.env
+analytics-server/lingshan-analytics*.db
+analytics-server/lingshan-analytics*.trace.db
+数字人开源项目/Fay-main/cache_data/
+数字人开源项目/Fay-main/logs/
+数字人开源项目/Fay-main/memory/
+数字人开源项目/Fay-main/samples/
+.tmp_codex_write_test
 
 # macOS
 .DS_Store

@@ -1,460 +1,472 @@
-# 环境搭建指南
+# 灵山胜境数字人项目安装与启动指南
 
-> 目标：让队友在一台新机器上，尽量少猜配置就能把 `Fay + Gorse + analytics-server + demo` 跑起来。
+> 面向 Mac / Windows 队友。目标是把 C 端游客小程序式前端、Fay 数字人、灵山 RAG、analytics 行为分析后端、B 端数据大屏完整跑起来。
 
-## 1. 前置条件
+## 1. 项目结构
+
+```text
+digital_man/
+├── demo/                         C 端游客前端 + B 端 React 大屏，React 18 + Vite
+├── analytics-server/             行为分析与推荐后端，Spring Boot + H2，默认 5002
+├── 数字人开源项目/Fay-main/       Fay 数字人引擎，HTTP 5000，WS 10003
+├── lingshan-rag/                 灵山知识库 RAG MCP 服务，Fay 启动时自动拉起
+├── gorse-docker/                 Gorse 可选推荐服务，目前不是主链路
+├── SETUP.md                      本安装文档
+└── HANDOFF.md                    前端 / B 端 / agent 交接文档
+```
+
+当前主线：
+
+- C 端：手机端优先，小程序式 App Shell，导览 / 地图 / 小灵 / 我的。
+- B 端：React 自建数据大屏，展示实时游客数据、灵山历史样本、聊天洞察、推荐效果、服务质量等。
+- 推荐：默认使用 analytics-server 内置 `local-score-v1`，Gorse 只保留可选增强，不依赖它启动。
+- 问答：Fay + 灵山 RAG 仍是独立主链路，不要让大屏或推荐改动影响问答准确率与速度。
+
+## 2. 前置环境
+
+### 2.1 通用要求
 
 | 工具 | 建议版本 | 用途 |
-|---|---|---|
-| Python | 3.10+，已实测 3.14 | Fay + lingshan-rag |
-| Node.js | 18+ | demo 前端 |
-| Java | 17 | analytics-server |
-| Maven | 3.8+ | analytics-server 构建 |
-| Docker Desktop | 最新版 | Gorse + DataEase |
-| Chrome / Edge | 最新版 | 前端联调 |
+|---|---:|---|
+| Git | 2.40+ | 拉取代码 |
+| Node.js | 18+，推荐 20 LTS | `demo` 前端 |
+| npm | Node 自带即可 | 安装前端依赖 |
+| Java JDK | 17 | `analytics-server` |
+| Maven | 3.8+ | 构建 / 启动 Spring Boot |
+| Python | 3.10-3.12 优先 | Fay 与 lingshan-rag |
+| ffmpeg | 最新稳定版 | 云端音频转文字上传识别 |
+| Docker Desktop | 可选 | 只在需要 Gorse / DataEase 时使用 |
+| Edge / Chrome | 最新版 | 浏览器调试；Edge + localhost 可用浏览器 ASR |
 
-说明：
-
-- Python 3.13+ 已兼容 `audioop` 缺失问题，`requirements.txt` 已补 `audioop-lts`
-- macOS 如果 `5000` 端口被系统占用，先关闭 `AirPlay Receiver`
-
----
-
-## 1.4 macOS 复现专章（Mac 队友看这里）
-
-本仓库就是在 macOS 上开发的，仓库里存的配置（RAG 绝对路径等）默认就是 Mac 路径，**大多数情况开箱即用**。下面是 Mac 上的关键点。
-
-### A. 拉代码
+### 2.2 macOS 安装建议
 
 ```bash
-git clone <仓库地址> 软件杯
-cd 软件杯
+# Homebrew 示例
+brew install node@20 openjdk@17 maven python@3.11 ffmpeg
+
+# 如果 shell 找不到 java/mvn，按 brew 提示配置 JAVA_HOME
+java -version
+mvn -version
+node -v
+python3 --version
+ffmpeg -version
 ```
 
-> 若你的本地路径和原作者不同（原作者是 `/Users/MR/Desktop/软件杯`），见 B 步要改一处 RAG 路径。
+macOS 常见坑：
 
-### B. RAG 绝对路径（路径不同才需改）
+- `5000` 端口被占用时，先关 `系统设置 -> 通用 -> 隔空投送与接力 -> AirPlay 接收器`。
+- 如果使用 nvm，启动前端前先执行 `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"`。
 
-打开 `数字人开源项目/Fay-main/faymcp/data/mcp_servers.json`，找到 **id 7「灵山RAG知识库」**，确认 `args` 和 `cwd` 是你本机的真实路径：
+### 2.3 Windows 安装建议
 
-```json
-"args": ["/Users/你的用户名/.../软件杯/lingshan-rag/mcp_server/server.py"],
-"cwd": "/Users/你的用户名/.../软件杯/lingshan-rag",
-```
-
-> 如果你 clone 到的路径恰好就是 `/Users/MR/Desktop/软件杯`，这步可跳过。
-> 不改对的话，数字人能聊天但**回答会脱离灵山知识库**（RAG 子进程起不来）。
-
-### C. 安装依赖
-
-```bash
-# Python（建议虚拟环境）
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r 数字人开源项目/Fay-main/requirements.txt
-pip install -r lingshan-rag/requirements.txt
-
-# 前端
-cd demo && npm install --legacy-peer-deps && cd ..
-```
-
-### D. 配置文件
-
-- `system.conf`：仓库已带可用版本（私密仓库，含 Key），无需手填。需重置时 `cp system.conf.bak system.conf`。
-- `demo/.env.local`：腾讯地图等前端 Key 仍需各自填写（见 §2.2）。
-- Gorse：`cd gorse-docker && cp .env.example .env`。
-
-### E. 启动命令（Mac 原生）
-
-| 用途 | 命令 |
-|---|---|
-| 启动 Fay | `cd 数字人开源项目/Fay-main && python main.py start` |
-| 启动 Gorse | `cd gorse-docker && /usr/local/bin/docker-compose up -d` |
-| 启动 analytics | `cd analytics-server && mvn spring-boot:run` |
-| 启动 demo | `cd demo && npm run dev -- --host 127.0.0.1` |
-| 清 Fay 缓存配置 | `rm -f cache_data/system.conf cache_data/config.json` |
-
-### F. Mac 专属坑
-
-- **`5000` 端口被占用**：多半是系统的 AirPlay 接收器。关闭：`系统设置 → 通用 → 隔空投送与接力 → AirPlay 接收器`，再启动 Fay。
-- **改配置不生效**：Fay 首启会把 `system.conf` 复制进 `cache_data/`。改了模型/Key 后先 `rm -f cache_data/system.conf cache_data/config.json` 再重启。
-- **改了 `rag_utils.py` 或 `mcp_servers.json`**：要**整体重启 Fay**（结束 python 进程再起），软重启不会重载 RAG 子进程。
-
----
-
-## 1.5 Windows 复现专章（Windows 队友看这里）
-
-本仓库主要在 macOS 上开发，下面把 **Windows 上必须改的点**集中列出。其余步骤与后文一致，只是命令换成 Windows 写法。
-
-### A. 拉代码
+推荐使用 PowerShell。
 
 ```powershell
-git clone <仓库地址> digital_man
+# 可用 winget 安装
+winget install OpenJS.NodeJS.LTS
+winget install Microsoft.OpenJDK.17
+winget install Apache.Maven
+winget install Python.Python.3.11
+winget install Gyan.FFmpeg
+
+java -version
+mvn -version
+node -v
+python --version
+ffmpeg -version
+```
+
+Windows 常见坑：
+
+- Windows Defender / 防火墙可能拦截手机访问 `5173/5000/5002/10003`，局域网联调时需要允许 Node、Java、Python 入站。
+- JSON 路径建议用正斜杠，例如 `D:/code/digital_man/lingshan-rag`。
+
+## 3. 拉代码
+
+### macOS
+
+```bash
+git clone https://github.com/talohui/digital_man.git
 cd digital_man
 ```
 
-记住你的仓库绝对路径，例如 `D:\code\digital_man`，后面要用。
+### Windows
 
-### B. 必改：灵山 RAG 的绝对路径（最容易漏）
+```powershell
+git clone https://github.com/talohui/digital_man.git
+cd digital_man
+```
 
-打开 `数字人开源项目\Fay-main\faymcp\data\mcp_servers.json`，找到 **id 7「灵山RAG知识库」**，把里面两处 macOS 路径改成你的 Windows 路径：
+本仓库是私密仓库，部分本地演示配置可能包含比赛联调 Key。不要把仓库改成公开仓库；如果新增个人 Key，优先放本地环境变量或 `.env.local`。
+
+## 4. 关键配置
+
+### 4.1 Fay / RAG 路径
+
+Fay 通过 `数字人开源项目/Fay-main/faymcp/data/mcp_servers.json` 启动灵山 RAG MCP。换机器后重点检查 id 为“灵山RAG知识库”的配置。
+
+macOS 示例：
 
 ```json
-"args": ["D:/code/digital_man/lingshan-rag/mcp_server/server.py"],
-"cwd": "D:/code/digital_man/lingshan-rag",
+{
+  "args": ["/Users/你的用户名/path/to/digital_man/lingshan-rag/mcp_server/server.py"],
+  "cwd": "/Users/你的用户名/path/to/digital_man/lingshan-rag"
+}
 ```
 
-> JSON 里用正斜杠 `/` 最稳（`D:/code/...`）。用反斜杠要写成双反斜杠 `D:\\code\\...`。
-> 不改这里，数字人能聊天但**回答会脱离灵山知识库**（RAG 子进程起不来）。
+Windows 示例：
 
-### C. 安装依赖
-
-```powershell
-# Python（建议用虚拟环境）
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r 数字人开源项目\Fay-main\requirements.txt
-pip install -r lingshan-rag\requirements.txt
-
-# 前端
-cd demo
-npm install --legacy-peer-deps
-cd ..
+```json
+{
+  "args": ["D:/code/digital_man/lingshan-rag/mcp_server/server.py"],
+  "cwd": "D:/code/digital_man/lingshan-rag"
+}
 ```
 
-### D. 配置文件
+如果这里路径不对，Fay 可能能启动，但灵山知识库不会参与回答，RAG 准确率会明显下降。
 
-- `system.conf`：仓库已带可用版本（私密仓库，含 Key），无需手填。若需重置，`copy system.conf.bak system.conf`。
-- `demo\.env.local`：腾讯地图等前端 Key 仍需各自填写（见 §2.2）。
-- Gorse：`cd gorse-docker && copy .env.example .env`。
+### 4.2 Fay 模型配置
 
-### E. 命令对照（mac → Windows）
+配置文件在：
 
-| 用途 | macOS（后文） | Windows |
-|---|---|---|
-| 启动 Fay | `python main.py start` | `python main.py start` |
-| 启动 Gorse | `/usr/local/bin/docker-compose up -d` | `docker compose up -d`（Docker Desktop 自带 compose v2） |
-| 启动 analytics | `mvn spring-boot:run` | `mvn spring-boot:run` |
-| 启动 demo | `npm run dev -- --host 127.0.0.1` | `npm run dev -- --host 127.0.0.1` |
-| 清 Fay 缓存配置 | `rm -f cache_data/system.conf` | `del cache_data\system.conf cache_data\config.json` |
+```text
+数字人开源项目/Fay-main/system.conf
+```
 
-### F. 端口提示
+注意：
 
-- Windows 上 `5000` 一般不会被系统占用（没有 AirPlay），无需特殊处理。
-- 若被别的程序占用，用 `netstat -ano | findstr :5000` 查 PID，再 `taskkill /PID <pid> /F`。
+- 当前速度优化基于 `qwen-plus` 非思考模型。
+- 不要随手换成 qwen3.5 思考模型，Fay 流式链路可能出现 60s 超时重试。
+- 改 `system.conf` 后如果没生效，删除 Fay 缓存后重启：
 
-### G. 改配置后让 Fay 真正生效
+macOS：
 
-Fay 首启会把 `system.conf` 复制进 `cache_data\`。**改了模型/Key 不生效**时：
+```bash
+cd "数字人开源项目/Fay-main"
+rm -f cache_data/system.conf cache_data/config.json
+python main.py start
+```
+
+Windows：
 
 ```powershell
+cd "数字人开源项目\Fay-main"
 del cache_data\system.conf cache_data\config.json
 python main.py start
 ```
 
-改了 `lingshan-rag\scripts\rag_utils.py` 或 `mcp_servers.json` 后，要**整体重启 Fay**（结束 python 进程再起），软重启不会重载 RAG 子进程。
+### 4.3 前端环境变量
 
-## 2. 必要配置
-
-### 2.1 Fay 配置
-
-在 `数字人开源项目/Fay-main/` 下准备本地 `system.conf`：
+在 `demo/.env.local` 创建：
 
 ```bash
-cd 数字人开源项目/Fay-main
-cp system.conf.bak system.conf
+VITE_TMAP_WEB_KEY=你的腾讯地图WebKey
+VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划Key
+
+# 可选。留空时前端会按当前访问 hostname 自动推导。
+VITE_FAY_HTTP=http://127.0.0.1:5000
+VITE_FAY_WS=ws://127.0.0.1:10003
+VITE_ANALYTICS_HTTP=http://127.0.0.1:5002
+
+# 可选：auto | browser | cloud
+VITE_VOICE_ASR_MODE=auto
 ```
 
-本仓库已直接提交一份可用的 `system.conf`（私密仓库，含真实 Key），结构如下：
+局域网手机访问时，如果电脑 IP 是 `192.168.1.8`，可以这样启动前端：
 
-```ini
-[key]
-# === LLM 主干：阿里百炼 Qwen ===
-chat_module = openai_api
-gpt_model_engine = qwen-plus
-gpt_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
-gpt_api_key = sk-xxxx
-
-# === 大模型（深度任务，同款）===
-big_model_engine = qwen-plus
-big_model_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
-big_model_api_key = sk-xxxx
-
-# === Embeddings：百炼向量服务 ===
-embedding_api_model = text-embedding-v3
-embedding_api_base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
-embedding_api_key = sk-xxxx
-
-# === TTS（Edge TTS，免 Key）===
-tts_module = edge-tts
-```
-
-注意（**踩坑点，务必看**）：
-
-- 模型固定用 **`qwen-plus`**（非思考模型，流式正常，约 10–25s/轮）。
-- ⚠️ **不要换 qwen3.5 系列（122b / flash / 27b）**：它们都是思考模型，在 Fay 的流式链路里会**每轮挂起约 60s 触发超时重试**，整条链路不可用。
-- `gpt_model_engine` 与 `big_model_engine` 两处都要是 `qwen-plus`。
-- 改完 `system.conf` 后，Fay 会在首次启动时把它复制进 `cache_data/`。**改了配置但没生效时**，删掉 `cache_data/system.conf` 和 `cache_data/config.json` 再重启。
-- 正常启动后日志里应看到 `model=qwen-plus` 和百炼 base_url，而不是 SiliconFlow。
-
-### 2.2 demo 环境变量
-
-在 `demo/.env.local` 写入：
+macOS：
 
 ```bash
-VITE_POSTHOG_KEY=你的 PostHog Key
-VITE_TMAP_WEB_KEY=你的腾讯地图 Web Key
-VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划 Key
+cd demo
+VITE_FAY_HTTP=http://192.168.1.8:5000 \
+VITE_FAY_WS=ws://192.168.1.8:10003 \
+VITE_ANALYTICS_HTTP=http://192.168.1.8:5002 \
+npm run dev:lan
 ```
 
-说明：
+Windows PowerShell：
 
-- 地图页依赖腾讯地图 key
-- 没配地图 key 时，首页推荐和后端接口仍可联调，但 `/map` 无法正常出图
-
-### 2.3 Gorse 环境变量
-
-```bash
-cd gorse-docker
-cp .env.example .env
+```powershell
+cd demo
+$env:VITE_FAY_HTTP="http://192.168.1.8:5000"
+$env:VITE_FAY_WS="ws://192.168.1.8:10003"
+$env:VITE_ANALYTICS_HTTP="http://192.168.1.8:5002"
+npm run dev:lan
 ```
 
-默认本地开发直接用 `.env.example` 的值即可。
+## 5. 安装依赖
 
-## 3. 一次性安装依赖
+### 5.1 Python
 
-### 3.1 Python
+macOS：
 
 ```bash
-pip install -r 数字人开源项目/Fay-main/requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r "数字人开源项目/Fay-main/requirements.txt"
 pip install -r lingshan-rag/requirements.txt
 ```
 
-### 3.2 Node
+Windows：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r "数字人开源项目\Fay-main\requirements.txt"
+pip install -r lingshan-rag\requirements.txt
+```
+
+### 5.2 前端
 
 ```bash
 cd demo
 npm install --legacy-peer-deps
 ```
 
-说明：
+### 5.3 analytics-server
 
-- 这版 `demo` 本地安装用 `--legacy-peer-deps` 更稳
+首次运行 Maven 会自动下载依赖：
 
-## 4. 启动顺序
+```bash
+cd analytics-server
+mvn test
+```
 
-严格按下面顺序启动。
+## 6. 启动服务
+
+建议开 3 个终端。Gorse 现在不是必需服务，可以先不启动。
 
 ### 终端 1：启动 Fay
 
+macOS：
+
 ```bash
-cd 数字人开源项目/Fay-main
+cd "数字人开源项目/Fay-main"
 python main.py start
 ```
 
-正常标志：
+Windows：
 
-- 控制台出现 `请通过浏览器访问 http://127.0.0.1:5000/ 管理您的Fay`
-- 后续出现 `服务启动完成!`
-- 终端能看到：
-  - `model=qwen-plus`
-  - `base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
-
-### 终端 2：启动 Gorse
-
-```bash
-cd gorse-docker
-/usr/local/bin/docker-compose up -d
+```powershell
+cd "数字人开源项目\Fay-main"
+python main.py start
 ```
 
-正常标志：
+正常端口：
 
-```bash
-curl -s http://127.0.0.1:8087/api/health/live
-```
+- Fay HTTP: `http://127.0.0.1:5000`
+- Fay WS: `ws://127.0.0.1:10003`
+- 灵山 RAG MCP: Fay 自动拉起，通常在 `5010`
 
-返回里应包含：
-
-```json
-{
-  "Ready": true,
-  "DataStoreConnected": true,
-  "CacheStoreConnected": true
-}
-```
-
-Dashboard：
-
-- 地址：`http://127.0.0.1:8088`
-- 用户名：`admin`
-- 密码：`admin123`
-
-### 终端 3：启动 analytics-server
+### 终端 2：启动 analytics-server
 
 ```bash
 cd analytics-server
 mvn spring-boot:run
 ```
 
-正常标志：
+正常端口：
 
-```bash
-curl -s http://127.0.0.1:5002/api/summary
+- REST API: `http://127.0.0.1:5002`
+- H2 Console: `http://127.0.0.1:5002/h2-console`
+
+H2 配置：
+
+```text
+JDBC URL: jdbc:h2:file:./lingshan-analytics
+User: sa
+Password: 空
 ```
 
-能返回 JSON 即可。
+### 终端 3：启动前端
 
-### 终端 4：启动 demo
+本机调试：
 
 ```bash
 cd demo
-npm run dev -- --host 127.0.0.1
+npm run dev
 ```
 
-说明：
-
-- 默认端口是 `5173`
-- 如果 `5173` 被占用，Vite 会自动切到 `5174` 或更高端口
-- 最终以前端终端打印的 `Local:` 地址为准
-
-### 终端 5：灵山 RAG 知识库（数字人问答的事实来源）
-
-灵山 RAG 以 **MCP 子进程**方式由 Fay 自动拉起，不需要手动开终端。配置在
-`数字人开源项目/Fay-main/faymcp/data/mcp_servers.json` 的 **id 7「灵山RAG知识库」**：
-
-```json
-{
-  "id": 7,
-  "name": "灵山RAG知识库",
-  "command": "python",
-  "args": ["<仓库绝对路径>/lingshan-rag/mcp_server/server.py"],
-  "cwd": "<仓库绝对路径>/lingshan-rag",
-  "env": {
-    "LINGSHAN_LLM_API_KEY": "sk-xxxx",
-    "LINGSHAN_LLM_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "LINGSHAN_LLM_MODEL": "qwen-plus"
-  },
-  "autostart": true
-}
-```
-
-⚠️ **换机器/换系统必改**：`args` 和 `cwd` 里是**绝对路径**，仓库里存的是原作者的 macOS 路径
-`/Users/MR/Desktop/软件杯/lingshan-rag`。**Windows 队友必须改成自己的路径**，例如
-`D:/code/digital_man/lingshan-rag`（详见下方 Windows 专章）。
-
-- 知识库向量库（ChromaDB）已**预构建并提交**（`lingshan-rag/chroma_db/`，集合 `lingshan_guide_v2`），clone 后开箱即用，无需重新跑 embedding。
-- 想独立调试 RAG，可单独运行：
+手机局域网调试：
 
 ```bash
-cd lingshan-rag
-python mcp_server/server.py
+cd demo
+npm run dev:lan
 ```
 
-- 改了 `lingshan-rag/scripts/rag_utils.py` 后，**必须整体重启 Fay**（软重启不会重载 MCP 子进程）。
-- RAG MCP 默认监听在 `5010`（Fay 启动后自动起）。
+访问地址：
 
-## 5. 联调验证流程
+- C 端游客首页：`http://127.0.0.1:5173/`
+- B 端数据大屏：`http://127.0.0.1:5173/admin`
+- 数字人配置页：`http://127.0.0.1:5173/admin/avatar`
+- 手机访问：`http://电脑局域网IP:5173/`
 
-按这个顺序验证最省时间：
+## 7. 可选：Gorse
 
-1. 打开前端 `Local:` 地址
-2. 首页点击一个快捷问题，确认 Fay 能正常回复
-3. 访问 `http://127.0.0.1:5002/api/summary`，确认 analytics-server 正常
-4. 访问 `http://127.0.0.1:8087/api/health/live`，确认 Gorse ready
-5. 首页选择标签，确认推荐卡能刷新
-6. 点击“进入地图导览”，确认能进入 `/map`
-7. 在地图页点击景点，确认能进入 `/spot/:spotId`
-8. 在景点页继续提问，确认回答围绕当前景点展开
-
-## 5.5 响应速度与性能说明
-
-已对"提问→数字人开口"的链路做过优化，实测每轮总耗时从约 20–26s 降到：
-
-- 简单事实问题（如"灵山大佛多高"）：约 **0.7–2s**
-- 复杂多段问题（如"梵宫主要看什么"）：约 **6–8s**（RAG 内部还要调一次 LLM 合成）
-
-做了三处优化（已在代码里）：
-
-1. **记忆检索 embedding 改持久连接**（`utils/api_embedding_service.py`）：用 `requests.Session` + keep-alive，超时降到 (connect 5s, read 15s)。消除了访问百炼时偶发的 SSL EOF 重试（之前每次新建 TLS 连接，单次重试要白等 ~15s）。
-2. **注入提示词的记忆条数 10→4**（`llm/nlp_cognitive_stream.py`）：缩小 planner 提示词，加快首字与生成。
-3. **灵山 RAG 开启 HuggingFace 离线模式**（`lingshan-rag/mcp_server/server.py` 顶部 `HF_HUB_OFFLINE=1`）：本地 bge 嵌入模型已缓存，跳过启动后首次查询时去 HF Hub 的联网检查——消除了**首条查询约 24–28s 的冷启动尖峰**。
-
-> 调试用：设环境变量 `LINGSHAN_LAT_DEBUG=1` 再启动 Fay，每轮各段耗时会写入 `/tmp/lat_timing.log`（记忆检索 / RAG检索 / 首字延迟 / 总耗时）。默认关闭，不影响生产。
-
-## 6. 常见问题
-
-**Q：Fay 启动了，但前端仍提示 WebSocket 连接失败**
-
-- 确认 Fay HTTP 是 `5000`，不是 `5001`
-- 确认 `ws://127.0.0.1:10003` 已监听
-- 先看 Fay 终端有没有 `服务启动完成!`
-
-**Q：Fay 回复“抱歉，我的大脑暂时开了小差，请稍后再试一下。”**
-
-- 先看 `system.conf` 是否真的生效
-- 正常情况下日志会显示百炼地址，而不是 SiliconFlow
-- 如果日志里不是百炼，说明 Fay 没读到本地 `system.conf`
-
-**Q：数字人能聊天，但回答跟灵山知识库对不上 / 在编**
-
-- 多半是灵山 RAG MCP 子进程没起来：检查 `mcp_servers.json` id 7 的绝对路径是否改成了你本机的路径（Windows 必改，见 §1.5-B）
-- 确认 `5010` 端口有监听
-- 改过 `rag_utils.py` 或 `mcp_servers.json` 后要**整体重启 Fay**
-- 如果数字人“复读”了一条旧的错误回答，可能是记忆系统回放：`POST http://127.0.0.1:5000/api/clear-memory` 后重启 Fay
-
-**Q：换了 qwen3.5 模型后，数字人每次回答都卡很久然后报错**
-
-- qwen3.5 系列（122b/flash/27b）是思考模型，在 Fay 流式链路里每轮会挂起约 60s 超时重试
-- 改回 `qwen-plus`（`system.conf` 的 `gpt_model_engine` 和 `big_model_engine` 两处），删 `cache_data` 重启
-
-**Q：macOS 上 `5000` 端口被占用**
-
-- 关闭 `系统设置 -> 通用 -> 隔空投送与接力 -> AirPlay 接收器`
-- 然后重新执行 `python main.py start`
-
-**Q：前端打不开 `5173`**
-
-- 看 `npm run dev` 终端里打印的 `Local:` 地址
-- 如果 `5173` 被占用，通常会自动切到 `5174`
-
-**Q：Gorse health 不是 `Ready: true`**
-
-- 先执行：
+当前推荐主链路是 `local-score-v1`，不依赖 Gorse。只有需要调研推荐增强时再启动：
 
 ```bash
 cd gorse-docker
-/usr/local/bin/docker-compose ps
+cp .env.example .env
+docker compose up -d
 ```
 
-- 如果 `master` 正常但 `server` 不 ready，再执行：
+地址：
+
+- Gorse REST: `http://127.0.0.1:8087`
+- Gorse Dashboard: `http://127.0.0.1:8088`
+
+## 8. 启动后验证
+
+### 8.1 analytics
 
 ```bash
-/usr/local/bin/docker-compose restart server worker
+curl http://127.0.0.1:5002/api/summary
+curl "http://127.0.0.1:5002/api/dashboard/visitor-behavior?mode=history"
+curl "http://127.0.0.1:5002/api/dashboard/visitor-behavior?mode=realtime"
 ```
 
-**Q：analytics-server 启动失败**
+历史样本接口应返回：
 
-- 先确认是不是已经有一个旧实例在跑
-- 如果是 H2 文件库冲突，通常是重复启动了第二个实例
+- `sourceLabel` 类似“灵山历史样本”
+- `sampleCount` 为 `522`
 
-## 7. 关键地址速查
+### 8.2 推荐接口
 
-| 服务 | 地址 | 说明 |
-|---|---|---|
-| Fay 控制台 | `http://127.0.0.1:5000` | 主 HTTP 服务 |
-| Fay WS | `ws://127.0.0.1:10003` | 数字人推流 |
-| 灵山 RAG MCP | `http://127.0.0.1:5010` | 由 Fay 自动拉起的知识库子进程 |
-| analytics-server | `http://127.0.0.1:5002` | 行为分析与导览推荐 |
-| Gorse REST | `http://127.0.0.1:8087` | 推荐引擎 REST |
-| Gorse Dashboard | `http://127.0.0.1:8088` | Dashboard |
-| demo | `http://127.0.0.1:5173` | 默认前端地址 |
-| demo 备选 | `http://127.0.0.1:5174` | `5173` 被占用时常见端口 |
+```bash
+curl -X POST http://127.0.0.1:5002/api/guide/recommendations \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"dev-user","selectedTags":["亲子游","拍照打卡"]}'
+```
 
-## 8. 最短结论
+期望：
 
-队友只要记住这四件事，基本就能跑起来：
+- 返回 3 条路线
+- 每条路线有 `score/reason/reasons/debug`
+- `engine` 为 `local-score-v1`
 
-1. Fay 用 `python main.py start`，不是 `python fay_booter.py`
-2. Fay 主 HTTP 端口是 `5000`
-3. Gorse 用 `/usr/local/bin/docker-compose up -d`
-4. demo 最终地址以 Vite 终端输出为准，不一定永远是 `5173`
+### 8.3 Fay / RAG
+
+打开 C 端问：
+
+```text
+灵山大佛有多高？
+```
+
+期望：
+
+- 回答包含 88 米或 79+9 米
+- 前端是单气泡流式输出
+- 没有 `<prestart>` / `<think>` 残留
+
+### 8.4 C 端小程序链路
+
+手机视口或真机访问：
+
+1. 首页选择游览期待。
+2. 进入购票页 `/ticket`，提交年龄段、性别、同行人数、游览日期。
+3. 进入消费页 `/consume`，模拟餐饮、文创、交通、演艺消费。
+4. 进入地图页 `/map`，切换路线 / 景点，进入“小灵”提问。
+5. 回到 `/admin`，查看实时游客数据是否变化。
+
+## 9. 常见问题
+
+### 9.1 前端能打开，但手机上 Fay / analytics 请求失败
+
+原因通常是前端仍请求手机自己的 `127.0.0.1`。使用电脑局域网 IP 启动：
+
+```bash
+VITE_FAY_HTTP=http://电脑IP:5000 \
+VITE_FAY_WS=ws://电脑IP:10003 \
+VITE_ANALYTICS_HTTP=http://电脑IP:5002 \
+npm run dev:lan
+```
+
+同时确认防火墙允许 `5000/10003/5002/5173`。
+
+### 9.2 B 端大屏没有新模块
+
+确认 analytics-server 是新代码启动，并且 `5002` 没被旧进程占用：
+
+macOS：
+
+```bash
+lsof -nP -iTCP:5002 -sTCP:LISTEN
+```
+
+Windows：
+
+```powershell
+netstat -ano | findstr :5002
+```
+
+如有旧进程，结束后重新 `mvn spring-boot:run`。
+
+### 9.3 历史样本不是 522
+
+历史样本来自：
+
+```text
+analytics-server/src/main/resources/visitor-behavior/lingshan-visitor-behavior-seed-v1.json
+```
+
+启动时如果数据库中没有 `history_lingshan_sample`，会自动导入一次。若需要重建本地 H2：
+
+```bash
+cd analytics-server
+rm -f lingshan-analytics.mv.db lingshan-analytics.trace.db
+mvn spring-boot:run
+```
+
+Windows 删除同名文件即可。
+
+### 9.4 Fay 改代码后不生效
+
+Fay、RAG MCP、缓存配置都可能常驻。完整重启：
+
+```bash
+pkill -f "python main.py start" || true
+pkill -f "lingshan-rag/mcp_server" || true
+cd "数字人开源项目/Fay-main"
+rm -f cache_data/system.conf cache_data/config.json
+python main.py start
+```
+
+Windows 用任务管理器结束 Python 进程，或：
+
+```powershell
+taskkill /F /IM python.exe
+```
+
+### 9.5 前端依赖安装报 peer dependency
+
+使用：
+
+```bash
+npm install --legacy-peer-deps
+```
+
+## 10. 提交注意事项
+
+不要把运行时缓存提交上去：
+
+- `数字人开源项目/Fay-main/memory/**`
+- `数字人开源项目/Fay-main/memory/chroma_db/**`
+- `数字人开源项目/Fay-main/logs/**`
+- `数字人开源项目/Fay-main/cache_data/**`
+- `.claude/settings.local.json`
+- `analytics-server/lingshan-analytics*.db`
+- `demo/node_modules/**`
+
+优先提交：
+
+- `demo/src/**`
+- `demo/public/**`
+- `analytics-server/src/**`
+- `analytics-server/scripts/**`
+- `数字人开源项目/Fay-main/asr/**`
+- `数字人开源项目/Fay-main/gui/flask_server.py`
+- `数字人开源项目/Fay-main/llm/nlp_cognitive_stream.py`
+- `SETUP.md`
+- `HANDOFF.md`
+

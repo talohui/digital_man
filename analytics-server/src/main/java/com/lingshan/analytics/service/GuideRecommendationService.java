@@ -12,11 +12,8 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,9 +23,11 @@ public class GuideRecommendationService {
     private static final int RECOMMENDATION_SIZE = 3;
 
     private final GorseClient gorseClient;
+    private final LocalScoreEngine localScoreEngine;
 
-    public GuideRecommendationService(GorseClient gorseClient) {
+    public GuideRecommendationService(GorseClient gorseClient, LocalScoreEngine localScoreEngine) {
         this.gorseClient = gorseClient;
+        this.localScoreEngine = localScoreEngine;
     }
 
     @PostConstruct
@@ -65,46 +64,22 @@ public class GuideRecommendationService {
             log.info("Seeded Gorse with {} routes, {} seed users and {} feedback rows.",
                     GuideRouteCatalog.ROUTES.size(), seedUsers.size(), feedbacks.size());
         } catch (Exception error) {
-            log.warn("Gorse seed failed, fallback mode will still work: {}", error.getMessage());
+            log.warn("Gorse seed failed, local score engine will still work: {}", error.getMessage());
         }
     }
 
     public GuideRecommendationResponse recommend(GuideRecommendationRequest request) {
         String userId = sanitizeUserId(request.userId());
         List<String> selectedTags = normalizeTags(request.selectedTags());
+        String requestId = "rec_" + Instant.now().toEpochMilli();
 
-        List<String> recommendedIds = new ArrayList<>();
-
-        if (gorseClient.isEnabled()) {
-            try {
-                gorseClient.upsertUser(userId, selectedTags);
-                recommendedIds.addAll(gorseClient.recommend(userId, RECOMMENDATION_SIZE));
-            } catch (Exception error) {
-                log.warn("Gorse recommendation failed for user {}: {}", userId, error.getMessage());
-            }
-        }
-
-        List<GuideRouteCard> routes = buildRouteCards(selectedTags, recommendedIds);
-
-        if (gorseClient.isEnabled()) {
-            try {
-                List<GorseClient.GorseFeedback> impressions = routes.stream()
-                        .map(route -> new GorseClient.GorseFeedback(
-                                "impression_route",
-                                userId,
-                                route.id(),
-                                Instant.now().toString(),
-                                "guide-impression"
-                        ))
-                        .toList();
-                gorseClient.writeFeedback(impressions);
-            } catch (Exception error) {
-                log.warn("Failed to write Gorse impressions for user {}: {}", userId, error.getMessage());
-            }
-        }
+        List<LocalScoreEngine.ScoredRoute> scoredRoutes = localScoreEngine.rank(userId, selectedTags, RECOMMENDATION_SIZE);
+        List<GuideRouteCard> routes = scoredRoutes.stream()
+                .map(route -> toRouteCard(route, requestId))
+                .toList();
 
         String topRouteId = routes.isEmpty() ? "" : routes.get(0).id();
-        return new GuideRecommendationResponse(userId, topRouteId, routes);
+        return new GuideRecommendationResponse(userId, topRouteId, routes, requestId, LocalScoreEngine.ENGINE);
     }
 
     public void recordFeedback(GuideFeedbackRequest request) {
@@ -139,64 +114,35 @@ public class GuideRecommendationService {
         }
     }
 
-    private List<GuideRouteCard> buildRouteCards(List<String> selectedTags, List<String> gorseIds) {
-        Set<String> finalIds = new LinkedHashSet<>();
-        gorseIds.stream()
-                .filter(routeId -> GuideRouteCatalog.findRoute(routeId) != null)
-                .forEach(finalIds::add);
-
-        fallbackRank(selectedTags).stream()
-                .map(GuideRouteCatalog.RouteProfile::routeId)
-                .forEach(finalIds::add);
-
-        return finalIds.stream()
-                .limit(RECOMMENDATION_SIZE)
-                .map(routeId -> toRouteCard(GuideRouteCatalog.findRoute(routeId), selectedTags, gorseIds.contains(routeId)))
-                .toList();
-    }
-
-    private List<GuideRouteCatalog.RouteProfile> fallbackRank(List<String> selectedTags) {
-        return GuideRouteCatalog.ROUTES.stream()
-                .sorted(Comparator
-                        .comparingInt((GuideRouteCatalog.RouteProfile route) -> overlapCount(route.labels(), selectedTags)).reversed()
-                        .thenComparingInt(route -> GuideRouteCatalog.ROUTES.indexOf(route)))
-                .toList();
-    }
-
-    private GuideRouteCard toRouteCard(GuideRouteCatalog.RouteProfile route, List<String> selectedTags, boolean fromGorse) {
-        List<String> matchedTags = route.labels().stream()
-                .filter(selectedTags::contains)
-                .toList();
-
-        String reason;
-        if (fromGorse && !matchedTags.isEmpty()) {
-            reason = "Gorse 推荐，命中标签：" + String.join(" / ", matchedTags);
-        } else if (fromGorse) {
-            reason = "Gorse 根据相似游客偏好为你补齐了这条路线。";
-        } else if (!matchedTags.isEmpty()) {
-            reason = "本地兜底命中标签：" + String.join(" / ", matchedTags);
-        } else {
-            reason = "当前按默认热门路线为你补齐推荐。";
-        }
-
+    private GuideRouteCard toRouteCard(LocalScoreEngine.ScoredRoute scoredRoute, String requestId) {
+        GuideRouteCatalog.RouteProfile route = scoredRoute.route();
         return new GuideRouteCard(
                 route.routeId(),
                 route.routeName(),
                 route.description(),
                 route.durationLabel(),
                 route.labels(),
-                reason
+                scoredRoute.reason(),
+                scoredRoute.score(),
+                scoredRoute.matchScore(),
+                route.primaryPersona(),
+                scoredRoute.reason(),
+                lightAlternativeId(route.routeId()),
+                scoredRoute.reasons(),
+                scoredRoute.matchedTags(),
+                scoredRoute.reasonCodes(),
+                withRequestMetadata(scoredRoute.debug(), requestId)
         );
     }
 
-    private int overlapCount(List<String> routeTags, List<String> selectedTags) {
-        int count = 0;
-        for (String tag : routeTags) {
-            if (selectedTags.contains(tag)) {
-                count += 1;
-            }
-        }
-        return count;
+    private String lightAlternativeId(String routeId) {
+        return "historical_culture".equals(routeId) ? "family" : null;
+    }
+
+    private java.util.Map<String, Object> withRequestMetadata(java.util.Map<String, Object> debug, String requestId) {
+        java.util.Map<String, Object> copy = new java.util.LinkedHashMap<>(debug);
+        copy.put("requestId", requestId);
+        return copy;
     }
 
     private List<String> normalizeTags(List<String> tags) {

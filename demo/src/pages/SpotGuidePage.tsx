@@ -28,8 +28,7 @@ function SpotGuidePage() {
   const { spotId } = useParams()
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const setSelectedSpotId = useGuideStore((state) => state.setSelectedSpotId)
-  const setGuideContext = useChatStore((state) => state.setGuideContext)
-  const clearGuideContext = useChatStore((state) => state.clearGuideContext)
+  const setActiveScene = useChatStore((state) => state.setActiveScene)
 
   const route = getGuideRouteById(activeRouteId)
   const currentSpotId =
@@ -37,12 +36,13 @@ function SpotGuidePage() {
       ? spotId
       : getDefaultSpotId(route.id)
   const spot = getGuideSpotById(currentSpotId)
+  const sceneId = `spot:${route.id}:${spot.id}`
   const { stop, stopIndex, nextStop } = getRouteStop(route.id, currentSpotId)
   const nextSpot = nextStop ? getGuideSpotById(nextStop.spotId) : null
 
   useEffect(() => {
     setSelectedSpotId(currentSpotId)
-    setGuideContext({
+    setActiveScene(sceneId, {
       routeName: route.name,
       spotName: spot.name,
       spotIntro: spot.intro,
@@ -54,9 +54,8 @@ function SpotGuidePage() {
 
     return () => {
       captureSpotLeave(currentSpotId, Date.now() - enteredAt)
-      clearGuideContext()
     }
-  }, [clearGuideContext, currentSpotId, route.id, route.name, setGuideContext, setSelectedSpotId, spot, stop?.narrative])
+  }, [currentSpotId, route.id, route.name, sceneId, setActiveScene, setSelectedSpotId, spot, stop?.narrative])
 
   const [rateOpen, setRateOpen] = useState(false)
 
@@ -111,6 +110,7 @@ function SpotGuidePage() {
 
         <div className="spot-guide-layout">
           <Live2DStage
+            sceneId={sceneId}
             highlightsOverride={[
               { title: '当前路线', value: route.name, icon: <CompassOutlined /> },
               { title: '当前景点', value: spot.name, icon: <EnvironmentOutlined /> },
@@ -120,11 +120,12 @@ function SpotGuidePage() {
 
           <div className="spot-guide-side">
             <QuickAsks
+              sceneId={sceneId}
               title="向数字人继续追问"
               subtitle="这些问题会自动带上当前路线与景点上下文"
               questions={buildSpotQuestions(route.id, spot.id)}
             />
-            <ChatPanel />
+            <ChatPanel sceneId={sceneId} />
           </div>
         </div>
       </main>

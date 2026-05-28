@@ -38,10 +38,17 @@ export type GuideRecommendationCard = {
   durationLabel: string
   tags: GuideTag[]
   reason: string
+  score?: number
   matchScore?: number
   routePersona?: string
   whyRecommended?: string
   lightAlternativeId?: string | null
+  reasons?: string[]
+  matchedTags?: string[]
+  reasonCodes?: string[]
+  debug?: Record<string, unknown>
+  recommendationRequestId?: string
+  recommendationEngine?: string
 }
 
 export type UserProfileSnapshot = {
@@ -354,10 +361,10 @@ export function buildLocalGuideRecommendations(selectedTags: string[]): GuideRec
     const matchedTags = route.tags.filter((tag) => selectedTags.includes(tag))
     const reason =
       matchedTags.length > 0
-        ? `本地兜底命中标签：${matchedTags.join(' / ')}`
+        ? `你选择了“${matchedTags.join('、')}”，这条路线主题最贴近。`
         : index === 0
-          ? '当前按默认热门路线为你补齐推荐。'
-          : '根据景区通用偏好为你补齐了一条备选路线。'
+          ? '按景区经典游览动线为你推荐，适合首次体验。'
+          : '这条路线能补充不同游览节奏，适合作为备选。'
 
     return {
       id: route.id,

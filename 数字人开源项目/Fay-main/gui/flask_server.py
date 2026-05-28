@@ -600,6 +600,23 @@ def api_stop_live():
     except Exception as e:
         return jsonify({'result': 'error', 'message': f'停止时出错: {e}'}), 500
 
+
+@__app.route('/api/asr-transcribe', methods=['POST'])
+def api_asr_transcribe():
+    """demo 浏览器按住说话：上传短音频，走阿里云 NLS 识别（不占用 Fay 本机麦）。"""
+    upload = request.files.get('audio')
+    if upload is None or not upload.filename:
+        return jsonify({'result': 'error', 'message': '未上传音频文件'}), 400
+    try:
+        from asr.ali_nls_file import transcribe_uploaded_file
+        raw = upload.read()
+        text = transcribe_uploaded_file(raw, upload.filename or 'audio.webm')
+        util.printInfo(1, 'demo-asr', f'[云端ASR]{text}')
+        return jsonify({'result': 'successful', 'text': text})
+    except Exception as e:
+        util.log(2, f"asr-transcribe 失败: {e}")
+        return jsonify({'result': 'error', 'message': str(e)}), 500
+
 @__app.route('/api/send', methods=['post'])
 def api_send():
     # 接收前端发送的消息

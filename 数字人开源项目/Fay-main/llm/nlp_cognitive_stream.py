@@ -530,6 +530,19 @@ def _run_prestart_tools(user_question: str) -> List[Dict[str, Any]]:
     return results
 
 
+def _has_lingshan_rag_prestart(prestart_context: str) -> bool:
+    """Return True when prestart already contains usable Lingshan RAG evidence."""
+    if not isinstance(prestart_context, str) or not prestart_context.strip():
+        return False
+
+    text = prestart_context
+    if "query_lingshan_rag" not in text:
+        return False
+
+    has_evidence = any(marker in text for marker in ("answer:", "context:", "faq:"))
+    has_result_metadata = any(marker in text for marker in ("used_llm:", "retrieval_count:"))
+    return has_evidence and has_result_metadata
+
 def _truncate_history(
     history: List[ToolResult],
     limit: Optional[int] = None,
@@ -2589,6 +2602,12 @@ def question(content, username, observation=None):
         ):
             messages_buffer.append({"role": "user", "content": content, "username": username})
 
+    has_lingshan_rag_prestart = _has_lingshan_rag_prestart(prestart_context)
+    if has_lingshan_rag_prestart:
+        for msg in messages_buffer:
+            if msg.get("role") == "assistant" and isinstance(msg.get("content"), str):
+                msg["content"] = _remove_prestart_from_text(msg["content"], keep_marked=False)
+
     tool_registry: Dict[str, WorkflowToolSpec] = {}
     try:
         mcp_tools = get_mcp_tools()
@@ -2601,6 +2620,9 @@ def question(content, username, observation=None):
             tool_registry[spec.name] = spec
     if tool_registry and not _LANGGRAPH_AVAILABLE:
         util.log(1, "langgraph is unavailable, workflow tools are disabled and the app will use direct LLM mode.")
+        tool_registry = {}
+    if tool_registry and has_lingshan_rag_prestart:
+        _lat_log("检测到灵山预启动RAG结果，跳过普通工具链")
         tool_registry = {}
 
     try:

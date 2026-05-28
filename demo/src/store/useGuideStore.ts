@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { fetchGuideRecommendations, fetchRecommendExplain } from '../api/guide'
+import { fetchGuideRecommendations } from '../api/guide'
 import {
   GUIDE_TAGS,
   buildLocalGuideRecommendations,
@@ -87,22 +87,6 @@ export const useGuideStore = create<GuideState>()(
         const { selectedTags, activeRouteId } = get()
         set({ isLoading: true, lastError: '' })
 
-        const explain = await fetchRecommendExplain(userId)
-        if (explain && explain.routes.length > 0) {
-          const nextRouteId =
-            explain.routes.some((route) => route.id === activeRouteId)
-              ? activeRouteId
-              : explain.routes[0].id
-          set({
-            candidateRoutes: explain.routes,
-            userProfile: explain.profile,
-            activeRouteId: nextRouteId,
-            selectedSpotId: getDefaultSpotId(nextRouteId),
-            isLoading: false,
-            lastError: ''
-          })
-          return
-        }
 
         try {
           const response = await fetchGuideRecommendations({ userId, selectedTags })

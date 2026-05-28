@@ -15,6 +15,9 @@ public class PersonaEngine {
     public static final List<String> ATOMS =
             List.of("culture", "ritual", "family", "photo", "walk_light", "deep_guide");
 
+    private static final List<String> GUIDE_TAGS =
+            List.of("亲子游", "文化探秘", "祈福静心", "轻松漫步", "拍照打卡");
+
     private static final Map<String, String> PERSONA_LABELS = Map.of(
             "culture_pilgrim", "文化朝圣型",
             "serenity_seeker", "疗愈祈福型",
@@ -29,6 +32,8 @@ public class PersonaEngine {
 
     private static final double MEMORY_WEIGHT = 0.75;
     private static final double SIGNAL_WEIGHT = 0.25;
+    private static final double TAG_WEIGHT = 0.70;
+    private static final double BEHAVIOR_WEIGHT = 0.30;
 
     private final UserProfileRepository repository;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -39,36 +44,82 @@ public class PersonaEngine {
 
     public void updateFromEvent(String userId, String eventType, Map<String, Object> props) {
         if (userId == null || userId.isBlank()) return;
+        Map<String, Object> safeProps = props != null ? props : Map.of();
 
-        Map<String, Double> signal = signalFor(eventType, props);
+        if ("preference_update".equals(eventType)) {
+            updateFromPreferenceSnapshot(userId, safeProps);
+            return;
+        }
+
+        Map<String, Double> signal = signalFor(eventType, safeProps);
         if (signal.isEmpty()) return;
 
         UserProfile profile = repository.findById(userId).orElse(null);
-        Map<String, Double> vector;
-        int version;
-
         if (profile == null) {
-            vector = normalize(signal);
-            version = 1;
             profile = new UserProfile();
             profile.setUserId(userId);
-        } else {
-            Map<String, Double> old = readVector(profile.getInterestVectorJson());
-            Map<String, Double> merged = new HashMap<>();
-            for (String dim : ATOMS) {
-                double prev = old.getOrDefault(dim, 0.0);
-                double sig  = signal.getOrDefault(dim, 0.0);
-                merged.put(dim, MEMORY_WEIGHT * prev + SIGNAL_WEIGHT * sig);
-            }
-            vector = normalize(merged);
-            version = profile.getProfileVersion() == null ? 2 : profile.getProfileVersion() + 1;
         }
 
-        String[] persona = pickPersona(vector);
-        profile.setInterestVectorJson(writeVector(vector));
+        Map<String, Double> oldBehavior = readVector(profile.getBehaviorVectorJson());
+        Map<String, Double> mergedBehavior = new HashMap<>();
+        for (String dim : ATOMS) {
+            double prev = oldBehavior.getOrDefault(dim, 0.0);
+            double sig = signal.getOrDefault(dim, 0.0);
+            mergedBehavior.put(dim, MEMORY_WEIGHT * prev + SIGNAL_WEIGHT * sig);
+        }
+
+        Map<String, Double> behaviorVector = normalize(mergedBehavior);
+        Map<String, Double> tagVector = readVector(profile.getTagVectorJson());
+        saveProfile(profile, tagVector, behaviorVector, null, null);
+    }
+
+    private void updateFromPreferenceSnapshot(String userId, Map<String, Object> props) {
+        List<String> selectedTags = normalizeSelectedTags(props.get("selectedTags"));
+        if (selectedTags.isEmpty()) {
+            selectedTags = normalizeSelectedTags(props.get("selected_tags"));
+        }
+
+        String nextHash = tagSnapshotHash(selectedTags);
+        UserProfile profile = repository.findById(userId).orElse(null);
+        if (profile == null && selectedTags.isEmpty()) {
+            return;
+        }
+        if (profile != null && Objects.equals(nextHash, profile.getTagSnapshotHash())) {
+            return;
+        }
+
+        if (profile == null) {
+            profile = new UserProfile();
+            profile.setUserId(userId);
+        }
+
+        Map<String, Double> tagVector = vectorForTags(selectedTags);
+        Map<String, Double> behaviorVector = readVector(profile.getBehaviorVectorJson());
+        saveProfile(profile, tagVector, behaviorVector, selectedTags, nextHash);
+    }
+
+    private void saveProfile(
+            UserProfile profile,
+            Map<String, Double> tagVector,
+            Map<String, Double> behaviorVector,
+            List<String> selectedTags,
+            String tagSnapshotHash
+    ) {
+        Map<String, Double> finalVector = mergeFinalVector(tagVector, behaviorVector);
+        String[] persona = hasAnySignal(finalVector) ? pickPersona(finalVector) : new String[]{null, "0.0"};
+
+        profile.setTagVectorJson(writeVector(tagVector));
+        profile.setBehaviorVectorJson(writeVector(behaviorVector));
+        profile.setInterestVectorJson(writeVector(finalVector));
+        if (selectedTags != null) {
+            profile.setSelectedTagsJson(writeTags(selectedTags));
+        }
+        if (tagSnapshotHash != null) {
+            profile.setTagSnapshotHash(tagSnapshotHash);
+        }
         profile.setPrimaryPersona(persona[0]);
         profile.setPrimaryScore(Double.parseDouble(persona[1]));
-        profile.setProfileVersion(version);
+        profile.setProfileVersion(nextVersion(profile));
         profile.setUpdatedAt(LocalDateTime.now());
         repository.save(profile);
     }
@@ -84,16 +135,19 @@ public class PersonaEngine {
             out.put("primaryPersonaLabel", null);
             out.put("primaryScore", 0.0);
             out.put("secondaryPreferences", List.of());
+            out.put("selectedTags", List.of());
             out.put("updatedAt", null);
             return out;
         }
         Map<String, Double> v = readVector(p.getInterestVectorJson());
+        String primaryPersona = p.getPrimaryPersona();
         out.put("profileVersion",      p.getProfileVersion());
         out.put("interestVector",      v);
-        out.put("primaryPersona",      p.getPrimaryPersona());
-        out.put("primaryPersonaLabel", PERSONA_LABELS.getOrDefault(p.getPrimaryPersona(), ""));
+        out.put("primaryPersona",      primaryPersona);
+        out.put("primaryPersonaLabel", primaryPersona == null ? null : PERSONA_LABELS.getOrDefault(primaryPersona, ""));
         out.put("primaryScore",        round3(p.getPrimaryScore() == null ? 0 : p.getPrimaryScore()));
         out.put("secondaryPreferences", topAtomLabels(v, 2));
+        out.put("selectedTags",        readTags(p.getSelectedTagsJson()));
         out.put("updatedAt",           p.getUpdatedAt() == null ? null : p.getUpdatedAt().toString());
         return out;
     }
@@ -105,7 +159,7 @@ public class PersonaEngine {
     }
 
     public static String personaLabel(String code) {
-        return PERSONA_LABELS.getOrDefault(code, "");
+        return code == null ? "" : PERSONA_LABELS.getOrDefault(code, "");
     }
 
     private Map<String, Double> signalFor(String event, Map<String, Object> props) {
@@ -113,20 +167,25 @@ public class PersonaEngine {
         if (event == null) return s;
         switch (event) {
             case "tag_toggle" -> {
-                Object tag = props.get("tag");
-                Object on  = props.get("on");
-                if (Boolean.FALSE.equals(on)) return s;
-                if ("亲子游".equals(tag))     { bump(s, "family", 0.30); bump(s, "photo", 0.10); }
-                if ("文化探秘".equals(tag))   { bump(s, "culture", 0.30); bump(s, "deep_guide", 0.20); }
-                if ("祈福静心".equals(tag))   { bump(s, "ritual", 0.30); bump(s, "walk_light", 0.10); }
-                if ("轻松漫步".equals(tag))   { bump(s, "walk_light", 0.30); }
-                if ("拍照打卡".equals(tag))   { bump(s, "photo", 0.30); }
+                // 只作为点击埋点保留；画像由 preference_update 的 selectedTags 快照驱动。
             }
             case "route_click" -> {
                 String rid = strProp(props, "target_id");
                 if ("historical_culture".equals(rid)) { bump(s, "culture", 0.25); bump(s, "ritual", 0.15); bump(s, "deep_guide", 0.20); }
                 if ("natural_scenery".equals(rid))    { bump(s, "walk_light", 0.25); bump(s, "photo", 0.20); }
                 if ("family".equals(rid))             { bump(s, "family", 0.30); bump(s, "photo", 0.15); }
+            }
+            case "ticket_purchase" -> {
+                double groupSize = numberProp(props, "group_size");
+                String ageBand = strProp(props, "age_band");
+                String ticketType = strProp(props, "ticket_type");
+                if (groupSize >= 3) { bump(s, "family", 0.18); bump(s, "walk_light", 0.06); }
+                if ("60+".equals(ageBand)) { bump(s, "walk_light", 0.08); bump(s, "ritual", 0.04); }
+                if ("18-24".equals(ageBand) || "25-34".equals(ageBand)) { bump(s, "photo", 0.06); }
+                if ("family".equals(ticketType)) { bump(s, "family", 0.12); }
+                if ("culture".equals(ticketType)) { bump(s, "culture", 0.10); bump(s, "deep_guide", 0.08); }
+                if ("blessing".equals(ticketType)) { bump(s, "ritual", 0.10); }
+                if ("leisure".equals(ticketType)) { bump(s, "walk_light", 0.10); }
             }
             case "spot_enter" -> {
                 String sid = strProp(props, "target_id");
@@ -153,6 +212,52 @@ public class PersonaEngine {
         return s;
     }
 
+    private Map<String, Double> vectorForTags(List<String> selectedTags) {
+        Map<String, Double> s = new HashMap<>();
+        for (String tag : selectedTags) {
+            if ("亲子游".equals(tag))     { bump(s, "family", 0.30); bump(s, "photo", 0.10); }
+            if ("文化探秘".equals(tag))   { bump(s, "culture", 0.30); bump(s, "deep_guide", 0.20); }
+            if ("祈福静心".equals(tag))   { bump(s, "ritual", 0.30); bump(s, "walk_light", 0.10); }
+            if ("轻松漫步".equals(tag))   { bump(s, "walk_light", 0.30); }
+            if ("拍照打卡".equals(tag))   { bump(s, "photo", 0.30); }
+        }
+        return normalize(s);
+    }
+
+    private Map<String, Double> mergeFinalVector(Map<String, Double> tagVector, Map<String, Double> behaviorVector) {
+        Map<String, Double> merged = new LinkedHashMap<>();
+        for (String dim : ATOMS) {
+            double tag = tagVector.getOrDefault(dim, 0.0);
+            double behavior = behaviorVector.getOrDefault(dim, 0.0);
+            merged.put(dim, round3(TAG_WEIGHT * tag + BEHAVIOR_WEIGHT * behavior));
+        }
+        return merged;
+    }
+
+    private List<String> normalizeSelectedTags(Object raw) {
+        if (!(raw instanceof Collection<?> values)) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (Object value : values) {
+            if (value instanceof String tag && GUIDE_TAGS.contains(tag)) {
+                out.add(tag);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private String tagSnapshotHash(List<String> selectedTags) {
+        return selectedTags.stream().sorted().reduce((a, b) -> a + "|" + b).orElse("");
+    }
+
+    private int nextVersion(UserProfile profile) {
+        Integer version = profile.getProfileVersion();
+        return version == null ? 1 : version + 1;
+    }
+
+    private boolean hasAnySignal(Map<String, Double> vector) {
+        return vector.values().stream().anyMatch(v -> v != null && v > 0.0001);
+    }
+
     private static void bump(Map<String, Double> m, String k, double v) {
         m.merge(k, v, Double::sum);
     }
@@ -160,6 +265,11 @@ public class PersonaEngine {
     private static String strProp(Map<String, Object> props, String key) {
         Object v = props.get(key);
         return v instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    private static double numberProp(Map<String, Object> props, String key) {
+        Object v = props.get(key);
+        return v instanceof Number n ? n.doubleValue() : 0.0;
     }
 
     private static Map<String, Double> normalize(Map<String, Double> raw) {
@@ -203,6 +313,7 @@ public class PersonaEngine {
                 "deep_guide", "深度讲解"
         );
         return v.entrySet().stream()
+                .filter(e -> e.getValue() != null && e.getValue() > 0)
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                 .limit(n)
                 .map(e -> niceNames.getOrDefault(e.getKey(), e.getKey()))
@@ -226,6 +337,23 @@ public class PersonaEngine {
             return mapper.writeValueAsString(v);
         } catch (Exception ex) {
             return "{}";
+        }
+    }
+
+    private List<String> readTags(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return mapper.readValue(json, new TypeReference<>() {});
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
+    private String writeTags(List<String> tags) {
+        try {
+            return mapper.writeValueAsString(tags);
+        } catch (Exception ex) {
+            return "[]";
         }
     }
 

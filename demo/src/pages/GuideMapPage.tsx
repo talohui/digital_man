@@ -61,7 +61,7 @@ function GuideMapPage() {
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
   const setActiveRouteId = useGuideStore((state) => state.setActiveRouteId)
   const setSelectedSpotId = useGuideStore((state) => state.setSelectedSpotId)
-  const clearGuideContext = useChatStore((state) => state.clearGuideContext)
+  const setActiveScene = useChatStore((state) => state.setActiveScene)
 
   const [mapStatus, setMapStatus] = useState<MapStatus>('idle')
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('idle')
@@ -69,13 +69,14 @@ function GuideMapPage() {
   const [showRoutePanel, setShowRoutePanel] = useState(false)
 
   const route = getGuideRouteById(activeRouteId)
+  const sceneId = `map:${route.id}`
   const routeSpots = getGuideRouteSpots(route.id)
   const selectedSpot = getGuideSpotById(selectedSpotId || getDefaultSpotId(route.id))
   const selectedIndex = route.stops.findIndex((stop) => stop.spotId === selectedSpot.id)
 
   useEffect(() => {
-    clearGuideContext()
-  }, [clearGuideContext])
+    setActiveScene(sceneId, { routeName: route.name })
+  }, [route.name, sceneId, setActiveScene])
 
   useEffect(() => {
     if (!route.stops.some((stop) => stop.spotId === selectedSpotId)) {

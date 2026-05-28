@@ -1,6 +1,8 @@
 // src/api/fay.ts
-export const FAY_HTTP = import.meta.env.VITE_FAY_HTTP?.trim() || 'http://127.0.0.1:5000'
-export const FAY_WS = import.meta.env.VITE_FAY_WS?.trim() || 'ws://127.0.0.1:10003'
+import { getFayHttpBase, getFayWsBase } from '../lib/runtimeConfig'
+
+export const FAY_HTTP = getFayHttpBase()
+export const FAY_WS = getFayWsBase()
 
 export interface FayMessage {
   // 根据实际抓包结构调整
@@ -89,9 +91,16 @@ export async function sendTextToFay(msg: string, username = 'User') {
  * 建立 WebSocket 监听 Fay 推送
  */
 interface ConnectOptions {
+  username?: string
   onOpen?: () => void
   onClose?: () => void
   onError?: (event: Event) => void
+}
+
+export function registerFayUsername(ws: WebSocket | null, username = 'User') {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  ws.send(JSON.stringify({ Username: username }))
+  console.log(`[Fay WS →] register Username=${username}`)
 }
 
 export function connectFayWS(
@@ -105,8 +114,7 @@ export function connectFayWS(
     // Fay 通过 Username 把 panelReply 路由给对应 socket(参考 Fay 自带 gui/static/js/index.js:777)
     // 不发这一帧的话,Fay 只会广播全局 panelMsg,聊天的 panelReply 永远收不到
     try {
-      ws.send(JSON.stringify({ Username: 'User' }))
-      console.log('[Fay WS →] register Username=User')
+      registerFayUsername(ws, options.username ?? 'User')
     } catch (err) {
       console.error('Fay WS register failed:', err)
     }

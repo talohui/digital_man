@@ -1,246 +1,481 @@
-# 工作交接文档
+# 灵山胜境项目交接文档
 
-> 当前负责人：german-spalo
-> 仓库：https://github.com/talohui/digital_man
-> 更新时间：2026-05-09
+> 给继续优化 C 端手机端和 B 端大屏的同学 / Claude / Codex agent。请先读本文件，再改代码。
 
----
+## 1. 当前主线
 
-## 项目目录结构
+当前项目目标已经从“单纯数字人聊天”扩展为：
 
 ```text
-/Users/MR/Desktop/软件杯/
-├── demo/                               前端 React 18 + Vite（默认 5173，可自动切到 5174+）
-├── analytics-server/                   Spring Boot 行为分析后端（5002）
-├── gorse-docker/                       Gorse 路线推荐集群（8087 / 8088）
-├── lingshan-rag/                       Python RAG 知识库 + MCP Server
-├── 数字人开源项目/Fay-main/             Fay 数字人引擎（HTTP:5000，WS:10003）
-├── dataease-docker/                    DataEase v2 本地 Docker 配置（9080 / 8100）
-├── SETUP.md                            环境搭建指南
-├── HANDOFF.md                          本文件
-├── README.md                           项目简介
-├── 地图导览_Gorse_v1_操作说明.md        地图导览 + Gorse v1 详细说明
-└── 实现文档.md                          完整技术实现文档
+C 端小程序式游客体验
++ Fay/RAG 数字人讲解
++ 个性化路线推荐
++ 票务 / 消费 / 地图 / 聊天行为采集
++ B 端实时与历史游客行为大屏
 ```
 
----
+近期重点：
 
-## 当前状态
+1. 继续优化 C 端手机端前端体验。
+2. 继续优化 B 端 `/admin` 数据大屏展示。
+3. 保持 Fay/RAG 的问答准确率和响应速度，不要把推荐、大屏、票务逻辑接进 RAG 主链路。
 
-### 已完成
+## 2. 高压保护区：默认不要动
 
-- 前端数字人主链路可用：Live2D、TTS、嘴型同步、浏览器 ASR 已闭环
-- Fay 通信已修复：WS 注册帧与 HTTP 表单发送格式已对齐
-- `analytics-server` 已稳定提供行为分析接口与导览推荐接口
-- React `/admin` 运营大屏可用
-- DataEase 本地大屏已恢复，可通过 APISIX 入口访问
-- 地图导览 + Gorse v1 已接入到 `demo` 主前端并完成联调
+这些文件关系到问答速度、RAG 准确率或已修过的关键 bug。除非任务明确要求，否则不要改：
 
-### 当前没有的主阻塞
+```text
+数字人开源项目/Fay-main/llm/nlp_cognitive_stream.py
+数字人开源项目/Fay-main/faymcp/data/mcp_prestart_tools.json
+demo/src/store/useChatStore.ts
+demo/src/api/fay.ts
+lingshan-rag/**
+```
 
-- 不再存在 DataEase 登录是主阻塞点的问题
-- Gorse 已经不是“仅 fallback”，真 Gorse 链路已跑通
+如果必须动：
 
-### 仍需注意
+- `useChatStore.ts` 要保留单气泡流式输出和 `<prestart>/<think>` 隐藏逻辑。
+- `nlp_cognitive_stream.py` 要保留“预启动 RAG 一次检索 + 一次 LLM 生成”的快路径。
+- `mcp_prestart_tools.json` 里 `query_lingshan_rag` 不要改回 RAG 内部二次 LLM。
 
-- `dataease-docker/data/`、`dataease-docker/.env`、`gorse-docker/.env`、`数字人开源项目/Fay-main/system.conf` 都是本地运行文件，不进 Git
-- 如果换新机器，DataEase 的数据源 / 数据集 / 大屏需要按本文档重新在 UI 中建一次
-- 地图页依赖腾讯地图 key，队友本地必须自行补齐 `demo/.env.local`
+## 3. 服务与端口
 
----
+| 服务 | 端口 | 作用 | 必需 |
+|---|---:|---|---|
+| demo | 5173 | C 端游客前端 + B 端 React 大屏 | 是 |
+| analytics-server | 5002 | 埋点、推荐、大屏聚合、游客行为样本 | 是 |
+| Fay HTTP | 5000 | 数字人 HTTP / ASR 上传 | 是 |
+| Fay WS | 10003 | 数字人回复、音频、流式消息 | 是 |
+| lingshan-rag MCP | 5010 | 灵山知识库检索，Fay 自动拉起 | 是 |
+| Gorse | 8087/8088 | 可选推荐增强 | 否 |
 
-## 各服务启动命令
+启动见 `SETUP.md`。
+
+## 4. C 端手机端结构
+
+入口：
+
+```text
+demo/src/App.tsx
+```
+
+逻辑：
+
+- `useIsMobileViewport()` 判断移动端，默认 `max-width: 768px`。
+- 手机端且非 `/admin` 路由时，进入 `MobileShell`。
+- 桌面端继续走旧的 `HomePage / GuideMapPage / SpotGuidePage`。
+
+核心文件：
+
+```text
+demo/src/mobile/MobileShell.tsx
+demo/src/mobile/MobileHomePage.tsx
+demo/src/mobile/MobileMapPage.tsx
+demo/src/mobile/MobileGuidePage.tsx
+demo/src/mobile/MobileProfilePage.tsx
+demo/src/mobile/MobileTicketPage.tsx
+demo/src/mobile/MobileConsumePage.tsx
+demo/src/hooks/useIsMobileViewport.ts
+demo/src/styles/global.css
+```
+
+### 4.1 手机端 Tab
+
+当前小程序式 Tab：
+
+- `导览`
+- `地图`
+- `小灵`
+- `我的`
+
+另外有独立页面：
+
+- `/ticket`：模拟购票
+- `/consume`：模拟消费
+
+### 4.2 场景隔离
+
+聊天记录按 scene 隔离，不同路线 / 景点不能串：
+
+```text
+main
+map:{routeId}
+spot:{routeId}:{spotId}
+```
+
+相关文件：
+
+```text
+demo/src/store/chatSessions.ts
+demo/src/store/useChatStore.ts
+demo/src/mobile/MobileGuidePage.tsx
+demo/src/mobile/MobileMapPage.tsx
+```
+
+约束：
+
+- 底部“小灵”没有明确景点上下文时，用 `map:{routeId}` 或 `main`。
+- 只有用户实际进入 / 点过景点时，才用 `spot:{routeId}:{spotId}`。
+- 不要因为默认选中的景点，把所有聊天都塞进某个 spot scene。
+
+### 4.3 当前手机端待优化重点
+
+手机端前端还有明显演示问题，后续同学优先处理：
+
+- 地图页抽屉 / 卡片挡住真实路线，应该支持收缩、半展开、全展开，默认不要遮挡主要路线。
+- 地图气泡卡片在窄屏显示不全，必须限制宽度并避免溢出。
+- 按钮需要清晰点击态 / 加载态 / 禁用态，用户要知道“点到了”。
+- 地图页顶部、路线卡、底部 Tab 的安全区适配还需要继续打磨。
+- 语音输入、文本输入、发送按钮在小屏不能重叠。
+- `/admin` 不走移动 App Shell，管理端后续单独适配。
+
+## 5. C 端业务能力
+
+### 5.1 导览与推荐
+
+相关文件：
+
+```text
+demo/src/store/useGuideStore.ts
+demo/src/api/guide.ts
+demo/src/data/guideData.ts
+analytics-server/src/main/java/com/lingshan/analytics/service/GuideRecommendationService.java
+analytics-server/src/main/java/com/lingshan/analytics/service/LocalScoreEngine.java
+```
+
+当前推荐引擎：
+
+```text
+local-score-v1
+finalScore = 45% 标签匹配 + 25% 行为兴趣 + 15% 热度 + 15% 满意度 - 负反馈惩罚
+```
+
+Gorse 状态：
+
+- Gorse 不是主链路。
+- 不启动 Gorse，推荐接口也应该正常返回。
+- 不要在手机端文案里出现“Gorse fallback / 本地兜底”等工程词。
+
+### 5.2 偏好标签与画像
+
+事件：
+
+```text
+tag_toggle          点击日志
+preference_update   当前 selectedTags 快照，真正驱动标签画像
+```
+
+原则：
+
+- 首页标签是“当前偏好快照”，不是“点击次数”。
+- 反复选 / 取消标签不应该刷高画像。
+- 聊天、路线点击、景点进入、评分等真实行为继续作为增量信号。
+
+相关文件：
+
+```text
+demo/src/lib/analytics.ts
+analytics-server/src/main/java/com/lingshan/analytics/service/PersonaEngine.java
+```
+
+### 5.3 票务与消费
+
+前端：
+
+```text
+demo/src/mobile/MobileTicketPage.tsx
+demo/src/mobile/MobileConsumePage.tsx
+demo/src/mobile/MobileProfilePage.tsx
+demo/src/store/useTicketStore.ts
+```
+
+事件：
+
+```text
+ticket_purchase
+purchase
+```
+
+字段：
+
+```text
+ticket_purchase:
+  ticket_id, age_band, gender, group_size, visit_date, ticket_type, ticket_cost
+
+purchase:
+  category(food/shopping/transport/entertainment), amount, spot_id?, route_id?, ticket_id?
+```
+
+注意：
+
+- A 版是模拟购票 / 模拟支付，不接真实身份证、手机号、微信支付、支付宝。
+- 不上传身份证号、姓名、手机号。
+- 数据只进入 analytics，不进入 Fay/RAG。
+
+### 5.4 语音输入
+
+相关文件：
+
+```text
+demo/src/components/VoiceRecorderBar.tsx
+demo/src/lib/browserAsr.ts
+demo/src/lib/cloudAsr.ts
+demo/src/lib/voiceAsr.ts
+数字人开源项目/Fay-main/asr/ali_nls.py
+数字人开源项目/Fay-main/asr/ali_nls_file.py
+数字人开源项目/Fay-main/gui/flask_server.py
+```
+
+模式：
+
+- `auto`：默认。
+- `browser`：仅安全上下文且浏览器支持 Web Speech 时。
+- `cloud`：上传到 Fay `/api/asr-transcribe`。
+
+局域网真机调试时，常见问题是手机访问自己的 `127.0.0.1`。用 `VITE_FAY_HTTP / VITE_FAY_WS / VITE_ANALYTICS_HTTP` 指到电脑局域网 IP。
+
+## 6. B 端大屏结构
+
+入口：
+
+```text
+http://127.0.0.1:5173/admin
+demo/src/pages/AdminDashboard.tsx
+```
+
+后端：
+
+```text
+analytics-server/src/main/java/com/lingshan/analytics/controller/DashboardController.java
+analytics-server/src/main/java/com/lingshan/analytics/service/DashboardService.java
+analytics-server/src/main/java/com/lingshan/analytics/service/VisitorBehaviorService.java
+```
+
+### 6.1 当前大屏模块
+
+`/admin` 当前应包含：
+
+- 实时总览 / 行为概览。
+- 聊天洞察：聊天量、热门问题、情绪趋势、慢回复监控。
+- 推荐效果：曝光、点击、CTR、推荐路线 Top、引擎类型。
+- 服务质量：P50/P90/MAX、语音完成率、AI 回复率。
+- 游客行为分析：`实时游客数据 / 灵山历史样本` 切换。
+- 画像 / 偏好相关统计。
+
+### 6.2 游客行为“实时 / 历史”切换
+
+接口：
+
+```text
+GET /api/dashboard/visitor-behavior?mode=realtime
+GET /api/dashboard/visitor-behavior?mode=history
+```
+
+历史样本：
+
+- 来源：`灵山胜境相关景点筛选结果.xlsx`
+- ETL 脚本：`analytics-server/scripts/build_lingshan_visitor_seed.py`
+- Seed JSON：`analytics-server/src/main/resources/visitor-behavior/lingshan-visitor-behavior-seed-v1.json`
+- 样本数：`522`
+- 入库表：`VisitorBehaviorRecord`
+- source：`history_lingshan_sample`
+
+实时样本：
+
+- 来源：C 端 `ticket_purchase` + `purchase` + 现有地图/评分/停留事件。
+- source：`realtime_mini_program`
+- 近 24 小时口径。
+
+不要把历史样本和实时数据混在同一张图里不加说明；UI 上必须明确当前 mode。
+
+### 6.3 官方历史样本旧接口
+
+旧的官方行业样本接口仍可能保留：
+
+```text
+/api/official-behavior/*
+```
+
+当前主展示已经切到“游客行为分析”的实时 / 灵山历史切换。后续可以保留旧接口作为备用，不要再让 `/admin` 同屏混杂多套历史口径。
+
+## 7. 数字人与形象配置
+
+管理页：
+
+```text
+http://127.0.0.1:5173/admin/avatar
+```
+
+相关文件：
+
+```text
+demo/src/pages/AdminAvatarPage.tsx
+demo/src/components/admin/AdminLive2DPreview.tsx
+demo/src/api/admin.ts
+demo/src/lib/live2dCostume.ts
+demo/src/lib/voicePreview.ts
+analytics-server/src/main/java/com/lingshan/analytics/controller/AdminConfigController.java
+analytics-server/src/main/java/com/lingshan/analytics/controller/PublicConfigController.java
+analytics-server/src/main/java/com/lingshan/analytics/service/AvatarConfigService.java
+```
+
+能力：
+
+- 音色选择与本地 wav 试听。
+- 保存后同步 analytics 配置，并写 Fay `config.json/cache_data/config.json` 的 `attribute.voice`。
+- Live2D 换装：当前是同模型纹理替换，不是任意新模型骨骼导入。
+
+注意：
+
+- Fay TTS 音色通常需要重启 Fay 才完全生效。
+- 新增服装最稳方式是同 Live2D 模型同尺寸纹理替换；如果换不同骨骼模型，需要重新适配动作、缩放、嘴型同步。
+
+## 8. 数据与事件速查
+
+主要事件：
+
+| 事件 | 作用 |
+|---|---|
+| `chat_message` | 用户聊天内容统计 |
+| `ai_reply` | AI 回复统计与时延 |
+| `preference_update` | 标签偏好快照 |
+| `tag_toggle` | 标签点击日志 |
+| `route_click` | 路线点击 |
+| `spot_enter` / `spot_leave` | 景点进入 / 停留 |
+| `rate_route` | 路线评分 |
+| `rate_spot` | 景点赞踩 |
+| `recommend_exposure` | 推荐曝光 |
+| `recommend_click` | 推荐点击 |
+| `ticket_purchase` | 模拟购票 |
+| `purchase` | 模拟消费 |
+
+核心接口：
+
+```text
+POST /api/events
+GET  /api/summary
+GET  /api/dashboard/overview
+GET  /api/dashboard/chat-insights
+GET  /api/dashboard/behavior
+GET  /api/dashboard/ticketing
+GET  /api/dashboard/consumption
+GET  /api/dashboard/visitor-behavior?mode=realtime|history
+GET  /api/dashboard/recommendation
+POST /api/guide/recommendations
+POST /api/guide/feedback
+GET  /api/public/avatar-config
+GET  /api/admin/avatar-config
+PUT  /api/admin/avatar-config
+```
+
+## 9. 验证命令
+
+前端类型检查：
 
 ```bash
-# 1. Fay
-cd /Users/MR/Desktop/软件杯/数字人开源项目/Fay-main
-python main.py start
-
-# 2. Gorse
-cd /Users/MR/Desktop/软件杯/gorse-docker
-/usr/local/bin/docker-compose up -d
-
-# 3. analytics-server
-cd /Users/MR/Desktop/软件杯/analytics-server
-mvn spring-boot:run
-
-# 4. demo
-cd /Users/MR/Desktop/软件杯/demo
-npm run dev
-
-# 5. DataEase
-cd /Users/MR/Desktop/软件杯/dataease-docker
-./start.sh
+cd demo
+./node_modules/.bin/tsc --noEmit --incremental false
 ```
 
----
-
-## 当前推荐访问地址
-
-| 服务 | 地址 | 说明 |
-|---|---|---|
-| Fay | `http://127.0.0.1:5000` | 数字人 HTTP 接口 |
-| Fay WS | `ws://127.0.0.1:10003` | 数字人消息 / 音频推送 |
-| analytics-server | `http://127.0.0.1:5002` | 行为分析 REST API |
-| 前端主页 | `http://127.0.0.1:5173` | 默认用户交互页面 |
-| React `/admin` | `http://127.0.0.1:5173/admin` | 默认自建运营大屏 |
-| Gorse REST | `http://127.0.0.1:8087` | 路线推荐 REST |
-| Gorse Dashboard | `http://127.0.0.1:8088` | Dashboard 登录页 |
-| DataEase | `http://localhost:9080` | 推荐入口，经 APISIX 转发 |
-| DataEase 直连 | `http://localhost:8100` | 容器直连入口 |
-
----
-
-## 地图导览 + Gorse v1 最新状态
-
-### 当前能力
-
-- `demo` 首页保留 Live2D 与聊天，同时新增标签选路与推荐路线卡
-- 新增 `/map` 地图导览页与 `/spot/:spotId` 景点讲解页
-- 景点页继续复用现有数字人能力，提问时会自动带上路线 / 景点上下文
-- `analytics-server` 提供：
-  - `POST /api/guide/recommendations`
-  - `POST /api/guide/feedback`
-- 推荐接口已支持：
-  - 用户标签 upsert
-  - Gorse 推荐
-  - `impression_route` 写回
-  - Gorse 不可用时的本地 fallback
-- 反馈接口已支持 `select_route` 写入
-
-### 关键代码位置
-
-- 前端页面：
-  - `demo/src/pages/HomePage.tsx`
-  - `demo/src/pages/GuideMapPage.tsx`
-  - `demo/src/pages/SpotGuidePage.tsx`
-- 前端导览状态与数据：
-  - `demo/src/store/useGuideStore.ts`
-  - `demo/src/data/guideData.ts`
-  - `demo/src/api/guide.ts`
-- 聊天上下文：
-  - `demo/src/store/useChatStore.ts`
-  - `demo/src/components/QuickAsks.tsx`
-  - `demo/src/components/Live2DStage.tsx`
-- 地图工具：
-  - `demo/src/lib/loadTMap.ts`
-  - `demo/src/lib/routePlanning.ts`
-- 后端 Gorse 适配：
-  - `analytics-server/src/main/java/com/lingshan/analytics/controller/GuideController.java`
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRecommendationService.java`
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GorseClient.java`
-  - `analytics-server/src/main/java/com/lingshan/analytics/service/GuideRouteCatalog.java`
-- Gorse 集群：
-  - `gorse-docker/docker-compose.yml`
-  - `gorse-docker/config/config.toml`
-  - `gorse-docker/.env.example`
-
-### 已验证结果
-
-- Gorse health：`/api/health/live` 返回 `Ready: true`
-- Gorse dashboard：`8088` 可跳转登录页
-- analytics-server 启动时成功 seed `3 routes / 6 seed users / 12 feedback rows`
-- `POST /api/guide/recommendations` 已能返回 3 条路线
-- `POST /api/guide/feedback` 已能写入 `select_route`
-- Fay 已实测切回百炼：
-  - `gpt_base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`
-  - `gpt_model_engine=qwen-turbo`
-  - 真实 `POST /v1/chat/completions` 可返回正常回答
-
-### 已知操作要点
-
-- 腾讯地图 key 需配置在 `demo/.env.local`
-- Fay 必须读本地 `数字人开源项目/Fay-main/system.conf`，不要依赖社区公共配置
-- Fay 主 HTTP 端口是 `5000`，不是 `5001`
-- 启动 Gorse 时优先用 `/usr/local/bin/docker-compose`
-- `gorse-master` 不能带 `--cache-path`
-- 如果 `5173` 被占用，Vite 会自动切到 `5174` 或更高端口，以终端 `Local:` 输出为准
-- 如果 `master` 正常但 `server` 仍不 ready，执行：
+前端构建：
 
 ```bash
-cd /Users/MR/Desktop/软件杯/gorse-docker
-/usr/local/bin/docker-compose restart server worker
+cd demo
+npm run build
 ```
 
-### 详细说明
+analytics 测试：
 
-- 查看 `地图导览_Gorse_v1_操作说明.md`
+```bash
+cd analytics-server
+mvn test
+```
 
----
+Fay Python 语法检查：
 
-## DataEase 当前约定
+```bash
+cd "数字人开源项目/Fay-main"
+PYTHONPYCACHEPREFIX=/tmp/codex-pycache python -m py_compile \
+  asr/ali_nls.py \
+  asr/ali_nls_file.py \
+  gui/flask_server.py
+```
 
-### 仓库内已版本化
+接口验证：
 
-- `dataease-docker/docker-compose.yml`
-- `dataease-docker/conf/*`
-- `dataease-docker/.env.example`
-- `dataease-docker/start.sh`
+```bash
+curl http://127.0.0.1:5002/api/summary
+curl "http://127.0.0.1:5002/api/dashboard/visitor-behavior?mode=history"
+curl -X POST http://127.0.0.1:5002/api/guide/recommendations \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"dev-user","selectedTags":["亲子游","拍照打卡"]}'
+```
 
-### 本地运行目录
+## 10. Git 提交边界
 
-- `dataease-docker/data/`
-- `dataease-docker/.env`
+优先提交：
 
-### 当前 UI 配置方式
+```text
+demo/src/**
+demo/public/**
+demo/package.json
+demo/package-lock.json
+analytics-server/src/**
+analytics-server/scripts/**
+analytics-server/pom.xml
+数字人开源项目/Fay-main/asr/**
+数字人开源项目/Fay-main/gui/flask_server.py
+数字人开源项目/Fay-main/llm/nlp_cognitive_stream.py
+SETUP.md
+HANDOFF.md
+```
 
-1. 数据源中新建 `API` 数据源
-2. 在 API 数据源里创建 5 张 API 表
-3. 每张表单独创建单表数据集
-4. 在数据大屏里组合 KPI、趋势图和条形图
+默认不要提交：
 
-### 7 张 API 表 / 数据集
+```text
+.claude/settings.local.json
+.tmp_codex_write_test
+数字人开源项目/Fay-main/memory/**
+数字人开源项目/Fay-main/memory/chroma_db/**
+数字人开源项目/Fay-main/logs/**
+数字人开源项目/Fay-main/cache_data/**
+analytics-server/lingshan-analytics*.db
+demo/node_modules/**
+```
 
-| 名称 | URL | 建议刷新频率 |
-|---|---|---|
-| 今日概览 / `summary` | `http://host.docker.internal:5002/api/summary` | 1 分钟 |
-| 情感趋势 / `sentiment_trend` | `http://host.docker.internal:5002/api/sentiment-trend?hours=12` | 5 分钟 |
-| 热门问题 / `popular_questions` | `http://host.docker.internal:5002/api/popular-questions?limit=10` | 5 分钟 |
-| 时延统计 / `latency_stats` | `http://host.docker.internal:5002/api/latency-stats` | 1 分钟 |
-| 实时状态 / `realtime` | `http://host.docker.internal:5002/api/realtime` | 1 分钟 |
-| 满意度总分 / `satisfaction_summary` | `http://host.docker.internal:5002/api/satisfaction/summary?days=1` | 1 分钟 |
-| 满意度趋势 / `satisfaction_trend` | `http://host.docker.internal:5002/api/satisfaction/trend?days=7` | 5 分钟 |
+当前仓库是私密仓库，历史上允许提交比赛演示 Key。但如果新增自己的个人 Key，仍建议放 `.env.local` 或本地配置，不要扩大泄露面。
 
-> Docker 内访问宿主机服务必须使用 `host.docker.internal`，不要写 `localhost`。
+## 11. 推荐给下一个 agent 的工作顺序
 
-### 当前大屏组件映射
+### C 端手机端
 
-| 组件 | 数据集 | 字段 |
-|---|---|---|
-| 今日对话量 | 今日概览 | `totalMessages` |
-| 正面情感占比 | 今日概览 | `positiveRatio` |
-| 快捷问题点击数 | 今日概览 | `quickAskCount` |
-| P90 响应时延 | 时延统计 | `p90Ms` |
-| 近 5 分钟活跃会话 | 实时状态 | `activeSessions5min` |
-| 情感趋势折线图 | 情感趋势 | `hour` / `positive` / `negative` / `neutral` |
-| 热门问题条形图 | 热门问题 | `question` / `count` |
-| 满意度总分 KPI | 满意度总分 | `scorePct`(0-100)/ `sampleSize` |
-| CSAT 子分 | 满意度总分 | `csatStar` / `csatThumb`(0-1 区间)|
-| 满意度 7 天折线 | 满意度趋势 | `date` / `scorePct` / `sampleSize` |
+1. 先跑 `npm run dev:lan`，用 375/390/430 宽度检查首页、地图、小灵、我的。
+2. 优先修地图页遮挡：地图路线必须可见，底部抽屉要能收缩。
+3. 补按钮点击态、加载态、禁用态。
+4. 确认 scene 隔离：`main / map:* / spot:*` 不串聊天。
+5. 确认语音输入在局域网真机不提示去 `127.0.0.1`。
 
----
+### B 端大屏
 
-## API 端点速查
+1. 确认 `visitor-behavior?mode=history` 返回 522。
+2. 确认购票和消费事件后 `mode=realtime` 有变化。
+3. 优化图表层级与排版，避免数字溢出。
+4. 聊天内容统计、推荐效果、票务消费、满意度四块要有清晰数据口径。
+5. 不要为了展示改 analytics 事件语义；优先在 DashboardService 聚合。
 
-| 服务 | 端点 | 说明 |
-|---|---|---|
-| analytics | `POST http://127.0.0.1:5002/api/events` | 上报埋点事件 |
-| analytics | `GET http://127.0.0.1:5002/api/summary` | 今日 KPI |
-| analytics | `GET http://127.0.0.1:5002/api/sentiment-trend?hours=12` | 情感趋势 |
-| analytics | `GET http://127.0.0.1:5002/api/popular-questions?limit=10` | 热门问题 |
-| analytics | `GET http://127.0.0.1:5002/api/latency-stats` | 响应时延 |
-| analytics | `GET http://127.0.0.1:5002/api/realtime` | 实时状态 |
-| analytics | `GET http://127.0.0.1:5002/api/satisfaction/summary?days=1` | 满意度总分(显式 65% + 隐式 35%,贝叶斯平滑) |
-| analytics | `GET http://127.0.0.1:5002/api/satisfaction/trend?days=7` | 满意度 7 天趋势 |
-| persona | `GET http://127.0.0.1:5002/api/profile/{userId}` | 用户画像快照(6 维原子向量 + 主画像) |
-| persona | `GET http://127.0.0.1:5002/api/recommend/explain/{userId}` | 路线推荐 + 画像匹配解释 |
-| guide | `POST http://127.0.0.1:5002/api/guide/recommendations` | 路线推荐 |
-| guide | `POST http://127.0.0.1:5002/api/guide/feedback` | 路线反馈 |
+### 问答回归
 
----
+每次大改后都问：
 
-## 后续建议
+```text
+灵山大佛有多高？
+九龙灌浴几点开始？
+梵宫主要看什么？
+```
 
-- 如果继续打磨展示效果，优先统一首页推荐模块、地图页和景点页的交互动效
-- 如果换机器复现，优先按 `SETUP.md` 拉起 Fay、Gorse、analytics-server、demo、DataEase
-- 如果继续扩展运营分析，可以在 `analytics-server` 增加事件维度，再同步到 React `/admin` 和 DataEase
+期望：
+
+- 数字和景点事实准确。
+- 简单事实接近 0.7-2s，复杂景点接近 6-8s；外部 LLM 抖动时记录实际值。
+- 前端单气泡流式，无 `<prestart>` / `<think>` 残留。
+

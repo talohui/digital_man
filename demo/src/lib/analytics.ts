@@ -10,13 +10,16 @@
 
 import posthog from 'posthog-js'
 import { useGuideStore } from '../store/useGuideStore'
+import type { GuideRecommendationCard } from '../data/guideData'
+import { getAnalyticsApiBase } from './runtimeConfig'
+import type { PurchaseRecord, TicketProfile } from '../store/useTicketStore'
 
 // ---- 配置 ----
 // 注册 https://app.posthog.com 后在 .env.local 里设置 VITE_POSTHOG_KEY=phc_xxx
 // 不设置时 PostHog 通道自动跳过，analytics-server 通道仍正常工作
 export const POSTHOG_KEY: string = (import.meta.env.VITE_POSTHOG_KEY as string) ?? ''
 export const POSTHOG_HOST = 'https://app.posthog.com'
-const ANALYTICS_URL = 'http://127.0.0.1:5002/api/events'
+const ANALYTICS_URL = `${getAnalyticsApiBase()}/events`
 
 // ---- 事件名常量 ----
 export const EVENT = {
@@ -36,6 +39,11 @@ export const EVENT = {
   RATE_ROUTE:       'rate_route',
   RATE_SPOT:        'rate_spot',
   TAG_TOGGLE:       'tag_toggle',
+  PREFERENCE_UPDATE:'preference_update',
+  RECOMMEND_EXPOSURE:'recommend_exposure',
+  RECOMMEND_CLICK:   'recommend_click',
+  TICKET_PURCHASE:   'ticket_purchase',
+  PURCHASE:          'purchase',
 } as const
 
 // ---- 内部：推送到 analytics-server ----
@@ -79,8 +87,14 @@ export function captureUserMessage(content: string, isVoice = false): void {
 
 /** AI 回复到达：计算从发消息到收到回复的时长 */
 export function captureAiReply(replyText: string, requestStartTime: number): void {
+  const now = Date.now()
+  const latencyMs = Number.isFinite(requestStartTime) && requestStartTime > 0
+    ? now - requestStartTime
+    : undefined
   capture(EVENT.AI_REPLY, {
-    latency_ms:      Date.now() - requestStartTime,
+    ...(latencyMs !== undefined && latencyMs >= 0 && latencyMs <= 120_000
+      ? { latency_ms: latencyMs }
+      : {}),
     reply_length:    replyText.length,
     content_preview: replyText.slice(0, 30),
   })
@@ -137,4 +151,54 @@ export function captureRateSpot(spotId: string, thumb: 1 | -1): void {
 
 export function captureTagToggle(tag: string, on: boolean): void {
   capture(EVENT.TAG_TOGGLE, { tag, on })
+}
+
+export function capturePreferenceUpdate(selectedTags: string[]): void {
+  capture(EVENT.PREFERENCE_UPDATE, { selectedTags })
+}
+
+export function captureTicketPurchase(ticket: TicketProfile): void {
+  capture(EVENT.TICKET_PURCHASE, {
+    ticket_id: ticket.ticketId,
+    age_band: ticket.ageBand,
+    gender: ticket.gender,
+    group_size: ticket.groupSize,
+    visit_date: ticket.visitDate,
+    ticket_type: ticket.ticketType,
+    ticket_cost: ticket.ticketCost,
+  })
+}
+
+export function capturePurchase(record: PurchaseRecord): void {
+  capture(EVENT.PURCHASE, {
+    target_id: record.spotId ?? record.routeId ?? record.ticketId ?? '',
+    category: record.category,
+    amount: record.amount,
+    spot_id: record.spotId,
+    route_id: record.routeId,
+    ticket_id: record.ticketId,
+  })
+}
+
+
+function recommendationProps(route: GuideRecommendationCard, rank: number): Record<string, unknown> {
+  const debugEngine = typeof route.debug?.engine === 'string' ? route.debug.engine : undefined
+  return {
+    target_id: route.id,
+    route_id: route.id,
+    rank,
+    request_id: route.recommendationRequestId ?? '',
+    engine: route.recommendationEngine ?? debugEngine ?? 'local-score-v1',
+    reason_codes: route.reasonCodes ?? []
+  }
+}
+
+export function captureRecommendationExposure(routes: GuideRecommendationCard[]): void {
+  routes.forEach((route, index) => {
+    capture(EVENT.RECOMMEND_EXPOSURE, recommendationProps(route, index + 1))
+  })
+}
+
+export function captureRecommendationClick(route: GuideRecommendationCard, rank: number): void {
+  capture(EVENT.RECOMMEND_CLICK, recommendationProps(route, rank))
 }

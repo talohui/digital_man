@@ -1,0 +1,125 @@
+import {
+  CompassOutlined,
+  EnvironmentOutlined,
+  HomeOutlined,
+  MessageOutlined,
+  UserOutlined
+} from '@ant-design/icons'
+import { useMemo, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
+import { useGuideStore } from '../store/useGuideStore'
+import MobileGuidePage from './MobileGuidePage'
+import MobileHomePage from './MobileHomePage'
+import MobileMapPage from './MobileMapPage'
+import MobileConsumePage from './MobileConsumePage'
+import MobileProfilePage from './MobileProfilePage'
+import MobileTicketPage from './MobileTicketPage'
+
+type MobileTabKey = 'home' | 'map' | 'guide' | 'profile'
+
+const tabs: Array<{
+  key: MobileTabKey
+  label: string
+  path: string
+  icon: ReactNode
+}> = [
+  { key: 'home', label: '导览', path: '/', icon: <HomeOutlined /> },
+  { key: 'map', label: '地图', path: '/map', icon: <EnvironmentOutlined /> },
+  { key: 'guide', label: '小灵', path: '/guide', icon: <MessageOutlined /> },
+  { key: 'profile', label: '我的', path: '/me', icon: <UserOutlined /> }
+]
+
+function getSpotIdFromPath(pathname: string) {
+  if (!pathname.startsWith('/spot/')) return undefined
+  return decodeURIComponent(pathname.slice('/spot/'.length))
+}
+
+function getActiveTab(pathname: string): MobileTabKey {
+  if (pathname === '/map') return 'map'
+  if (pathname === '/me' || pathname === '/consume') return 'profile'
+  if (pathname === '/guide' || pathname.startsWith('/spot/')) return 'guide'
+  return 'home'
+}
+
+function MobileShell() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeRouteId = useGuideStore((state) => state.activeRouteId)
+  const activeTab = getActiveTab(location.pathname)
+  const route = getGuideRouteById(activeRouteId)
+  const spotId = getSpotIdFromPath(location.pathname)
+  const spot = spotId ? getGuideSpotById(spotId) : null
+
+  const pageTitle = useMemo(() => {
+    if (location.pathname === '/ticket') return '购票入园'
+    if (location.pathname === '/consume') return '景区消费'
+    if (activeTab === 'map') return '地图导览'
+    if (activeTab === 'guide') return spot ? `${spot.name}讲解` : '灵山小灵'
+    if (activeTab === 'profile') return '我的画像'
+    return '灵山胜境'
+  }, [activeTab, location.pathname, spot])
+
+  const pageSubtitle = useMemo(() => {
+    if (location.pathname === '/ticket') return '生成本次游客画像'
+    if (location.pathname === '/consume') return '餐饮、文创、交通、演艺'
+    if (activeTab === 'home') return '选择期待，生成今日路线'
+    if (activeTab === 'map') return `${route.name} · ${route.durationLabel}`
+    if (activeTab === 'guide') return spot ? `${route.name} · 当前景点` : `${route.name} · 路线场景`
+    return '偏好、推荐与互动记录'
+  }, [activeTab, location.pathname, route.durationLabel, route.name, spot])
+
+  const handleTabClick = (tab: (typeof tabs)[number]) => {
+    if (tab.key === 'guide') {
+      navigate(location.pathname.startsWith('/spot/') ? location.pathname : '/guide')
+      return
+    }
+    navigate(tab.path)
+  }
+
+  let page = <MobileHomePage />
+  if (activeTab === 'map') page = <MobileMapPage />
+  if (activeTab === 'guide') page = <MobileGuidePage spotId={spotId} />
+  if (activeTab === 'profile') page = <MobileProfilePage />
+  if (location.pathname === '/ticket') page = <MobileTicketPage />
+  if (location.pathname === '/consume') page = <MobileConsumePage />
+
+  return (
+    <div className="mobile-shell">
+      <header className="mobile-shell__topbar">
+        <div>
+          <span className="mobile-shell__eyebrow">LINGSHAN MINI TOUR</span>
+          <h1>{pageTitle}</h1>
+          <p>{pageSubtitle}</p>
+        </div>
+        <button
+          className="mobile-shell__route-chip"
+          type="button"
+          onClick={() => navigate('/map')}
+          aria-label="查看当前路线"
+        >
+          <CompassOutlined />
+          <span>{route.name.replace('路线', '')}</span>
+        </button>
+      </header>
+
+      <main className="mobile-shell__content">{page}</main>
+
+      <nav className="mobile-shell__tabbar" aria-label="移动端主导航">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`mobile-shell__tab ${activeTab === tab.key ? 'is-active' : ''}`}
+            onClick={() => handleTabClick(tab)}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  )
+}
+
+export default MobileShell

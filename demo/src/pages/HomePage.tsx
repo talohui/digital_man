@@ -1,6 +1,6 @@
 import { CompassOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Col, Row, Space, Typography } from 'antd'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
 import ChatPanel from '../components/ChatPanel'
@@ -11,7 +11,8 @@ import RouteCard from '../components/RouteCard'
 import SceneHeader from '../components/SceneHeader'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
-import { captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
+import { DEFAULT_SCENE_ID } from '../store/chatSessions'
+import { capturePreferenceUpdate, captureRecommendationClick, captureRecommendationExposure, captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
 
 const { Paragraph, Text, Title } = Typography
 
@@ -27,7 +28,9 @@ function HomePage() {
   const refreshRecommendations = useGuideStore((state) => state.refreshRecommendations)
   const setActiveRouteId = useGuideStore((state) => state.setActiveRouteId)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
-  const clearGuideContext = useChatStore((state) => state.clearGuideContext)
+  const setActiveScene = useChatStore((state) => state.setActiveScene)
+  const exposedRecommendationKeyRef = useRef('')
+  const sentPreferenceKeyRef = useRef('')
 
   const selectedTagsKey = selectedTags.join('|')
   const mainRoute = candidateRoutes[0]
@@ -35,8 +38,16 @@ function HomePage() {
 
   useEffect(() => {
     ensureUserId()
-    clearGuideContext()
-  }, [clearGuideContext, ensureUserId])
+    setActiveScene(DEFAULT_SCENE_ID, null)
+  }, [ensureUserId, setActiveScene])
+
+  useEffect(() => {
+    if (selectedTagsKey === sentPreferenceKeyRef.current) {
+      return
+    }
+    sentPreferenceKeyRef.current = selectedTagsKey
+    capturePreferenceUpdate(selectedTags)
+  }, [selectedTags, selectedTagsKey])
 
   useEffect(() => {
     void refreshRecommendations()
@@ -44,12 +55,25 @@ function HomePage() {
 
   useEffect(() => {
     if (candidateRoutes.length > 0) {
+      const exposureKey = candidateRoutes
+        .map((route, index) => `${route.recommendationRequestId ?? 'local'}:${route.id}:${index + 1}`)
+        .join('|')
+      if (exposureKey === exposedRecommendationKeyRef.current) {
+        return
+      }
+      exposedRecommendationKeyRef.current = exposureKey
       captureRouteExpose(candidateRoutes.map((r) => r.id))
+      captureRecommendationExposure(candidateRoutes)
     }
   }, [candidateRoutes])
 
   const handleEnterMap = (routeId: string) => {
     const userId = ensureUserId()
+    const routeIndex = candidateRoutes.findIndex((route) => route.id === routeId)
+    const recommendedRoute = routeIndex >= 0 ? candidateRoutes[routeIndex] : null
+    if (recommendedRoute) {
+      captureRecommendationClick(recommendedRoute, routeIndex + 1)
+    }
     captureRouteClick(routeId)
     setActiveRouteId(routeId)
     void sendGuideFeedback({
@@ -61,7 +85,9 @@ function HomePage() {
   }
 
   const handleTagToggle = (tag: string) => {
-    captureTagToggle(tag, !selectedTags.includes(tag))
+    const isSelected = selectedTags.includes(tag)
+
+    captureTagToggle(tag, !isSelected)
     toggleTag(tag)
   }
 
@@ -155,13 +181,13 @@ function HomePage() {
 
         <Row gutter={[24, 24]} align="stretch">
           <Col xs={24} xl={15}>
-            <Live2DStage />
+            <Live2DStage sceneId={DEFAULT_SCENE_ID} />
           </Col>
 
           <Col xs={24} xl={9}>
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <QuickAsks />
-              <ChatPanel />
+              <QuickAsks sceneId={DEFAULT_SCENE_ID} />
+              <ChatPanel sceneId={DEFAULT_SCENE_ID} />
             </Space>
           </Col>
         </Row>

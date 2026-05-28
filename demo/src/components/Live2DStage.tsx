@@ -4,19 +4,24 @@ import { CompassOutlined, EnvironmentOutlined, SoundOutlined } from '@ant-design
 import { Card, Col, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import * as PIXI from 'pixi.js'
 import { useChatStore } from '../store/useChatStore'
+import { getSession } from '../store/chatSessions'
+import { fetchPublicAvatarConfig } from '../api/admin'
+import {
+  applyCostumeTexture,
+  parseCostumeId,
+  type CostumeId
+} from '../lib/live2dCostume'
 import {
   playMotionForState,
   registerModel,
   setMouthOpen,
+  type Live2DLikeModel,
   type RobotState
 } from '../lib/live2dManager'
 
 // pixi-live2d-display 0.4 通过全局 window.PIXI 访问 Pixi,必须在 import 之前注入
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
-// 默认模型:pixi-live2d-display 项目自带的免费 Cubism4 测试模型(Haru)
-// 后续替换为定制"灵山小灵"模型时,只需替换这个 URL 与本地资源
-// 国内访问 jsdelivr 时不时超时,优先用 fastly 镜像
 const DEFAULT_MODEL_URL =
   'https://fastly.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json'
 
@@ -41,52 +46,100 @@ type StageHighlight = {
 
 type Live2DStageProps = {
   highlightsOverride?: StageHighlight[]
+  /** 首页左栏嵌入：隐藏指标区、缩小视口 */
+  variant?: 'default' | 'embedded'
+  /** 首屏可见时立即加载，不等待 IntersectionObserver */
+  eager?: boolean
+  sceneId?: string
 }
 
-function Live2DStage({ highlightsOverride }: Live2DStageProps) {
+function Live2DStage({
+  highlightsOverride,
+  variant = 'default',
+  eager = false,
+  sceneId
+}: Live2DStageProps) {
+  const isEmbedded = variant === 'embedded'
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string>('')
-  const robotState = useChatStore((s) => s.robotState)
-  const mouthOpen = useChatStore((s) => s.mouthOpen)
+  const modelRef = useRef<Live2DLikeModel | null>(null)
+  const costumeIdRef = useRef<CostumeId>('default')
+  const [isInView, setIsInView] = useState(eager)
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const activeSceneId = useChatStore((s) => s.activeSceneId)
+  const resolvedSceneId = sceneId ?? activeSceneId
+  const session = useChatStore((s) => getSession(s.sessions, resolvedSceneId))
+  const robotState = session.robotState
+  const mouthOpen = session.mouthOpen
   const visibleHighlights = highlightsOverride ?? highlights
 
-  // 挂载 Pixi + 加载模型
   useEffect(() => {
+    if (eager) {
+      setIsInView(true)
+      return
+    }
+    const el = viewportRef.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setIsInView(true)
+        }
+      },
+      { rootMargin: '120px 0px', threshold: 0.08 }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [eager])
+
+  useEffect(() => {
+    if (!isInView) return
+
     let cancelled = false
+    let resizeObserver: ResizeObserver | null = null
     const canvas = canvasRef.current
     if (!canvas) return
+
+    const preferReducedGpu = window.matchMedia('(max-width: 768px)').matches
+    setIsLoading(true)
+    setLoadError('')
 
     const app = new PIXI.Application({
       view: canvas,
       autoStart: true,
       resizeTo: canvas.parentElement ?? undefined,
       backgroundAlpha: 0,
-      antialias: true
+      antialias: !preferReducedGpu
     })
     appRef.current = app
 
-    // 动态 import 以避免 SSR/初次加载阻塞
-    console.log('[Live2D] 开始加载模型:', DEFAULT_MODEL_URL)
     import('pixi-live2d-display/cubism4')
       .then(async ({ Live2DModel }) => {
-        console.log('[Live2D] cubism4 模块就绪,fetch 模型 JSON...')
-        // 必须注册 Ticker,否则 Cubism 更新循环不启动,模型在画布上不可见
+        if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
-        const model = await Live2DModel.from(DEFAULT_MODEL_URL, { autoInteract: false })
-        console.log('[Live2D] 模型加载完成:', { width: model.width, height: model.height })
+        const cfg = await fetchPublicAvatarConfig()
+        const modelUrl =
+          typeof cfg?.live2dModelUrl === 'string' && cfg.live2dModelUrl
+            ? cfg.live2dModelUrl
+            : DEFAULT_MODEL_URL
+        const costumeId = parseCostumeId(cfg?.costumeId)
+        costumeIdRef.current = costumeId
+
+        const model = await Live2DModel.from(modelUrl, { autoInteract: false })
         if (cancelled) {
           model.destroy()
           return
         }
 
         app.stage.addChild(model as unknown as PIXI.DisplayObject)
+        modelRef.current = model as unknown as Live2DLikeModel
+        await applyCostumeTexture(model as unknown as Parameters<typeof applyCostumeTexture>[0], costumeId)
 
-        // 居中并按容器自适应缩放(不用 anchor,直接手动算左上角坐标)
         const fit = () => {
           const parent = canvas.parentElement
-          // resizeTo 在初始化早于 layout 时可能给 0,这里兜底从 parent clientRect 拿
           let w = app.renderer.width
           let h = app.renderer.height
           if ((!w || !h) && parent) {
@@ -101,29 +154,27 @@ function Live2DStage({ highlightsOverride }: Live2DStageProps) {
           model.scale.set(scale)
           model.x = (w - baseW * scale) / 2
           model.y = (h - baseH * scale) / 2
-          console.log('[Live2D] fit', { w, h, baseW, baseH, scale, x: model.x, y: model.y })
         }
-        // 等一帧让 layout 稳定
         requestAnimationFrame(fit)
-        const resizeObserver = new ResizeObserver(fit)
+        resizeObserver = new ResizeObserver(fit)
         if (canvas.parentElement) resizeObserver.observe(canvas.parentElement)
 
-        registerModel(model as unknown as Parameters<typeof registerModel>[0])
+        registerModel(modelRef.current, resolvedSceneId)
         setIsLoading(false)
-
-        return () => {
-          resizeObserver.disconnect()
-        }
       })
       .catch((err) => {
         console.error('Live2D 加载失败:', err)
-        setLoadError('数字人模型加载失败,稍后将以默认形象呈现。')
-        setIsLoading(false)
+        if (!cancelled) {
+          setLoadError('数字人模型加载失败,稍后将以默认形象呈现。')
+          setIsLoading(false)
+        }
       })
 
     return () => {
       cancelled = true
-      registerModel(null)
+      resizeObserver?.disconnect()
+      registerModel(null, resolvedSceneId)
+      modelRef.current = null
       try {
         app.destroy(true, { children: true, texture: true, baseTexture: true })
       } catch {
@@ -131,35 +182,64 @@ function Live2DStage({ highlightsOverride }: Live2DStageProps) {
       }
       appRef.current = null
     }
-  }, [])
+  }, [isInView, resolvedSceneId])
 
-  // 嘴型驱动:store 的 mouthOpen 变化 → 写入模型参数
   useEffect(() => {
-    setMouthOpen(mouthOpen)
-  }, [mouthOpen])
+    if (!isInView) return
 
-  // robotState 变化 → 切换 motion
+    const syncCostume = async () => {
+      const cfg = await fetchPublicAvatarConfig()
+      const nextId = parseCostumeId(cfg?.costumeId)
+      if (nextId === costumeIdRef.current) return
+      costumeIdRef.current = nextId
+      if (modelRef.current) {
+        await applyCostumeTexture(
+          modelRef.current as Parameters<typeof applyCostumeTexture>[0],
+          nextId
+        )
+      }
+    }
+
+    syncCostume()
+    const timer = window.setInterval(syncCostume, 30000)
+    return () => window.clearInterval(timer)
+  }, [isInView])
+
   useEffect(() => {
-    playMotionForState(robotState)
-  }, [robotState])
+    setMouthOpen(mouthOpen, resolvedSceneId)
+  }, [mouthOpen, resolvedSceneId])
+
+  useEffect(() => {
+    playMotionForState(robotState, resolvedSceneId)
+  }, [robotState, resolvedSceneId])
+
+  const showPlaceholder = !isInView || (isLoading && !loadError)
+  const placeholderText = !isInView
+    ? isEmbedded
+      ? '正在唤醒小灵...'
+      : '下滑至对话区后将加载数字人'
+    : '正在唤醒小灵...'
 
   return (
-    <Card className="stage-card" bordered={false}>
+    <Card
+      className={`stage-card ${isEmbedded ? 'stage-card--embedded' : ''}`}
+      bordered={false}
+    >
       <div className="stage-card__topline">
-        <Tag color="gold">Live2D Stage</Tag>
+        {!isEmbedded ? <Tag color="gold">Live2D Stage</Tag> : <span />}
         <Typography.Text className="stage-card__status">
           {stateLabel[robotState]}
         </Typography.Text>
       </div>
 
-      <div className="stage-card__viewport">
+      <div className="stage-card__viewport" ref={viewportRef}>
         <div className="stage-card__halo" />
         <canvas ref={canvasRef} className="live2d-canvas" />
 
-        {isLoading ? (
+        {showPlaceholder ? (
           <div className="stage-card__loading">
-            <Spin size="large" />
-            <Typography.Text>正在唤醒小灵...</Typography.Text>
+            <Spin size={isEmbedded ? 'default' : 'large'} />
+            <Typography.Text>{placeholderText}</Typography.Text>
           </div>
         ) : null}
 
@@ -170,22 +250,24 @@ function Live2DStage({ highlightsOverride }: Live2DStageProps) {
         ) : null}
       </div>
 
-      <Row gutter={[12, 12]}>
-        {visibleHighlights.map((item) => (
-          <Col span={8} key={item.title}>
-            <div className="stage-card__metric">
-              <Space size={8}>
-                <span className="stage-card__metric-icon">{item.icon}</span>
-                <Statistic
-                  title={item.title}
-                  value={item.value}
-                  className="stage-card__stat"
-                />
-              </Space>
-            </div>
-          </Col>
-        ))}
-      </Row>
+      {!isEmbedded ? (
+        <Row gutter={[12, 12]}>
+          {visibleHighlights.map((item) => (
+            <Col span={8} key={item.title}>
+              <div className="stage-card__metric">
+                <Space size={8}>
+                  <span className="stage-card__metric-icon">{item.icon}</span>
+                  <Statistic
+                    title={item.title}
+                    value={item.value}
+                    className="stage-card__stat"
+                  />
+                </Space>
+              </div>
+            </Col>
+          ))}
+        </Row>
+      ) : null}
     </Card>
   )
 }

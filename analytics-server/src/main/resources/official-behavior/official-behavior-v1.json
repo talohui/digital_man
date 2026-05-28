@@ -1,0 +1,1179 @@
+{
+  "sourceMeta": {
+    "sourceLabel": "官方历史样本",
+    "sourceType": "official_behavior_excel",
+    "generatedAt": "2026-05-28T04:19:32+00:00",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "recordCount": 140447,
+    "dateRange": {
+      "start": "2025-01-01",
+      "end": "2025-12-31",
+      "dayCount": 365
+    }
+  },
+  "summary": {
+    "sourceLabel": "官方历史样本",
+    "sourceType": "official_behavior_excel",
+    "generatedAt": "2026-05-28T04:19:32+00:00",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "recordCount": 140447,
+    "dateRange": {
+      "start": "2025-01-01",
+      "end": "2025-12-31",
+      "dayCount": 365
+    },
+    "sampleCount": 140447,
+    "attractionTypeCount": 8,
+    "avgSatisfaction": 74.48,
+    "avgStayHours": 4.23,
+    "avgSpend": 686.33,
+    "satisfactionScale": {
+      "rawMin": 2.0,
+      "rawMax": 5.0,
+      "normalizedTo": "0-100"
+    },
+    "stayDurationUnit": "hour",
+    "dataQuality": {
+      "totalRows": 140447,
+      "negativeCostRows": 0,
+      "costMismatchRows": 13411,
+      "costMismatchRatio": 0.0955,
+      "totalCostClip": {
+        "p1": 10.12,
+        "p99": 3397.51
+      }
+    }
+  },
+  "demographics": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "ageBands": [
+      {
+        "label": "25-34",
+        "count": 52787,
+        "ratio": 0.3758
+      },
+      {
+        "label": "35-44",
+        "count": 34484,
+        "ratio": 0.2455
+      },
+      {
+        "label": "45-59",
+        "count": 24030,
+        "ratio": 0.1711
+      },
+      {
+        "label": "18-24",
+        "count": 18269,
+        "ratio": 0.1301
+      },
+      {
+        "label": "60+",
+        "count": 10877,
+        "ratio": 0.0774
+      }
+    ],
+    "genderDistribution": [
+      {
+        "label": "男",
+        "count": 70329,
+        "ratio": 0.5008
+      },
+      {
+        "label": "女",
+        "count": 70118,
+        "ratio": 0.4992
+      }
+    ],
+    "groupSizeBands": [
+      {
+        "label": "3-4人",
+        "count": 64216,
+        "ratio": 0.4572
+      },
+      {
+        "label": "双人",
+        "count": 50908,
+        "ratio": 0.3625
+      },
+      {
+        "label": "单人",
+        "count": 20197,
+        "ratio": 0.1438
+      },
+      {
+        "label": "5人+",
+        "count": 5126,
+        "ratio": 0.0365
+      }
+    ]
+  },
+  "attractionTypes": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "items": [
+      {
+        "type": "古镇水乡",
+        "visitCount": 31564,
+        "visitRatio": 0.2247,
+        "heatIndex": 100.0,
+        "avgSatisfaction": 69.51,
+        "avgStayHours": 3.99,
+        "avgSpend": 598.26,
+        "sampleSize": 31564
+      },
+      {
+        "type": "风景名胜与休闲度假",
+        "visitCount": 25682,
+        "visitRatio": 0.1829,
+        "heatIndex": 81.36,
+        "avgSatisfaction": 71.5,
+        "avgStayHours": 4.0,
+        "avgSpend": 650.53,
+        "sampleSize": 25682
+      },
+      {
+        "type": "主题乐园",
+        "visitCount": 17524,
+        "visitRatio": 0.1248,
+        "heatIndex": 55.52,
+        "avgSatisfaction": 65.28,
+        "avgStayHours": 8.98,
+        "avgSpend": 1527.29,
+        "sampleSize": 17524
+      },
+      {
+        "type": "动植物园与水族馆",
+        "visitCount": 16302,
+        "visitRatio": 0.1161,
+        "heatIndex": 51.65,
+        "avgSatisfaction": 67.87,
+        "avgStayHours": 4.5,
+        "avgSpend": 1065.6,
+        "sampleSize": 16302
+      },
+      {
+        "type": "现代地标",
+        "visitCount": 16257,
+        "visitRatio": 0.1158,
+        "heatIndex": 51.5,
+        "avgSatisfaction": 71.87,
+        "avgStayHours": 2.75,
+        "avgSpend": 512.97,
+        "sampleSize": 16257
+      },
+      {
+        "type": "博物馆与展馆",
+        "visitCount": 12297,
+        "visitRatio": 0.0876,
+        "heatIndex": 38.96,
+        "avgSatisfaction": 95.14,
+        "avgStayHours": 2.75,
+        "avgSpend": 164.06,
+        "sampleSize": 12297
+      },
+      {
+        "type": "自然公园",
+        "visitCount": 11717,
+        "visitRatio": 0.0834,
+        "heatIndex": 37.12,
+        "avgSatisfaction": 91.9,
+        "avgStayHours": 3.24,
+        "avgSpend": 234.94,
+        "sampleSize": 11717
+      },
+      {
+        "type": "历史文化",
+        "visitCount": 9104,
+        "visitRatio": 0.0648,
+        "heatIndex": 28.84,
+        "avgSatisfaction": 83.91,
+        "avgStayHours": 2.0,
+        "avgSpend": 390.74,
+        "sampleSize": 9104
+      }
+    ]
+  },
+  "satisfaction": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "overallSat": 74.48,
+    "distribution": [
+      {
+        "score": 2,
+        "normalizedScore": 40.0,
+        "count": 6565,
+        "ratio": 0.0467
+      },
+      {
+        "score": 3,
+        "normalizedScore": 60.0,
+        "count": 56819,
+        "ratio": 0.4046
+      },
+      {
+        "score": 4,
+        "normalizedScore": 80.0,
+        "count": 45908,
+        "ratio": 0.3269
+      },
+      {
+        "score": 5,
+        "normalizedScore": 100.0,
+        "count": 31155,
+        "ratio": 0.2218
+      }
+    ],
+    "satByType": [
+      {
+        "type": "博物馆与展馆",
+        "avgSatisfaction": 95.14,
+        "sampleSize": 12297
+      },
+      {
+        "type": "自然公园",
+        "avgSatisfaction": 91.9,
+        "sampleSize": 11717
+      },
+      {
+        "type": "历史文化",
+        "avgSatisfaction": 83.91,
+        "sampleSize": 9104
+      },
+      {
+        "type": "现代地标",
+        "avgSatisfaction": 71.87,
+        "sampleSize": 16257
+      },
+      {
+        "type": "风景名胜与休闲度假",
+        "avgSatisfaction": 71.5,
+        "sampleSize": 25682
+      },
+      {
+        "type": "古镇水乡",
+        "avgSatisfaction": 69.51,
+        "sampleSize": 31564
+      },
+      {
+        "type": "动植物园与水族馆",
+        "avgSatisfaction": 67.87,
+        "sampleSize": 16302
+      },
+      {
+        "type": "主题乐园",
+        "avgSatisfaction": 65.28,
+        "sampleSize": 17524
+      }
+    ],
+    "lowSatWarnings": [
+      {
+        "type": "主题乐园",
+        "avgSatisfaction": 65.28,
+        "sampleSize": 17524,
+        "reason": "历史样本满意度低于整体均值，适合作为运营关注类型。"
+      },
+      {
+        "type": "动植物园与水族馆",
+        "avgSatisfaction": 67.87,
+        "sampleSize": 16302,
+        "reason": "历史样本满意度低于整体均值，适合作为运营关注类型。"
+      },
+      {
+        "type": "古镇水乡",
+        "avgSatisfaction": 69.51,
+        "sampleSize": 31564,
+        "reason": "历史样本满意度低于整体均值，适合作为运营关注类型。"
+      },
+      {
+        "type": "风景名胜与休闲度假",
+        "avgSatisfaction": 71.5,
+        "sampleSize": 25682,
+        "reason": "历史样本满意度低于整体均值，适合作为运营关注类型。"
+      },
+      {
+        "type": "现代地标",
+        "avgSatisfaction": 71.87,
+        "sampleSize": 16257,
+        "reason": "历史样本满意度低于整体均值，适合作为运营关注类型。"
+      }
+    ]
+  },
+  "spending": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "avgTotalCost": 686.33,
+    "costMix": [
+      {
+        "category": "ticket_cost",
+        "label": "门票",
+        "total": 14149442.4,
+        "avg": 100.75,
+        "share": 0.147
+      },
+      {
+        "category": "food_cost",
+        "label": "餐饮",
+        "total": 27157788.49,
+        "avg": 193.37,
+        "share": 0.2822
+      },
+      {
+        "category": "shopping_cost",
+        "label": "购物",
+        "total": 29229797.14,
+        "avg": 208.12,
+        "share": 0.3037
+      },
+      {
+        "category": "transport_cost",
+        "label": "交通",
+        "total": 10056147.01,
+        "avg": 71.6,
+        "share": 0.1045
+      },
+      {
+        "category": "entertainment_cost",
+        "label": "娱乐",
+        "total": 15636641.5,
+        "avg": 111.33,
+        "share": 0.1625
+      }
+    ],
+    "avgCostByType": [
+      {
+        "type": "古镇水乡",
+        "avgSpend": 598.26,
+        "sampleSize": 31564
+      },
+      {
+        "type": "风景名胜与休闲度假",
+        "avgSpend": 650.53,
+        "sampleSize": 25682
+      },
+      {
+        "type": "主题乐园",
+        "avgSpend": 1527.29,
+        "sampleSize": 17524
+      },
+      {
+        "type": "动植物园与水族馆",
+        "avgSpend": 1065.6,
+        "sampleSize": 16302
+      },
+      {
+        "type": "现代地标",
+        "avgSpend": 512.97,
+        "sampleSize": 16257
+      },
+      {
+        "type": "博物馆与展馆",
+        "avgSpend": 164.06,
+        "sampleSize": 12297
+      },
+      {
+        "type": "自然公园",
+        "avgSpend": 234.94,
+        "sampleSize": 11717
+      },
+      {
+        "type": "历史文化",
+        "avgSpend": 390.74,
+        "sampleSize": 9104
+      }
+    ],
+    "dataQuality": {
+      "costMismatchRows": 13411,
+      "costMismatchRatio": 0.0955,
+      "note": "图表使用 P1-P99 裁剪值，避免极端消费影响展示。"
+    }
+  },
+  "trends": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "visitsByMonth": [
+      {
+        "month": "2025-01",
+        "visitCount": 3450
+      },
+      {
+        "month": "2025-02",
+        "visitCount": 3581
+      },
+      {
+        "month": "2025-03",
+        "visitCount": 8261
+      },
+      {
+        "month": "2025-04",
+        "visitCount": 12434
+      },
+      {
+        "month": "2025-05",
+        "visitCount": 13936
+      },
+      {
+        "month": "2025-06",
+        "visitCount": 11562
+      },
+      {
+        "month": "2025-07",
+        "visitCount": 15493
+      },
+      {
+        "month": "2025-08",
+        "visitCount": 17188
+      },
+      {
+        "month": "2025-09",
+        "visitCount": 17616
+      },
+      {
+        "month": "2025-10",
+        "visitCount": 11189
+      },
+      {
+        "month": "2025-11",
+        "visitCount": 10853
+      },
+      {
+        "month": "2025-12",
+        "visitCount": 14884
+      }
+    ],
+    "satisfactionByMonth": [
+      {
+        "month": "2025-01",
+        "avgSatisfaction": 73.55
+      },
+      {
+        "month": "2025-02",
+        "avgSatisfaction": 73.51
+      },
+      {
+        "month": "2025-03",
+        "avgSatisfaction": 74.04
+      },
+      {
+        "month": "2025-04",
+        "avgSatisfaction": 73.56
+      },
+      {
+        "month": "2025-05",
+        "avgSatisfaction": 74.06
+      },
+      {
+        "month": "2025-06",
+        "avgSatisfaction": 74.64
+      },
+      {
+        "month": "2025-07",
+        "avgSatisfaction": 74.47
+      },
+      {
+        "month": "2025-08",
+        "avgSatisfaction": 74.38
+      },
+      {
+        "month": "2025-09",
+        "avgSatisfaction": 74.42
+      },
+      {
+        "month": "2025-10",
+        "avgSatisfaction": 75.74
+      },
+      {
+        "month": "2025-11",
+        "avgSatisfaction": 75.47
+      },
+      {
+        "month": "2025-12",
+        "avgSatisfaction": 74.68
+      }
+    ],
+    "spendByMonth": [
+      {
+        "month": "2025-01",
+        "avgSpend": 749.69
+      },
+      {
+        "month": "2025-02",
+        "avgSpend": 744.73
+      },
+      {
+        "month": "2025-03",
+        "avgSpend": 723.02
+      },
+      {
+        "month": "2025-04",
+        "avgSpend": 729.99
+      },
+      {
+        "month": "2025-05",
+        "avgSpend": 705.25
+      },
+      {
+        "month": "2025-06",
+        "avgSpend": 686.62
+      },
+      {
+        "month": "2025-07",
+        "avgSpend": 691.62
+      },
+      {
+        "month": "2025-08",
+        "avgSpend": 695.72
+      },
+      {
+        "month": "2025-09",
+        "avgSpend": 685.31
+      },
+      {
+        "month": "2025-10",
+        "avgSpend": 627.99
+      },
+      {
+        "month": "2025-11",
+        "avgSpend": 622.04
+      },
+      {
+        "month": "2025-12",
+        "avgSpend": 658.42
+      }
+    ],
+    "weekdayDistribution": [
+      {
+        "weekday": 1,
+        "count": 20184,
+        "ratio": 0.1437
+      },
+      {
+        "weekday": 2,
+        "count": 20261,
+        "ratio": 0.1443
+      },
+      {
+        "weekday": 3,
+        "count": 20046,
+        "ratio": 0.1427
+      },
+      {
+        "weekday": 4,
+        "count": 19951,
+        "ratio": 0.1421
+      },
+      {
+        "weekday": 5,
+        "count": 20038,
+        "ratio": 0.1427
+      },
+      {
+        "weekday": 6,
+        "count": 19884,
+        "ratio": 0.1416
+      },
+      {
+        "weekday": 7,
+        "count": 20083,
+        "ratio": 0.143
+      }
+    ]
+  },
+  "recommendationPriors": {
+    "sourceLabel": "官方历史样本",
+    "disclaimer": "该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。",
+    "defaultPriors": [
+      {
+        "type": "古镇水乡",
+        "satPrior": 69.51,
+        "heatPrior": 100.0,
+        "segmentPrior": 81.71,
+        "avgStayHours": 3.99,
+        "avgSpend": 598.26,
+        "sampleSize": 31564
+      },
+      {
+        "type": "风景名胜与休闲度假",
+        "satPrior": 71.5,
+        "heatPrior": 81.36,
+        "segmentPrior": 75.44,
+        "avgStayHours": 4.0,
+        "avgSpend": 650.53,
+        "sampleSize": 25682
+      },
+      {
+        "type": "主题乐园",
+        "satPrior": 65.28,
+        "heatPrior": 55.52,
+        "segmentPrior": 61.38,
+        "avgStayHours": 8.98,
+        "avgSpend": 1527.29,
+        "sampleSize": 17524
+      },
+      {
+        "type": "动植物园与水族馆",
+        "satPrior": 67.87,
+        "heatPrior": 51.65,
+        "segmentPrior": 61.38,
+        "avgStayHours": 4.5,
+        "avgSpend": 1065.6,
+        "sampleSize": 16302
+      },
+      {
+        "type": "现代地标",
+        "satPrior": 71.87,
+        "heatPrior": 51.5,
+        "segmentPrior": 63.72,
+        "avgStayHours": 2.75,
+        "avgSpend": 512.97,
+        "sampleSize": 16257
+      },
+      {
+        "type": "博物馆与展馆",
+        "satPrior": 95.14,
+        "heatPrior": 38.96,
+        "segmentPrior": 72.67,
+        "avgStayHours": 2.75,
+        "avgSpend": 164.06,
+        "sampleSize": 12297
+      },
+      {
+        "type": "自然公园",
+        "satPrior": 91.9,
+        "heatPrior": 37.12,
+        "segmentPrior": 69.99,
+        "avgStayHours": 3.24,
+        "avgSpend": 234.94,
+        "sampleSize": 11717
+      },
+      {
+        "type": "历史文化",
+        "satPrior": 83.91,
+        "heatPrior": 28.84,
+        "segmentPrior": 61.88,
+        "avgStayHours": 2.0,
+        "avgSpend": 390.74,
+        "sampleSize": 9104
+      }
+    ],
+    "bySegment": [
+      {
+        "segmentKey": "25-34|3-4人",
+        "ageBand": "25-34",
+        "groupSizeBand": "3-4人",
+        "sampleSize": 23499,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.62,
+            "satPrior": 68.14,
+            "heatPrior": 22.62,
+            "sampleSize": 5315
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 17.86,
+            "satPrior": 70.53,
+            "heatPrior": 17.86,
+            "sampleSize": 4196
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.53,
+            "satPrior": 64.19,
+            "heatPrior": 12.53,
+            "sampleSize": 2944
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.74,
+            "satPrior": 65.47,
+            "heatPrior": 11.74,
+            "sampleSize": 2758
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.6,
+            "satPrior": 70.83,
+            "heatPrior": 11.6,
+            "sampleSize": 2726
+          }
+        ]
+      },
+      {
+        "segmentKey": "35-44|3-4人",
+        "ageBand": "35-44",
+        "groupSizeBand": "3-4人",
+        "sampleSize": 22458,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.72,
+            "satPrior": 62.92,
+            "heatPrior": 22.72,
+            "sampleSize": 5102
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.31,
+            "satPrior": 65.52,
+            "heatPrior": 18.31,
+            "sampleSize": 4113
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.32,
+            "satPrior": 64.26,
+            "heatPrior": 12.32,
+            "sampleSize": 2766
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.91,
+            "satPrior": 64.23,
+            "heatPrior": 11.91,
+            "sampleSize": 2674
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.04,
+            "satPrior": 65.08,
+            "heatPrior": 11.04,
+            "sampleSize": 2479
+          }
+        ]
+      },
+      {
+        "segmentKey": "25-34|双人",
+        "ageBand": "25-34",
+        "groupSizeBand": "双人",
+        "sampleSize": 21128,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.29,
+            "satPrior": 68.01,
+            "heatPrior": 22.29,
+            "sampleSize": 4709
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.84,
+            "satPrior": 70.22,
+            "heatPrior": 18.84,
+            "sampleSize": 3980
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.48,
+            "satPrior": 64.15,
+            "heatPrior": 12.48,
+            "sampleSize": 2637
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.63,
+            "satPrior": 70.43,
+            "heatPrior": 11.63,
+            "sampleSize": 2458
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.19,
+            "satPrior": 65.25,
+            "heatPrior": 11.19,
+            "sampleSize": 2364
+          }
+        ]
+      },
+      {
+        "segmentKey": "45-59|双人",
+        "ageBand": "45-59",
+        "groupSizeBand": "双人",
+        "sampleSize": 11886,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.45,
+            "satPrior": 72.06,
+            "heatPrior": 22.45,
+            "sampleSize": 2669
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 17.95,
+            "satPrior": 73.97,
+            "heatPrior": 17.95,
+            "sampleSize": 2133
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.38,
+            "satPrior": 65.08,
+            "heatPrior": 12.38,
+            "sampleSize": 1471
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 12.17,
+            "satPrior": 75.09,
+            "heatPrior": 12.17,
+            "sampleSize": 1446
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.78,
+            "satPrior": 68.96,
+            "heatPrior": 11.78,
+            "sampleSize": 1400
+          }
+        ]
+      },
+      {
+        "segmentKey": "45-59|3-4人",
+        "ageBand": "45-59",
+        "groupSizeBand": "3-4人",
+        "sampleSize": 9697,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.84,
+            "satPrior": 72.98,
+            "heatPrior": 22.84,
+            "sampleSize": 2215
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.3,
+            "satPrior": 73.25,
+            "heatPrior": 18.3,
+            "sampleSize": 1775
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.59,
+            "satPrior": 64.9,
+            "heatPrior": 12.59,
+            "sampleSize": 1221
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.95,
+            "satPrior": 75.1,
+            "heatPrior": 11.95,
+            "sampleSize": 1159
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.64,
+            "satPrior": 68.91,
+            "heatPrior": 11.64,
+            "sampleSize": 1129
+          }
+        ]
+      },
+      {
+        "segmentKey": "25-34|单人",
+        "ageBand": "25-34",
+        "groupSizeBand": "单人",
+        "sampleSize": 8160,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.54,
+            "satPrior": 68.23,
+            "heatPrior": 22.54,
+            "sampleSize": 1839
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.38,
+            "satPrior": 71.19,
+            "heatPrior": 18.38,
+            "sampleSize": 1500
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.82,
+            "satPrior": 63.84,
+            "heatPrior": 12.82,
+            "sampleSize": 1046
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.83,
+            "satPrior": 71.4,
+            "heatPrior": 11.83,
+            "sampleSize": 965
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 10.93,
+            "satPrior": 66.3,
+            "heatPrior": 10.93,
+            "sampleSize": 892
+          }
+        ]
+      },
+      {
+        "segmentKey": "18-24|双人",
+        "ageBand": "18-24",
+        "groupSizeBand": "双人",
+        "sampleSize": 7291,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.62,
+            "satPrior": 71.29,
+            "heatPrior": 22.62,
+            "sampleSize": 1649
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.75,
+            "satPrior": 72.25,
+            "heatPrior": 18.75,
+            "sampleSize": 1367
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.25,
+            "satPrior": 61.46,
+            "heatPrior": 12.25,
+            "sampleSize": 893
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 12.03,
+            "satPrior": 73.2,
+            "heatPrior": 12.03,
+            "sampleSize": 877
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.32,
+            "satPrior": 69.16,
+            "heatPrior": 11.32,
+            "sampleSize": 825
+          }
+        ]
+      },
+      {
+        "segmentKey": "18-24|3-4人",
+        "ageBand": "18-24",
+        "groupSizeBand": "3-4人",
+        "sampleSize": 6442,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 21.65,
+            "satPrior": 71.37,
+            "heatPrior": 21.65,
+            "sampleSize": 1395
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.98,
+            "satPrior": 72.13,
+            "heatPrior": 18.98,
+            "sampleSize": 1223
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 12.26,
+            "satPrior": 69.19,
+            "heatPrior": 12.26,
+            "sampleSize": 790
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.06,
+            "satPrior": 62.03,
+            "heatPrior": 12.06,
+            "sampleSize": 777
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.22,
+            "satPrior": 73.78,
+            "heatPrior": 11.22,
+            "sampleSize": 723
+          }
+        ]
+      },
+      {
+        "segmentKey": "60+|双人",
+        "ageBand": "60+",
+        "groupSizeBand": "双人",
+        "sampleSize": 5384,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.51,
+            "satPrior": 87.62,
+            "heatPrior": 22.51,
+            "sampleSize": 1212
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.39,
+            "satPrior": 87.31,
+            "heatPrior": 18.39,
+            "sampleSize": 990
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 13.47,
+            "satPrior": 80.08,
+            "heatPrior": 13.47,
+            "sampleSize": 725
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.85,
+            "satPrior": 85.74,
+            "heatPrior": 11.85,
+            "sampleSize": 638
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 10.72,
+            "satPrior": 88.98,
+            "heatPrior": 10.72,
+            "sampleSize": 577
+          }
+        ]
+      },
+      {
+        "segmentKey": "35-44|双人",
+        "ageBand": "35-44",
+        "groupSizeBand": "双人",
+        "sampleSize": 5219,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 21.75,
+            "satPrior": 62.8,
+            "heatPrior": 21.75,
+            "sampleSize": 1135
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 17.65,
+            "satPrior": 66.84,
+            "heatPrior": 17.65,
+            "sampleSize": 921
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.47,
+            "satPrior": 64.58,
+            "heatPrior": 12.47,
+            "sampleSize": 651
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.86,
+            "satPrior": 64.75,
+            "heatPrior": 11.86,
+            "sampleSize": 619
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.32,
+            "satPrior": 64.7,
+            "heatPrior": 11.32,
+            "sampleSize": 591
+          }
+        ]
+      },
+      {
+        "segmentKey": "35-44|5人+",
+        "ageBand": "35-44",
+        "groupSizeBand": "5人+",
+        "sampleSize": 5126,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.9,
+            "satPrior": 62.88,
+            "heatPrior": 22.9,
+            "sampleSize": 1174
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 17.97,
+            "satPrior": 65.78,
+            "heatPrior": 17.97,
+            "sampleSize": 921
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.27,
+            "satPrior": 64.17,
+            "heatPrior": 12.27,
+            "sampleSize": 629
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.76,
+            "satPrior": 64.61,
+            "heatPrior": 11.76,
+            "sampleSize": 603
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.71,
+            "satPrior": 64.23,
+            "heatPrior": 11.71,
+            "sampleSize": 600
+          }
+        ]
+      },
+      {
+        "segmentKey": "18-24|单人",
+        "ageBand": "18-24",
+        "groupSizeBand": "单人",
+        "sampleSize": 4536,
+        "priors": [
+          {
+            "type": "古镇水乡",
+            "segmentPrior": 22.35,
+            "satPrior": 71.28,
+            "heatPrior": 22.35,
+            "sampleSize": 1014
+          },
+          {
+            "type": "风景名胜与休闲度假",
+            "segmentPrior": 18.47,
+            "satPrior": 72.6,
+            "heatPrior": 18.47,
+            "sampleSize": 838
+          },
+          {
+            "type": "主题乐园",
+            "segmentPrior": 12.76,
+            "satPrior": 61.45,
+            "heatPrior": 12.76,
+            "sampleSize": 579
+          },
+          {
+            "type": "动植物园与水族馆",
+            "segmentPrior": 11.29,
+            "satPrior": 68.48,
+            "heatPrior": 11.29,
+            "sampleSize": 512
+          },
+          {
+            "type": "现代地标",
+            "segmentPrior": 11.2,
+            "satPrior": 72.72,
+            "heatPrior": 11.2,
+            "sampleSize": 508
+          }
+        ]
+      }
+    ]
+  }
+}

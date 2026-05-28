@@ -63,6 +63,14 @@ def start():
     MyThread(target=__runnable).start()
 
 
+def get_nls_token():
+    """供 demo 上传识别等 HTTP 接口复用 AliNLS token。"""
+    global _token
+    if not _token:
+        __post_token()
+    return _token
+
+
 class ALiNls:
     # 初始化
     def __init__(self, username):

@@ -49,7 +49,7 @@ function ProfileBadge({ profile }: Props) {
       </div>
 
       <div className="profile-badge__body">
-        <p className="profile-badge__eyebrow">个性画像 · v{profile.profileVersion}</p>
+        <p className="profile-badge__eyebrow">个性画像 · 偏好已同步</p>
         <p className="profile-badge__title">
           你当前更接近 <strong>{personaLabel}</strong>
           <span className="profile-badge__score">{Math.round(score * 100)}%</span>

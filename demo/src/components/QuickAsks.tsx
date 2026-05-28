@@ -15,12 +15,14 @@ type QuickAsksProps = {
   questions?: string[]
   title?: string
   subtitle?: string
+  sceneId?: string
 }
 
 function QuickAsks({
   questions = defaultQuestions,
   title = '一键发起热门导览问题',
-  subtitle = '猜你想问'
+  subtitle = '猜你想问',
+  sceneId
 }: QuickAsksProps) {
   const sendQuickAsk = useChatStore((state) => state.sendQuickAsk)
 
@@ -42,7 +44,7 @@ function QuickAsks({
               key={question}
               className="quick-asks-card__button"
               icon={<MessageOutlined />}
-              onClick={() => sendQuickAsk(question)}
+              onClick={() => sendQuickAsk(question, sceneId)}
             >
               {question}
             </Button>

@@ -3,14 +3,17 @@ import {
   type GuideRecommendationCard,
   type UserProfileSnapshot
 } from '../data/guideData'
+import { getAnalyticsApiBase } from '../lib/runtimeConfig'
 
-const GUIDE_API = 'http://127.0.0.1:5002/api/guide'
-const ANALYTICS_API = 'http://127.0.0.1:5002/api'
+const ANALYTICS_API = getAnalyticsApiBase()
+const GUIDE_API = `${ANALYTICS_API}/guide`
 
 export type GuideRecommendationsResponse = {
   userId: string
   recommendedRouteId: string
   routes: GuideRecommendationCard[]
+  requestId?: string
+  engine?: string
 }
 
 export async function fetchGuideRecommendations(payload: {
@@ -28,13 +31,21 @@ export async function fetchGuideRecommendations(payload: {
       throw new Error(`HTTP ${response.status}`)
     }
 
-    return (await response.json()) as GuideRecommendationsResponse
+    const data = (await response.json()) as GuideRecommendationsResponse
+    return {
+      ...data,
+      routes: data.routes.map((route) => ({
+        ...route,
+        recommendationRequestId: data.requestId,
+        recommendationEngine: data.engine ?? (route.debug?.engine as string | undefined)
+      }))
+    }
   } catch {
     const routes = buildLocalGuideRecommendations(payload.selectedTags)
     return {
       userId: payload.userId,
       recommendedRouteId: routes[0]?.id ?? 'historical_culture',
-      routes
+      routes: routes.map((route) => ({ ...route, recommendationEngine: 'frontend-fallback' }))
     }
   }
 }
