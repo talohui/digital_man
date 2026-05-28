@@ -4,6 +4,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import AdminAvatarPage from './pages/AdminAvatarPage'
 import GuideMapPage from './pages/GuideMapPage'
 import HomePage from './pages/HomePage'
+import Scenic3DPreviewPage from './pages/Scenic3DPreviewPage'
 import SpotGuidePage from './pages/SpotGuidePage'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import MobileShell from './mobile/MobileShell'
@@ -27,6 +28,7 @@ function App() {
   if (isMobile && !isAdminRoute) {
     return (
       <Routes>
+        <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
         <Route path="*" element={<MobileShell />} />
       </Routes>
     )
@@ -37,6 +39,7 @@ function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/map" element={<GuideMapPage />} />
       <Route path="/spot/:spotId" element={<SpotGuidePage />} />
+      <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
       <Route path="/guide" element={<HomePage />} />
       <Route path="/me" element={<HomePage />} />
       <Route path="/admin" element={<AdminDashboard />} />

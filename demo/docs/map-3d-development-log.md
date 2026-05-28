@@ -806,3 +806,79 @@
 - 阶段十二 C 可新增页面接入前的轻量导出或 Story/本地验证入口，但仍建议避免直接改动地图主逻辑。
 - 后续接入 `GuideMapPage` 时，使用可关闭的右侧或底部 3D 面板。
 - 接入真实 `.glb` 前，先保持 placeholder 链路稳定，再逐个替换核心地标模型。
+
+## 2026-05-28 阶段十三：独立 3D 预览测试页新增
+
+### 本次目标
+
+新增独立 3D 预览测试页，用于在浏览器中验证 `Scenic3DPreview` 是否能正常渲染和切换 POI，占位模型是否可见，`OrbitControls` 是否可用。本阶段不接入 `GuideMapPage`。
+
+### 本次约束
+
+- 新增一个独立 3D 测试页。
+- 在路由中新增测试路由。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改地图路线逻辑。
+- 不接入地图页面 UI。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `src/pages/Scenic3DPreviewPage.tsx`
+- `src/App.tsx`
+- `docs/map-3d-development-log.md`
+
+### 新增页面说明
+
+新增 `src/pages/Scenic3DPreviewPage.tsx`：
+
+- 使用已有 `Scenic3DPreview` 组件。
+- 不引入数字人组件。
+- 不引入地图组件。
+- 页面标题为“灵山 3D 预览测试页”。
+- 默认选中 `giant_buddha`。
+- 提供 4 个按钮切换 `selectedPoiId`：
+  - `giant_buddha`
+  - `jiulong_guanyu`
+  - `fan_gong`
+  - `wuyin_tancheng`
+- 页面展示当前 `selectedPoiId`。
+- 3D 预览区域高度为 520px。
+- 使用简单 inline style，不依赖复杂 UI。
+
+### 路由说明
+
+在 `src/App.tsx` 中新增测试路由：
+
+- `/three-preview`
+
+该路由指向 `Scenic3DPreviewPage`。本次没有改变已有首页、地图页、景点页、数字人相关页面行为。移动端分支也为 `/three-preview` 保留独立测试路由，其他移动端路径仍按原逻辑进入 `MobileShell`。
+
+### 为什么先做独立测试页而不是接入 GuideMapPage
+
+独立测试页可以先验证 3D Canvas、占位模型、POI 切换和 `OrbitControls` 的基本可用性。这样后续接入 `GuideMapPage` 时，可以把风险集中在地图选中状态、布局和交互联动，而不是同时排查 3D 渲染基础问题。
+
+### 对现有地图行为的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，没有接入地图页面 UI，没有修改地图路线逻辑，没有新增真实 `.glb`、`.gltf` 模型，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。现有地图 Marker、Polyline、InfoWindow 和路线切换逻辑不受影响。
+
+### 验证方式
+
+- 检查 `/three-preview` 路由已添加。
+- 检查测试页包含 4 个 POI 切换按钮。
+- 运行 `npm run build`。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出中仍存在 Vite chunk size warning：`dist/assets/index-*.js` 超过 500 kB。这是构建体积提示，不是失败；本阶段未做代码拆分或构建优化。
+
+### 下一步建议
+
+- 可运行本地 dev server，手动打开 `/three-preview` 验证 Canvas、切换按钮和 OrbitControls。
+- 下一阶段如接入 `GuideMapPage`，建议使用可关闭的 3D 预览面板，并将地图选中 POI 映射到 `Scenic3DPreview` 的 `selectedPoiId`。
+- 接入真实模型前，继续保持 placeholder 兜底，避免模型资源缺失导致页面不可用。
