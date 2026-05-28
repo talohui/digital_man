@@ -13,8 +13,9 @@ import {
   type GuideSpot,
   type LatLngPoint
 } from '../data/guideData'
+import { getLingshanPresetRoutePath, USE_LINGSHAN_PRESET_ROUTE_PATHS } from '../data/lingshanMapData'
 import { loadTMap } from '../lib/loadTMap'
-import { buildWalkingRoute } from '../lib/routePlanning'
+import { buildPlannedRouteFromPath, buildWalkingRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 
@@ -201,7 +202,11 @@ function GuideMapPage() {
       setRouteStatus('loading')
       setPageMessage(`${route.name}正在规划景区步行路线...`)
 
-      const plannedRoute = await buildWalkingRoute(routeSpots)
+      const presetRoutePath = USE_LINGSHAN_PRESET_ROUTE_PATHS ? getLingshanPresetRoutePath(route.id) : undefined
+      const hasPresetRoutePath = presetRoutePath !== undefined && presetRoutePath.path.length >= 2
+      const plannedRoute = hasPresetRoutePath
+        ? buildPlannedRouteFromPath(presetRoutePath.path)
+        : await buildWalkingRoute(routeSpots)
 
       if (cancelled || !window.TMap || !mapRef.current) {
         return
@@ -237,7 +242,7 @@ function GuideMapPage() {
       }
 
       setRouteStatus('ready')
-      setPageMessage(`${route.name}已按腾讯步行规划绘制完成。`)
+      setPageMessage(hasPresetRoutePath ? `${route.name}已按园区预设路线绘制完成。` : `${route.name}已按腾讯步行规划绘制完成。`)
     }
 
     void renderRoute()
