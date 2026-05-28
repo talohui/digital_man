@@ -647,3 +647,69 @@
 - 下一阶段如开始写代码，先安装 `three`、`@react-three/fiber`、`@react-three/drei`、`@types/three`。
 - 第一轮只新增空的 `Scenic3DPreview`、`PlaceholderLandmark` 和占位 `lingshanAssetMap.ts`。
 - 先以可关闭面板接入 `GuideMapPage.tsx`，不加载真实 `.glb`，并确保 `npm run build` 通过。
+
+## 2026-05-28 阶段十二 A：3D 依赖安装与构建验证
+
+### 本次目标
+
+为前端 3D 能力做准备，只安装 Three.js / React Three Fiber 相关依赖，并验证当前 React + Vite 项目可以通过 `npm run build`。
+
+### 本次约束
+
+- 只安装 3D 相关依赖。
+- 不新增组件。
+- 不新增页面。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `App.tsx` 或路由。
+- 不修改地图路线逻辑。
+- 不新增真实 `.glb`、`.gltf` 或模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`，不触碰上层无关 `.env` 或 Fay 配置。
+
+### 修改文件清单
+
+- `package.json`
+- `package-lock.json`
+- `docs/map-3d-development-log.md`
+
+### 安装依赖说明
+
+安装 dependencies：
+
+- `three@^0.184.0`
+- `@react-three/fiber@^8.18.0`
+- `@react-three/drei@^9.122.0`
+
+安装 devDependencies：
+
+- `@types/three@^0.184.1`
+
+首次直接安装最新 `@react-three/fiber` 时，npm 解析到 9.x，要求 React 19；当前项目使用 React 18.3.1，因此改为安装兼容 React 18 的 `@react-three/fiber@8` 与 `@react-three/drei@9`。安装过程中 npm 还暴露了项目既有的 Ant Design peer dependency 冲突，因此使用 `--legacy-peer-deps` 保持现有依赖解析策略。
+
+安装过程中出现过一次 `ECONNRESET` 网络中断，重试后安装成功。
+
+### 为什么先只安装依赖、不新增组件
+
+当前阶段的目标是验证依赖层是否能与现有 React + Vite + TypeScript 项目共存。如果同时新增 3D 组件和页面接入，构建失败时难以区分是依赖兼容问题、组件实现问题还是页面接入问题。先只安装依赖，可以把风险收敛在依赖树和构建链路。
+
+### 对现有功能的影响
+
+本阶段没有新增 3D 组件，没有修改 `GuideMapPage.tsx`，没有修改地图页面 UI，没有修改地图路线逻辑，没有新增模型文件，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。
+
+### 验证方式
+
+- 使用项目现有 npm 包管理器安装依赖。
+- 运行 `npm run build`。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出中存在 Vite chunk size warning：`dist/assets/index-*.js` 超过 500 kB。这是构建体积提示，不是失败；本阶段未做代码拆分或构建优化。
+
+### 下一步建议
+
+- 阶段十二 B 可新增空的 `Scenic3DPreview.tsx` 和 `PlaceholderLandmark.tsx`，不接入真实 `.glb`。
+- 如接入页面，优先使用可关闭的 3D 预览面板，避免影响腾讯地图主流程。
+- 后续真实模型加载前，先建立 `lingshanAssetMap.ts` 占位数据和懒加载策略。
