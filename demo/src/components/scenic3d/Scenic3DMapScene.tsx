@@ -15,6 +15,7 @@ type Scenic3DMapSceneProps = {
   selectedPoiId?: string
   onSelectPoi?: (poiId: string) => void
   routePoiSequence?: string[]
+  routeGeometryPath?: Array<{ lat: number; lng: number }>
   layoutMode?: Scenic3DLayoutMode
 }
 
@@ -152,13 +153,34 @@ function buildRoutePoints(sequence: string[], layoutMode: Scenic3DLayoutMode) {
   return points
 }
 
-function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'projected' }: Scenic3DMapSceneProps) {
+function buildRouteGeometryPoints(routeGeometryPath: Array<{ lat: number; lng: number }> | undefined) {
+  if (!routeGeometryPath || routeGeometryPath.length < 2) {
+    return null
+  }
+
+  return routeGeometryPath.map((point) => {
+    const position = geoToScenePosition(point, { center: scenicCenter })
+    return new Vector3(position.x, 0.13, position.z)
+  })
+}
+
+function SceneContent({
+  selectedPoiId,
+  onSelectPoi,
+  routePoiSequence,
+  routeGeometryPath,
+  layoutMode = 'projected',
+}: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(layoutMode), [layoutMode])
   const scenicRouteNodes = useMemo(() => buildScenicRouteNodes(layoutMode), [layoutMode])
   const activePoiId = selectedPoiId || 'giant_buddha'
   const routeSequence = useMemo(() => getRouteSequence(routePoiSequence, layoutMode), [layoutMode, routePoiSequence])
   const routePoiSet = useMemo(() => new Set(routeSequence), [routeSequence])
-  const routePoints = useMemo(() => buildRoutePoints(routeSequence, layoutMode), [layoutMode, routeSequence])
+  const routeGeometryPoints = useMemo(() => buildRouteGeometryPoints(routeGeometryPath), [routeGeometryPath])
+  const routePoints = useMemo(
+    () => routeGeometryPoints ?? buildRoutePoints(routeSequence, layoutMode),
+    [layoutMode, routeGeometryPoints, routeSequence]
+  )
 
   return (
     <>
@@ -356,13 +378,20 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode
   )
 }
 
-function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'projected' }: Scenic3DMapSceneProps) {
+function Scenic3DMapScene({
+  selectedPoiId,
+  onSelectPoi,
+  routePoiSequence,
+  routeGeometryPath,
+  layoutMode = 'projected',
+}: Scenic3DMapSceneProps) {
   return (
     <Canvas camera={{ position: [4.8, 7.8, 8.6], fov: 38 }}>
       <SceneContent
         selectedPoiId={selectedPoiId}
         onSelectPoi={onSelectPoi}
         routePoiSequence={routePoiSequence}
+        routeGeometryPath={routeGeometryPath}
         layoutMode={layoutMode}
       />
     </Canvas>

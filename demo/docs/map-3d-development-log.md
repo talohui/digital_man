@@ -3582,6 +3582,114 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 将浏览器下载得到的 JSON 人工暂存到 `tmp/route-exports`，不要直接提交。
 - 后续新增 routeGeometry 草稿阶段时，再由 Codex 读取这些人工确认的导出文件进行整理。
 
+## 阶段四十：3D 金线优先使用 routeGeometry
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+让 `/scenic-3d-map` 的金色路线优先使用阶段三十九生成的 `lingshanRouteGeometries` 候选路线几何。当前 `sceneRoute` 如果存在对应 `routeGeometry.path`，则将经纬度点串投影为 3D 坐标绘制金线；如果不存在，则回退到原有 `routePoiSequence` 节点连线。
+
+### 本次约束
+
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不提交 `tmp/route-exports` 原始 JSON。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### routeGeometryPath 如何从 lingshanRouteGeometries 传入 Scenic3DMapScene
+
+`Scenic3DMapPage` 根据当前 `currentRoute.id` 调用：
+
+`getLingshanRouteGeometryBySceneRouteId(currentRoute.id)`
+
+如果找到候选几何，则把 `currentRouteGeometry.path` 作为 `routeGeometryPath` 传给 `Scenic3DMapScene`。页面同时显示路线几何来源：
+
+- 有 routeGeometry：`腾讯 walking 候选路径`
+- 无 routeGeometry：`POI 节点骨架`
+
+页面还展示候选路径点数和状态，例如 `candidate，需要人工核对`。
+
+### routeGeometryPath 如何经 geoToScenePosition 映射到 3D
+
+`Scenic3DMapScene` 新增 `routeGeometryPath?: Array<{ lat: number; lng: number }>`。
+
+当 `routeGeometryPath.length >= 2` 时，场景组件使用：
+
+`geoToScenePosition(point, { center: scenicCenter })`
+
+将每个经纬度点转换为 Three.js 场景坐标，并生成 3D 金线路线点。该过程使用与 projected layout 一致的 `scenicCenter` 和默认 scale。
+
+这些几何点只用于路线曲线，不会被渲染成节点、标签或可点击对象，避免几百个 path 点影响 UI 复杂度。
+
+### 为什么比 POI 中心连线更合理
+
+原有金线由 `routePoiSequence` 的 POI 中心点连接而成，容易穿过建筑、地台或水面，只能表达站点顺序。
+
+候选 `routeGeometry.path` 来自腾讯 walking runtime 返回的 polyline，包含更多中间路径点，更接近真实步行路线形态，因此比 POI 中心直连更适合作为 3D 金线基础。
+
+### 为什么 routeGeometry 仍是 candidate
+
+虽然三条候选路线的 `usedFallback=false`，说明腾讯 walking 请求成功，但这不代表路线已经人工确认完全贴合园区内部步道。腾讯路网、POI 终点位置和园区内部道路精度仍可能存在偏差。
+
+因此当前 `routeGeometry` 仍是 `candidate`，后续需要人工核对后才能升级为 `verified`。
+
+### fallback 到 routePoiSequence 的条件
+
+如果当前 `sceneRoute.id` 找不到对应 `routeGeometry`，或传入的 `routeGeometryPath` 不存在、点数不足 2，`Scenic3DMapScene` 会继续使用原有 `routePoiSequence` 逻辑生成金线。
+
+这保证没有候选几何的兼容路线仍可显示导览路径，不会出现空路线。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 的金色路线优先使用候选 routeGeometry 投影后的路线几何。站点列表、POI 节点、标签、核心地标、选中高亮、跳转真实地图按钮和路线切换逻辑保持不变。
+
+当前页面会显示路线几何来源、候选路径点数和状态，提醒该路径来自腾讯 walking runtime，仍需人工核对。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route 规划逻辑、Marker、Polyline、InfoWindow 或 query 参数行为。
+
+### 验证方式
+
+- 检查 `Scenic3DMapScene` 新增 `routeGeometryPath` prop。
+- 检查 `routeGeometryPath.length >= 2` 时，金线使用 `geoToScenePosition(pathPoint, { center: scenicCenter })` 的投影结果。
+- 检查缺少 routeGeometry 时，金线 fallback 到 `routePoiSequence`。
+- 检查 `Scenic3DMapPage` 根据 `currentRoute.id` 读取 `getLingshanRouteGeometryBySceneRouteId`。
+- 检查页面显示路线几何来源、候选路径点数和 `candidate` 状态。
+- 检查没有修改 `/map`、`GuideMapPage.tsx`、`routePlanning.ts`、POI 坐标、`displayLocation`、`navLocation`、`scenePosition` 或 `lingshanRouteGeometries.ts` 数据内容。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，分别切换历史文化、自然风光和亲子 3D 路线，观察金线是否更接近真实步行路径。
+- 对金线仍穿越建筑或不合理绕行的局部段，建立人工修正清单。
+- 后续可新增 `hybrid_corrected` 路线几何，逐段替换腾讯 walking 候选 path。
+
 ## 阶段三十九：腾讯 walking path 静态 routeGeometry 候选数据生成
 
 ### 日期

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 import Scenic3DMapScene from '../components/scenic3d/Scenic3DMapScene'
 import { lingshanPois, lingshanSceneRoutes } from '../data/lingshanMapData'
+import { getLingshanRouteGeometryBySceneRouteId } from '../data/lingshanRouteGeometries'
 
 const fallbackRoute = {
   id: 'fallback_3d_scene',
@@ -39,6 +40,10 @@ function Scenic3DMapPage() {
   const currentRoute = useMemo(
     () => lingshanSceneRoutes.find((route) => route.id === currentSceneRouteId) ?? initialSceneRoute,
     [currentSceneRouteId, initialSceneRoute]
+  )
+  const currentRouteGeometry = useMemo(
+    () => getLingshanRouteGeometryBySceneRouteId(currentRoute.id),
+    [currentRoute.id]
   )
   const scenePois = useMemo(
     () =>
@@ -101,6 +106,7 @@ function Scenic3DMapPage() {
           selectedPoiId={selectedPoiId}
           onSelectPoi={setSelectedPoiId}
           routePoiSequence={currentRoute.poiSequence}
+          routeGeometryPath={currentRouteGeometry?.path}
           layoutMode="projected"
         />
       </div>
@@ -239,6 +245,31 @@ function Scenic3DMapPage() {
           >
             当前 3D 地图依据景点真实经纬度进行近似投影，已展示 {scenePois.length} 个核心游线节点，用于表达景区核心游线与空间关系。
           </p>
+          <p
+            style={{
+              margin: '8px 0 0',
+              color: '#7a6a44',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            路线几何：
+            {currentRouteGeometry
+              ? `腾讯 walking 候选路径，候选路径点数：${currentRouteGeometry.pointCount}，状态：${currentRouteGeometry.status}，需要人工核对。`
+              : 'POI 节点骨架，当前路线暂无候选 routeGeometry。'}
+          </p>
+          {currentRouteGeometry ? (
+            <p
+              style={{
+                margin: '6px 0 0',
+                color: '#8a5b12',
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              routeGeometry 来自腾讯 walking runtime 导出，比 POI 中心连线更接近真实步行路径，但仍不是最终 verified 园区路线。
+            </p>
+          ) : null}
         </div>
 
         <div
