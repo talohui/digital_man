@@ -2771,3 +2771,98 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 手动打开 `/scenic-3d-map`，分别切换历史文化、自然风光和亲子路线，检查金线是否覆盖对应站点。
 - 后续可继续优化 3D 路线视觉，例如给不同路线使用不同金线层级、增加当前路线段高亮或路线分段播放。
 - 如果后续获得真实园区道路折线，应新增独立数据层，把真实步行 geometry 与艺术化 `poiSequence` 区分管理。
+
+## 2026-05-29 阶段三十二：真实坐标到 3D scenePosition 映射评估
+
+### 本次目标
+
+建立一个可复用的真实经纬度到 3D 场景坐标的映射工具，并生成当前 19 个 POI 的真实投影坐标与现有 `scenePosition` 的对比评估报告。
+
+本阶段只做工具和评估，不直接覆盖现有 `scenePosition`。
+
+### 本次约束
+
+- 新增真实经纬度到 3D 坐标的映射工具。
+- 生成对比/评估文档。
+- 不修改现有 `scenePosition`。
+- 不修改 `/scenic-3d-map` 渲染逻辑。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `displayLocation` / `navLocation`。
+- 不新增真实 `.glb` / `.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/lib/scenic3d/geoToScene.ts`
+- `docs/lingshan-scene-position-mapping-report.md`
+- `docs/map-3d-development-log.md`
+
+### geoToScenePosition 工具说明
+
+新增 `src/lib/scenic3d/geoToScene.ts`，导出：
+
+- `ScenePoint`
+- `GeoPoint`
+- `GeoToSceneOptions`
+- `geoToScenePosition(point, options)`
+
+工具使用近似局部平面投影：
+
+- `x` 表示东西方向。
+- `z` 表示南北方向。
+- `y` 默认是 `0`。
+- `center` 作为投影中心。
+- `scale` 默认是 `0.01`。
+
+该工具不依赖 Three.js，不读取环境变量，适合后续在数据层或构建脚本中复用。
+
+### 为什么不直接覆盖现有 scenePosition
+
+当前 `/scenic-3d-map` 的视觉构图已经围绕人工 `scenePosition` 做过镜头、山体、水面、标签和路线优化。直接用真实投影坐标覆盖会改变入口区、大佛区、梵宫区、坛城区和出口之间的画面关系，可能破坏现有演示效果。
+
+本阶段报告显示：部分 POI 与真实投影方向大致一致，但入口区、灵山大佛、五印坛城、三圣殿等点存在明显人工构图偏移。因此更稳妥的方向是后续采用“真实投影坐标 + artisticOffset”或独立 `lingshanSceneLayout.ts`，而不是直接覆盖现有 `scenePosition`。
+
+### 当前 3D 地图与真实地图的绑定关系说明
+
+当前系统通过 `poiId` 建立真实地图和 3D 艺术地图之间的连接：
+
+- `displayLocation` / `navLocation`：真实地图坐标，用于 `/map` 和腾讯地图能力。
+- `scenePosition`：3D 场景坐标，用于 `/scenic-3d-map`。
+- `lingshanSceneRoutes.poiSequence`：通过 `poiId` 连接 3D 导览路线和站点。
+- `lingshanSceneRouteToGuideRouteMap`：通过 sceneRoute id 连接 3D 艺术路线和真实 guideRoute。
+
+本阶段新增的投影工具用于评估真实坐标和 3D 坐标之间的关系，不改变上述运行逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map` 渲染逻辑。页面仍读取现有 `scenePosition`，仍显示 19 个核心游线节点，并支持三条 3D 导览路线切换。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实 POI 坐标、Marker、Polyline 或 InfoWindow。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `src/lib/scenic3d/geoToScene.ts` 只包含纯函数和类型定义，不依赖 Three.js 或环境变量。
+- 检查 `docs/lingshan-scene-position-mapping-report.md` 已包含 19 个 POI 的当前 `scenePosition` 与投影坐标对比表。
+- 检查没有修改 `src/data/lingshanMapData.ts` 中现有 `scenePosition`、`displayLocation`、`navLocation` 或腾讯 POI 字段。
+- 检查没有修改 `/scenic-3d-map` 渲染逻辑、`/map`、`GuideMapPage.tsx`、`routePlanning.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 下一阶段可以新增独立 `src/data/scenic3d/lingshanSceneLayout.ts`，同时保存投影坐标、人工偏移和最终 3D 展示坐标。
+- 可以考虑新增 `scenePositionSource` 或 `artisticOffset`，明确哪些点来自真实投影，哪些点经过人工构图。
+- 不建议直接覆盖现有 `scenePosition`，应先在独立 layout 数据层做 A/B 对比，再决定是否迁移。
