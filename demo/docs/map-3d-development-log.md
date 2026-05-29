@@ -3867,3 +3867,98 @@ tmp/
 
 - 保持 `tmp/route-exports` 作为本地人工导出中转目录。
 - 后续如需整理路线数据，应从人工确认后的导出文件生成正式 `routeGeometry`，不要提交临时原始 JSON。
+
+## 阶段四十一 B：routeGeometry 候选路线人工复核记录生成
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+生成 `routeGeometry` 候选路线人工复核记录文档，明确当前三条候选路线的数据来源、候选状态、已知风险、人工复核方式和后续修正策略。
+
+### 本次约束
+
+- 只新增/更新文档。
+- 不修改功能代码。
+- 不修改 `src/data/lingshanRouteGeometries.ts`。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不提交 `tmp/route-exports` 原始 JSON。
+
+### 修改文件清单
+
+- `docs/lingshan-route-geometry-review.md`
+- `docs/map-3d-development-log.md`
+
+### 当前 routeGeometry 来源说明
+
+当前三条 `routeGeometry` 均来自腾讯 walking route runtime 导出，已整理到 `src/data/lingshanRouteGeometries.ts`：
+
+| sceneRouteId | guideRouteId | source | status | pointCount | distanceMeters | durationMinutes | usedFallback |
+|---|---|---|---|---:|---:|---:|---|
+| `historical_3d_scene` | `historical_culture` | `tencent_walking_runtime` | `candidate` | 417 | 4945 | 76 | false |
+| `natural_3d_scene` | `natural_scenery` | `tencent_walking_runtime` | `candidate` | 365 | 4607 | 71 | false |
+| `family_3d_scene` | `family` | `tencent_walking_runtime` | `candidate` | 198 | 2497 | 37 | false |
+
+### 为什么 usedFallback=false 仍不能直接 verified
+
+`usedFallback=false` 只说明腾讯 walking 返回了路线 polyline，不代表景区内部步道完全准确。
+
+灵山胜境内部广场、台阶、私有步道、观赏区和建筑入口可能不在腾讯路网中精确表达；如果 POI 起终点位于景点中心，也可能导致路线局部不贴路。因此 `usedFallback=false` 只能支持进入候选状态，不能直接升级为 `verified`。
+
+### 已知问题说明
+
+当前观察认为 `routeGeometry` 比 POI 中心连线更合理，但仍可能存在局部问题：
+
+- 穿湖。
+- 穿建筑。
+- 不贴道路。
+- 绕路异常。
+- 入口点不合理。
+- 需要现场或手机端进一步验证。
+
+这些问题说明当前路线仍需人工逐段复核。
+
+### 后续修正策略
+
+- 策略 A：修正 `navLocation`，优先处理灵山大佛、梵宫、九龙灌浴、五印坛城等核心点。
+- 策略 B：人工修正 `routeGeometry`，将局部异常段升级为 `hybrid_corrected`。
+- 策略 C：建设园区自有路网，维护 road nodes / edges，自行生成路线。
+- 策略 D：结合 `docs/mobile-lan-route-verification.md` 做手机端局域网人工验证。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route 规划逻辑、Marker、Polyline、InfoWindow 或 query 参数行为。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 金线、`scenePosition`、`layoutMode` 或模型资产。文档仅记录候选路线复核方法和后续策略。
+
+### 验证方式
+
+- 检查 `docs/lingshan-route-geometry-review.md` 已生成。
+- 检查文档记录三条 routeGeometry 的 `candidate` 状态。
+- 检查文档说明 `usedFallback=false` 不等于 `verified`。
+- 检查文档给出 `navLocation` 修正、人工 routeGeometry 修正、自有路网和手机端验证四类策略。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+本阶段只修改 Markdown 文档，不涉及 TypeScript 或功能代码，因此未运行 `npm run build`。
+
+### 下一步建议
+
+- 按 `docs/lingshan-route-geometry-review.md` 的复核清单逐段记录问题。
+- 对高风险路段先做截图或手机端记录，再决定是否修 `navLocation` 或新增 `hybrid_corrected` routeGeometry。
