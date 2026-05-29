@@ -1675,3 +1675,97 @@ export type LingshanSceneRoute = {
 - 手动打开 `/scenic-3d-map`，点击“查看该景点真实地图”，确认跳转到 `/map?poi=<selectedPoiId>` 后地图聚焦对应景点。
 - 下一阶段可以设计 `sceneRoute -> guideRoute` 映射表，让 `/map?sceneRoute=classic_3d_scene` 切换到合适的真实导览路线。
 - 继续保持 3D 艺术路线和腾讯地图真实导航的职责边界。
+
+## 2026-05-29 阶段二十二：修复真实地图 query poi 最终聚焦
+
+### 本次目标
+
+修复从 `/scenic-3d-map` 跳转到 `/map?poi=<spotId>` 后，地图最终视野被路线全貌覆盖的问题。目标是 URL 带有效 `poi` 参数时，地图最终聚焦到对应景点并打开 InfoWindow。
+
+### 本次约束
+
+- 只修复 `/map?poi=xxx` 的最终聚焦行为。
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+从 `/scenic-3d-map` 点击“查看该景点真实地图”后，可以跳转到类似：
+
+```text
+/map?poi=giant_buddha
+```
+
+`GuideMapPage` 能识别 `poi` 参数，也能显示对应景点信息，但地图最终视野停留在整条路线全貌，而不是聚焦到该景点。
+
+### 原因分析
+
+`GuideMapPage` 中 query poi 的 `focusSpot` 会先执行，但路线绘制 effect 在 Polyline 创建完成后会继续无条件调用 `fitMapToRoute(mapRef.current, routeSpots)`。这会用路线 bounds 覆盖前面的景点聚焦视野。
+
+因此原因确认为：路线绘制完成后的 `fitMapToRoute` 覆盖了 query poi 的 `focusSpot`。
+
+### 修复方式
+
+采用最小改动：
+
+- 增加 `appliedQueryPoiIdRef`，让有效 query poi 的初始选中和必要路线切换只应用一次，避免用户后续手动切换路线时被反复拉回。
+- 在路线绘制完成后判断当前 URL 是否有有效 `queryPoiSpot`，且当前 route 包含该 POI。
+- 如果有，则不执行 `fitMapToRoute`，改为最终调用 `focusSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)`。
+- 如果没有有效 query poi，则保持原有 `fitMapToRoute` 行为。
+
+### /map?poi=xxx 的最终行为
+
+当 URL 为：
+
+```text
+/map?poi=<spotId>
+```
+
+且 `<spotId>` 能匹配到 `guideSpots` 时：
+
+- 页面会选中该景点。
+- 如果当前路线不包含该景点，会切到第一个包含该景点的现有 `guideRoute`。
+- Marker、Polyline 和 InfoWindow 正常渲染。
+- 路线绘制完成后，地图最终聚焦到该景点，并打开对应 InfoWindow。
+
+无效 `poi` 仍保持默认行为，不报错。
+
+### 对普通 /map 的影响
+
+普通 `/map` 没有有效 query poi，因此仍保持原来的路线全貌展示逻辑，`fitMapToRoute` 继续生效。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。它已有的 `/map?poi=...` 跳转入口现在能在真实地图页获得更稳定的最终聚焦体验。
+
+### 验证方式
+
+- 检查 `GuideMapPage.tsx` 中路线绘制完成后的视野控制逻辑。
+- 确认普通 `/map` 仍走 `fitMapToRoute`。
+- 确认有效 `/map?poi=<spotId>` 走最终 `focusSpot(queryPoiSpot)`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动从 `/scenic-3d-map` 点击“查看该景点真实地图”，确认 `/map?poi=giant_buddha` 最终聚焦大佛 Marker 并打开 InfoWindow。
+- 后续可继续处理 `/map?sceneRoute=xxx` 到真实 `guideRoutes` 的映射。
+- 后续如增加用户手动交互状态，可进一步区分 query 初始化聚焦和用户主动地图操作。

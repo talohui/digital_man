@@ -59,6 +59,7 @@ function GuideMapPage() {
   const markerLayerRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
   const infoWindowRef = useRef<any>(null)
+  const appliedQueryPoiIdRef = useRef<string | null>(null)
 
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
@@ -92,6 +93,10 @@ function GuideMapPage() {
       return
     }
 
+    if (appliedQueryPoiIdRef.current === queryPoiSpot.id) {
+      return
+    }
+
     if (queryPoiRoute && queryPoiRoute.id !== activeRouteId) {
       setActiveRouteId(queryPoiRoute.id)
     }
@@ -99,6 +104,8 @@ function GuideMapPage() {
     if (selectedSpotId !== queryPoiSpot.id) {
       setSelectedSpotId(queryPoiSpot.id)
     }
+
+    appliedQueryPoiIdRef.current = queryPoiSpot.id
   }, [activeRouteId, queryPoiRoute, queryPoiSpot, selectedSpotId, setActiveRouteId, setSelectedSpotId])
 
   useEffect(() => {
@@ -271,7 +278,11 @@ function GuideMapPage() {
         ]
       })
 
-      fitMapToRoute(mapRef.current, routeSpots)
+      if (queryPoiSpot && route.stops.some((stop) => stop.spotId === queryPoiSpot.id)) {
+        focusSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+      } else {
+        fitMapToRoute(mapRef.current, routeSpots)
+      }
 
       if (plannedRoute.usedFallback) {
         setRouteStatus('fallback')
@@ -288,7 +299,7 @@ function GuideMapPage() {
     return () => {
       cancelled = true
     }
-  }, [mapStatus, route, routeSpots])
+  }, [mapStatus, queryPoiSpot, route, routeSpots])
 
   const [rateOpen, setRateOpen] = useState(false)
   const [rateStars, setRateStars] = useState(0)
