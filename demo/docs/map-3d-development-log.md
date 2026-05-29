@@ -3456,3 +3456,128 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 分别打开三条路线的 debug URL，复制腾讯 walking path JSON。
 - 将导出的 JSON 先保存为人工工作材料，不直接进入源码。
 - 下一阶段可以新增 routeGeometry 草稿文档或数据导入任务，对腾讯 path 进行人工修正和分段标注。
+
+## 阶段三十八 B：腾讯 walking path JSON 下载按钮
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+在 `/map` 的 `debugSceneRoute` 调试模式中，在已有“复制腾讯路线 path JSON”能力旁边新增“下载腾讯路线 path JSON”按钮，让开发者可以直接从浏览器下载当前 `plannedRoute.path` 及元信息。
+
+### 本次约束
+
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增 `routeGeometry` 静态数据。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么不能让 Codex 直接保存浏览器运行时 path
+
+腾讯 walking path 是浏览器运行时通过 `/map` 页面请求并解码得到的数据，Codex 在代码编辑环境中无法直接读取浏览器内存、剪贴板或当前页面状态。即使页面已经显示路线，运行时 `plannedRoute.path` 也只存在于浏览器环境中。
+
+因此需要在页面内提供下载按钮，让开发者从浏览器导出 JSON 文件，再人工放入 `tmp/route-exports` 或交给后续任务整理。
+
+### 下载按钮实现方式
+
+`GuideMapPage` 复用阶段三十八已有的导出 payload，新增 `handleDownloadWalkingRoutePathJson`：
+
+1. 如果当前 `plannedRoute` 尚未生成，提示“路线尚未生成”。
+2. 将 payload 用 `JSON.stringify(payload, null, 2)` 转成字符串。
+3. 使用 `Blob` 创建 `application/json;charset=utf-8` 文件内容。
+4. 使用 `URL.createObjectURL` 创建临时下载地址。
+5. 创建临时 `a` 标签并触发 `click()`。
+6. 下载后释放 object URL。
+7. 成功后提示“已生成下载文件”。
+
+本阶段不自动写入源码，也不自动写入 `tmp/route-exports`。
+
+### 下载 JSON 字段说明
+
+下载内容与复制按钮保持一致，包含：
+
+- `routeId`：当前真实地图使用的 guideRoute id。
+- `sceneRoute`：URL 中的 3D sceneRoute id。
+- `generatedAt`：下载时间，ISO 字符串。
+- `source`：固定为 `tencent_walking_runtime`。
+- `pointCount`：`plannedRoute.path.length`。
+- `distanceMeters`：腾讯 walking 或兜底结果距离。
+- `durationMinutes`：腾讯 walking 或兜底结果耗时。
+- `usedFallback`：是否存在 fallback。
+- `fallbackReason`：fallback 原因，没有则为 `null`。
+- `path`：腾讯 walking 返回的经纬度点串。
+
+### 下载文件命名规则
+
+如果 URL 中存在 `querySceneRoute`，下载文件名为：
+
+`<querySceneRoute>.tencent-walking.json`
+
+例如：
+
+- `historical_3d_scene.tencent-walking.json`
+- `natural_3d_scene.tencent-walking.json`
+- `family_3d_scene.tencent-walking.json`
+
+如果没有 `querySceneRoute`，则使用当前 `activeRouteId`：
+
+`<activeRouteId>.tencent-walking.json`
+
+### 后续如何把下载文件整理为 routeGeometry
+
+下载得到的 JSON 可以先由人工暂存到 `tmp/route-exports`，再执行后续整理任务：
+
+1. 按路线收集腾讯 walking runtime path。
+2. 对照真实地图和园区导览图检查是否穿越建筑、水面或不可通行区域。
+3. 删除不合理点段或补充人工控制点。
+4. 转换为静态 `routeGeometry` 候选数据。
+5. 3D 使用时再通过 `geoToScenePosition` 或路线映射转换为 Three.js 坐标。
+
+### 对 /map 的影响
+
+普通 `/map` 行为不变。只有 `debugSceneRoute=1` 或 `debugSceneRoute=true` 时，调试卡片中显示复制和下载按钮。
+
+本阶段没有改变 Marker、Polyline、InfoWindow、`/map?poi=xxx` 聚焦逻辑、sceneRoute 映射逻辑或腾讯 walking route 规划逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 路线、`scenePosition`、`layoutMode` 或任何模型资产。
+
+### 验证方式
+
+- 检查普通 `/map` 不显示“下载腾讯路线 path JSON”按钮。
+- 检查 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1` 显示下载按钮。
+- 检查路线尚未生成时下载按钮不可用或提示“路线尚未生成”。
+- 检查路线生成后点击下载按钮会生成 `<querySceneRoute>.tencent-walking.json` 文件。
+- 检查 JSON 字段包含 routeId、sceneRoute、generatedAt、source、pointCount、distanceMeters、durationMinutes、usedFallback、fallbackReason 和 path。
+- 检查复制按钮功能仍保留。
+- 检查没有修改 `routePlanning.ts`、腾讯 walking route 规划算法、POI 坐标、`displayLocation`、`navLocation`、`scenePosition` 或 `/scenic-3d-map`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 在浏览器中分别打开三条路线的 debug URL，并下载对应 JSON。
+- 将浏览器下载得到的 JSON 人工暂存到 `tmp/route-exports`，不要直接提交。
+- 后续新增 routeGeometry 草稿阶段时，再由 Codex 读取这些人工确认的导出文件进行整理。

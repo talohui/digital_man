@@ -1,6 +1,6 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Modal, Rate } from 'antd'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
 import {
@@ -426,13 +426,12 @@ function GuideMapPage() {
     navigate(`/spot/${selectedSpot.id}`)
   }
 
-  const handleCopyWalkingRoutePathJson = async () => {
+  const buildWalkingRoutePathExportPayload = () => {
     if (!currentPlannedRouteForDebug) {
-      setRouteExportMessage('路线尚未生成')
-      return
+      return null
     }
 
-    const payload = {
+    return {
       routeId: activeRouteId,
       sceneRoute: querySceneRouteId,
       generatedAt: new Date().toISOString(),
@@ -444,6 +443,16 @@ function GuideMapPage() {
       fallbackReason: currentPlannedRouteForDebug.fallbackReason ?? null,
       path: currentPlannedRouteForDebug.path
     }
+  }
+
+  const handleCopyWalkingRoutePathJson = async () => {
+    const payload = buildWalkingRoutePathExportPayload()
+
+    if (!payload) {
+      setRouteExportMessage('路线尚未生成')
+      return
+    }
+
     const jsonText = JSON.stringify(payload, null, 2)
 
     try {
@@ -456,6 +465,34 @@ function GuideMapPage() {
     } catch {
       console.log('[GuideMapPage] walking route path JSON', jsonText)
       setRouteExportMessage('复制失败，已输出到控制台。')
+    }
+  }
+
+  const handleDownloadWalkingRoutePathJson = () => {
+    const payload = buildWalkingRoutePathExportPayload()
+
+    if (!payload) {
+      setRouteExportMessage('路线尚未生成')
+      return
+    }
+
+    const jsonText = JSON.stringify(payload, null, 2)
+    const fileName = `${querySceneRouteId || activeRouteId}.tencent-walking.json`
+
+    try {
+      const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' })
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      setRouteExportMessage('已生成下载文件')
+    } catch {
+      console.log('[GuideMapPage] walking route path JSON', jsonText)
+      setRouteExportMessage('下载失败，已输出到控制台。')
     }
   }
 
@@ -551,26 +588,32 @@ function GuideMapPage() {
               }}
             >
               <p style={{ margin: '0 0 8px', color: '#665326' }}>
-                可复制腾讯 walking 路线 path，后续作为人工 routeGeometry 的候选数据。该 path 是经纬度点串，不能直接作为 Three.js 坐标，需要再经过 geoToScenePosition 或后续路线映射。
+                可复制或下载腾讯 walking 路线 path JSON，下载后的 JSON 可暂存到 tmp/route-exports，后续整理为 routeGeometry 候选数据。该 path 是经纬度点串，不能直接作为 Three.js 坐标，需要再经过 geoToScenePosition 或后续路线映射。
               </p>
-              <button
-                type="button"
-                onClick={handleCopyWalkingRoutePathJson}
-                disabled={!currentPlannedRouteForDebug}
+              <div
                 style={{
-                  width: '100%',
-                  minHeight: 34,
-                  border: '1px solid rgba(154, 90, 8, 0.28)',
-                  borderRadius: 10,
-                  background: currentPlannedRouteForDebug ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
-                  color: currentPlannedRouteForDebug ? '#7a4b08' : '#9a8d6b',
-                  cursor: currentPlannedRouteForDebug ? 'pointer' : 'not-allowed',
-                  fontSize: 12,
-                  fontWeight: 800
+                  display: 'grid',
+                  gridTemplateColumns: '1fr',
+                  gap: 6
                 }}
               >
-                复制腾讯路线 path JSON
-              </button>
+                <button
+                  type="button"
+                  onClick={handleCopyWalkingRoutePathJson}
+                  disabled={!currentPlannedRouteForDebug}
+                  style={getRouteExportButtonStyle(Boolean(currentPlannedRouteForDebug))}
+                >
+                  复制腾讯路线 path JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadWalkingRoutePathJson}
+                  disabled={!currentPlannedRouteForDebug}
+                  style={getRouteExportButtonStyle(Boolean(currentPlannedRouteForDebug))}
+                >
+                  下载腾讯路线 path JSON
+                </button>
+              </div>
               {routeExportMessage ? (
                 <span style={{ display: 'block', marginTop: 6, color: '#7a4b08' }}>{routeExportMessage}</span>
               ) : null}
@@ -764,6 +807,20 @@ function renderInfoWindowContent(spot: GuideSpot) {
 
 function createSvgDataUri(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function getRouteExportButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 34,
+    border: '1px solid rgba(154, 90, 8, 0.28)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#7a4b08' : '#9a8d6b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 12,
+    fontWeight: 800
+  }
 }
 
 export default GuideMapPage
