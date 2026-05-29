@@ -2056,3 +2056,70 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 在浏览器中手动验证 query poi 初始聚焦和后续站点点击的完整交互。
 - 后续如果要让 Marker 点击停留在地图页而不是进入讲解页，可以单独设计地图内选点交互，不应和本阶段修复混在一起。
+
+## 2026-05-29 阶段二十五：首页接入沉浸式 3D 地图入口
+
+### 本次目标
+
+在首页增加进入 `/scenic-3d-map` 的普通用户入口，让用户不需要手动输入 URL 就能打开全屏艺术化 3D 景区导览地图。
+
+### 本次约束
+
+- 只在 `HomePage` 增加进入 `/scenic-3d-map` 的入口。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `/map`。
+- 不修改 3D 场景逻辑。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/HomePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 首页入口说明
+
+首页推荐面板中新增“沉浸式 3D 导览地图”入口区，包含：
+
+- 主标题：沉浸式 3D 导览地图
+- 副文案：以艺术化 3D 场景探索灵山核心景点，真实导航可一键切回腾讯地图。
+- 按钮：进入 3D 导览地图
+
+点击按钮后使用 `react-router-dom` 的 `navigate('/scenic-3d-map')` 跳转到沉浸式 3D 景区地图页面。
+
+### 为什么本阶段只改首页、不改地图页
+
+`/map` 是腾讯地图真实导览页，刚完成 `poi` 和 `sceneRoute` 的真实地图闭环修复。为了避免影响真实地图交互，本阶段只增加首页入口，不在 `/map` 中嵌入或改造 3D 场景，也不修改路线规划、Marker、Polyline、InfoWindow 等真实地图逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 页面本身没有修改。新增首页入口后，普通用户可以从首页直接进入该页面。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map` 或 `GuideMapPage.tsx`。真实腾讯地图导览、路线切换、POI 聚焦和 sceneRoute 映射行为保持不变。
+
+### 验证方式
+
+- 检查首页新增入口按钮文案与跳转路径。
+- 确认 `/three-preview` 未暴露给普通用户。
+- 确认 `GuideMapPage.tsx` 没有改动。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动从首页点击“进入 3D 导览地图”，确认跳转到 `/scenic-3d-map`。
+- 继续保留 `/map` 作为真实腾讯地图导览入口，后续可在 3D 地图页面继续优化与真实地图的联动说明。
