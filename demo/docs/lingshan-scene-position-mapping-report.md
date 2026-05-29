@@ -161,3 +161,35 @@ y = options.y ?? 0
 - 第二阶段：新增独立 3D layout 数据层，记录投影坐标与人工偏移。
 - 第三阶段：只在 `/scenic-3d-map` 中读取新的 layout 数据做 A/B 对比。
 - 第四阶段：确认视觉和空间关系后，再考虑迁移或重命名现有 `scenePosition`。
+
+## 7. scenePositionSource 与 sceneOffset 设计
+
+阶段三十三为 `LingshanPoi` 补充了两个 3D 坐标元数据字段：
+
+```ts
+scenePositionSource?: 'manual' | 'projected' | 'projected_with_offset'
+
+sceneOffset?: {
+  x: number
+  y?: number
+  z: number
+}
+```
+
+字段含义：
+
+- `scenePositionSource: 'manual'`：当前 `scenePosition` 是人工艺术化坐标。
+- `scenePositionSource: 'projected'`：未来可表示 `scenePosition` 由真实 `lat/lng` 直接投影生成。
+- `scenePositionSource: 'projected_with_offset'`：未来可表示 `scenePosition` 由真实投影坐标叠加艺术偏移得到。
+- `sceneOffset`：未来用于记录相对投影坐标的视觉构图偏移量。
+
+当前 19 个拥有 `scenePosition` 的 POI 均设置为 `scenePositionSource: 'manual'`。这是因为现有 3D 场景坐标已经围绕水墨构图、镜头视角、标签位置和路线可读性做过人工调整。
+
+本阶段没有填充 `sceneOffset`，也没有改变任何 `scenePosition` 数值。`/scenic-3d-map` 的视觉效果保持不变。
+
+后续如果采用“真实投影坐标 + artisticOffset”方案，可以逐步迁移为：
+
+1. 使用 `geoToScenePosition` 得到 projected 坐标。
+2. 为需要构图调整的 POI 记录 `sceneOffset`。
+3. 将最终展示坐标标记为 `projected_with_offset`。
+4. 在独立 3D layout 数据层中管理 projected、offset 和 final 三类坐标，避免真实 POI 数据与艺术布局耦合过重。

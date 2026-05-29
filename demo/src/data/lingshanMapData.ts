@@ -56,6 +56,14 @@ export type LingshanPoi = {
     z: number
   }
 
+  scenePositionSource?: 'manual' | 'projected' | 'projected_with_offset'
+
+  sceneOffset?: {
+    x: number
+    y?: number
+    z: number
+  }
+
   note?: string
 }
 
@@ -225,6 +233,10 @@ function inferScenePosition(spot: GuideSpot): LingshanPoi['scenePosition'] {
   return LINGSHAN_SCENE_POSITIONS[spot.id]
 }
 
+function inferScenePositionSource(spot: GuideSpot): LingshanPoi['scenePositionSource'] {
+  return LINGSHAN_SCENE_POSITIONS[spot.id] ? 'manual' : undefined
+}
+
 function inferPoiNote(spot: GuideSpot): string | undefined {
   if (!LINGSHAN_SCENE_POSITIONS[spot.id]) {
     return undefined
@@ -257,6 +269,7 @@ export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
     triggerRadiusMeters: 35,
     bindStatus: 'candidate',
     scenePosition: inferScenePosition(spot),
+    scenePositionSource: inferScenePositionSource(spot),
     note: inferPoiNote(spot)
   }
 })

@@ -2866,3 +2866,90 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 下一阶段可以新增独立 `src/data/scenic3d/lingshanSceneLayout.ts`，同时保存投影坐标、人工偏移和最终 3D 展示坐标。
 - 可以考虑新增 `scenePositionSource` 或 `artisticOffset`，明确哪些点来自真实投影，哪些点经过人工构图。
 - 不建议直接覆盖现有 `scenePosition`，应先在独立 layout 数据层做 A/B 对比，再决定是否迁移。
+
+## 2026-05-29 阶段三十三：scenePosition 来源与偏移字段补充
+
+### 本次目标
+
+为 `LingshanPoi` 的 3D 坐标体系增加来源字段和未来偏移字段，使后续可以从当前 manual `scenePosition` 渐进迁移到 projected + artisticOffset 布局。
+
+本阶段只做数据结构准备，不改变当前 `/scenic-3d-map` 视觉效果。
+
+### 本次约束
+
+- 只修改 POI 类型与数据结构、文档记录。
+- 不改变当前 `scenePosition` 数值。
+- 不改变 `/scenic-3d-map` 渲染逻辑。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `displayLocation` / `navLocation`。
+- 不新增真实 `.glb` / `.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/data/lingshanMapData.ts`
+- `docs/lingshan-scene-position-mapping-report.md`
+- `docs/map-3d-development-log.md`
+
+### 新增字段说明
+
+`LingshanPoi` 新增：
+
+- `scenePositionSource?: 'manual' | 'projected' | 'projected_with_offset'`
+- `sceneOffset?: { x: number; y?: number; z: number }`
+
+字段含义：
+
+- `manual`：当前 `scenePosition` 为人工艺术化坐标。
+- `projected`：未来可表示 `scenePosition` 由真实经纬度投影生成。
+- `projected_with_offset`：未来可表示 `scenePosition` 由投影坐标加艺术偏移得到。
+- `sceneOffset`：未来用于记录相对于投影坐标的视觉构图偏移。
+
+### 为什么当前设置为 manual
+
+当前 19 个拥有 `scenePosition` 的 POI 均来自人工艺术化布局，而不是 `geoToScenePosition` 自动投影。
+
+阶段三十二的评估报告显示，部分点与真实投影方向一致，但也有入口区、灵山大佛、五印坛城、三圣殿等点存在明显人工构图偏移。将这些现有坐标标记为 `manual`，可以准确表达当前数据来源，也为后续逐步迁移留出空间。
+
+### 为什么本阶段不改变 scenePosition 数值
+
+当前 `/scenic-3d-map` 已经围绕现有 `scenePosition` 完成 19 个节点展示、三条 3D 路线切换、镜头、山水背景、标签和金线视觉优化。
+
+直接调整或覆盖 `scenePosition` 会改变当前演示效果，并可能引入标签遮挡、路线变形和构图失衡。本阶段只补元数据，不改变任何坐标值。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map` 渲染逻辑。页面仍按原方式读取 `scenePosition`，视觉效果保持不变。
+
+新增字段只是数据层元信息，当前页面不会读取 `scenePositionSource` 或 `sceneOffset`。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实 POI 坐标、Marker、Polyline 或 InfoWindow。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `LingshanPoi` 已新增 `scenePositionSource` 和 `sceneOffset` 可选字段。
+- 检查 19 个已有 `scenePosition` 的 POI 均生成 `scenePositionSource: 'manual'`。
+- 检查没有修改 `LINGSHAN_SCENE_POSITIONS` 中任何坐标数值。
+- 检查没有修改 `displayLocation`、`navLocation`、腾讯 POI 字段或 `bindStatus`。
+- 检查没有修改 `/scenic-3d-map` 渲染逻辑、`/map`、`GuideMapPage.tsx`、`routePlanning.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 后续可新增 `src/data/scenic3d/lingshanSceneLayout.ts`，集中管理 projected 坐标、artistic offset、final scene position、标签偏移和显示层级。
+- 可在不影响当前页面的前提下做一套 projected layout 预览，用于和现有 manual 布局 A/B 对比。
+- 等视觉和空间关系确认后，再考虑将部分 POI 迁移为 `projected_with_offset`。
