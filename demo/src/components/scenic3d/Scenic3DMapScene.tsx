@@ -5,6 +5,7 @@ import { Vector3 } from 'three'
 
 import { scenicCenter } from '../../data/guideData'
 import { lingshanPois } from '../../data/lingshanMapData'
+import { lingshanRouteGeometries } from '../../data/lingshanRouteGeometries'
 import { lingshanAssetMap } from '../../data/scenic3d/lingshanAssetMap'
 import { geoToScenePosition } from '../../lib/scenic3d/geoToScene'
 import PlaceholderLandmark from './PlaceholderLandmark'
@@ -164,6 +165,18 @@ function buildRouteGeometryPoints(routeGeometryPath: Array<{ lat: number; lng: n
   })
 }
 
+function buildRoadNetworkLines() {
+  return lingshanRouteGeometries
+    .map((geometry) => ({
+      id: geometry.id,
+      points: geometry.path.map((point) => {
+        const position = geoToScenePosition(point, { center: scenicCenter })
+        return new Vector3(position.x, 0.095, position.z)
+      }),
+    }))
+    .filter((line) => line.points.length >= 2)
+}
+
 function SceneContent({
   selectedPoiId,
   onSelectPoi,
@@ -177,6 +190,7 @@ function SceneContent({
   const routeSequence = useMemo(() => getRouteSequence(routePoiSequence, layoutMode), [layoutMode, routePoiSequence])
   const routePoiSet = useMemo(() => new Set(routeSequence), [routeSequence])
   const routeGeometryPoints = useMemo(() => buildRouteGeometryPoints(routeGeometryPath), [routeGeometryPath])
+  const roadNetworkLines = useMemo(() => buildRoadNetworkLines(), [])
   const routePoints = useMemo(
     () => routeGeometryPoints ?? buildRoutePoints(routeSequence, layoutMode),
     [layoutMode, routeGeometryPoints, routeSequence]
@@ -206,14 +220,19 @@ function SceneContent({
         <meshBasicMaterial color="#f7f0dc" transparent opacity={0.46} />
       </mesh>
 
-      <mesh rotation={[-Math.PI / 2, 0, -0.18]} position={[-4.25, -0.025, 0.65]} scale={[1.85, 0.78, 1]}>
-        <circleGeometry args={[1.55, 64]} />
-        <meshStandardMaterial color="#adc9c9" roughness={0.34} metalness={0.02} transparent opacity={0.72} />
+      <mesh rotation={[-Math.PI / 2, 0, -0.24]} position={[-5.35, -0.024, 0.8]} scale={[2.7, 1.05, 1]}>
+        <circleGeometry args={[1.72, 96]} />
+        <meshStandardMaterial color="#abc7c8" roughness={0.38} metalness={0.02} transparent opacity={0.58} />
       </mesh>
 
-      <mesh rotation={[-Math.PI / 2, 0, 0.22]} position={[-5.85, -0.02, -2.95]} scale={[2.85, 0.76, 1]}>
-        <circleGeometry args={[1.14, 64]} />
-        <meshStandardMaterial color="#bed4d0" roughness={0.38} metalness={0.02} transparent opacity={0.58} />
+      <mesh rotation={[-Math.PI / 2, 0, 0.18]} position={[-6.75, -0.018, -2.55]} scale={[3.2, 0.86, 1]}>
+        <circleGeometry args={[1.24, 96]} />
+        <meshStandardMaterial color="#c0d5d1" roughness={0.42} metalness={0.02} transparent opacity={0.42} />
+      </mesh>
+
+      <mesh rotation={[-Math.PI / 2, 0, -0.05]} position={[-3.6, -0.017, 3.65]} scale={[1.92, 0.58, 1]}>
+        <circleGeometry args={[1.18, 72]} />
+        <meshStandardMaterial color="#d3dfd7" roughness={0.46} metalness={0.01} transparent opacity={0.32} />
       </mesh>
 
       {[
@@ -227,6 +246,14 @@ function SceneContent({
           <coneGeometry args={[radius, height, 5]} />
           <meshStandardMaterial color={index % 2 === 0 ? '#aebaaa' : '#9fae9e'} roughness={0.94} transparent opacity={0.64} />
         </mesh>
+      ))}
+
+      {roadNetworkLines.map((line) => (
+        <Line key={line.id} points={line.points} color="#9f9a83" lineWidth={1.3} transparent opacity={0.42} dashed={false} />
+      ))}
+
+      {roadNetworkLines.map((line) => (
+        <Line key={`${line.id}-wash`} points={line.points} color="#efe7cf" lineWidth={3.2} transparent opacity={0.18} dashed={false} />
       ))}
 
       <Line points={routePoints} color="#d7c08a" lineWidth={7} dashed={false} />

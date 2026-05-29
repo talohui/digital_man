@@ -3962,3 +3962,89 @@ tmp/
 
 - 按 `docs/lingshan-route-geometry-review.md` 的复核清单逐段记录问题。
 - 对高风险路段先做截图或手机端记录，再决定是否修 `navLocation` 或新增 `hybrid_corrected` routeGeometry。
+
+## 阶段四十二：3D 地图道路网络与水系意象层
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+在 `/scenic-3d-map` 中增加两个视觉层：基于候选 `routeGeometry` 的淡色道路网络层，以及艺术化太湖/水系大色块层，让 3D 地图不只显示 POI 节点和当前路线金线。
+
+### 本次约束
+
+- 只修改 `/scenic-3d-map` 的 3D 场景视觉层和开发记录。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 真实经纬度 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition` 数值。
+- 不修改 `src/data/lingshanRouteGeometries.ts` 的数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 道路网络层数据来源说明
+
+道路网络层从 `lingshanRouteGeometries` 读取全部候选路线几何。每条 `geometry.path` 是腾讯 walking runtime 导出的经纬度点串，场景内通过 `geoToScenePosition(point, { center: scenicCenter })` 投影为 3D 坐标。
+
+三条候选路线全部作为淡色底网显示，当前选中路线仍由现有金色路线层高亮。
+
+### 道路网络为什么仍是 candidate
+
+这些道路来自腾讯 walking runtime 导出，虽然三条路线 `usedFallback=false`，但仍没有经过人工逐段核对。园区内部步道、广场、台阶、建筑入口和水域边界可能与腾讯路网存在局部偏差，因此只能作为 candidate 道路网络视觉层，不等同 verified 园区道路网。
+
+### 水系/太湖意象层说明
+
+本阶段在 projected 场景空间中增加了低饱和淡蓝灰、青灰色的大色块水面，用于表达太湖/水系环境意象。水面放置在不遮挡核心 POI、建筑和路线的位置，作为环境背景层。
+
+### 为什么水面不是精确湖岸线
+
+当前项目没有真实湖岸线 GeoJSON、水系边界数据或人工核验过的水域轮廓。本阶段水面只是艺术化大色块，不代表精确湖岸线，也不用于导航或地理判断。
+
+### 图层顺序说明
+
+当前场景图层顺序为：
+
+1. 地形底盘。
+2. 水系/太湖意象层。
+3. 淡色候选道路网络层。
+4. 当前路线金色高亮线。
+5. POI 节点和核心地标。
+6. 景点标签。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 现在会显示三条候选路线形成的淡色道路底网，并保留当前路线的金色高亮线。页面说明补充了道路网络来源和水面非精确表达的提示。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route、Marker、Polyline、InfoWindow 或 query 参数逻辑。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查 `/scenic-3d-map` 仍能加载。
+- 检查三条路线切换后当前金线仍随路线变化。
+- 检查底层淡色道路网络可见但不抢当前金线。
+- 检查水面作为背景层可见，且没有遮挡核心 POI。
+- 检查页面说明明确道路网络仍需人工复核，水面不是精确湖岸线。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 结合 `docs/lingshan-route-geometry-review.md` 对候选道路网络逐段复核。
+- 对明显穿湖、穿建筑或不贴路的段落生成 `hybrid_corrected` routeGeometry。
+- 后续如获得真实湖岸线或园区水系数据，再替换当前艺术化水面大色块。

@@ -270,6 +270,26 @@ function Scenic3DMapPage() {
               routeGeometry 来自腾讯 walking runtime 导出，比 POI 中心连线更接近真实步行路径，但仍不是最终 verified 园区路线。
             </p>
           ) : null}
+          <p
+            style={{
+              margin: '6px 0 0',
+              color: '#607166',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            底层淡色线为候选游览道路网络，来自腾讯 walking 路线导出，仍需人工复核。
+          </p>
+          <p
+            style={{
+              margin: '6px 0 0',
+              color: '#607166',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            水面为艺术化太湖/水系意象，不代表精确湖岸线。
+          </p>
         </div>
 
         <div
