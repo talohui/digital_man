@@ -787,8 +787,10 @@ function GuideMapPage() {
             right: 20,
             width: 328,
             maxWidth: 'calc(100vw - 40px)',
+            maxHeight: showEnhancedMapPanelBody ? 'calc(100vh - 160px)' : undefined,
             padding: '14px 16px',
             color: '#26443a',
+            overflow: 'hidden',
             pointerEvents: 'auto'
           }}
         >
@@ -821,7 +823,14 @@ function GuideMapPage() {
           </div>
 
           {showEnhancedMapPanelBody ? (
-            <>
+            <div
+              style={{
+                maxHeight: 'calc(100vh - 252px)',
+                overflowY: 'auto',
+                paddingRight: 4,
+                overscrollBehavior: 'contain'
+              }}
+            >
               <p style={{ margin: '0 0 12px', color: '#4b635c', fontSize: 12, lineHeight: 1.6 }}>
                 基于腾讯地图底图显示真实 POI、路线和导航兜底；沉浸式体验可切换到 3D 导览地图。
               </p>
@@ -1001,35 +1010,19 @@ function GuideMapPage() {
                   </button>
                 ) : null}
 
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(13, 148, 136, 0.1)' }}>
-                  <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
-                    <span>定位模式：{getLocationModeLabel(locationMode)}</span>
-                    <span>定位状态：{getLocationStatusLabel(locationStatus)}</span>
-                    {userLocation ? (
-                      <>
-                        <span>
-                          坐标：{userLocation.lat.toFixed(6)},{userLocation.lng.toFixed(6)}
-                        </span>
-                        <span>精度：{Math.round(userLocation.accuracyMeters)} 米</span>
-                        <span>更新时间：{formatLocationTime(userLocation.timestamp)}</span>
-                        <span>
-                          {userLocation.source === 'mock'
-                            ? '当前为模拟定位，不代表真实 GPS 位置。'
-                            : '当前位置来自浏览器定位。'}
-                        </span>
-                      </>
-                    ) : null}
-                    {locationError ? <span style={{ color: '#9a3412' }}>错误信息：{locationError.message}</span> : null}
-                    {isUserFarFromScenicArea ? (
-                      <span style={{ color: '#9a5a08' }}>你当前可能不在灵山胜境景区内，可使用模拟定位体验导览流程。</span>
-                    ) : null}
-                    <span>本阶段仅显示当前位置，尚未启用路线进度、偏航判断和重规划。</span>
-                    {userLocation ? <span>精度圆：浏览器支持圆形覆盖物时会显示，否则仅展示精度数值。</span> : null}
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(37, 99, 235, 0.1)' }}>
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    border: '1px solid rgba(37, 99, 235, 0.12)',
+                    borderRadius: 12,
+                    background: 'rgba(239, 246, 255, 0.72)'
+                  }}
+                >
                   <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线进度预估</strong>
+                  <p style={{ margin: '0 0 6px', color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                    基于候选 routeGeometry 和当前位置估算，仅用于导览参考。
+                  </p>
                   {!userLocation ? (
                     <p style={{ margin: 0, color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
                       开启真实定位或模拟定位后查看路线进度。
@@ -1060,6 +1053,33 @@ function GuideMapPage() {
                     </p>
                   )}
                 </div>
+
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(13, 148, 136, 0.1)' }}>
+                  <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
+                    <span>定位模式：{getLocationModeLabel(locationMode)}</span>
+                    <span>定位状态：{getLocationStatusLabel(locationStatus)}</span>
+                    {userLocation ? (
+                      <>
+                        <span>
+                          坐标：{userLocation.lat.toFixed(6)},{userLocation.lng.toFixed(6)}
+                        </span>
+                        <span>精度：{Math.round(userLocation.accuracyMeters)} 米</span>
+                        <span>更新时间：{formatLocationTime(userLocation.timestamp)}</span>
+                        <span>
+                          {userLocation.source === 'mock'
+                            ? '当前为模拟定位，不代表真实 GPS 位置。'
+                            : '当前位置来自浏览器定位。'}
+                        </span>
+                      </>
+                    ) : null}
+                    {locationError ? <span style={{ color: '#9a3412' }}>错误信息：{locationError.message}</span> : null}
+                    {isUserFarFromScenicArea ? (
+                      <span style={{ color: '#9a5a08' }}>你当前可能不在灵山胜境景区内，可使用模拟定位体验导览流程。</span>
+                    ) : null}
+                    <span>本阶段仅显示当前位置，尚未启用偏航判断和重规划。</span>
+                    {userLocation ? <span>精度圆：浏览器支持圆形覆盖物时会显示，否则仅展示精度数值。</span> : null}
+                  </div>
+                </div>
               </div>
 
               {isMapDebugMode ? (
@@ -1067,7 +1087,7 @@ function GuideMapPage() {
                   调试模式：可查看诊断信息；访问 <code>/map?sceneRoute=xxx&amp;debugSceneRoute=1</code> 可打开骨架线和路线 path 导出能力。
                 </p>
               ) : null}
-            </>
+            </div>
           ) : null}
         </section>
 
