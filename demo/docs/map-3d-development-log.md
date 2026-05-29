@@ -4236,3 +4236,76 @@ tmp/
 
 - 阶段 45 可进入实时定位基础能力：`navigator.geolocation`、用户位置 Marker、GPS 精度圆和手机端局域网测试。
 - 后续再增加路线进度、下一站距离、偏航判断和重规划到下一站。
+
+## 阶段四十五：腾讯地图 GLModelOverlay 方案调研
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+生成腾讯地图 GLModelOverlay 与 3D 模型覆盖物方案调研文档，判断该能力对当前 Web demo、未来 Android APK 和灵山 3D 模型资产路线的意义。
+
+### 本次约束
+
+- 只新增/更新文档。
+- 不修改功能代码。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `Scenic3DMapScene.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `routeGeometry` 数据。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `docs/tencent-map-glmodeloverlay-research.md`
+- `docs/map-3d-development-log.md`
+
+### GLModelOverlay 能力定位
+
+GLModelOverlay 属于腾讯地图 Android Map SDK 方向，面向 Android 原生地图，用于在原生腾讯地图上叠加 3D 模型覆盖物。它适合把 glTF / GLB 类核心模型绑定到真实经纬度位置，例如灵山大佛、九龙灌浴、梵宫和五印坛城。
+
+本阶段尝试联网读取官方文档但未能完整获取页面内容，因此文档中明确：当前分析基于官方文档入口、Android SDK 能力命名和方案判断，具体 API 参数、模型格式限制、缩放、旋转、生命周期等细节需后续 Android 开发时重新核对官方文档。
+
+### 它与当前 Web 方案的区别
+
+当前 Web 方案是 React + Vite + Tencent JS API GL + Three.js / React Three Fiber：
+
+- `/scenic-3d-map` 是独立 Web 3D 场景。
+- `/map` 是 Web 腾讯地图真实导览增强页。
+
+GLModelOverlay 是 Android 原生 Map SDK 能力，不能直接在当前 React Web 页面中调用。Web 端继续保留 `/scenic-3d-map` + `/map` 双模式更稳妥。
+
+### 对 Android APK 的意义
+
+如果后续项目进入 Android APK 阶段，GLModelOverlay 很有价值：
+
+- 真实底图、道路、水体、建筑轮廓由腾讯地图负责。
+- 核心 glTF 模型可作为覆盖物贴到真实经纬度位置。
+- Android 定位和导航能力可与模型覆盖物结合。
+- 现有 `poiId`、`navLocation`、`guideRoutes`、`routeGeometry` 和模型资产规范可复用。
+
+### 为什么本阶段只做文档、不改代码
+
+GLModelOverlay 不属于当前 Web React 运行环境。直接修改 Web 代码无法调用 Android SDK 能力，也容易混淆 Web 独立 3D 地图、Web 腾讯地图增强模式和 Android 原生地图增强三条路线。因此本阶段只做调研文档，明确边界和后续 Android 验证任务。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route、Marker、Polyline、InfoWindow、图层开关或调试导出能力。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、routeGeometry 金线、道路网络层、水系意象层、POI 节点或模型资产。
+
+### 下一步建议
+
+- 后续单独做“Android GLModelOverlay 官方 API 参数核对”，读取并记录官方 API、模型格式、经纬度绑定、缩放、旋转、生命周期和性能限制。
+- 如果确定做 Android APK，再做最小 Android demo：加载一个简单 glTF 模型并绑定到灵山景区某个经纬度点。
+- Web 端继续推进 `/scenic-3d-map` 和 `/map` 双模式，不把 Android SDK 能力误用为 JS API 能力。
