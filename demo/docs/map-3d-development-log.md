@@ -1871,3 +1871,103 @@ function focusQueryPoiSpot(map, infoWindow, spot) {
 - 手动验证 `/map?poi=jiulong_guanyu` 和 `/map?poi=giant_buddha`，确认最终 zoom 为景点级别。
 - 如后续发现局部仍不够清晰，可在验证后将 `QUERY_POI_FOCUS_ZOOM` 从 `17` 调整为 `18`。
 - 继续保持 `/map` 普通入口的全路线视野和真实导航职责。
+
+## 2026-05-29 阶段二十四：sceneRoute 到真实 guideRoute 映射
+
+### 本次目标
+
+让 `/map?sceneRoute=classic_3d_scene` 能够映射到真实腾讯地图导览路线 `historical_culture`，打通 3D 艺术路线到真实地图路线的映射闭环。
+
+### 本次约束
+
+- 只处理 `/map?sceneRoute=xxx` 到现有 `guideRoute` 的映射。
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `src/data/lingshanMapData.ts`
+- `docs/map-3d-development-log.md`
+
+### 新增 lingshanSceneRouteToGuideRouteMap 说明
+
+新增映射：
+
+```ts
+export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
+  classic_3d_scene: 'historical_culture'
+}
+```
+
+该映射用于把艺术化 3D 导览路线映射到腾讯地图真实导览路线。key 是 `lingshanSceneRoutes` 中的 sceneRoute id，value 是 `guideRoutes` 中的真实导览路线 id。
+
+### classic_3d_scene 如何映射到 historical_culture
+
+当 URL 为：
+
+```text
+/map?sceneRoute=classic_3d_scene
+```
+
+`GuideMapPage` 会读取 `sceneRoute`，从 `lingshanSceneRouteToGuideRouteMap` 找到 `historical_culture`，再确认该 route id 存在于 `guideRoutes` 中。确认后设置 `activeRouteId` 为 `historical_culture`。
+
+### sceneRoute 参数处理逻辑
+
+`GuideMapPage` 现在会：
+
+- 读取 `sceneRoute` 查询参数。
+- 从 `lingshanSceneRouteToGuideRouteMap` 查找真实 `guideRouteId`。
+- 如果找到有效 `guideRoute`，设置 `activeRouteId`。
+- 不设置 `selectedSpotId` 为某个具体点。
+- 让地图按普通路线逻辑绘制并显示路线全貌。
+- 如果映射不存在或 route id 无效，不报错，保持默认路线行为。
+
+### poi 与 sceneRoute 同时存在时为什么 poi 优先
+
+如果 URL 同时包含：
+
+```text
+/map?poi=giant_buddha&sceneRoute=classic_3d_scene
+```
+
+则 `poi` 优先。原因是 `poi` 表示用户明确希望聚焦某个真实景点；`sceneRoute` 只表示希望进入某条真实路线。为了保证从 3D 地图点击具体景点后的闭环体验，具体 POI 聚焦优先于路线全貌。
+
+### 对 /map 的影响
+
+`/map?sceneRoute=classic_3d_scene` 现在会切换到 `historical_culture` 并显示路线全貌。
+
+普通 `/map` 仍显示默认路线。`/map?poi=xxx` 仍按阶段二十二、二十三逻辑聚焦并缩放到对应景点。
+
+本阶段没有修改腾讯地图路线规划逻辑，没有修改 `buildWalkingRoute`，没有修改预设路线开关逻辑，没有修改 Marker、Polyline、InfoWindow 或地图初始化参数。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。它已有的 `/map?sceneRoute=classic_3d_scene` 跳转入口现在可以被 `/map` 映射到真实导览路线。
+
+### 验证方式
+
+- 检查 `lingshanSceneRouteToGuideRouteMap` 映射存在。
+- 检查 `GuideMapPage.tsx` 读取 `sceneRoute` 并设置有效 `activeRouteId`。
+- 检查同时存在 `poi` 和 `sceneRoute` 时 `poi` 优先。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动验证 `/map?sceneRoute=classic_3d_scene` 是否显示历史文化路线全貌。
+- 手动验证 `/map?poi=jiulong_guanyu&sceneRoute=classic_3d_scene` 是否仍聚焦九龙灌浴。
+- 后续可继续扩展更多 `sceneRoute -> guideRoute` 映射，并补充场景路线与真实路线的说明文案。

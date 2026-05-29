@@ -14,7 +14,11 @@ import {
   type GuideSpot,
   type LatLngPoint
 } from '../data/guideData'
-import { getLingshanPresetRoutePath, USE_LINGSHAN_PRESET_ROUTE_PATHS } from '../data/lingshanMapData'
+import {
+  getLingshanPresetRoutePath,
+  lingshanSceneRouteToGuideRouteMap,
+  USE_LINGSHAN_PRESET_ROUTE_PATHS
+} from '../data/lingshanMapData'
 import { loadTMap } from '../lib/loadTMap'
 import { buildPlannedRouteFromPath, buildWalkingRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
@@ -62,6 +66,7 @@ function GuideMapPage() {
   const routeLayerRef = useRef<any>(null)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
+  const appliedSceneRouteIdRef = useRef<string | null>(null)
 
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
@@ -79,6 +84,10 @@ function GuideMapPage() {
   const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
   const queryPoiRoute = queryPoiSpot
     ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
+    : undefined
+  const querySceneGuideRouteId = querySceneRouteId ? lingshanSceneRouteToGuideRouteMap[querySceneRouteId] : undefined
+  const querySceneGuideRoute = querySceneGuideRouteId
+    ? guideRoutes.find((item) => item.id === querySceneGuideRouteId)
     : undefined
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
@@ -111,12 +120,20 @@ function GuideMapPage() {
   }, [activeRouteId, queryPoiRoute, queryPoiSpot, selectedSpotId, setActiveRouteId, setSelectedSpotId])
 
   useEffect(() => {
-    if (!querySceneRouteId) {
+    if (!querySceneRouteId || queryPoiSpot) {
       return
     }
 
-    console.debug('[GuideMapPage] sceneRoute query recognized but not mapped yet:', querySceneRouteId)
-  }, [querySceneRouteId])
+    if (appliedSceneRouteIdRef.current === querySceneRouteId) {
+      return
+    }
+
+    if (querySceneGuideRoute && querySceneGuideRoute.id !== activeRouteId) {
+      setActiveRouteId(querySceneGuideRoute.id)
+    }
+
+    appliedSceneRouteIdRef.current = querySceneRouteId
+  }, [activeRouteId, queryPoiSpot, querySceneGuideRoute, querySceneRouteId, setActiveRouteId])
 
   useEffect(() => {
     if (!route.stops.some((stop) => stop.spotId === selectedSpotId)) {

@@ -278,5 +278,10 @@ export const lingshanSceneRoutes: LingshanSceneRoute[] = [
   }
 ]
 
+// 将艺术化 3D 导览路线映射到腾讯地图真实导览路线。
+export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
+  classic_3d_scene: 'historical_culture'
+}
+
 // TODO: 后续需要根据灵山胜境真实边界修正。
 export const lingshanBoundary: LatLngPoint[] = []
