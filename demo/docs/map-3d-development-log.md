@@ -2402,3 +2402,90 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 在浏览器中手动验证 `/scenic-3d-map` 的初始画面，确认 4 个核心地标、金色路线和标签都在可读范围内。
 - 下一阶段可考虑增加轻量 hover 反馈或点击镜头推进，但仍不建议改动 `/map` 的真实导航职责。
+
+## 2026-05-29 阶段二十八：核心游线 3D 空间表达规划生成
+
+### 本次目标
+
+基于现有 `guideRoutes`、`guideSpots`、`lingshanPois` 和 `lingshanSceneRoutes`，生成一份核心游线驱动的 3D 景区地图空间规划文档，用于指导后续 `scenePosition` 调整、低模场景布局、Blender/3D 重建资产制作。
+
+### 本次约束
+
+- 只生成/更新规划文档和开发记录。
+- 不修改功能代码。
+- 不修改 `/scenic-3d-map` 代码。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 POI 坐标或 `scenePosition`。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `docs/lingshan-3d-core-route-spatial-plan.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么从完整景区收敛到核心游线
+
+当前 demo 的目标不是完整景区数字孪生，而是能向用户清楚表达核心游线、核心景点和真实地图兜底能力。完整景区重建会带来边界、路网、模型体积、性能、资产制作和导航准确性风险。
+
+基于现有三条真实路线和一条 3D 原型线，核心游线已经覆盖：
+
+- 南门/入口区
+- 灵山大照壁/胜境广场
+- 九龙灌浴
+- 灵山大佛
+- 梵宫
+- 五印坛城
+- 祥符禅寺
+- 出口/回程节点
+
+这些点足以支撑一个完整的艺术化 3D 导览地图主体验。
+
+### 山体/水系/道路/广场的真实空间表达原则
+
+文档明确：
+
+- 山体作为背景意象，位于真实方位相近的场景边缘，不遮挡核心建筑和路线。
+- 太湖/水系用大色块表达，参考真实水域方向，不追求精确岸线。
+- 道路使用金线/墨线表达主游线，优先表达路线顺序和导览节奏，不还原所有小路。
+- 广场使用浅色地台、圆盘、平台表达，用于承接核心建筑和游客停留点。
+- `scenePosition` 是艺术化 3D 坐标，不是经纬度，但应保持真实相对方向和路线顺序。
+- `displayLocation` 和 `navLocation` 继续服务真实地图，`scenePosition` 服务 3D 展示，`poiId` 是两者连接桥梁。
+
+### 核心建筑 3D 重建建议
+
+文档建议：
+
+- `giant_buddha`、`jiulong_guanyu`、`fan_gong`、`wuyin_tancheng` 作为第一批 core_3d 建模/重建候选。
+- `xiangfu_temple`、`lingshan_wall`、`shengjing_square`、`foqian_square`、`fan_gong_square` 等作为 simple_3d 或低模环境资产。
+- `south_gate` 和 `exit` 第一阶段用入口/出口符号、标牌或 Marker 表达即可。
+- 服务设施暂时 marker_only 或极简符号，不进入第一批建模。
+
+### 为什么本阶段只做规划、不改代码
+
+后续是否新增更多 `scenePosition`、是否拆出 `src/data/scenic3d/lingshanSceneLayout.ts`、哪些建筑进入 Blender 资产制作，都需要先明确空间范围和表达边界。本阶段先规划，避免直接修改代码时把完整景区重建、核心游线、真实导航和艺术化布局混在一起。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。文档为后续核心游线驱动的 3D 场景布局提供依据，建议下一步补充 8-10 个核心 POI 的艺术化 `scenePosition`。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx` 或腾讯地图路线规划逻辑。真实地图导航页继续承担 POI、真实路线和导航兜底职责。
+
+### 验证方式
+
+- 检查 `docs/lingshan-3d-core-route-spatial-plan.md` 已生成。
+- 检查文档包含规划目标、核心点筛选、推荐场景范围、真实空间关系原则、山水路广场规范、核心建筑建模建议、scenePosition 调整建议、后续阶段、风险边界和结论。
+- 检查本阶段未修改功能代码。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### 下一步建议
+
+- 阶段二十九可为核心 8-10 个 POI 补充 `scenePosition`，但仍不修改真实经纬度。
+- 后续可考虑新增 `src/data/scenic3d/lingshanSceneLayout.ts`，把 3D 展示布局从真实 POI 数据中分离出来。
