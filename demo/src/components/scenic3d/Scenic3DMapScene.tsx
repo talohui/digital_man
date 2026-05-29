@@ -10,6 +10,7 @@ import PlaceholderLandmark from './PlaceholderLandmark'
 type Scenic3DMapSceneProps = {
   selectedPoiId?: string
   onSelectPoi?: (poiId: string) => void
+  routePoiSequence?: string[]
 }
 
 type LandmarkNode = {
@@ -45,6 +46,8 @@ const fallbackName: Record<string, string> = {
   wuyin_tancheng: '五印坛城',
 }
 
+const defaultRoutePoiSequence = ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng']
+
 function getPoiName(poiId: string) {
   return lingshanPois.find((poi) => poi.id === poiId)?.name ?? fallbackName[poiId] ?? poiId
 }
@@ -70,29 +73,39 @@ function buildLandmarks(): LandmarkNode[] {
     }))
 }
 
-function SceneContent({ selectedPoiId, onSelectPoi }: Scenic3DMapSceneProps) {
+function getRouteSequence(routePoiSequence?: string[]) {
+  const validSequence = routePoiSequence?.filter((poiId) => lingshanPois.some((poi) => poi.id === poiId && poi.scenePosition))
+
+  return validSequence && validSequence.length >= 2 ? validSequence : defaultRoutePoiSequence
+}
+
+function buildRoutePoints(routePoiSequence?: string[]) {
+  const sequence = getRouteSequence(routePoiSequence)
+  const points: Vector3[] = []
+
+  sequence.forEach((poiId, index) => {
+    const [x, , z] = getScenePosition(poiId)
+
+    if (index === 0) {
+      points.push(new Vector3(x - 1.1, 0.08, z + 0.45))
+    }
+
+    points.push(new Vector3(x, 0.12, z))
+
+    const nextPoiId = sequence[index + 1]
+    if (nextPoiId) {
+      const [nextX, , nextZ] = getScenePosition(nextPoiId)
+      points.push(new Vector3((x + nextX) / 2, 0.13, (z + nextZ) / 2))
+    }
+  })
+
+  return points
+}
+
+function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(), [])
   const activePoiId = selectedPoiId || 'giant_buddha'
-  const routePoints = useMemo(
-    () => {
-      const jiulong = getScenePosition('jiulong_guanyu')
-      const buddha = getScenePosition('giant_buddha')
-      const tancheng = getScenePosition('wuyin_tancheng')
-      const fanGong = getScenePosition('fan_gong')
-
-      return [
-        [-4.2, 0.08, 2.65],
-        [jiulong[0], 0.12, jiulong[2]],
-        [-1.25, 0.12, 0.45],
-        [buddha[0], 0.12, buddha[2]],
-        [-1.05, 0.12, -2.55],
-        [tancheng[0], 0.12, tancheng[2]],
-        [1.2, 0.12, -2.35],
-        [fanGong[0], 0.12, fanGong[2]],
-      ].map((point) => new Vector3(point[0], point[1], point[2]))
-    },
-    []
-  )
+  const routePoints = useMemo(() => buildRoutePoints(routePoiSequence), [routePoiSequence])
 
   return (
     <>
@@ -185,10 +198,10 @@ function SceneContent({ selectedPoiId, onSelectPoi }: Scenic3DMapSceneProps) {
   )
 }
 
-function Scenic3DMapScene({ selectedPoiId, onSelectPoi }: Scenic3DMapSceneProps) {
+function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   return (
     <Canvas camera={{ position: [6.4, 5.6, 7.6], fov: 43 }}>
-      <SceneContent selectedPoiId={selectedPoiId} onSelectPoi={onSelectPoi} />
+      <SceneContent selectedPoiId={selectedPoiId} onSelectPoi={onSelectPoi} routePoiSequence={routePoiSequence} />
     </Canvas>
   )
 }

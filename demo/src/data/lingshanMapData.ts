@@ -66,6 +66,13 @@ export type LingshanRoutePath = {
   note?: string
 }
 
+export type LingshanSceneRoute = {
+  id: string
+  name: string
+  description: string
+  poiSequence: string[]
+}
+
 export const USE_LINGSHAN_PRESET_ROUTE_PATHS = false
 
 const POI_CATEGORY_KEYWORDS: Array<{
@@ -261,6 +268,15 @@ export const lingshanPresetRoutePaths: LingshanRoutePath[] = guideRoutes.map((ro
 export function getLingshanPresetRoutePath(routeId: string): LingshanRoutePath | undefined {
   return lingshanPresetRoutePaths.find((routePath) => routePath.routeId === routeId)
 }
+
+export const lingshanSceneRoutes: LingshanSceneRoute[] = [
+  {
+    id: 'classic_3d_scene',
+    name: '灵山经典 3D 导览线',
+    description: '以灵山大佛、九龙灌浴、梵宫、五印坛城为核心的艺术化 3D 导览路线。',
+    poiSequence: ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng']
+  }
+]
 
 // TODO: 后续需要根据灵山胜境真实边界修正。
 export const lingshanBoundary: LatLngPoint[] = []

@@ -1380,3 +1380,99 @@ scenePosition: { x: number; y: number; z: number }
 - 手动打开 `/scenic-3d-map`，确认 4 个核心 POI 的空间分布符合艺术化导览预期。
 - 后续可将艺术化路线 Ribbon 的控制点也抽到数据层。
 - 后续真实 `.glb` 接入时，通过 `poiId` 同时关联 `scenePosition`、模型 URL、缩放和旋转。
+
+## 2026-05-29 阶段十九：3D 导览路线数据化
+
+### 本次目标
+
+为 `/scenic-3d-map` 增加明确的 3D 导览路线数据结构，让 3D 场景中的金色路线曲线和页面路线站点列表都由同一份 `poiSequence` 驱动。
+
+### 本次约束
+
+- 只处理 `/scenic-3d-map` 的 3D 路线数据化与展示。
+- 不替换 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/data/lingshanMapData.ts`
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### LingshanSceneRoute 说明
+
+新增类型：
+
+```ts
+export type LingshanSceneRoute = {
+  id: string
+  name: string
+  description: string
+  poiSequence: string[]
+}
+```
+
+新增 `lingshanSceneRoutes`，当前包含一条 3D 原型路线：
+
+- `id`: `classic_3d_scene`
+- `name`: `灵山经典 3D 导览线`
+- `description`: `以灵山大佛、九龙灌浴、梵宫、五印坛城为核心的艺术化 3D 导览路线。`
+- `poiSequence`: `['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng']`
+
+`poiSequence` 使用 `lingshanPois.id`，用于连接 3D 路线、景点数据和场景坐标。
+
+### poiSequence 如何连接 lingshanPois.scenePosition
+
+`Scenic3DMapScene` 新增 `routePoiSequence?: string[]`。组件会根据 `routePoiSequence` 查找 `lingshanPois` 中对应 POI 的 `scenePosition`，再生成金色 3D 路线曲线。
+
+如果 `routePoiSequence` 为空，或者有效点位不足 2 个，则回退到默认核心点顺序：
+
+- `jiulong_guanyu`
+- `giant_buddha`
+- `fan_gong`
+- `wuyin_tancheng`
+
+这样 3D 路线、场景地标和页面站点列表都通过 `poiId` 连接到同一批 POI 数据。
+
+### 为什么 3D 路线不等于真实步行路线
+
+`lingshanSceneRoutes` 是艺术化 3D 导览路线，用于控制全屏 3D 场景中的视觉叙事顺序和路线 Ribbon，不直接代表真实园区步行道路。
+
+真实路线规划、导航终点、POI 校准和兜底逻辑仍属于 `/map` 的腾讯地图导览体系。后续可以再把 `lingshanSceneRoutes` 与 `guideRoutes`、真实园区步道折线或人工导航点建立关联。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 现在读取 `lingshanSceneRoutes[0]` 作为当前 3D 导览路线，并将 `currentRoute.poiSequence` 传给 `Scenic3DMapScene`。
+
+页面左侧浮层显示当前路线名称、路线说明和路线站点列表。点击站点会更新 `selectedPoiId`，并高亮场景中的对应模型。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`，没有修改 `GuideMapPage.tsx`，没有修改腾讯地图路线规划逻辑，也没有影响 Marker、Polyline、InfoWindow、路线切换或腾讯地图初始化。
+
+### 验证方式
+
+- 检查 `lingshanMapData.ts` 已导出 `LingshanSceneRoute` 和 `lingshanSceneRoutes`。
+- 检查 `Scenic3DMapScene` 通过 `routePoiSequence` 生成路线。
+- 检查 `/scenic-3d-map` 页面显示路线名称、说明和站点列表。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，检查站点列表顺序、路线曲线和模型高亮是否一致。
+- 后续可为 `LingshanSceneRoute` 增加路线主题、颜色、控制点或停留讲解文案。
+- 后续可将 3D 艺术路线与真实 `guideRoutes` 或园区步道折线建立映射，但不要让它替代腾讯地图真实导航。

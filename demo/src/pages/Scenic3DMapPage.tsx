@@ -2,9 +2,14 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Scenic3DMapScene from '../components/scenic3d/Scenic3DMapScene'
-import { lingshanPois } from '../data/lingshanMapData'
+import { lingshanPois, lingshanSceneRoutes } from '../data/lingshanMapData'
 
-const corePoiIds = ['giant_buddha', 'jiulong_guanyu', 'fan_gong', 'wuyin_tancheng']
+const fallbackRoute = {
+  id: 'fallback_3d_scene',
+  name: '灵山经典 3D 导览线',
+  description: '以灵山大佛、九龙灌浴、梵宫、五印坛城为核心的艺术化 3D 导览路线。',
+  poiSequence: ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng'],
+}
 
 const fallbackPoiMeta: Record<string, { name: string; intro: string }> = {
   giant_buddha: {
@@ -27,22 +32,23 @@ const fallbackPoiMeta: Record<string, { name: string; intro: string }> = {
 
 function Scenic3DMapPage() {
   const navigate = useNavigate()
-  const [selectedPoiId, setSelectedPoiId] = useState(corePoiIds[0])
-  const corePois = useMemo(
+  const currentRoute = lingshanSceneRoutes[0] ?? fallbackRoute
+  const [selectedPoiId, setSelectedPoiId] = useState(currentRoute.poiSequence[0])
+  const routePois = useMemo(
     () =>
-      corePoiIds.map((poiId) => {
+      currentRoute.poiSequence.map((poiId) => {
         const poi = lingshanPois.find((item) => item.id === poiId)
         const fallback = fallbackPoiMeta[poiId]
 
         return {
           poiId,
-          name: poi?.name ?? fallback.name,
-          intro: poi?.intro ?? fallback.intro,
+          name: poi?.name ?? fallback?.name ?? poiId,
+          intro: poi?.intro ?? fallback?.intro ?? '当前为 3D 艺术化路线站点占位。',
         }
       }),
-    []
+    [currentRoute.poiSequence]
   )
-  const selectedPoi = corePois.find((poi) => poi.poiId === selectedPoiId) ?? corePois[0]
+  const selectedPoi = routePois.find((poi) => poi.poiId === selectedPoiId) ?? routePois[0]
 
   return (
     <main
@@ -60,7 +66,11 @@ function Scenic3DMapPage() {
           inset: 0,
         }}
       >
-        <Scenic3DMapScene selectedPoiId={selectedPoiId} onSelectPoi={setSelectedPoiId} />
+        <Scenic3DMapScene
+          selectedPoiId={selectedPoiId}
+          onSelectPoi={setSelectedPoiId}
+          routePoiSequence={currentRoute.poiSequence}
+        />
       </div>
 
       <section
@@ -101,12 +111,41 @@ function Scenic3DMapPage() {
 
         <div
           style={{
+            marginBottom: 14,
+            padding: 12,
+            borderRadius: 10,
+            background: 'rgba(255, 255, 255, 0.54)',
+          }}
+        >
+          <strong
+            style={{
+              display: 'block',
+              marginBottom: 6,
+              fontSize: 16,
+            }}
+          >
+            {currentRoute.name}
+          </strong>
+          <p
+            style={{
+              margin: 0,
+              color: '#5f716b',
+              fontSize: 13,
+              lineHeight: 1.55,
+            }}
+          >
+            {currentRoute.description}
+          </p>
+        </div>
+
+        <div
+          style={{
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
           }}
         >
-          {corePois.map((poi) => {
+          {routePois.map((poi, index) => {
             const active = poi.poiId === selectedPoiId
 
             return (
@@ -125,6 +164,9 @@ function Scenic3DMapPage() {
                   boxShadow: active ? '0 10px 24px rgba(171, 112, 24, 0.14)' : 'none',
                 }}
               >
+                <span style={{ display: 'block', marginBottom: 5, color: active ? '#9a6518' : '#71827c', fontSize: 12, fontWeight: 700 }}>
+                  第 {index + 1} 站
+                </span>
                 <strong style={{ display: 'block', marginBottom: 4, fontSize: 16 }}>
                   {poi.name}
                 </strong>
@@ -182,7 +224,7 @@ function Scenic3DMapPage() {
             lineHeight: 1.6,
           }}
         >
-          当前为艺术化 3D 导览原型，真实导航仍以腾讯地图 POI 与 navLocation 为准。
+          当前 3D 路线是艺术化路线，不等同于真实步行导航；真实导航仍以腾讯地图 POI 与 navLocation 为准。
         </p>
         <button
           type="button"
