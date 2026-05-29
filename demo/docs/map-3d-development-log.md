@@ -1579,3 +1579,99 @@ export type LingshanSceneRoute = {
 - 下一阶段可让 `/map` 读取 `poi` 参数，初始化 `selectedSpotId` 并聚焦对应 Marker/InfoWindow。
 - 再下一步可让 `/map` 读取 `sceneRoute` 参数，并映射到真实 `guideRoutes` 或园区路线。
 - 继续保持 3D 艺术路线和真实腾讯地图导航的职责边界。
+
+## 2026-05-29 阶段二十一：真实地图 poi 查询参数聚焦
+
+### 本次目标
+
+让 `/map` 读取 `/scenic-3d-map` 传入的查询参数，支持 `/map?poi=<spotId>` 自动选中并聚焦对应景点，打通 3D 艺术地图到真实腾讯地图的 POI 聚焦闭环。
+
+### 本次约束
+
+- 修改 `GuideMapPage.tsx` 以读取查询参数。
+- 支持 `/map?poi=<spotId>` 自动选中并聚焦景点。
+- 安全识别 `/map?sceneRoute=<sceneRouteId>`，但不做复杂路线映射。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### /map?poi=xxx 处理逻辑
+
+`GuideMapPage.tsx` 现在通过 `useSearchParams` 读取 `poi` 参数：
+
+```text
+/map?poi=giant_buddha
+```
+
+处理逻辑：
+
+- 如果 `poi` 存在，并且能在 `guideSpots` 中找到对应景点：
+  - 设置 `selectedSpotId` 为该 POI。
+  - 如果当前路线不包含该 POI，则切换到第一个包含该 POI 的现有 `guideRoute`。
+  - 等地图对象和 `InfoWindow` 就绪后，复用现有 `focusSpot` 聚焦该点。
+- 如果 `poi` 不存在或找不到对应景点：
+  - 不报错。
+  - 保持当前默认景点和默认路线行为。
+
+该逻辑只处理入口参数和聚焦，不改变路线规划算法。
+
+### /map?sceneRoute=xxx 本阶段处理策略
+
+`GuideMapPage.tsx` 现在会读取 `sceneRoute` 参数：
+
+```text
+/map?sceneRoute=classic_3d_scene
+```
+
+本阶段只通过 `console.debug` 安全识别该参数，说明已经收到但暂不映射到 `guideRoutes`。如果 `sceneRoute` 找不到或没有后续映射，也不会报错。
+
+本阶段不会因为 `sceneRoute` 修改当前 `activeRouteId`。
+
+### 为什么本阶段不做 sceneRoute 到 guideRoutes 的映射
+
+`sceneRoute` 是艺术化 3D 导览路线，`guideRoutes` 是真实地图导览路线。二者不一定一一对应，直接映射会涉及路线语义、POI 覆盖关系、路线优先级和后续真实路线数据设计。
+
+本阶段先打通最小闭环：从 3D 地图传 POI 到真实地图并聚焦。`sceneRoute -> guideRoute` 映射留到后续独立阶段处理，避免影响 `/map` 当前真实导览主流程。
+
+### 对 /map 的影响
+
+`/map` 新增查询参数读取能力：
+
+- `/map?poi=xxx` 可聚焦有效景点。
+- `/map?sceneRoute=xxx` 可被安全识别但暂不映射。
+
+本阶段没有修改腾讯地图路线规划逻辑，没有修改 `buildWalkingRoute`，没有修改预设路线开关逻辑，没有修改 Marker 点击跳转逻辑，没有修改 InfoWindow 内容，也没有修改地图初始化参数。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。它已有的 `/map?poi=...` 与 `/map?sceneRoute=...` 跳转入口现在可以被 `/map` 读取，其中 `poi` 已形成聚焦闭环。
+
+### 验证方式
+
+- 检查 `GuideMapPage.tsx` 使用 `useSearchParams` 读取 `poi` 和 `sceneRoute`。
+- 检查 `/map?poi=<spotId>` 有效时会设置 `selectedSpotId` 并在地图 ready 后调用 `focusSpot`。
+- 检查 `/map?sceneRoute=<sceneRouteId>` 只安全识别，不改变当前路线。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，点击“查看该景点真实地图”，确认跳转到 `/map?poi=<selectedPoiId>` 后地图聚焦对应景点。
+- 下一阶段可以设计 `sceneRoute -> guideRoute` 映射表，让 `/map?sceneRoute=classic_3d_scene` 切换到合适的真实导览路线。
+- 继续保持 3D 艺术路线和腾讯地图真实导航的职责边界。

@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Modal, Rate } from 'antd'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
 import {
   getDefaultSpotId,
@@ -9,6 +9,7 @@ import {
   getGuideSpotById,
   getGuideRouteSpots,
   guideRoutes,
+  guideSpots,
   scenicCenter,
   type GuideSpot,
   type LatLngPoint
@@ -52,6 +53,7 @@ const activeMarkerIcon = createSvgDataUri(`
 
 function GuideMapPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const markerLayerRef = useRef<any>(null)
@@ -69,6 +71,12 @@ function GuideMapPage() {
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutePanel, setShowRoutePanel] = useState(false)
 
+  const queryPoiId = searchParams.get('poi')?.trim() ?? ''
+  const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
+  const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
+  const queryPoiRoute = queryPoiSpot
+    ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
+    : undefined
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
   const routeSpots = getGuideRouteSpots(route.id)
@@ -78,6 +86,28 @@ function GuideMapPage() {
   useEffect(() => {
     setActiveScene(sceneId, { routeName: route.name })
   }, [route.name, sceneId, setActiveScene])
+
+  useEffect(() => {
+    if (!queryPoiSpot) {
+      return
+    }
+
+    if (queryPoiRoute && queryPoiRoute.id !== activeRouteId) {
+      setActiveRouteId(queryPoiRoute.id)
+    }
+
+    if (selectedSpotId !== queryPoiSpot.id) {
+      setSelectedSpotId(queryPoiSpot.id)
+    }
+  }, [activeRouteId, queryPoiRoute, queryPoiSpot, selectedSpotId, setActiveRouteId, setSelectedSpotId])
+
+  useEffect(() => {
+    if (!querySceneRouteId) {
+      return
+    }
+
+    console.debug('[GuideMapPage] sceneRoute query recognized but not mapped yet:', querySceneRouteId)
+  }, [querySceneRouteId])
 
   useEffect(() => {
     if (!route.stops.some((stop) => stop.spotId === selectedSpotId)) {
@@ -190,6 +220,14 @@ function GuideMapPage() {
 
     focusSpot(mapRef.current, infoWindowRef.current, selectedSpot)
   }, [mapStatus, navigate, routeSpots, selectedSpot, setSelectedSpotId])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !queryPoiSpot || selectedSpot.id !== queryPoiSpot.id) {
+      return
+    }
+
+    focusSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+  }, [mapStatus, queryPoiSpot, selectedSpot.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current || routeSpots.length < 2) {
