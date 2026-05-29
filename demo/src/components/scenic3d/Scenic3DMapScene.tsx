@@ -81,20 +81,30 @@ function getRouteSequence(routePoiSequence?: string[]) {
 
 function buildRoutePoints(sequence: string[]) {
   const points: Vector3[] = []
+  const firstPoiId = sequence[0]
+
+  if (firstPoiId) {
+    const [firstX, , firstZ] = getScenePosition(firstPoiId)
+    points.push(new Vector3(firstX - 0.95, 0.1, firstZ + 0.58))
+  }
 
   sequence.forEach((poiId, index) => {
     const [x, , z] = getScenePosition(poiId)
-
-    if (index === 0) {
-      points.push(new Vector3(x - 1.1, 0.08, z + 0.45))
-    }
-
     points.push(new Vector3(x, 0.12, z))
 
     const nextPoiId = sequence[index + 1]
     if (nextPoiId) {
       const [nextX, , nextZ] = getScenePosition(nextPoiId)
-      points.push(new Vector3((x + nextX) / 2, 0.13, (z + nextZ) / 2))
+      const dx = nextX - x
+      const dz = nextZ - z
+      const length = Math.hypot(dx, dz) || 1
+      const curveDirection = index % 2 === 0 ? 1 : -1
+      const curveOffset = Math.min(0.58, length * 0.14) * curveDirection
+      const normalX = -dz / length
+      const normalZ = dx / length
+
+      points.push(new Vector3(x + dx * 0.34 + normalX * curveOffset, 0.14, z + dz * 0.34 + normalZ * curveOffset))
+      points.push(new Vector3(x + dx * 0.68 - normalX * curveOffset * 0.45, 0.14, z + dz * 0.68 - normalZ * curveOffset * 0.45))
     }
   })
 
@@ -110,7 +120,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
   return (
     <>
       <color attach="background" args={['#f2efe6']} />
-      <fog attach="fog" args={['#f2efe6', 6.5, 16.5]} />
+      <fog attach="fog" args={['#f2efe6', 7.2, 19]} />
       <ambientLight intensity={0.68} />
       <hemisphereLight args={['#fff7e8', '#a8b8ad', 0.78]} />
       <directionalLight position={[5.5, 8, 4.5]} intensity={1.05} color="#fff3d3" />
@@ -136,21 +146,21 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
         <meshStandardMaterial color="#adc9c9" roughness={0.34} metalness={0.02} transparent opacity={0.72} />
       </mesh>
 
-      <mesh rotation={[-Math.PI / 2, 0, 0.26]} position={[-5.25, -0.02, -2.45]} scale={[2.5, 0.84, 1]}>
-        <circleGeometry args={[1.2, 64]} />
-        <meshStandardMaterial color="#bed4d0" roughness={0.38} metalness={0.02} transparent opacity={0.66} />
+      <mesh rotation={[-Math.PI / 2, 0, 0.22]} position={[-5.85, -0.02, -2.95]} scale={[2.85, 0.76, 1]}>
+        <circleGeometry args={[1.14, 64]} />
+        <meshStandardMaterial color="#bed4d0" roughness={0.38} metalness={0.02} transparent opacity={0.58} />
       </mesh>
 
       {[
-        [-5.8, 0.35, -5.8, 1.2, 1.5],
-        [-4.25, 0.48, -6.3, 1.55, 2.1],
-        [-2.35, 0.32, -6.05, 1.1, 1.4],
-        [4.85, 0.4, -5.75, 1.4, 1.8],
-        [6.15, 0.3, -4.6, 0.95, 1.25],
+        [-6.85, 0.3, -6.7, 1.15, 1.22],
+        [-5.25, 0.38, -7.15, 1.48, 1.62],
+        [-3.35, 0.28, -6.85, 1.05, 1.16],
+        [4.85, 0.32, -6.95, 1.25, 1.38],
+        [6.45, 0.25, -5.95, 0.92, 1.06],
       ].map(([x, y, z, radius, height], index) => (
         <mesh key={index} position={[x, y, z]}>
           <coneGeometry args={[radius, height, 5]} />
-          <meshStandardMaterial color={index % 2 === 0 ? '#aebaaa' : '#9fae9e'} roughness={0.92} transparent opacity={0.84} />
+          <meshStandardMaterial color={index % 2 === 0 ? '#aebaaa' : '#9fae9e'} roughness={0.94} transparent opacity={0.64} />
         </mesh>
       ))}
 
@@ -219,10 +229,11 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
       <OrbitControls
         makeDefault
         enablePan
-        minDistance={4.6}
-        maxDistance={12}
-        maxPolarAngle={Math.PI * 0.48}
-        target={[0, 0.55, -0.85]}
+        minDistance={5.2}
+        maxDistance={13.2}
+        minPolarAngle={Math.PI * 0.2}
+        maxPolarAngle={Math.PI * 0.42}
+        target={[0.05, 0.42, -0.7]}
       />
     </>
   )
@@ -230,7 +241,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
 
 function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   return (
-    <Canvas camera={{ position: [6.2, 5.35, 7.4], fov: 41 }}>
+    <Canvas camera={{ position: [4.8, 7.8, 8.6], fov: 38 }}>
       <SceneContent selectedPoiId={selectedPoiId} onSelectPoi={onSelectPoi} routePoiSequence={routePoiSequence} />
     </Canvas>
   )

@@ -76,11 +76,11 @@ function Scenic3DMapPage() {
       <section
         style={{
           position: 'absolute',
-          top: 24,
-          left: 24,
-          width: 360,
-          maxWidth: 'calc(100vw - 48px)',
-          padding: 20,
+          top: 20,
+          left: 20,
+          width: 326,
+          maxWidth: 'calc(100vw - 40px)',
+          padding: 16,
           border: '1px solid rgba(255, 255, 255, 0.66)',
           borderRadius: 18,
           background: 'rgba(255, 252, 242, 0.86)',
@@ -103,7 +103,7 @@ function Scenic3DMapPage() {
           style={{
             margin: '0 0 16px',
             color: '#243a31',
-            fontSize: 29,
+            fontSize: 26,
             lineHeight: 1.22,
             fontFamily: "'Songti SC', 'STSong', 'Noto Serif SC', serif",
           }}
@@ -114,7 +114,7 @@ function Scenic3DMapPage() {
         <div
           style={{
             marginBottom: 14,
-            padding: 13,
+            padding: 12,
             border: '1px solid rgba(129, 142, 113, 0.14)',
             borderRadius: 14,
             background: 'rgba(255, 255, 255, 0.56)',
@@ -160,9 +160,9 @@ function Scenic3DMapPage() {
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '28px minmax(0, 1fr)',
-                  gap: 10,
+                  gap: 9,
                   alignItems: 'center',
-                  padding: 13,
+                  padding: 11,
                   border: active ? '1px solid rgba(169, 111, 30, 0.58)' : '1px solid rgba(68, 83, 73, 0.12)',
                   borderRadius: 14,
                   background: active ? 'rgba(255, 246, 219, 0.96)' : 'rgba(255, 255, 255, 0.52)',
@@ -205,11 +205,11 @@ function Scenic3DMapPage() {
       <aside
         style={{
           position: 'absolute',
-          right: 24,
-          bottom: 24,
-          width: 380,
-          maxWidth: 'calc(100vw - 48px)',
-          padding: 20,
+          right: 20,
+          bottom: 20,
+          width: 354,
+          maxWidth: 'calc(100vw - 40px)',
+          padding: 16,
           border: '1px solid rgba(255, 255, 255, 0.66)',
           borderRadius: 18,
           background: 'rgba(255, 252, 242, 0.87)',

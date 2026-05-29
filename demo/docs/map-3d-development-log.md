@@ -2290,3 +2290,115 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 在浏览器中手动打开 `/scenic-3d-map`，检查桌面和移动端的视觉层次、标签遮挡、路线可读性和按钮可点击性。
 - 后续可继续做 hover 高亮、点击镜头推进、路线分段播放，但仍应保持真实导航由 `/map` 兜底。
+
+## 2026-05-29 阶段二十八：沉浸式 3D 地图构图与镜头优化
+
+### 本次目标
+
+优化 `/scenic-3d-map` 的 3D 场景构图、初始镜头、远景山体和路线曲线，让页面更像完整的沉浸式景区导览地图，而不是低模模型陈列。
+
+### 本次约束
+
+- 只优化 `/scenic-3d-map` 的 3D 场景构图和页面展示体验。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 真实经纬度坐标。
+- 原则上不修改 `lingshanMapData.ts`；如果修改也只能调整 4 个核心 POI 的 `scenePosition`。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 初始镜头优化说明
+
+`Scenic3DMapScene` 的初始相机从偏低的模型展示视角调整为更高、更俯视的导览地图视角：
+
+- camera position 调整为 `[4.8, 7.8, 8.6]`。
+- fov 调整为 `38`，减少广角变形，让 4 个核心地标和金色路线更像沙盘地图。
+- OrbitControls target 调整到 `[0.05, 0.42, -0.7]`，让核心路线处于画面中心区域。
+
+初始打开页面时更容易同时看到九龙灌浴、灵山大佛、梵宫、五印坛城和整条金色导览路线。
+
+### OrbitControls 限制说明
+
+保留用户旋转、缩放和平移能力，但限制过低视角：
+
+- `minDistance` 调整为 `5.2`。
+- `maxDistance` 调整为 `13.2`。
+- 新增 `minPolarAngle={Math.PI * 0.2}`。
+- `maxPolarAngle` 调整为 `Math.PI * 0.42`。
+
+这样用户仍可以观察场景，但不容易拖到被山体或低角度模型遮挡的视角。
+
+### 山体与远景优化说明
+
+远景山体从较靠近主场景的位置移到更靠后的边缘区域，并降低高度、透明度和视觉存在感：
+
+- 山体整体后移到场景上缘和侧缘。
+- 高度降低，避免压住核心地标。
+- 透明度从较明显状态降低到更柔和的背景意象。
+- 第二块水面也向左后方移动，减少对主路线的干扰。
+
+山体现在更像水墨山水远景，不抢主视觉，也不遮挡核心路线。
+
+### 路线曲线优化说明
+
+金色路线仍由 `routePoiSequence -> lingshanPois.scenePosition` 驱动，没有改成写死路线。
+
+本次将相邻景点之间的路线从简单中点连接，改为根据两点方向计算少量垂直偏移控制点：
+
+- 每段路线保留起点和终点。
+- 在相邻景点之间插入两个轻微偏移的中间控制点。
+- 偏移方向按段落交替，形成更自然的游览路径。
+- 保留三层金色路线和路线节点圆环。
+
+路线现在更像导览路径，而不是直接连线。
+
+### scenePosition 调整说明
+
+本阶段没有修改 `src/data/lingshanMapData.ts`，也没有调整任何 POI 的 `scenePosition`。
+
+当前优化通过相机、OrbitControls、远景位置和路线控制点完成。`scenePosition` 仍是艺术化 3D 场景坐标，不是真实经纬度，也不用于真实导航。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 初始构图更接近完整景区导览地图：
+
+- 主要地标和路线更集中在画面中心。
+- 山体作为远景背景，不再抢占核心地标。
+- 路线更自然，游览动线感更强。
+- 左侧卡片和右下信息卡略收窄，减少对主场景的遮挡。
+
+功能逻辑保持不变：景点选择、高亮、路线站点列表、`/map?poi=xxx` 和 `/map?sceneRoute=xxx` 跳转都没有变化。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx` 或腾讯地图路线规划逻辑。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `Scenic3DMapScene.tsx` 中相机、OrbitControls、山体、水面和路线曲线逻辑。
+- 检查 `Scenic3DMapPage.tsx` 中浮层尺寸和按钮跳转逻辑保持不变。
+- 确认没有修改 `GuideMapPage.tsx`、`routePlanning.ts`、`lingshanMapData.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 在浏览器中手动验证 `/scenic-3d-map` 的初始画面，确认 4 个核心地标、金色路线和标签都在可读范围内。
+- 下一阶段可考虑增加轻量 hover 反馈或点击镜头推进，但仍不建议改动 `/map` 的真实导航职责。
