@@ -91,12 +91,27 @@ const POI_CATEGORY_KEYWORDS: Array<{
 const CORE_SPOT_KEYWORDS = ['灵山大佛', '大佛', '九龙灌浴', '梵宫', '五印坛城', '祥符禅寺']
 const CORE_3D_SPOT_IDS = ['giant_buddha', 'jiulong_guanyu', 'fan_gong', 'wuyin_tancheng']
 
-// scenePosition 是艺术化 3D 场景坐标，不是经纬度，也不用于真实导航。
-const CORE_3D_SCENE_POSITIONS: Record<string, NonNullable<LingshanPoi['scenePosition']>> = {
+// scenePosition 是艺术化 3D 导览坐标，不是经纬度，也不用于真实导航。
+const LINGSHAN_SCENE_POSITIONS: Record<string, NonNullable<LingshanPoi['scenePosition']>> = {
+  south_gate: { x: -4.6, y: 0, z: 4.7 },
+  lingshan_wall: { x: -4.25, y: 0, z: 4.05 },
+  shengjing_square: { x: -3.45, y: 0, z: 3.25 },
+  fozu_tan: { x: -4.35, y: 0, z: 3.05 },
   giant_buddha: { x: 0, y: 0, z: -1.2 },
   jiulong_guanyu: { x: -2.8, y: 0, z: 2.35 },
+  puti_avenue: { x: -2.05, y: 0, z: 1.55 },
+  foshou_square: { x: -1.35, y: 0, z: 0.25 },
+  xiangfu_temple: { x: -0.75, y: 0, z: -0.25 },
+  xingtan_square: { x: -0.55, y: 0, z: -0.7 },
+  foqian_square: { x: -0.35, y: 0, z: -1.0 },
+  baizi_mile: { x: 0.65, y: 0, z: 0.65 },
   fan_gong: { x: 3.45, y: 0, z: -0.15 },
-  wuyin_tancheng: { x: -1.75, y: 0, z: -4.05 }
+  fan_gong_square: { x: 2.85, y: 0, z: 0.35 },
+  wuyin_tancheng: { x: -1.75, y: 0, z: -4.05 },
+  manfeilong_tower: { x: 3.9, y: 0, z: -2.35 },
+  lingshan_jingshe: { x: 4.35, y: 0, z: -3.7 },
+  sansheng_hall: { x: -2.65, y: 0, z: -1.9 },
+  exit: { x: 3.95, y: 0, z: 4.25 }
 }
 
 function includesAny(text: string, keywords: string[]) {
@@ -206,15 +221,15 @@ function inferAssetBindingPriority(
 }
 
 function inferScenePosition(spot: GuideSpot): LingshanPoi['scenePosition'] {
-  return CORE_3D_SCENE_POSITIONS[spot.id]
+  return LINGSHAN_SCENE_POSITIONS[spot.id]
 }
 
 function inferPoiNote(spot: GuideSpot): string | undefined {
-  if (!CORE_3D_SCENE_POSITIONS[spot.id]) {
+  if (!LINGSHAN_SCENE_POSITIONS[spot.id]) {
     return undefined
   }
 
-  return 'scenePosition 为艺术化 3D 场景坐标，不是经纬度，也不用于真实导航。'
+  return 'scenePosition 为艺术化 3D 导览坐标，不是经纬度，也不用于真实导航。'
 }
 
 export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {

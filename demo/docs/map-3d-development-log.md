@@ -2489,3 +2489,107 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 阶段二十九可为核心 8-10 个 POI 补充 `scenePosition`，但仍不修改真实经纬度。
 - 后续可考虑新增 `src/data/scenic3d/lingshanSceneLayout.ts`，把 3D 展示布局从真实 POI 数据中分离出来。
+
+## 2026-05-29 阶段二十九：19 个核心游线 POI scenePosition 补充
+
+### 本次目标
+
+为 `guideData.ts` 中当前 19 个去重景点/地点全部补充艺术化 3D `scenePosition`，让后续 `/scenic-3d-map` 可以基于更完整的核心游线数据展示入口、照壁、广场、道路节点、寺院、核心建筑、出口等空间节点。
+
+### 本次约束
+
+- 只修改 POI 数据层和开发记录。
+- 不修改 `/scenic-3d-map` 组件代码。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 `displayLocation`。
+- 不修改 `navLocation`。
+- 不修改腾讯 POI 字段。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/data/lingshanMapData.ts`
+- `docs/map-3d-development-log.md`
+
+### 本次补充 scenePosition 的 POI 列表
+
+本阶段为当前 19 个去重 POI 全部补充了艺术化 3D `scenePosition`：
+
+- `south_gate`：南门入园
+- `lingshan_wall`：灵山大照壁
+- `shengjing_square`：胜境广场
+- `fozu_tan`：佛足坛
+- `jiulong_guanyu`：九龙灌浴
+- `puti_avenue`：菩提大道
+- `foshou_square`：佛手广场
+- `xiangfu_temple`：祥符禅寺
+- `xingtan_square`：杏坛广场
+- `foqian_square`：佛前广场
+- `giant_buddha`：灵山大佛
+- `baizi_mile`：百子戏弥勒
+- `fan_gong`：梵宫
+- `fan_gong_square`：梵宫广场
+- `wuyin_tancheng`：五印坛城
+- `manfeilong_tower`：曼飞龙塔
+- `lingshan_jingshe`：灵山精舍
+- `sansheng_hall`：三圣殿
+- `exit`：景区出口
+
+原有 4 个核心地标 `giant_buddha`、`jiulong_guanyu`、`fan_gong`、`wuyin_tancheng` 的坐标保持不变，避免影响当前 `/scenic-3d-map` 的既有构图。其余 15 个点根据核心游线顺序补充为入口区、前中段路线节点、大佛中轴区、梵宫/坛城片区、辅助文化点和出口回程节点。
+
+### 未找到的 POI id
+
+本阶段要求覆盖的 19 个 POI id 均存在于当前 `lingshanPois` 数据来源中，没有未找到的 POI id。
+
+### scenePosition 不是经纬度的说明
+
+`scenePosition` 是艺术化 3D 导览坐标，不是经纬度，也不用于真实导航判断。
+
+- `displayLocation` 继续用于真实地图展示点。
+- `navLocation` 继续用于真实导航终点。
+- `scenePosition` 只用于 3D 场景中的空间表达。
+- `poiId` 是真实地图坐标、3D 坐标、模型资产、讲解内容和路线站点之间的连接桥梁。
+
+### 为什么为 19 个去重点位补齐，而不是按 28 个站点位次重复补
+
+当前 3 条真实路线合计有 28 个站点位次，但其中多个景点在不同路线中复用，例如南门入园、景区出口、灵山大佛、九龙灌浴、梵宫、五印坛城等。
+
+3D 地图中同一个真实地点应只有一个 `scenePosition`，不同路线通过 `poiId` 复用该空间节点。这样可以避免同一景点在 3D 场景中出现多个位置，也能让后续路线、模型、讲解和真实地图跳转保持一致。
+
+### 为什么本阶段只补数据、不改 3D 渲染代码
+
+本阶段目标是先把核心游线空间数据补齐，为后续扩展渲染层做准备。当前 `/scenic-3d-map` 仍只渲染已有核心地标和当前 3D 路线，不在本阶段扩大显示范围，避免数据补充和渲染策略混在同一次改动中。
+
+### 对 /scenic-3d-map 的影响
+
+当前 `/scenic-3d-map` 组件代码没有修改。由于现有渲染仍基于当前资产映射和 3D 原型路线，页面视觉不会因为本阶段直接扩大节点显示。后续可以基于完整 `scenePosition` 数据逐步增加入口、照壁、广场、道路节点、寺院、出口等空间表达。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实经纬度坐标、`displayLocation` 或 `navLocation`。真实地图导航页行为不变。
+
+### 验证方式
+
+- 检查 `src/data/lingshanMapData.ts` 中 19 个 POI id 都有 `scenePosition`。
+- 检查 `displayLocation`、`navLocation`、腾讯 POI 字段和 `bindStatus` 未改动。
+- 检查未修改 `/scenic-3d-map` 组件代码、`/map`、`GuideMapPage.tsx`、`routePlanning.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 后续阶段可考虑新增 `src/data/scenic3d/lingshanSceneLayout.ts`，把 3D 展示布局从真实 POI 数据中进一步分离。
+- 下一步可基于 19 个 `scenePosition` 选择性渲染入口、照壁、广场、路线节点和出口，但仍不应把 3D 艺术路线当作真实导航路线。
