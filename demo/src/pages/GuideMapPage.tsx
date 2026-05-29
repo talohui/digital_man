@@ -99,12 +99,14 @@ function GuideMapPage() {
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
   const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
-  const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && (queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true')
+  const isMapDebugMode = queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true'
+  const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && isMapDebugMode
   const [showPoiMarkers, setShowPoiMarkers] = useState(true)
   const [showCurrentRoute, setShowCurrentRoute] = useState(true)
   const [showSceneRouteDebugLine, setShowSceneRouteDebugLine] = useState(isSceneRouteDebugEnabled)
-  const [showRouteDiagnosticsPanel, setShowRouteDiagnosticsPanel] = useState(isSceneRouteDebugEnabled)
-  const shouldShowSceneRouteDebugLine = Boolean(querySceneRouteId) && showSceneRouteDebugLine
+  const [showRouteDiagnosticsPanel, setShowRouteDiagnosticsPanel] = useState(isMapDebugMode)
+  const [showEnhancedMapPanelBody, setShowEnhancedMapPanelBody] = useState(true)
+  const shouldShowSceneRouteDebugLine = isSceneRouteDebugEnabled && showSceneRouteDebugLine
   const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
   const queryPoiRoute = queryPoiSpot
     ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
@@ -139,8 +141,8 @@ function GuideMapPage() {
 
   useEffect(() => {
     setShowSceneRouteDebugLine(isSceneRouteDebugEnabled)
-    setShowRouteDiagnosticsPanel(isSceneRouteDebugEnabled)
-  }, [isSceneRouteDebugEnabled, querySceneRouteId])
+    setShowRouteDiagnosticsPanel(isMapDebugMode)
+  }, [isMapDebugMode, isSceneRouteDebugEnabled, querySceneRouteId])
 
   useEffect(() => {
     setActiveScene(sceneId, { routeName: route.name })
@@ -568,92 +570,128 @@ function GuideMapPage() {
             pointerEvents: 'auto'
           }}
         >
-          <p style={{ margin: '0 0 4px', color: '#0f766e', fontSize: 12, fontWeight: 800 }}>
-            腾讯地图增强模式
-          </p>
-          <h1 style={{ margin: '0 0 8px', color: '#173b33', fontSize: 20, lineHeight: 1.25 }}>
-            真实地图导览模式
-          </h1>
-          <p style={{ margin: '0 0 12px', color: '#4b635c', fontSize: 12, lineHeight: 1.6 }}>
-            基于腾讯地图底图显示真实 POI、路线和导航兜底；沉浸式体验可切换到 3D 导览地图。
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate('/scenic-3d-map')}
-            style={{
-              width: '100%',
-              minHeight: 38,
-              marginBottom: 12,
-              border: 0,
-              borderRadius: 12,
-              background: '#0d9488',
-              color: '#fffaf0',
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 800,
-              boxShadow: '0 12px 24px rgba(13, 148, 136, 0.18)'
-            }}
-          >
-            进入 3D 导览地图
-          </button>
-
-          <div style={{ marginBottom: 12, paddingTop: 10, borderTop: '1px solid rgba(13, 148, 136, 0.12)' }}>
-            <strong style={{ display: 'block', marginBottom: 8, color: '#244d43', fontSize: 13 }}>图层开关</strong>
-            <label style={getLayerToggleStyle()}>
-              <input
-                type="checkbox"
-                checked={showPoiMarkers}
-                onChange={(event) => setShowPoiMarkers(event.target.checked)}
-              />
-              <span>显示 POI 标记</span>
-            </label>
-            <label style={getLayerToggleStyle()}>
-              <input
-                type="checkbox"
-                checked={showCurrentRoute}
-                onChange={(event) => setShowCurrentRoute(event.target.checked)}
-              />
-              <span>显示当前路线</span>
-            </label>
-            <label style={getLayerToggleStyle(!querySceneRouteId)}>
-              <input
-                type="checkbox"
-                checked={showSceneRouteDebugLine}
-                disabled={!querySceneRouteId}
-                onChange={(event) => setShowSceneRouteDebugLine(event.target.checked)}
-              />
-              <span>显示 sceneRoute 调试线</span>
-            </label>
-            <label style={getLayerToggleStyle()}>
-              <input
-                type="checkbox"
-                checked={showRouteDiagnosticsPanel}
-                onChange={(event) => setShowRouteDiagnosticsPanel(event.target.checked)}
-              />
-              <span>显示路线诊断信息</span>
-            </label>
-          </div>
-
-          <div style={{ marginBottom: 10, padding: 10, borderRadius: 12, background: 'rgba(255, 255, 255, 0.58)' }}>
-            <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线状态</strong>
-            <div style={{ display: 'grid', gap: 3, color: '#4b635c', fontSize: 12, lineHeight: 1.5 }}>
-              <span>当前真实路线：{route.name}</span>
-              <span>路线来源：{getRouteSourceLabel(routeSource)}</span>
-              <span>usedFallback：{routeDiagnostics ? (routeDiagnostics.usedFallback ? 'true' : 'false') : '-'}</span>
-              <span>
-                距离 / 耗时：
-                {routeDiagnostics ? `${routeDiagnostics.distanceMeters} 米 / ${routeDiagnostics.durationMinutes} 分钟` : '生成中'}
-              </span>
-              {routeDiagnostics?.fallbackReason ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <p style={{ margin: '0 0 4px', color: '#0f766e', fontSize: 12, fontWeight: 800 }}>
+                腾讯地图增强模式
+              </p>
+              <h1 style={{ margin: '0 0 8px', color: '#173b33', fontSize: 20, lineHeight: 1.25 }}>
+                真实地图导览模式
+              </h1>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowEnhancedMapPanelBody((current) => !current)}
+              style={{
+                minWidth: 48,
+                minHeight: 28,
+                border: '1px solid rgba(13, 148, 136, 0.18)',
+                borderRadius: 999,
+                background: 'rgba(255, 255, 255, 0.62)',
+                color: '#246158',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 800
+              }}
+            >
+              {showEnhancedMapPanelBody ? '收起' : '展开'}
+            </button>
           </div>
 
-          <p style={{ margin: 0, color: '#6b7f77', fontSize: 11, lineHeight: 1.55 }}>
-            调试入口：访问 <code>/map?sceneRoute=xxx&amp;debugSceneRoute=1</code> 可打开骨架线、诊断信息和路线 path 导出能力。
-          </p>
+          {showEnhancedMapPanelBody ? (
+            <>
+              <p style={{ margin: '0 0 12px', color: '#4b635c', fontSize: 12, lineHeight: 1.6 }}>
+                基于腾讯地图底图显示真实 POI、路线和导航兜底；沉浸式体验可切换到 3D 导览地图。
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/scenic-3d-map')}
+                style={{
+                  width: '100%',
+                  minHeight: 38,
+                  marginBottom: 12,
+                  border: 0,
+                  borderRadius: 12,
+                  background: '#0d9488',
+                  color: '#fffaf0',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  boxShadow: '0 12px 24px rgba(13, 148, 136, 0.18)'
+                }}
+              >
+                进入 3D 导览地图
+              </button>
+
+              <div style={{ marginBottom: 12, paddingTop: 10, borderTop: '1px solid rgba(13, 148, 136, 0.12)' }}>
+                <strong style={{ display: 'block', marginBottom: 8, color: '#244d43', fontSize: 13 }}>图层开关</strong>
+                <label style={getLayerToggleStyle()}>
+                  <input
+                    type="checkbox"
+                    checked={showPoiMarkers}
+                    onChange={(event) => setShowPoiMarkers(event.target.checked)}
+                  />
+                  <span>显示 POI Marker</span>
+                </label>
+                <p style={{ margin: '0 0 6px 24px', color: '#74847d', fontSize: 11, lineHeight: 1.45 }}>
+                  仅控制地图上的景点标记，不影响已打开的信息窗。
+                </p>
+                <label style={getLayerToggleStyle()}>
+                  <input
+                    type="checkbox"
+                    checked={showCurrentRoute}
+                    onChange={(event) => setShowCurrentRoute(event.target.checked)}
+                  />
+                  <span>显示当前路线</span>
+                </label>
+                {isSceneRouteDebugEnabled ? (
+                  <label style={getLayerToggleStyle()}>
+                    <input
+                      type="checkbox"
+                      checked={showSceneRouteDebugLine}
+                      onChange={(event) => setShowSceneRouteDebugLine(event.target.checked)}
+                    />
+                    <span>显示 sceneRoute 调试线</span>
+                  </label>
+                ) : null}
+                {isMapDebugMode ? (
+                  <label style={getLayerToggleStyle()}>
+                    <input
+                      type="checkbox"
+                      checked={showRouteDiagnosticsPanel}
+                      onChange={(event) => setShowRouteDiagnosticsPanel(event.target.checked)}
+                    />
+                    <span>显示路线诊断信息</span>
+                  </label>
+                ) : null}
+              </div>
+
+              <div style={{ marginBottom: 10, padding: 10, borderRadius: 12, background: 'rgba(255, 255, 255, 0.58)' }}>
+                <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线状态</strong>
+                <div style={{ display: 'grid', gap: 3, color: '#4b635c', fontSize: 12, lineHeight: 1.5 }}>
+                  <span>当前真实路线：{route.name}</span>
+                  <span>路线来源：{getRouteSourceLabel(routeSource)}</span>
+                  {isMapDebugMode ? (
+                    <span>usedFallback：{routeDiagnostics ? (routeDiagnostics.usedFallback ? 'true' : 'false') : '-'}</span>
+                  ) : null}
+                  <span>
+                    距离 / 耗时：
+                    {routeDiagnostics ? `${routeDiagnostics.distanceMeters} 米 / ${routeDiagnostics.durationMinutes} 分钟` : '生成中'}
+                  </span>
+                  {routeDiagnostics?.fallbackReason && isMapDebugMode ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+                </div>
+              </div>
+
+              {isMapDebugMode ? (
+                <p style={{ margin: 0, color: '#6b7f77', fontSize: 11, lineHeight: 1.55 }}>
+                  调试模式：可查看诊断信息；访问 <code>/map?sceneRoute=xxx&amp;debugSceneRoute=1</code> 可打开骨架线和路线 path 导出能力。
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </section>
 
-        {showRouteDiagnosticsPanel ? (
+        {isMapDebugMode && showRouteDiagnosticsPanel ? (
           <div
             className="glass-card"
             style={{

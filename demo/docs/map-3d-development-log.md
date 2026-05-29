@@ -4309,3 +4309,90 @@ GLModelOverlay 不属于当前 Web React 运行环境。直接修改 Web 代码�
 - 后续单独做“Android GLModelOverlay 官方 API 参数核对”，读取并记录官方 API、模型格式、经纬度绑定、缩放、旋转、生命周期和性能限制。
 - 如果确定做 Android APK，再做最小 Android demo：加载一个简单 glTF 模型并绑定到灵山景区某个经纬度点。
 - Web 端继续推进 `/scenic-3d-map` 和 `/map` 双模式，不把 Android SDK 能力误用为 JS API 能力。
+
+## 阶段四十六 B：腾讯地图增强模式 UI 调试入口收敛
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+修正 `/map` 腾讯地图增强模式 UI 中普通游客可见的调试入口和容易误解的文案，让普通模式更聚焦真实导览，debug 模式继续保留开发诊断能力。
+
+### 本次约束
+
+- 只修改 `/map` 增强模式 UI 的调试入口可见性、文案和轻量移动端友好性。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么要隐藏普通模式下的调试入口
+
+普通游客进入 `/map` 时应看到真实地图、POI、路线和导览状态，不应直接看到 plannedRoute 诊断、sceneRoute 骨架线或 path JSON 导出入口。这些能力属于开发调试和路线复核流程，应只在 `debugSceneRoute=1` 或 `debugSceneRoute=true` 时显示。
+
+本阶段将“显示路线诊断信息”和“显示 sceneRoute 调试线”控制收敛到 debug 模式，普通 `/map` 与普通 `/map?sceneRoute=xxx` 不再暴露这些开关。
+
+### “显示 POI Marker”文案调整说明
+
+原文案“显示 POI 标记”容易让用户理解为关闭所有 POI 信息。实际开关只控制地图上的 Marker layer，不影响已打开的信息窗。
+
+本阶段将文案改为“显示 POI Marker”，并补充说明“仅控制地图上的景点标记，不影响已打开的信息窗”。
+
+### debugSceneRoute 模式下仍保留哪些调试能力
+
+当 URL 带 `debugSceneRoute=1` 或 `debugSceneRoute=true` 时，仍保留：
+
+- plannedRoute 诊断信息。
+- `path.length`、距离、耗时、`usedFallback`、`fallbackReason`。
+- sceneRoute POI 骨架线开关。
+- 腾讯 walking path JSON 复制。
+- 腾讯 walking path JSON 下载。
+
+### 移动端轻量优化说明
+
+增强模式卡片新增“收起 / 展开”按钮。默认仍保持展开，桌面端不改变主要使用方式；小屏幕或地图被遮挡时，用户可以收起卡片正文，减少对地图区域的遮挡。
+
+本阶段没有做大规模响应式重构，也没有改变地图底部景点抽屉。
+
+### 对 /map 的影响
+
+普通 `/map` 更接近游客导览模式：保留增强模式说明、进入 3D 导览地图入口、POI Marker 开关、当前路线开关和简洁路线状态。
+
+debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 / 下载 walking path JSON。`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 路线映射、poi 优先规则、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、routeGeometry 渲染、水系层、道路网络层、POI 节点或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查普通 `/map` 不显示“显示路线诊断信息”开关。
+- 检查普通 `/map?sceneRoute=historical_3d_scene` 不显示“显示 sceneRoute 调试线”开关。
+- 检查 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1` 仍显示 sceneRoute 调试线开关和路线诊断信息开关。
+- 检查复制 / 下载腾讯路线 path JSON 按钮仍只在 debug 模式下出现。
+- 检查“显示 POI Marker”文案和说明正确。
+- 检查增强模式卡片可收起 / 展开。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 若验收通过，可进入实时定位基础能力阶段。
+- 后续移动端可继续把增强模式卡片改成更完整的底部抽屉或浮动工具栏。
