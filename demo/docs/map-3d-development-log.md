@@ -4132,3 +4132,107 @@ tmp/
 - 阶段 46：做 routeGeometry 最近点吸附、路线进度和下一站距离。
 - 阶段 47：做偏航与重规划。
 - 阶段 48：校准核心 POI 的 `navLocation`。
+
+## 阶段四十四：腾讯地图增强模式 UI 雏形
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+在 `/map` 中增加腾讯地图增强模式 UI 雏形，让真实地图页更像“真实地图导览工作台”，包含模式说明、进入 3D 导览地图入口、图层开关、路线状态卡片和调试入口说明。
+
+### 本次约束
+
+- 只修改 `/map` 页面的 UI 组织与轻量控制。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 增强模式 UI 说明
+
+`/map` 右上角新增“腾讯地图增强模式 / 真实地图导览模式”说明卡片，明确当前页面基于腾讯地图底图显示真实 POI、路线和导航兜底，沉浸式体验可切换到 3D 导览地图。
+
+该卡片承担真实地图模式入口说明和轻量控制面板角色，不改变地图初始化、Marker、Polyline、InfoWindow 或路线规划流程。
+
+### 进入 3D 导览地图入口说明
+
+新增“进入 3D 导览地图”按钮，点击后跳转 `/scenic-3d-map`。该入口不改变 `/map?poi=xxx`、`/map?sceneRoute=xxx` 或 debug 参数逻辑。
+
+### 图层开关说明
+
+新增四个轻量图层开关：
+
+- 显示 POI 标记：控制 Marker layer 是否挂载到地图。
+- 显示当前路线：控制当前 route Polyline 是否显示。
+- 显示 sceneRoute 调试线：当 URL 存在 `sceneRoute` 时可用，用于显示或隐藏骨架调试线。
+- 显示路线诊断信息：控制 plannedRoute 诊断卡片显示。
+
+默认行为保持兼容：
+
+- POI 标记默认显示。
+- 当前路线默认显示。
+- sceneRoute 调试线默认由 `debugSceneRoute` query 决定。
+- 路线诊断信息默认由 `debugSceneRoute` query 决定。
+
+### 路线状态卡片说明
+
+增强模式卡片中补充当前路线状态：
+
+- 当前真实路线。
+- 路线来源：腾讯 walking route、预设路线、fallback 兜底或路线生成中。
+- `usedFallback`。
+- 距离和耗时。
+- 如存在 `fallbackReason`，同步显示。
+
+普通模式下显示简洁状态，详细诊断仍由路线诊断信息开关控制。
+
+### 为什么本阶段不做实时定位
+
+实时定位涉及浏览器权限、手机端精度、accuracy circle、跟随模式、路线吸附、下一站计算和偏航判断。直接实现会改变真实导航行为，本阶段先完成 UI 组织和图层控制，为后续定位能力预留入口。
+
+### 为什么本阶段不修改路线规划算法
+
+本阶段目标是腾讯地图增强模式 UI 雏形，不处理腾讯 walking route、预设路线、fallback 或 routeGeometry 生成算法。保持路线数据流稳定，可以降低对现有 `/map` 导览功能的风险。
+
+### 对 /map 的影响
+
+`/map` 新增增强模式说明卡、3D 入口、图层开关和路线状态卡片。已有 `/map` 默认路线、`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 路线映射、poi 优先规则、debugSceneRoute 调试线、plannedRoute 诊断、walking path JSON 复制/下载能力保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、routeGeometry 渲染、水系层、道路网络层、POI 节点或模型资产。新增入口只从 `/map` 跳转到已有 `/scenic-3d-map`。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查 `/map` 普通进入仍显示默认路线。
+- 检查“进入 3D 导览地图”按钮跳转 `/scenic-3d-map`。
+- 检查 POI 标记开关可隐藏 / 显示 Marker layer。
+- 检查当前路线开关可隐藏 / 显示 route Polyline。
+- 检查带 `sceneRoute` 时可用 sceneRoute 调试线开关。
+- 检查路线诊断信息开关可显示 / 隐藏诊断面板。
+- 检查 `debugSceneRoute=1` 时原有诊断和复制 / 下载 path JSON 功能仍可用。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 阶段 45 可进入实时定位基础能力：`navigator.geolocation`、用户位置 Marker、GPS 精度圆和手机端局域网测试。
+- 后续再增加路线进度、下一站距离、偏航判断和重规划到下一站。
