@@ -25,6 +25,17 @@ export type NextStopResult = {
   distanceToNextStopMeters?: number
 }
 
+export type RouteDeviationLevel =
+  | 'on_route'
+  | 'maybe_off_route'
+  | 'off_route'
+
+export type RouteDeviationResult = {
+  level: RouteDeviationLevel
+  distanceMeters: number
+  message: string
+}
+
 export function haversineDistanceMeters(a: LatLngPoint, b: LatLngPoint) {
   const earthRadiusMeters = 6371000
   const fromLat = degreesToRadians(a.lat)
@@ -113,6 +124,39 @@ export function formatDistanceMeters(distance: number) {
   }
 
   return `${(distance / 1000).toFixed(1)} 公里`
+}
+
+export function evaluateRouteDeviation(
+  distanceMeters: number,
+  options?: {
+    maybeThresholdMeters?: number
+    offRouteThresholdMeters?: number
+  }
+): RouteDeviationResult {
+  const maybeThresholdMeters = options?.maybeThresholdMeters ?? 30
+  const offRouteThresholdMeters = options?.offRouteThresholdMeters ?? 80
+
+  if (distanceMeters <= maybeThresholdMeters) {
+    return {
+      level: 'on_route',
+      distanceMeters,
+      message: '你在推荐路线附近'
+    }
+  }
+
+  if (distanceMeters <= offRouteThresholdMeters) {
+    return {
+      level: 'maybe_off_route',
+      distanceMeters,
+      message: '你可能偏离推荐路线'
+    }
+  }
+
+  return {
+    level: 'off_route',
+    distanceMeters,
+    message: '你已明显偏离推荐路线'
+  }
 }
 
 function degreesToRadians(value: number) {

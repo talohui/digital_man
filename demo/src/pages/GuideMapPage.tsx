@@ -34,10 +34,12 @@ import {
 } from '../lib/geolocation'
 import { loadTMap } from '../lib/loadTMap'
 import {
+  evaluateRouteDeviation,
   findNearestRoutePoint,
   findNextStop,
   formatDistanceMeters,
-  haversineDistanceMeters
+  haversineDistanceMeters,
+  type RouteDeviationLevel
 } from '../lib/routeProgress'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
@@ -198,7 +200,8 @@ function GuideMapPage() {
 
     return {
       nearestRoutePoint,
-      nextStop: findNextStop(userLocation, routeForProgress.stops, getRouteProgressSpot)
+      nextStop: findNextStop(userLocation, routeForProgress.stops, getRouteProgressSpot),
+      routeDeviation: evaluateRouteDeviation(nearestRoutePoint.distanceMeters)
     }
   }, [currentRouteGeometry, routeForProgress.stops, userLocation])
 
@@ -1034,6 +1037,9 @@ function GuideMapPage() {
                   ) : routeProgressEstimate ? (
                     <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
                       <span>routeGeometry：{currentRouteGeometry.status} / {currentRouteGeometry.pointCount} 点</span>
+                      <span style={getRouteDeviationStyle(routeProgressEstimate.routeDeviation.level)}>
+                        路线状态：{routeProgressEstimate.routeDeviation.message}
+                      </span>
                       <span>距离当前路线：{formatDistanceMeters(routeProgressEstimate.nearestRoutePoint.distanceMeters)}</span>
                       <span>路线进度：约 {Math.round(routeProgressEstimate.nearestRoutePoint.progressRatio * 100)}%</span>
                       <span>下一站：{routeProgressEstimate.nextStop.nextStopName ?? '已接近路线终点'}</span>
@@ -1045,7 +1051,7 @@ function GuideMapPage() {
                           ? '当前为模拟定位，仅用于开发和演示。'
                           : '当前位置来自浏览器定位。'}
                       </span>
-                      <span>当前为基础路线吸附估算，尚未启用偏航判断和重新规划。</span>
+                      <span>当前仅基于候选 routeGeometry 距离判断，尚未启用自动重规划。</span>
                     </div>
                   ) : (
                     <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
@@ -1434,6 +1440,34 @@ function getLocationActionButtonStyle(enabled: boolean): CSSProperties {
     cursor: enabled ? 'pointer' : 'not-allowed',
     fontSize: 11,
     fontWeight: 800
+  }
+}
+
+function getRouteDeviationStyle(level: RouteDeviationLevel): CSSProperties {
+  const styleByLevel: Record<RouteDeviationLevel, CSSProperties> = {
+    on_route: {
+      background: 'rgba(22, 163, 74, 0.12)',
+      border: '1px solid rgba(22, 163, 74, 0.22)',
+      color: '#166534'
+    },
+    maybe_off_route: {
+      background: 'rgba(217, 119, 6, 0.12)',
+      border: '1px solid rgba(217, 119, 6, 0.24)',
+      color: '#92400e'
+    },
+    off_route: {
+      background: 'rgba(220, 38, 38, 0.1)',
+      border: '1px solid rgba(220, 38, 38, 0.24)',
+      color: '#991b1b'
+    }
+  }
+
+  return {
+    display: 'block',
+    padding: '5px 7px',
+    borderRadius: 8,
+    fontWeight: 800,
+    ...styleByLevel[level]
   }
 }
 

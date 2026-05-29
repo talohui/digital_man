@@ -4677,3 +4677,99 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 手机端实际验证增强模式卡片滚动和底部景点卡片之间的遮挡情况。
 - 如果仍拥挤，可将定位与路线进度拆成独立底部抽屉或移动端专用浮层。
 - 后续再进入偏航提示和重规划能力，而不是继续在当前阶段修改计算逻辑。
+
+## 阶段四十九 A：routeGeometry 偏航状态提示
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+在 `/map` 中基于当前位置到当前候选 `routeGeometry` 的最近距离，增加轻量路线偏航状态提示，帮助用户判断自己是否仍在推荐路线附近。
+
+### 本次约束
+
+- 只修改 `/map` 页面和必要的 `routeProgress` 工具。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/lib/routeProgress.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 偏航阈值说明
+
+本阶段默认阈值：
+
+- `distance <= 30m`：`on_route`，提示“你在推荐路线附近”。
+- `30m < distance <= 80m`：`maybe_off_route`，提示“你可能偏离推荐路线”。
+- `distance > 80m`：`off_route`，提示“你已明显偏离推荐路线”。
+
+这些阈值只用于前端 UI 提醒，后续可结合手机端实测、GPS 精度和路线可信度调整。
+
+### evaluateRouteDeviation 说明
+
+`src/lib/routeProgress.ts` 新增：
+
+- `RouteDeviationLevel`
+- `RouteDeviationResult`
+- `evaluateRouteDeviation(distanceMeters, options?)`
+
+该函数是纯函数，不依赖腾讯地图对象，不读取环境变量，不引入第三方依赖。它只根据“用户位置到候选 routeGeometry 最近点的距离”返回偏航等级和提示文案。
+
+### 偏航状态 UI 说明
+
+`/map` 的“路线进度预估”区域新增“路线状态”提示：
+
+- 绿色：你在推荐路线附近。
+- 橙色：你可能偏离推荐路线。
+- 红色：你已明显偏离推荐路线。
+
+模拟定位和真实定位都会参与该判断，方便开发和答辩时用模拟点测试不同距离下的提示效果。
+
+### 为什么本阶段不做重规划
+
+本阶段只做偏航状态提示，不调用新的腾讯路线接口、不自动切换路线、不自动重规划。自动重规划需要明确下一站、重规划触发频率、连续偏离判断、用户确认机制和临时路线展示，后续单独阶段实现更稳。
+
+### 模拟定位如何用于测试偏航
+
+阶段四十七 A 已支持模拟定位到南门、九龙灌浴、灵山大佛、梵宫、五印坛城和景区出口。本阶段复用模拟定位产生的当前位置，直接用候选 `routeGeometry` 最近距离评估偏航状态，因此用户不在景区内也能测试提示 UI。
+
+### 对 /map 的影响
+
+`/map` 增强模式中的路线进度区域新增偏航状态提示。原有 `/map` 默认路线、`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 路线映射、debugSceneRoute 调试层、复制 / 下载 walking path JSON、图层开关、真实 / 模拟定位、用户位置 Marker、精度圆、路线进度、下一站、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、routeGeometry 金线、道路网络层、水系层、POI 节点或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map`，使用模拟定位点，确认“路线状态”显示在“路线进度预估”区域。
+- 检查不同模拟点下根据距离显示绿色、橙色或红色提示。
+- 检查真实定位仍可参与偏航状态判断。
+- 检查没有自动调用腾讯路线规划、没有自动重规划、没有自动切换路线。
+- 检查 POI 聚焦、sceneRoute 映射、debugSceneRoute 调试能力不受影响。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 手机端实测不同 GPS 精度下的偏航阈值是否合理。
+- 后续可做阶段四十九 B：连续多次偏离后再提示偏航，降低 GPS 抖动误报。
+- 再后续可做“重规划到下一站”能力，但需要用户确认和临时路线图层。
