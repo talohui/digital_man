@@ -2593,3 +2593,83 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 后续阶段可考虑新增 `src/data/scenic3d/lingshanSceneLayout.ts`，把 3D 展示布局从真实 POI 数据中进一步分离。
 - 下一步可基于 19 个 `scenePosition` 选择性渲染入口、照壁、广场、路线节点和出口，但仍不应把 3D 艺术路线当作真实导航路线。
+
+## 2026-05-29 阶段三十：19 个核心游线节点 3D 可视化
+
+### 本次目标
+
+基于 `lingshanPois` 中已经补齐的 19 个 `scenePosition`，让 `/scenic-3d-map` 从“4 个核心地标”升级为“核心游线结构地图”，在 3D 场景中展示入口、照壁、广场、道路节点、文化点、核心建筑和出口等空间节点。
+
+### 本次约束
+
+- 只修改 `/scenic-3d-map` 的 3D 场景展示和开发记录。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 真实经纬度 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition` 数据。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 19 个 scenePosition 如何被用于 3D 节点渲染
+
+`Scenic3DMapScene` 现在会从 `lingshanPois` 中读取所有拥有 `scenePosition` 的 POI。4 个已有 `core_3d` 继续按原有 `PlaceholderLandmark` 模型渲染；其余具有 `scenePosition` 的 POI 会被渲染为低模节点。
+
+这些节点仍通过 `poiId` 与真实地图、讲解内容和后续模型资产连接。点击节点会调用 `onSelectPoi(poi.id)`，从而更新当前选中 POI。
+
+### 核心地标、文化点、广场/道路节点的分层表达方式
+
+- 核心地标：`giant_buddha`、`jiulong_guanyu`、`fan_gong`、`wuyin_tancheng` 继续使用现有低模 placeholder 模型和常显标签。
+- 文化点 / 寺院节点：`xiangfu_temple`、`manfeilong_tower`、`lingshan_jingshe`、`sansheng_hall`、`baizi_mile` 使用稍大的低矮圆柱地台和竖向符号表达，并显示小标签。
+- 广场 / 道路 / 入口出口节点：`south_gate`、`lingshan_wall`、`shengjing_square`、`fozu_tan`、`puti_avenue`、`foshou_square`、`xingtan_square`、`foqian_square`、`fan_gong_square`、`exit` 使用浅色小圆盘、路线节点或小牌表达。
+- 起点和出口：`south_gate`、`exit` 额外使用小型方牌，让入口/出口与普通广场节点有所区分。
+- 高亮：`selectedPoiId` 对应的核心地标或辅助节点会放大/变亮，并显示更明显的光环和标签。
+
+### 为什么本阶段不修改路线数据
+
+当前 `lingshanSceneRoutes` 的 `routePoiSequence` 仍是一条 4 点经典 3D 原型线。本阶段目标是先把 19 个核心游线节点可视化，而不是重新设计路线数据。
+
+路线升级应在后续阶段单独处理，例如映射到真实 `guideRoutes`、增加多路线切换或基于 19 点生成更完整的 3D 主游线，避免与节点渲染混在同一次改动中。
+
+### 为什么本阶段不引入真实 glb 模型
+
+本阶段只做低模/符号化节点表达，不引入真实 `.glb` 模型。这样可以先验证核心游线空间结构、节点密度、标签可读性和点击交互，再决定哪些节点需要 Blender 或 3D 重建模型。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 现在会显示 19 个 `scenePosition` 节点。左侧仍保留当前经典 3D 主线列表，不把 19 个点全部塞进左侧 UI。右下角信息卡可以显示辅助节点的名称、`poiId` 和介绍，并继续保留“查看该景点真实地图”“查看整条路线真实地图”“返回真实地图”等按钮。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实经纬度坐标、`displayLocation`、`navLocation` 或 `scenePosition` 数据。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `Scenic3DMapScene.tsx` 会从 `lingshanPois` 渲染所有拥有 `scenePosition` 的节点。
+- 检查 4 个核心地标仍使用现有 placeholder 模型。
+- 检查文化点、广场/道路节点、入口出口使用不同低模符号表达。
+- 检查点击辅助节点后右下信息卡可显示对应名称和 `poiId`。
+- 检查未修改 `lingshanMapData.ts`、`GuideMapPage.tsx`、`routePlanning.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map` 检查 19 个节点的标签密度和遮挡情况。
+- 后续可单独做 3D 路线升级，让 `routePoiSequence` 支持完整核心游线或多条 guideRoute 映射。

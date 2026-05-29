@@ -20,6 +20,13 @@ type LandmarkNode = {
   scale: [number, number, number]
 }
 
+type ScenicRouteNode = {
+  poiId: string
+  name: string
+  position: [number, number, number]
+  nodeType: 'culture' | 'route'
+}
+
 const landmarkFallbackLayout: Record<string, Pick<LandmarkNode, 'position' | 'scale'>> = {
   jiulong_guanyu: {
     position: [-2.8, 0, 2.35],
@@ -47,6 +54,7 @@ const fallbackName: Record<string, string> = {
 }
 
 const defaultRoutePoiSequence = ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng']
+const cultureNodeIds = new Set(['xiangfu_temple', 'manfeilong_tower', 'lingshan_jingshe', 'sansheng_hall', 'baizi_mile'])
 
 function getPoiName(poiId: string) {
   return lingshanPois.find((poi) => poi.id === poiId)?.name ?? fallbackName[poiId] ?? poiId
@@ -70,6 +78,17 @@ function buildLandmarks(): LandmarkNode[] {
       name: getPoiName(asset.poiId),
       position: getScenePosition(asset.poiId),
       scale: landmarkFallbackLayout[asset.poiId].scale,
+    }))
+}
+
+function buildScenicRouteNodes(): ScenicRouteNode[] {
+  return lingshanPois
+    .filter((poi) => poi.scenePosition && !landmarkFallbackLayout[poi.id])
+    .map((poi) => ({
+      poiId: poi.id,
+      name: poi.name,
+      position: [poi.scenePosition!.x, poi.scenePosition!.y, poi.scenePosition!.z] as [number, number, number],
+      nodeType: cultureNodeIds.has(poi.id) ? 'culture' : 'route',
     }))
 }
 
@@ -113,8 +132,10 @@ function buildRoutePoints(sequence: string[]) {
 
 function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(), [])
+  const scenicRouteNodes = useMemo(() => buildScenicRouteNodes(), [])
   const activePoiId = selectedPoiId || 'giant_buddha'
   const routeSequence = useMemo(() => getRouteSequence(routePoiSequence), [routePoiSequence])
+  const routePoiSet = useMemo(() => new Set(routeSequence), [routeSequence])
   const routePoints = useMemo(() => buildRoutePoints(routeSequence), [routeSequence])
 
   return (
@@ -178,6 +199,80 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
               <torusGeometry args={[active ? 0.34 : 0.24, active ? 0.026 : 0.018, 12, 48]} />
               <meshBasicMaterial color={active ? '#d09b35' : '#cfbb83'} />
             </mesh>
+          </group>
+        )
+      })}
+
+      {scenicRouteNodes.map((node) => {
+        const active = node.poiId === activePoiId
+        const onRoute = routePoiSet.has(node.poiId)
+        const culture = node.nodeType === 'culture'
+        const baseRadius = culture ? 0.24 : 0.16
+        const activeRadius = culture ? 0.34 : 0.25
+        const labelVisible = culture || active || onRoute
+
+        return (
+          <group
+            key={node.poiId}
+            position={node.position}
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelectPoi?.(node.poiId)
+            }}
+          >
+            <mesh position={[0, 0.035, 0]}>
+              <cylinderGeometry args={[active ? activeRadius : baseRadius, active ? activeRadius : baseRadius, culture ? 0.08 : 0.045, culture ? 40 : 28]} />
+              <meshStandardMaterial
+                color={active ? '#c9953b' : culture ? '#efe1bf' : '#f1ead6'}
+                roughness={0.86}
+                transparent
+                opacity={active ? 0.96 : culture ? 0.86 : 0.72}
+              />
+            </mesh>
+
+            {culture ? (
+              <mesh position={[0, active ? 0.27 : 0.22, 0]}>
+                <cylinderGeometry args={[active ? 0.095 : 0.075, active ? 0.12 : 0.095, active ? 0.38 : 0.3, 8]} />
+                <meshStandardMaterial color={active ? '#b57e2d' : '#cdbb8f'} roughness={0.82} />
+              </mesh>
+            ) : null}
+
+            {node.poiId === 'south_gate' || node.poiId === 'exit' ? (
+              <mesh position={[0, 0.16, 0]}>
+                <boxGeometry args={[active ? 0.34 : 0.26, active ? 0.24 : 0.18, 0.08]} />
+                <meshStandardMaterial color={active ? '#a86f27' : '#c9b98e'} roughness={0.84} />
+              </mesh>
+            ) : null}
+
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.062, 0]}>
+              <ringGeometry args={active ? [0.3, 0.42, 48] : [0.2, 0.26, 36]} />
+              <meshBasicMaterial color={active ? '#d0a14a' : onRoute ? '#d7c08a' : '#ddd2b7'} transparent opacity={active ? 0.36 : onRoute ? 0.25 : 0.16} />
+            </mesh>
+
+            {labelVisible ? (
+              <Html center position={[0, culture ? 0.78 : 0.42, 0]} distanceFactor={culture ? 8.6 : 9.8}>
+                <button
+                  type="button"
+                  onClick={() => onSelectPoi?.(node.poiId)}
+                  style={{
+                    minWidth: culture ? 76 : 58,
+                    padding: culture ? '4px 8px' : '3px 7px',
+                    border: active ? '1px solid rgba(170, 114, 29, 0.62)' : '1px solid rgba(63, 83, 74, 0.12)',
+                    borderRadius: 10,
+                    background: active ? 'rgba(255, 246, 220, 0.96)' : 'rgba(255, 252, 242, 0.78)',
+                    color: active ? '#7f5314' : '#405448',
+                    boxShadow: active ? '0 8px 18px rgba(121, 82, 22, 0.16)' : '0 5px 12px rgba(31, 42, 51, 0.08)',
+                    cursor: 'pointer',
+                    fontSize: culture ? 11 : 10,
+                    fontWeight: active ? 800 : 700,
+                    whiteSpace: 'nowrap',
+                    letterSpacing: 0,
+                  }}
+                >
+                  {node.name}
+                </button>
+              </Html>
+            ) : null}
           </group>
         )
       })}

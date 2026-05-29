@@ -34,6 +34,17 @@ function Scenic3DMapPage() {
   const navigate = useNavigate()
   const currentRoute = lingshanSceneRoutes[0] ?? fallbackRoute
   const [selectedPoiId, setSelectedPoiId] = useState(currentRoute.poiSequence[0])
+  const scenePois = useMemo(
+    () =>
+      lingshanPois
+        .filter((poi) => poi.scenePosition)
+        .map((poi) => ({
+          poiId: poi.id,
+          name: poi.name,
+          intro: poi.intro,
+        })),
+    []
+  )
   const routePois = useMemo(
     () =>
       currentRoute.poiSequence.map((poiId) => {
@@ -48,7 +59,11 @@ function Scenic3DMapPage() {
       }),
     [currentRoute.poiSequence]
   )
-  const selectedPoi = routePois.find((poi) => poi.poiId === selectedPoiId) ?? routePois[0]
+  const selectedPoi = scenePois.find((poi) => poi.poiId === selectedPoiId) ?? routePois[0] ?? {
+    poiId: selectedPoiId,
+    name: '未选择景点',
+    intro: '请选择一个 3D 导览节点查看详情。',
+  }
 
   return (
     <main
@@ -139,6 +154,16 @@ function Scenic3DMapPage() {
             }}
           >
             {currentRoute.description}
+          </p>
+          <p
+            style={{
+              margin: '8px 0 0',
+              color: '#7a6a44',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            当前 3D 场景已扩展显示 {scenePois.length} 个核心游线节点，左侧列表保留经典 3D 主线。
           </p>
         </div>
 
