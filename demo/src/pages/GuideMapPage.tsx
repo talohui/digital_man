@@ -1,6 +1,6 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Modal, Rate } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
 import {
@@ -66,6 +66,7 @@ function GuideMapPage() {
   const routeLayerRef = useRef<any>(null)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
+  const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
   const appliedSceneRouteIdRef = useRef<string | null>(null)
 
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
@@ -91,9 +92,18 @@ function GuideMapPage() {
     : undefined
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
-  const routeSpots = getGuideRouteSpots(route.id)
+  const routeSpots = useMemo(() => getGuideRouteSpots(route.id), [route.id])
   const selectedSpot = getGuideSpotById(selectedSpotId || getDefaultSpotId(route.id))
   const selectedIndex = route.stops.findIndex((stop) => stop.spotId === selectedSpot.id)
+
+  const focusQueryPoiOnce = (spot: GuideSpot) => {
+    if (appliedQueryPoiFocusIdRef.current === spot.id) {
+      return
+    }
+
+    focusQueryPoiSpot(mapRef.current, infoWindowRef.current, spot)
+    appliedQueryPoiFocusIdRef.current = spot.id
+  }
 
   useEffect(() => {
     setActiveScene(sceneId, { routeName: route.name })
@@ -107,6 +117,8 @@ function GuideMapPage() {
     if (appliedQueryPoiIdRef.current === queryPoiSpot.id) {
       return
     }
+
+    appliedQueryPoiFocusIdRef.current = null
 
     if (queryPoiRoute && queryPoiRoute.id !== activeRouteId) {
       setActiveRouteId(queryPoiRoute.id)
@@ -252,7 +264,7 @@ function GuideMapPage() {
       return
     }
 
-    focusQueryPoiSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+    focusQueryPoiOnce(queryPoiSpot)
   }, [mapStatus, queryPoiSpot, selectedSpot.id])
 
   useEffect(() => {
@@ -297,8 +309,12 @@ function GuideMapPage() {
         ]
       })
 
-      if (queryPoiSpot && route.stops.some((stop) => stop.spotId === queryPoiSpot.id)) {
-        focusQueryPoiSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+      if (
+        queryPoiSpot &&
+        selectedSpot.id === queryPoiSpot.id &&
+        route.stops.some((stop) => stop.spotId === queryPoiSpot.id)
+      ) {
+        focusQueryPoiOnce(queryPoiSpot)
       } else {
         fitMapToRoute(mapRef.current, routeSpots)
       }

@@ -1971,3 +1971,88 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 手动验证 `/map?sceneRoute=classic_3d_scene` 是否显示历史文化路线全貌。
 - 手动验证 `/map?poi=jiulong_guanyu&sceneRoute=classic_3d_scene` 是否仍聚焦九龙灌浴。
 - 后续可继续扩展更多 `sceneRoute -> guideRoute` 映射，并补充场景路线与真实路线的说明文案。
+
+## 2026-05-29 阶段二十四 B：query poi 后手动选点 InfoWindow 同步修复
+
+### 本次目标
+
+修复从 `/map?poi=xxx` 进入真实地图后，用户手动点击路线站点时地图 InfoWindow 仍停留在 query poi 的问题。URL 中的 `poi` 参数只作为一次性初始聚焦意图，后续用户手动选点应完全由用户交互驱动。
+
+### 本次约束
+
+- 只修复 `GuideMapPage` 中 query poi 后手动选点的地图聚焦和 InfoWindow 同步问题。
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `lingshanMapData.ts`。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+打开 `/map?poi=jiulong_guanyu&sceneRoute=classic_3d_scene` 后，初始 InfoWindow 能显示九龙灌浴。但在右下角景点卡片中点击曼飞龙塔、灵山精舍、梵宫广场等其它站点后，页面选中状态会变化，地图上的 InfoWindow 却仍可能停留在九龙灌浴。
+
+### 原因分析
+
+`poi` 查询参数的初始聚焦逻辑和后续用户手动选点没有完全解耦。同时 `routeSpots` 每次渲染都会生成新数组，导致选点渲染也可能触发路线绘制 effect。路线绘制完成后仍根据 `queryPoiSpot` 执行 `focusQueryPoiSpot`，从而把 InfoWindow 拉回 URL 中的初始 POI。
+
+### 修复方式
+
+- 使用 `useMemo` 缓存当前路线的 `routeSpots`，避免用户选点时不必要地触发路线重绘。
+- 新增 `appliedQueryPoiFocusIdRef`，让 query poi 的地图聚焦只执行一次。
+- 保留 query poi 初始进入时的 `focusQueryPoiSpot` 和 `zoom=17` 行为。
+- 路线绘制完成后，只有当前选中点仍然是 query poi 时才执行 query poi 聚焦；用户手动选择其它站点后不再被 query poi 拉回。
+- 右下角站点按钮继续调用 `setSelectedSpotId` 和 `focusSpot`，手动选点会立即更新地图中心与 InfoWindow。
+
+### query poi 为什么应作为一次性初始意图
+
+`/map?poi=xxx` 表示从 3D 艺术地图或外部入口进入真实地图时，希望初始定位到某个景点。进入页面之后，用户的点击、路线切换和地图操作应拥有更高优先级，否则 URL 参数会持续覆盖用户的真实交互，造成 InfoWindow 与当前选中景点不一致。
+
+### 用户手动选点后的新行为
+
+用户在路线站点列表中点击其它景点时：
+
+- `selectedSpotId` 更新为用户点击的景点。
+- `focusSpot` 使用该景点坐标更新地图中心。
+- InfoWindow 内容和位置同步切换到该景点。
+- 已消费的 query poi 不再把 InfoWindow 拉回初始景点。
+
+### 对 /map?poi=xxx 的影响
+
+`/map?poi=jiulong_guanyu` 和 `/map?poi=jiulong_guanyu&sceneRoute=classic_3d_scene` 仍会初始聚焦九龙灌浴，并保持景点级缩放。初始聚焦完成后，用户手动选择其它站点时地图 InfoWindow 会跟随新站点。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。它跳转到 `/map?poi=xxx` 的入口保持不变。
+
+### 验证方式
+
+- 打开 `/map?poi=jiulong_guanyu&sceneRoute=classic_3d_scene`。
+- 初始显示九龙灌浴 InfoWindow。
+- 点击右下角景点卡片中的曼飞龙塔。
+- 地图 InfoWindow 应切换到曼飞龙塔。
+- 再点击梵宫广场。
+- 地图 InfoWindow 应切换到梵宫广场。
+- 页面不应被 query poi 自动拉回九龙灌浴。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 在浏览器中手动验证 query poi 初始聚焦和后续站点点击的完整交互。
+- 后续如果要让 Marker 点击停留在地图页而不是进入讲解页，可以单独设计地图内选点交互，不应和本阶段修复混在一起。
