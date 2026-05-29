@@ -28,6 +28,13 @@ import { useChatStore } from '../store/useChatStore'
 
 type MapStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'fallback'
+type RouteDiagnostics = {
+  pathPointCount: number
+  distanceMeters: number
+  durationMinutes: number
+  usedFallback: boolean
+  fallbackReason?: string
+}
 
 const QUERY_POI_FOCUS_ZOOM = 17
 
@@ -82,6 +89,7 @@ function GuideMapPage() {
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('idle')
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutePanel, setShowRoutePanel] = useState(false)
+  const [routeDiagnostics, setRouteDiagnostics] = useState<RouteDiagnostics | null>(null)
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
@@ -325,6 +333,7 @@ function GuideMapPage() {
 
     async function renderRoute() {
       setRouteStatus('loading')
+      setRouteDiagnostics(null)
       setPageMessage(`${route.name}正在规划景区步行路线...`)
 
       const presetRoutePath = USE_LINGSHAN_PRESET_ROUTE_PATHS ? getLingshanPresetRoutePath(route.id) : undefined
@@ -336,6 +345,14 @@ function GuideMapPage() {
       if (cancelled || !window.TMap || !mapRef.current) {
         return
       }
+
+      setRouteDiagnostics({
+        pathPointCount: plannedRoute.path.length,
+        distanceMeters: plannedRoute.distanceMeters,
+        durationMinutes: plannedRoute.durationMinutes,
+        usedFallback: plannedRoute.usedFallback,
+        fallbackReason: plannedRoute.fallbackReason
+      })
 
       routeLayerRef.current?.setMap?.(null)
       routeLayerRef.current = new window.TMap.MultiPolyline({
@@ -461,6 +478,33 @@ function GuideMapPage() {
             <span>
               金色线为 3D sceneRoute 的 POI 骨架连线，不代表真实步行道路。蓝绿色路线为腾讯 walking 或当前真实地图路线。
             </span>
+            <div
+              style={{
+                marginTop: 8,
+                paddingTop: 8,
+                borderTop: '1px solid rgba(154, 90, 8, 0.18)',
+                color: '#58451d'
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: 4, color: '#73510e' }}>plannedRoute 诊断</strong>
+              {routeDiagnostics ? (
+                <div style={{ display: 'grid', gap: 2 }}>
+                  <span>activeRouteId：{route.id}</span>
+                  <span>query sceneRoute：{querySceneRouteId || '-'}</span>
+                  <span>path 点数：{routeDiagnostics.pathPointCount}</span>
+                  <span>距离：{routeDiagnostics.distanceMeters} 米</span>
+                  <span>耗时：{routeDiagnostics.durationMinutes} 分钟</span>
+                  <span>usedFallback：{routeDiagnostics.usedFallback ? 'true' : 'false'}</span>
+                  <span>
+                    路线来源：
+                    {routeDiagnostics.usedFallback ? '存在 fallback 直线兜底段或整条路线兜底' : '腾讯 walking route 成功'}
+                  </span>
+                  {routeDiagnostics.fallbackReason ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+                </div>
+              ) : (
+                <span>路线生成中...</span>
+              )}
+            </div>
             {sceneRouteDebugPath.length < 2 ? (
               <span style={{ display: 'block', marginTop: 4, color: '#8a4f0b' }}>当前 sceneRoute 未找到可绘制的骨架线。</span>
             ) : null}

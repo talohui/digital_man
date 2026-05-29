@@ -3256,3 +3256,101 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 用 `/map?sceneRoute=<id>&debugSceneRoute=1` 分别检查历史文化、自然风光和亲子 3D 路线的骨架线。
 - 对明显穿越建筑或偏离真实道路的位置，优先记录需要人工控制点的路线段。
 - 后续可以新增独立的 3D route control points 数据层，用真实地图调试结果反向修正 `/scenic-3d-map` 的金线路线。
+
+## 阶段三十七：路线诊断信息增强与手机端局域网验证指南
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+增强 `/map` 在 `debugSceneRoute` 调试模式下的路线诊断信息，让开发者能判断蓝绿色路线是腾讯 walking 成功结果，还是 fallback 直线兜底。同时新增手机端局域网人工验证指南，用于在真实移动端环境下验证地图、3D 和路线表现。
+
+### 本次约束
+
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增 `routeGeometry`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/mobile-lan-route-verification.md`
+- `docs/map-3d-development-log.md`
+
+### plannedRoute 调试字段说明
+
+`/map?sceneRoute=<sceneRouteId>&debugSceneRoute=1` 或 `debugSceneRoute=true` 时，真实地图调试提示中新增 `plannedRoute` 诊断信息：
+
+- `activeRouteId`：当前真实地图正在展示的 guideRoute id。
+- `query sceneRoute`：URL 中传入的 3D sceneRoute id。
+- `path 点数`：`plannedRoute.path.length`。
+- `距离`：`plannedRoute.distanceMeters`。
+- `耗时`：`plannedRoute.durationMinutes`。
+- `usedFallback`：是否存在 fallback。
+- `fallbackReason`：如果存在，则显示腾讯路线规划失败或兜底原因。
+- `路线来源`：根据 `usedFallback` 判断是腾讯 walking route 成功，还是存在 fallback 直线兜底段或整条路线兜底。
+
+如果 `plannedRoute` 尚未生成，调试区域显示“路线生成中”。
+
+### fallbackReason 暴露的意义
+
+此前页面只显示“兜底路线”，无法判断路线不贴路是腾讯 walking 返回结果本身的问题，还是请求失败后的 POI 直线兜底。暴露 `usedFallback`、`fallbackReason` 和 `path 点数` 后，可以更直接地区分：
+
+- `usedFallback=false`：蓝绿色线来自腾讯 walking route 成功返回的 polyline。
+- `usedFallback=true`：至少存在一段 fallback，蓝绿色线可能包含 POI 直线连接。
+
+这能帮助后续判断是否应优先修正 Key / 请求 / 路网问题，还是建设园区自有 `routeGeometry`。
+
+### 为什么需要手机端局域网人工验证
+
+电脑端和手机端在地图 SDK、WebGL、触摸手势、视口尺寸和网络环境上表现可能不同。用户实际更接近手机端场景，因此需要通过局域网访问 Mac 上的 Vite dev server，验证：
+
+- `/scenic-3d-map` 是否能在移动端加载和交互。
+- `/map` 是否能在移动端显示腾讯地图、Marker 和 InfoWindow。
+- 手机端蓝绿色路线是否比电脑端更合理。
+- `debugSceneRoute` 调试信息是否足够判断 fallback 状态。
+
+新增 `docs/mobile-lan-route-verification.md` 记录了启动 dev server、获取 Mac 局域网 IP、手机访问前提、验证 URL、验证清单和 iPhone Safari 远程调试建议。
+
+### 对 /map 的影响
+
+普通 `/map` 行为不变。新增诊断信息只在 `debugSceneRoute=1` 或 `debugSceneRoute=true` 时展示。
+
+本阶段没有改变 Marker、InfoWindow、Polyline 核心逻辑，没有改变 `/map?poi=xxx` 聚焦逻辑，也没有改变 `sceneRoute` 到 guideRoute 的映射逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 路线、`scenePosition`、`layoutMode` 或模型资产。
+
+### 验证方式
+
+- 检查普通 `/map` 不显示 plannedRoute 诊断信息。
+- 检查 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1` 显示 activeRouteId、query sceneRoute、path 点数、距离、耗时、usedFallback 和路线来源。
+- 检查 fallbackReason 缺失时页面不报错。
+- 检查 plannedRoute 尚未生成时显示“路线生成中”。
+- 检查没有修改 `routePlanning.ts`、腾讯 walking route 规划算法、POI 坐标、`navLocation`、`scenePosition` 或 `/scenic-3d-map`。
+- 检查 `docs/mobile-lan-route-verification.md` 已生成，并包含手机端局域网验证流程。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 使用手机访问 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1`、`natural_3d_scene`、`family_3d_scene`，记录 `usedFallback` 和路线贴路情况。
+- 如果 `usedFallback=true`，优先排查腾讯 walking 请求、Key 权限和网络加载。
+- 如果 `usedFallback=false` 但仍明显不贴园区道路，后续应优先建设 `navLocation` 人工修正和园区 `routeGeometry` 数据。
