@@ -3581,3 +3581,113 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 在浏览器中分别打开三条路线的 debug URL，并下载对应 JSON。
 - 将浏览器下载得到的 JSON 人工暂存到 `tmp/route-exports`，不要直接提交。
 - 后续新增 routeGeometry 草稿阶段时，再由 Codex 读取这些人工确认的导出文件进行整理。
+
+## 阶段三十九：腾讯 walking path 静态 routeGeometry 候选数据生成
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+读取 `tmp/route-exports` 中三条腾讯 walking runtime 导出的 path JSON，校验后整理为正式的静态候选路线几何数据文件 `src/data/lingshanRouteGeometries.ts`，供后续 `/map` 和 `/scenic-3d-map` 接入 routeGeometry 使用。
+
+### 本次约束
+
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯 walking route 规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不提交 `tmp/route-exports` 原始导出文件。
+
+### 修改文件清单
+
+- `src/data/lingshanRouteGeometries.ts`
+- `docs/map-3d-development-log.md`
+
+### 读取的 tmp/route-exports 文件列表
+
+- `tmp/route-exports/historical_3d_scene.tencent-walking.json`
+- `tmp/route-exports/natural_3d_scene.tencent-walking.json`
+- `tmp/route-exports/family_3d_scene.tencent-walking.json`
+
+三个文件均存在，且 `path` 为数组，点位均包含 `lat` / `lng`，`pointCount` 与 `path.length` 一致。
+
+### 路线数据摘要
+
+| sceneRoute | guideRoute | pointCount | distanceMeters | durationMinutes | usedFallback |
+|---|---|---:|---:|---:|---|
+| `historical_3d_scene` | `historical_culture` | 417 | 4945 | 76 | false |
+| `natural_3d_scene` | `natural_scenery` | 365 | 4607 | 71 | false |
+| `family_3d_scene` | `family` | 198 | 2497 | 37 | false |
+
+### 为什么这些数据是 candidate 而不是 verified
+
+这些几何数据来自腾讯 walking route 的运行时导出。`usedFallback=false` 说明腾讯请求成功并返回了 polyline，但不代表路线已经人工确认完全贴合灵山胜境园区内部步道。
+
+腾讯路线可能仍受内部路网精度、POI 终点位置、园区可通行道路缺失等因素影响，因此当前状态统一标记为 `candidate`，需要后续结合园区导览图和人工现场/地图核对后，才能升级为 `manual_verified` 或 `verified`。
+
+### 为什么不提交 tmp/route-exports 原始 JSON
+
+`tmp/route-exports` 是浏览器下载的运行时中间产物，适合作为人工导出和临时交换目录，不应作为正式源码资产提交。
+
+正式可复用数据已经整理进入 `src/data/lingshanRouteGeometries.ts`，后续只维护该结构化数据文件，避免提交重复的临时 JSON。
+
+### 后续如何使用 lingshanRouteGeometries
+
+`lingshanRouteGeometries.ts` 新增：
+
+- `RouteGeometrySource`
+- `RouteGeometryStatus`
+- `RouteGeometryPoint`
+- `LingshanRouteGeometry`
+- `lingshanRouteGeometries`
+- `getLingshanRouteGeometryBySceneRouteId`
+- `getLingshanRouteGeometryByGuideRouteId`
+
+后续可以：
+
+1. 在 `/map` 中优先使用 candidate routeGeometry 作为预设路线调试图层。
+2. 在 `/scenic-3d-map` 中把经纬度 path 通过 `geoToScenePosition` 转换为 3D 路线曲线。
+3. 对不贴合园区步道的点段做人工修正，并将 `source` 升级为 `hybrid_corrected`。
+4. 人工确认后将 `status` 从 `candidate` 升级为 `verified`。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route 规划逻辑、Marker、Polyline、InfoWindow 或 query 参数行为。新增数据文件尚未接入页面渲染。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 路线、`scenePosition`、`layoutMode` 或模型资产。新增 routeGeometry 数据尚未接入 3D 场景。
+
+### 验证方式
+
+- 检查三个 `tmp/route-exports` JSON 文件存在。
+- 校验每个 JSON 包含 `routeId`、`sceneRoute`、`source`、`pointCount`、`distanceMeters`、`durationMinutes`、`usedFallback`、`fallbackReason` 和 `path`。
+- 校验 `path` 为数组，且每个点包含 `lat` / `lng`。
+- 校验 `pointCount` 与 `path.length` 一致。
+- 确认三个文件 `usedFallback=false`。
+- 检查 `src/data/lingshanRouteGeometries.ts` 生成了 3 条 `candidate` routeGeometry。
+- 检查没有修改 `/map`、`/scenic-3d-map`、`GuideMapPage.tsx`、`routePlanning.ts`、POI 坐标或 `scenePosition`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交，不提交 `tmp/route-exports` 原始 JSON。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 在 `/map` 中增加可控开关，使用 `lingshanRouteGeometries` 绘制候选 routeGeometry，与腾讯实时 walking route 对比。
+- 在 `/scenic-3d-map` 中把 candidate routeGeometry 转换为 3D 曲线，替代简单 POI 顺序金线。
+- 对明显不贴合园区步道的点段建立人工修正流程，再升级为 `hybrid_corrected`。
