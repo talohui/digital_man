@@ -16,6 +16,8 @@ import {
 } from '../data/guideData'
 import {
   getLingshanPresetRoutePath,
+  lingshanPois,
+  lingshanSceneRoutes,
   lingshanSceneRouteToGuideRouteMap,
   USE_LINGSHAN_PRESET_ROUTE_PATHS
 } from '../data/lingshanMapData'
@@ -64,6 +66,7 @@ function GuideMapPage() {
   const mapRef = useRef<any>(null)
   const markerLayerRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
+  const sceneRouteDebugLayerRef = useRef<any>(null)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
   const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
@@ -82,6 +85,8 @@ function GuideMapPage() {
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
+  const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
+  const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && (queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true')
   const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
   const queryPoiRoute = queryPoiSpot
     ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
@@ -93,6 +98,10 @@ function GuideMapPage() {
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
   const routeSpots = useMemo(() => getGuideRouteSpots(route.id), [route.id])
+  const sceneRouteDebugPath = useMemo(
+    () => (isSceneRouteDebugEnabled ? getSceneRouteDebugPath(querySceneRouteId) : []),
+    [isSceneRouteDebugEnabled, querySceneRouteId]
+  )
   const selectedSpot = getGuideSpotById(selectedSpotId || getDefaultSpotId(route.id))
   const selectedIndex = route.stops.findIndex((stop) => stop.spotId === selectedSpot.id)
 
@@ -202,10 +211,12 @@ function GuideMapPage() {
     return () => {
       cancelled = true
       infoWindowRef.current?.close?.()
+      sceneRouteDebugLayerRef.current?.setMap?.(null)
       mapRef.current?.destroy?.()
       mapRef.current = null
       markerLayerRef.current = null
       routeLayerRef.current = null
+      sceneRouteDebugLayerRef.current = null
       infoWindowRef.current = null
     }
   }, [])
@@ -258,6 +269,44 @@ function GuideMapPage() {
 
     focusSpot(mapRef.current, infoWindowRef.current, selectedSpot)
   }, [mapStatus, navigate, routeSpots, selectedSpot, setSelectedSpotId])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    sceneRouteDebugLayerRef.current?.setMap?.(null)
+    sceneRouteDebugLayerRef.current = null
+
+    if (!isSceneRouteDebugEnabled || sceneRouteDebugPath.length < 2) {
+      return
+    }
+
+    sceneRouteDebugLayerRef.current = new window.TMap.MultiPolyline({
+      map: mapRef.current,
+      styles: {
+        sceneRouteDebug: new window.TMap.PolylineStyle({
+          color: '#D97706',
+          width: 4,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 246, 219, 0.82)',
+          lineCap: 'round'
+        })
+      },
+      geometries: [
+        {
+          id: `scene-route-debug:${querySceneRouteId}`,
+          styleId: 'sceneRouteDebug',
+          paths: sceneRouteDebugPath.map((point) => new window.TMap.LatLng(point.lat, point.lng))
+        }
+      ]
+    })
+
+    return () => {
+      sceneRouteDebugLayerRef.current?.setMap?.(null)
+      sceneRouteDebugLayerRef.current = null
+    }
+  }, [isSceneRouteDebugEnabled, mapStatus, querySceneRouteId, sceneRouteDebugPath])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !queryPoiSpot || selectedSpot.id !== queryPoiSpot.id) {
@@ -393,6 +442,31 @@ function GuideMapPage() {
           </div>
         ) : null}
 
+        {isSceneRouteDebugEnabled ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              top: 86,
+              left: 20,
+              maxWidth: 360,
+              padding: '12px 14px',
+              color: '#4b3b17',
+              fontSize: 12,
+              lineHeight: 1.6,
+              pointerEvents: 'none'
+            }}
+          >
+            <strong style={{ display: 'block', marginBottom: 4, color: '#9a5a08' }}>sceneRoute 调试叠加</strong>
+            <span>
+              金色线为 3D sceneRoute 的 POI 骨架连线，不代表真实步行道路。蓝绿色路线为腾讯 walking 或当前真实地图路线。
+            </span>
+            {sceneRouteDebugPath.length < 2 ? (
+              <span style={{ display: 'block', marginTop: 4, color: '#8a4f0b' }}>当前 sceneRoute 未找到可绘制的骨架线。</span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="guide-map-bottom">
           <div className="glass-card guide-spot-drawer">
             <div className="guide-spot-drawer__head">
@@ -494,6 +568,35 @@ function GuideMapPage() {
       </Modal>
     </div>
   )
+}
+
+function getSceneRouteDebugPath(sceneRouteId: string): LatLngPoint[] {
+  const sceneRoute = lingshanSceneRoutes.find((item) => item.id === sceneRouteId)
+
+  if (!sceneRoute) {
+    return []
+  }
+
+  return sceneRoute.poiSequence
+    .map((poiId) => {
+      const lingshanPoi = lingshanPois.find((poi) => poi.id === poiId)
+
+      if (lingshanPoi) {
+        return lingshanPoi.displayLocation
+      }
+
+      const guideSpot = guideSpots.find((spot) => spot.id === poiId)
+
+      if (!guideSpot) {
+        return null
+      }
+
+      return {
+        lat: guideSpot.lat,
+        lng: guideSpot.lng
+      }
+    })
+    .filter((point): point is LatLngPoint => point !== null)
 }
 
 function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {

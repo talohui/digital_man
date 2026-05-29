@@ -3150,3 +3150,109 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 手动打开 `/scenic-3d-map`，检查三条 3D 导览路线在 projected 布局下的节点分布、标签遮挡和金线路线可读性。
 - 后续可基于 projected 真实空间骨架做视觉优化，例如局部 artistic offset、标签避让、镜头参数、山水背景与路线层级。
 - 不建议重新把 `manual` 作为用户可见模式，除非作为开发调试入口单独隔离。
+
+## 阶段三十六：真实地图 sceneRoute 骨架线调试叠加
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+在 `/map` 中增加一个可选调试叠加层，用于把 3D `sceneRoute` 的 POI 中心骨架连线叠加到腾讯地图真实底图上，方便对比 3D 导览线与腾讯 walking 路线之间的差异。
+
+### 本次约束
+
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯 walking route 规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### debugSceneRoute 查询参数说明
+
+新增调试入口：
+
+- `/map?sceneRoute=<sceneRouteId>&debugSceneRoute=1`
+- `/map?sceneRoute=<sceneRouteId>&debugSceneRoute=true`
+
+只有同时存在 `sceneRoute`，并且 `debugSceneRoute` 为 `1` 或 `true` 时，才会在真实腾讯地图上额外绘制 3D `sceneRoute` 骨架线。
+
+普通 `/map`、`/map?sceneRoute=classic_3d_scene`、`/map?poi=xxx` 不会显示调试线。
+
+### 3D sceneRoute 骨架线的数据来源
+
+调试线从 `lingshanSceneRoutes` 中按 `sceneRoute` id 查找路线，读取其 `poiSequence`，再逐个将 `poiId` 转换为真实地图坐标：
+
+1. 优先使用 `lingshanPois.displayLocation`。
+2. 如果缺少对应 POI，则回退到 `guideSpots` 中的 `lat/lng`。
+3. 生成 `LatLngPoint[]` 后，用独立的 `TMap.MultiPolyline` 图层绘制。
+
+调试图层使用独立 `sceneRouteDebugLayerRef` 管理。关闭调试、切换 `sceneRoute` 或页面卸载时，会清理旧图层，避免地图残留多条调试线。
+
+### 骨架线为什么不等同真实步行道路
+
+3D `sceneRoute` 的 `poiSequence` 表达的是导览站点顺序和讲解节奏。调试线只是把这些 POI 的真实坐标按顺序直连，属于 POI 中心骨架连线。
+
+它不包含腾讯 walking route 的道路折线、转弯、步道绕行、入口点或真实可通行路网，因此不能作为真实步行导航使用。
+
+### 如何与腾讯 walking 路线对比
+
+真实地图页原有蓝绿色路线仍由腾讯 walking route 或当前真实地图路线逻辑绘制。新增金色调试线用于显示 3D `sceneRoute` 的 POI 骨架连线。
+
+页面在调试模式下显示轻量提示：
+
+- 金色线为 3D `sceneRoute` 的 POI 骨架连线，不代表真实步行道路。
+- 蓝绿色路线为腾讯 walking 或当前真实地图路线。
+
+如果金色线明显穿过建筑、水面或核心地台，说明 3D 艺术路线需要后续通过真实路径点串、人工控制点或 `artisticOffset` 进行修正。
+
+### 对 /map 的影响
+
+`/map` 增加了一个仅 query 参数开启的调试叠加层。默认访问 `/map` 时行为不变：
+
+- 不显示调试线。
+- 不改变 Marker、Polyline、InfoWindow。
+- 不改变 `/map?poi=xxx` 的聚焦逻辑。
+- 不改变 `/map?sceneRoute=xxx` 到 guideRoute 的映射逻辑。
+- 不改变腾讯 walking route 规划、缓存或兜底逻辑。
+
+当 `/map?poi=xxx&sceneRoute=xxx&debugSceneRoute=1` 同时存在时，`poi` 仍用于初始聚焦，调试线可以同时显示。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 路线、`scenePosition`、`layoutMode` 或任何模型资产。该调试能力只服务于真实地图页上的空间对照。
+
+### 验证方式
+
+- 检查 `/map` 普通访问时不显示金色调试线。
+- 检查 `/map?sceneRoute=classic_3d_scene` 不显示金色调试线。
+- 检查 `/map?sceneRoute=classic_3d_scene&debugSceneRoute=1` 显示金色 POI 骨架线和调试提示。
+- 检查 `/map?sceneRoute=classic_3d_scene&debugSceneRoute=true` 同样启用调试线。
+- 检查 `/map?poi=giant_buddha&sceneRoute=classic_3d_scene&debugSceneRoute=1` 仍优先聚焦灵山大佛，同时显示调试线。
+- 检查关闭或切换 query 后旧调试图层被清理。
+- 检查没有修改 `/scenic-3d-map`、`routePlanning.ts`、真实 POI 坐标、`displayLocation`、`navLocation` 或 `scenePosition`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 用 `/map?sceneRoute=<id>&debugSceneRoute=1` 分别检查历史文化、自然风光和亲子 3D 路线的骨架线。
+- 对明显穿越建筑或偏离真实道路的位置，优先记录需要人工控制点的路线段。
+- 后续可以新增独立的 3D route control points 数据层，用真实地图调试结果反向修正 `/scenic-3d-map` 的金线路线。
