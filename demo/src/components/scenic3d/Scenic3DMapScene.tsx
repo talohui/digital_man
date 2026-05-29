@@ -79,8 +79,7 @@ function getRouteSequence(routePoiSequence?: string[]) {
   return validSequence && validSequence.length >= 2 ? validSequence : defaultRoutePoiSequence
 }
 
-function buildRoutePoints(routePoiSequence?: string[]) {
-  const sequence = getRouteSequence(routePoiSequence)
+function buildRoutePoints(sequence: string[]) {
   const points: Vector3[] = []
 
   sequence.forEach((poiId, index) => {
@@ -105,30 +104,41 @@ function buildRoutePoints(routePoiSequence?: string[]) {
 function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(), [])
   const activePoiId = selectedPoiId || 'giant_buddha'
-  const routePoints = useMemo(() => buildRoutePoints(routePoiSequence), [routePoiSequence])
+  const routeSequence = useMemo(() => getRouteSequence(routePoiSequence), [routePoiSequence])
+  const routePoints = useMemo(() => buildRoutePoints(routeSequence), [routeSequence])
 
   return (
     <>
-      <color attach="background" args={['#e9f0ef']} />
-      <fog attach="fog" args={['#e9f0ef', 8, 18]} />
-      <ambientLight intensity={0.58} />
-      <hemisphereLight args={['#ffffff', '#a9bbb6', 0.72]} />
-      <directionalLight position={[5, 8, 4]} intensity={1.35} />
-      <directionalLight position={[-4, 5, -5]} intensity={0.35} />
+      <color attach="background" args={['#f2efe6']} />
+      <fog attach="fog" args={['#f2efe6', 6.5, 16.5]} />
+      <ambientLight intensity={0.68} />
+      <hemisphereLight args={['#fff7e8', '#a8b8ad', 0.78]} />
+      <directionalLight position={[5.5, 8, 4.5]} intensity={1.05} color="#fff3d3" />
+      <directionalLight position={[-4.5, 4.2, -5]} intensity={0.28} color="#c7d6d0" />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
-        <circleGeometry args={[7.4, 96]} />
-        <meshStandardMaterial color="#dfe8de" roughness={0.9} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.08, 0]}>
+        <circleGeometry args={[8.35, 128]} />
+        <meshStandardMaterial color="#e5ddca" roughness={0.96} />
+      </mesh>
+
+      <mesh rotation={[-Math.PI / 2, 0, 0.08]} position={[0, -0.045, 0]} scale={[1, 0.86, 1]}>
+        <circleGeometry args={[7.25, 128]} />
+        <meshStandardMaterial color="#d9dfd0" roughness={0.94} />
+      </mesh>
+
+      <mesh rotation={[-Math.PI / 2, 0, -0.08]} position={[0.15, -0.028, 0.1]} scale={[0.98, 0.82, 1]}>
+        <ringGeometry args={[6.55, 6.62, 128]} />
+        <meshBasicMaterial color="#f7f0dc" transparent opacity={0.46} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, -0.18]} position={[-4.25, -0.025, 0.65]} scale={[1.85, 0.78, 1]}>
         <circleGeometry args={[1.55, 64]} />
-        <meshStandardMaterial color="#a8ccd3" roughness={0.42} metalness={0.03} />
+        <meshStandardMaterial color="#adc9c9" roughness={0.34} metalness={0.02} transparent opacity={0.72} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0.26]} position={[-5.25, -0.02, -2.45]} scale={[2.5, 0.84, 1]}>
         <circleGeometry args={[1.2, 64]} />
-        <meshStandardMaterial color="#b7d5d9" roughness={0.46} metalness={0.02} />
+        <meshStandardMaterial color="#bed4d0" roughness={0.38} metalness={0.02} transparent opacity={0.66} />
       </mesh>
 
       {[
@@ -140,12 +150,27 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
       ].map(([x, y, z, radius, height], index) => (
         <mesh key={index} position={[x, y, z]}>
           <coneGeometry args={[radius, height, 5]} />
-          <meshStandardMaterial color="#b7c3b6" roughness={0.88} />
+          <meshStandardMaterial color={index % 2 === 0 ? '#aebaaa' : '#9fae9e'} roughness={0.92} transparent opacity={0.84} />
         </mesh>
       ))}
 
-      <Line points={routePoints} color="#c79a3b" lineWidth={4} dashed={false} />
-      <Line points={routePoints} color="#f6e6ae" lineWidth={1.5} dashed={false} />
+      <Line points={routePoints} color="#d7c08a" lineWidth={7} dashed={false} />
+      <Line points={routePoints} color="#b8892e" lineWidth={3.4} dashed={false} />
+      <Line points={routePoints} color="#fff0b8" lineWidth={1.2} dashed={false} />
+
+      {routeSequence.map((poiId) => {
+        const [x, , z] = getScenePosition(poiId)
+        const active = poiId === activePoiId
+
+        return (
+          <group key={`route-node-${poiId}`} position={[x, active ? 0.18 : 0.16, z]} rotation={[Math.PI / 2, 0, 0]}>
+            <mesh>
+              <torusGeometry args={[active ? 0.34 : 0.24, active ? 0.026 : 0.018, 12, 48]} />
+              <meshBasicMaterial color={active ? '#d09b35' : '#cfbb83'} />
+            </mesh>
+          </group>
+        )
+      })}
 
       {landmarks.map((landmark) => {
         const active = landmark.poiId === activePoiId
@@ -160,6 +185,10 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
               onSelectPoi?.(landmark.poiId)
             }}
           >
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]}>
+              <ringGeometry args={active ? [0.72, 0.94, 64] : [0.5, 0.58, 48]} />
+              <meshBasicMaterial color={active ? '#d0a14a' : '#d4d0ba'} transparent opacity={active ? 0.36 : 0.2} />
+            </mesh>
             <PlaceholderLandmark poiId={landmark.poiId} active={active} />
             <Html center position={[0, 2.15, 0]} distanceFactor={8}>
               <button
@@ -167,16 +196,17 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
                 onClick={() => onSelectPoi?.(landmark.poiId)}
                 style={{
                   minWidth: 84,
-                  padding: '5px 9px',
-                  border: active ? '1px solid rgba(178, 118, 24, 0.65)' : '1px solid rgba(55, 73, 84, 0.18)',
-                  borderRadius: 999,
-                  background: active ? 'rgba(255, 247, 221, 0.94)' : 'rgba(255, 255, 255, 0.84)',
-                  color: active ? '#8a5b12' : '#364852',
-                  boxShadow: '0 8px 20px rgba(31, 42, 51, 0.14)',
+                  padding: '5px 10px',
+                  border: active ? '1px solid rgba(170, 114, 29, 0.62)' : '1px solid rgba(63, 83, 74, 0.16)',
+                  borderRadius: 12,
+                  background: active ? 'rgba(255, 246, 220, 0.96)' : 'rgba(255, 252, 242, 0.88)',
+                  color: active ? '#7f5314' : '#2f443b',
+                  boxShadow: active ? '0 10px 24px rgba(121, 82, 22, 0.18)' : '0 8px 18px rgba(31, 42, 51, 0.1)',
                   cursor: 'pointer',
                   fontSize: 12,
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
+                  letterSpacing: 0,
                 }}
               >
                 {landmark.name}
@@ -192,7 +222,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
         minDistance={4.6}
         maxDistance={12}
         maxPolarAngle={Math.PI * 0.48}
-        target={[0, 0.6, -0.8]}
+        target={[0, 0.55, -0.85]}
       />
     </>
   )
@@ -200,7 +230,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
 
 function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
   return (
-    <Canvas camera={{ position: [6.4, 5.6, 7.6], fov: 43 }}>
+    <Canvas camera={{ position: [6.2, 5.35, 7.4], fov: 41 }}>
       <SceneContent selectedPoiId={selectedPoiId} onSelectPoi={onSelectPoi} routePoiSequence={routePoiSequence} />
     </Canvas>
   )

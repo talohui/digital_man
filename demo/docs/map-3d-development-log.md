@@ -2201,3 +2201,92 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 阶段二十七优先做 `/scenic-3d-map` 代码级视觉升级。
 - 建议只修改 `src/components/scenic3d/Scenic3DMapScene.tsx`、`src/pages/Scenic3DMapPage.tsx` 和开发记录。
 - 暂不修改 `/map`，暂不引入真实 `.glb`，先优化颜色、雾效、水面、山体、路线、标签、高亮和页面浮层风格。
+
+## 2026-05-29 阶段二十七：沉浸式 3D 地图代码级视觉轻量升级
+
+### 本次目标
+
+在不改变 `/scenic-3d-map` 功能逻辑的前提下，对沉浸式 3D 地图做代码级视觉轻量升级，让它更接近“水墨留白 + 低多边形 + 东方山水 + 金线导览”的视觉方向。
+
+### 本次约束
+
+- 只优化 `/scenic-3d-map` 的视觉表现。
+- 只修改 3D 场景组件、3D 地图页面和开发记录。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标或 `scenePosition` 数据。
+- 不修改 `lingshanMapData.ts`。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 场景视觉升级说明
+
+`Scenic3DMapScene.tsx` 做了轻量视觉升级：
+
+- 背景从工程测试感浅青色调整为更柔和的浅米白、青灰色。
+- fog 色彩和距离调整为水墨留白方向，远景更柔和。
+- 地形底盘增加外层宣纸色大地台、浅灰绿内层和软边界环。
+- 水面改为低饱和淡蓝灰半透明材质，保留太湖/水面意象。
+- 山体远景改为更低饱和的青灰、墨绿色，并降低视觉抢占。
+- 金色路线升级为三层导览金线，并增加路线节点圆环。
+- 景点标签改为米白底、深绿/墨色文字、轻阴影和圆角的手绘地图标注感。
+- selectedPoiId 对应地标增加底座光环和路线节点强调，非选中状态保持低饱和。
+- 光照调整为更柔和的暖色主光和青灰补光，避免纯白过曝。
+
+### 页面 UI 升级说明
+
+`Scenic3DMapPage.tsx` 做了轻量 UI 升级：
+
+- 页面背景调整为米白到青灰绿的整体氛围。
+- 左侧路线浮层改为半透明宣纸色卡片，圆角和阴影更柔和。
+- 路线站点列表增加序号节点感，当前选中站点更清晰。
+- 右下角景点信息卡统一为文旅导览卡片风格。
+- 信息卡明确显示“当前为艺术化 3D 占位”。
+- 保留“查看该景点真实地图”“查看整条路线真实地图”“返回真实地图”按钮。
+- 保持 `/map?poi=xxx` 和 `/map?sceneRoute=xxx` 跳转 URL 不变。
+
+### 为什么本阶段不引入真实 glb 模型
+
+本阶段目标是先验证整体视觉方向、色彩、雾效、路线、标签和信息卡是否更接近目标风格。真实 `.glb` 模型会引入资产体积、加载、LOD、版权和宗教景观表达等问题，适合在视觉语言稳定后再进入 Blender 资产替换阶段。
+
+### 为什么本阶段不修改 /map
+
+`/map` 是腾讯地图真实导览页，负责真实 POI、路线规划、InfoWindow、query poi 聚焦和真实地图兜底。本阶段只优化 3D 艺术地图视觉，不应影响真实地图的稳定交互和导航职责。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 的视觉更接近沉浸式文旅导览地图：色彩更柔和，地形、水面、山体、路线和标签更统一。景点选择、高亮、路线站点列表和真实地图跳转能力保持不变。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx` 或腾讯地图路线规划逻辑。真实地图导航页行为不变。
+
+### 验证方式
+
+- 检查 `Scenic3DMapScene.tsx` 保留 `selectedPoiId`、`onSelectPoi`、`routePoiSequence`、OrbitControls 和 4 个核心地标。
+- 检查 `Scenic3DMapPage.tsx` 保留路线站点、景点信息和真实地图跳转按钮。
+- 检查未修改 `/map`、`GuideMapPage.tsx`、`routePlanning.ts`、`lingshanMapData.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 在浏览器中手动打开 `/scenic-3d-map`，检查桌面和移动端的视觉层次、标签遮挡、路线可读性和按钮可点击性。
+- 后续可继续做 hover 高亮、点击镜头推进、路线分段播放，但仍应保持真实导航由 `/map` 兜底。

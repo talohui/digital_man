@@ -56,8 +56,8 @@ function Scenic3DMapPage() {
         position: 'relative',
         minHeight: '100vh',
         overflow: 'hidden',
-        background: '#dfe9e7',
-        color: '#24323a',
+        background: 'linear-gradient(180deg, #f3eedf 0%, #dce8df 58%, #d4e0d7 100%)',
+        color: '#23352f',
       }}
     >
       <div
@@ -78,20 +78,20 @@ function Scenic3DMapPage() {
           position: 'absolute',
           top: 24,
           left: 24,
-          width: 340,
+          width: 360,
           maxWidth: 'calc(100vw - 48px)',
-          padding: 18,
-          border: '1px solid rgba(255, 255, 255, 0.58)',
-          borderRadius: 14,
-          background: 'rgba(255, 255, 255, 0.78)',
-          boxShadow: '0 20px 50px rgba(22, 34, 40, 0.16)',
-          backdropFilter: 'blur(14px)',
+          padding: 20,
+          border: '1px solid rgba(255, 255, 255, 0.66)',
+          borderRadius: 18,
+          background: 'rgba(255, 252, 242, 0.86)',
+          boxShadow: '0 24px 60px rgba(48, 58, 47, 0.16)',
+          backdropFilter: 'blur(16px)',
         }}
       >
         <p
           style={{
             margin: '0 0 6px',
-            color: '#6a7c76',
+            color: '#75816f',
             fontSize: 13,
             fontWeight: 700,
             letterSpacing: 0,
@@ -102,8 +102,10 @@ function Scenic3DMapPage() {
         <h1
           style={{
             margin: '0 0 16px',
-            fontSize: 28,
+            color: '#243a31',
+            fontSize: 29,
             lineHeight: 1.22,
+            fontFamily: "'Songti SC', 'STSong', 'Noto Serif SC', serif",
           }}
         >
           灵山胜境 3D 导览地图
@@ -112,15 +114,17 @@ function Scenic3DMapPage() {
         <div
           style={{
             marginBottom: 14,
-            padding: 12,
-            borderRadius: 10,
-            background: 'rgba(255, 255, 255, 0.54)',
+            padding: 13,
+            border: '1px solid rgba(129, 142, 113, 0.14)',
+            borderRadius: 14,
+            background: 'rgba(255, 255, 255, 0.56)',
           }}
         >
           <strong
             style={{
               display: 'block',
               marginBottom: 6,
+              color: '#2f4a3f',
               fontSize: 16,
             }}
           >
@@ -129,7 +133,7 @@ function Scenic3DMapPage() {
           <p
             style={{
               margin: 0,
-              color: '#5f716b',
+              color: '#65756a',
               fontSize: 13,
               lineHeight: 1.55,
             }}
@@ -154,24 +158,43 @@ function Scenic3DMapPage() {
                 type="button"
                 onClick={() => setSelectedPoiId(poi.poiId)}
                 style={{
+                  display: 'grid',
+                  gridTemplateColumns: '28px minmax(0, 1fr)',
+                  gap: 10,
+                  alignItems: 'center',
                   padding: 13,
-                  border: active ? '1px solid rgba(171, 112, 24, 0.62)' : '1px solid rgba(56, 76, 84, 0.14)',
-                  borderRadius: 10,
-                  background: active ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.58)',
-                  color: '#24323a',
+                  border: active ? '1px solid rgba(169, 111, 30, 0.58)' : '1px solid rgba(68, 83, 73, 0.12)',
+                  borderRadius: 14,
+                  background: active ? 'rgba(255, 246, 219, 0.96)' : 'rgba(255, 255, 255, 0.52)',
+                  color: '#243a31',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  boxShadow: active ? '0 10px 24px rgba(171, 112, 24, 0.14)' : 'none',
+                  boxShadow: active ? '0 12px 26px rgba(153, 105, 35, 0.16)' : 'none',
                 }}
               >
-                <span style={{ display: 'block', marginBottom: 5, color: active ? '#9a6518' : '#71827c', fontSize: 12, fontWeight: 700 }}>
-                  第 {index + 1} 站
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 26,
+                    height: 26,
+                    borderRadius: 999,
+                    background: active ? '#b9822e' : 'rgba(72, 91, 80, 0.1)',
+                    color: active ? '#fff8e8' : '#66766e',
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  {index + 1}
                 </span>
-                <strong style={{ display: 'block', marginBottom: 4, fontSize: 16 }}>
-                  {poi.name}
-                </strong>
-                <span style={{ display: 'block', color: '#64756f', fontSize: 12 }}>
-                  {poi.poiId}
+                <span>
+                  <strong style={{ display: 'block', marginBottom: 4, fontSize: 16 }}>
+                    {poi.name}
+                  </strong>
+                  <span style={{ display: 'block', color: '#66766e', fontSize: 12 }}>
+                    {poi.poiId}
+                  </span>
                 </span>
               </button>
             )
@@ -186,19 +209,21 @@ function Scenic3DMapPage() {
           bottom: 24,
           width: 380,
           maxWidth: 'calc(100vw - 48px)',
-          padding: 18,
-          border: '1px solid rgba(255, 255, 255, 0.58)',
-          borderRadius: 14,
-          background: 'rgba(255, 255, 255, 0.78)',
-          boxShadow: '0 20px 50px rgba(22, 34, 40, 0.16)',
-          backdropFilter: 'blur(14px)',
+          padding: 20,
+          border: '1px solid rgba(255, 255, 255, 0.66)',
+          borderRadius: 18,
+          background: 'rgba(255, 252, 242, 0.87)',
+          boxShadow: '0 24px 60px rgba(48, 58, 47, 0.16)',
+          backdropFilter: 'blur(16px)',
         }}
       >
         <h2
           style={{
             margin: '0 0 6px',
+            color: '#253a31',
             fontSize: 22,
             lineHeight: 1.3,
+            fontFamily: "'Songti SC', 'STSong', 'Noto Serif SC', serif",
           }}
         >
           {selectedPoi.name}
@@ -208,8 +233,23 @@ function Scenic3DMapPage() {
         </p>
         <p
           style={{
+            display: 'inline-flex',
+            margin: '0 0 12px',
+            padding: '5px 9px',
+            border: '1px solid rgba(184, 130, 46, 0.18)',
+            borderRadius: 999,
+            background: 'rgba(255, 246, 221, 0.78)',
+            color: '#8a5b12',
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          当前为艺术化 3D 占位
+        </p>
+        <p
+          style={{
             margin: '0 0 14px',
-            color: '#3f5057',
+            color: '#3c5047',
             fontSize: 14,
             lineHeight: 1.65,
           }}
@@ -219,7 +259,7 @@ function Scenic3DMapPage() {
         <p
           style={{
             margin: '0 0 14px',
-            color: '#6a5a36',
+            color: '#6d5b37',
             fontSize: 13,
             lineHeight: 1.6,
           }}
@@ -241,12 +281,13 @@ function Scenic3DMapPage() {
                 minHeight: 40,
                 padding: '0 14px',
                 border: 0,
-                borderRadius: 8,
-                background: '#0d9488',
-                color: '#ffffff',
+                borderRadius: 10,
+                background: '#1f7d70',
+                color: '#fffaf0',
                 cursor: 'pointer',
                 fontSize: 14,
                 fontWeight: 700,
+                boxShadow: '0 10px 22px rgba(31, 125, 112, 0.2)',
               }}
             >
               查看该景点真实地图
@@ -258,10 +299,10 @@ function Scenic3DMapPage() {
             style={{
               minHeight: 40,
               padding: '0 14px',
-              border: '1px solid rgba(13, 148, 136, 0.3)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.72)',
-              color: '#0b746b',
+              border: '1px solid rgba(31, 125, 112, 0.24)',
+              borderRadius: 10,
+              background: 'rgba(255, 255, 255, 0.68)',
+              color: '#1f7469',
               cursor: 'pointer',
               fontSize: 14,
               fontWeight: 700,
@@ -275,10 +316,10 @@ function Scenic3DMapPage() {
             style={{
               minHeight: 40,
               padding: '0 14px',
-              border: '1px solid rgba(79, 96, 104, 0.2)',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.58)',
-              color: '#43565e',
+              border: '1px solid rgba(79, 96, 104, 0.18)',
+              borderRadius: 10,
+              background: 'rgba(255, 255, 255, 0.54)',
+              color: '#435a50',
               cursor: 'pointer',
               fontSize: 14,
               fontWeight: 700,
