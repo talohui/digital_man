@@ -68,6 +68,7 @@ export type LingshanRoutePath = {
 
 export type LingshanSceneRoute = {
   id: string
+  guideRouteId: string
   name: string
   description: string
   poiSequence: string[]
@@ -284,18 +285,51 @@ export function getLingshanPresetRoutePath(routeId: string): LingshanRoutePath |
   return lingshanPresetRoutePaths.find((routePath) => routePath.routeId === routeId)
 }
 
+function getGuideRoutePoiSequence(routeId: string) {
+  return guideRoutes.find((route) => route.id === routeId)?.stops.map((stop) => stop.spotId) ?? []
+}
+
+const historicalCulturePoiSequence = getGuideRoutePoiSequence('historical_culture')
+const naturalSceneryPoiSequence = getGuideRoutePoiSequence('natural_scenery')
+const familyPoiSequence = getGuideRoutePoiSequence('family')
+
 export const lingshanSceneRoutes: LingshanSceneRoute[] = [
   {
     id: 'classic_3d_scene',
     name: '灵山经典 3D 导览线',
-    description: '以灵山大佛、九龙灌浴、梵宫、五印坛城为核心的艺术化 3D 导览路线。',
-    poiSequence: ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng']
+    guideRouteId: 'historical_culture',
+    description: '基于历史文化路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达游览顺序和导览节奏，不等同真实步行路径。',
+    poiSequence: historicalCulturePoiSequence
+  },
+  {
+    id: 'historical_3d_scene',
+    name: '历史文化 3D 导览线',
+    guideRouteId: 'historical_culture',
+    description: '基于历史文化路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达佛教历史、建筑艺术和文化轴线，不等同真实步行路径。',
+    poiSequence: historicalCulturePoiSequence
+  },
+  {
+    id: 'natural_3d_scene',
+    name: '自然风光 3D 导览线',
+    guideRouteId: 'natural_scenery',
+    description: '基于自然风光路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达太湖视野、山水格局和禅意园林节奏，不等同真实步行路径。',
+    poiSequence: naturalSceneryPoiSequence
+  },
+  {
+    id: 'family_3d_scene',
+    name: '亲子 3D 导览线',
+    guideRouteId: 'family',
+    description: '基于亲子路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达亲子互动、表演打卡和轻松游览节奏，不等同真实步行路径。',
+    poiSequence: familyPoiSequence
   }
 ]
 
 // 将艺术化 3D 导览路线映射到腾讯地图真实导览路线。
 export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
-  classic_3d_scene: 'historical_culture'
+  classic_3d_scene: 'historical_culture',
+  historical_3d_scene: 'historical_culture',
+  natural_3d_scene: 'natural_scenery',
+  family_3d_scene: 'family'
 }
 
 // TODO: 后续需要根据灵山胜境真实边界修正。

@@ -6,6 +6,7 @@ import { lingshanPois, lingshanSceneRoutes } from '../data/lingshanMapData'
 
 const fallbackRoute = {
   id: 'fallback_3d_scene',
+  guideRouteId: 'historical_culture',
   name: '灵山经典 3D 导览线',
   description: '以灵山大佛、九龙灌浴、梵宫、五印坛城为核心的艺术化 3D 导览路线。',
   poiSequence: ['jiulong_guanyu', 'giant_buddha', 'fan_gong', 'wuyin_tancheng'],
@@ -32,8 +33,13 @@ const fallbackPoiMeta: Record<string, { name: string; intro: string }> = {
 
 function Scenic3DMapPage() {
   const navigate = useNavigate()
-  const currentRoute = lingshanSceneRoutes[0] ?? fallbackRoute
-  const [selectedPoiId, setSelectedPoiId] = useState(currentRoute.poiSequence[0])
+  const initialSceneRoute = lingshanSceneRoutes[0] ?? fallbackRoute
+  const [currentSceneRouteId, setCurrentSceneRouteId] = useState(initialSceneRoute.id)
+  const [selectedPoiId, setSelectedPoiId] = useState(initialSceneRoute.poiSequence[0] ?? '')
+  const currentRoute = useMemo(
+    () => lingshanSceneRoutes.find((route) => route.id === currentSceneRouteId) ?? initialSceneRoute,
+    [currentSceneRouteId, initialSceneRoute]
+  )
   const scenePois = useMemo(
     () =>
       lingshanPois
@@ -63,6 +69,16 @@ function Scenic3DMapPage() {
     poiId: selectedPoiId,
     name: '未选择景点',
     intro: '请选择一个 3D 导览节点查看详情。',
+  }
+  const handleSceneRouteChange = (sceneRouteId: string) => {
+    const nextRoute = lingshanSceneRoutes.find((route) => route.id === sceneRouteId)
+
+    if (!nextRoute) {
+      return
+    }
+
+    setCurrentSceneRouteId(nextRoute.id)
+    setSelectedPoiId(nextRoute.poiSequence[0] ?? '')
   }
 
   return (
@@ -95,12 +111,16 @@ function Scenic3DMapPage() {
           left: 20,
           width: 326,
           maxWidth: 'calc(100vw - 40px)',
+          maxHeight: 'calc(100vh - 40px)',
           padding: 16,
           border: '1px solid rgba(255, 255, 255, 0.66)',
           borderRadius: 18,
           background: 'rgba(255, 252, 242, 0.86)',
           boxShadow: '0 24px 60px rgba(48, 58, 47, 0.16)',
           backdropFilter: 'blur(16px)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
         <p
@@ -125,6 +145,59 @@ function Scenic3DMapPage() {
         >
           灵山胜境 3D 导览地图
         </h1>
+
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 10,
+            border: '1px solid rgba(129, 142, 113, 0.12)',
+            borderRadius: 14,
+            background: 'rgba(255, 255, 255, 0.42)',
+          }}
+        >
+          <p
+            style={{
+              margin: '0 0 8px',
+              color: '#6d776e',
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            选择 3D 导览路线
+          </p>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
+            {lingshanSceneRoutes.map((sceneRoute) => {
+              const active = sceneRoute.id === currentRoute.id
+
+              return (
+                <button
+                  key={sceneRoute.id}
+                  type="button"
+                  onClick={() => handleSceneRouteChange(sceneRoute.id)}
+                  style={{
+                    minHeight: 32,
+                    padding: '0 10px',
+                    border: active ? '1px solid rgba(169, 111, 30, 0.58)' : '1px solid rgba(68, 83, 73, 0.12)',
+                    borderRadius: 999,
+                    background: active ? 'rgba(255, 246, 219, 0.96)' : 'rgba(255, 255, 255, 0.52)',
+                    color: active ? '#815516' : '#465b51',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  {sceneRoute.name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <div
           style={{
@@ -163,7 +236,7 @@ function Scenic3DMapPage() {
               lineHeight: 1.5,
             }}
           >
-            当前 3D 场景已扩展显示 {scenePois.length} 个核心游线节点，左侧列表保留经典 3D 主线。
+            当前 3D 场景已扩展显示 {scenePois.length} 个核心游线节点，金色导览线由所选 sceneRoute 的站点顺序驱动。
           </p>
         </div>
 
@@ -172,6 +245,10 @@ function Scenic3DMapPage() {
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            paddingRight: 4,
           }}
         >
           {routePois.map((poi, index) => {

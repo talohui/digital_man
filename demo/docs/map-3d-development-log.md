@@ -2673,3 +2673,101 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 
 - 手动打开 `/scenic-3d-map` 检查 19 个节点的标签密度和遮挡情况。
 - 后续可单独做 3D 路线升级，让 `routePoiSequence` 支持完整核心游线或多条 guideRoute 映射。
+
+## 2026-05-29 阶段三十一：3D 导览路线对齐 guideRoutes 三路线
+
+### 本次目标
+
+让 `/scenic-3d-map` 的 3D 金线导览路线基于 `src/data/guideData.ts` 中现有三条业务路线 `guideRoutes.stops`，支持历史文化、自然风光和亲子三类 3D 艺术化导览路线切换。
+
+### 本次约束
+
+- 只修改 3D sceneRoute 数据、3D 页面路线选择展示和开发记录。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增真实 `.glb` / `.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/data/lingshanMapData.ts`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么使用 guideRoutes.stops 作为 3D 路线基础
+
+阶段三十一 A 只读扫描确认：项目内没有真实土建道路折线、道路网、GeoJSON LineString 或可提交的腾讯 walking route 缓存数据。当前最可靠的业务路线数据是 `guideData.ts` 中的三条 `guideRoutes`。
+
+`guideRoutes.stops` 已经承载导览站点顺序和讲解叙事，因此适合作为 3D 艺术化路线的基础顺序。3D 页面通过 `poiId -> lingshanPois.scenePosition` 将这些站点顺序映射到 3D 场景中的金色导览线。
+
+### 为什么这些路线不等同真实步行路线
+
+`guideRoutes.stops` 是业务导览顺序，不是园区道路折线。它没有道路转折、台阶、禁行区域、桥梁、出入口通道、无障碍路径或真实步行 geometry。
+
+本阶段生成的 3D 路线表达的是游览节奏和空间叙事，不应作为精确步行导航。真实定位、路线规划、POI 聚焦和导航兜底仍由 `/map` 的腾讯地图导览页承担。
+
+### 新增/调整的 lingshanSceneRoutes 列表
+
+- `classic_3d_scene`：灵山经典 3D 导览线，兼容既有入口，对应 `historical_culture`，`poiSequence` 使用历史文化路线 12 站顺序。
+- `historical_3d_scene`：历史文化 3D 导览线，对应 `historical_culture`，`poiSequence` 使用历史文化路线 12 站顺序。
+- `natural_3d_scene`：自然风光 3D 导览线，对应 `natural_scenery`，`poiSequence` 使用自然风光路线 9 站顺序。
+- `family_3d_scene`：亲子 3D 导览线，对应 `family`，`poiSequence` 使用亲子路线 7 站顺序。
+
+`classic_3d_scene` 保留为历史文化线的兼容别名，避免阶段二十以来已有 `/map?sceneRoute=classic_3d_scene` 跳转失效。
+
+### lingshanSceneRouteToGuideRouteMap 映射说明
+
+本阶段补齐艺术化 3D 路线到真实 guideRoute 的映射：
+
+- `classic_3d_scene -> historical_culture`
+- `historical_3d_scene -> historical_culture`
+- `natural_3d_scene -> natural_scenery`
+- `family_3d_scene -> family`
+
+这些映射用于 `/map?sceneRoute=xxx` 跳转真实地图时切换对应的腾讯地图导览路线。
+
+### /scenic-3d-map 路线选择 UI 说明
+
+`Scenic3DMapPage` 新增 3D 导览路线选择区，展示 `lingshanSceneRoutes` 中的路线名称。点击路线后：
+
+- 更新当前 `currentSceneRoute`。
+- 将 `routePoiSequence` 传给 `Scenic3DMapScene`。
+- 3D 金线随所选路线变化。
+- 左侧站点列表随所选路线变化。
+- 默认选中该路线第一个站点。
+- 站点列表区域支持滚动，避免历史文化 12 站撑出屏幕。
+- “查看整条路线真实地图”继续跳转 `/map?sceneRoute=<currentSceneRoute.id>`。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、Marker、Polyline、InfoWindow、query poi 聚焦或真实路线绘制逻辑。`/map?sceneRoute=xxx` 的解析能力沿用已有实现，只因为数据层映射补齐而支持更多 sceneRoute。
+
+### 验证方式
+
+- 检查 `lingshanSceneRoutes` 已包含 classic、historical、natural、family 四个 sceneRoute。
+- 检查每条 3D route 的 `poiSequence` 来自对应 `guideRoutes.stops`。
+- 检查 `lingshanSceneRouteToGuideRouteMap` 包含四条映射。
+- 检查 `/scenic-3d-map` 左侧可以切换 3D 路线，站点列表随路线变化。
+- 检查“查看整条路线真实地图”使用当前 sceneRoute id。
+- 检查未修改 `/map`、`GuideMapPage.tsx`、`routePlanning.ts`、真实经纬度坐标和 `scenePosition`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，分别切换历史文化、自然风光和亲子路线，检查金线是否覆盖对应站点。
+- 后续可继续优化 3D 路线视觉，例如给不同路线使用不同金线层级、增加当前路线段高亮或路线分段播放。
+- 如果后续获得真实园区道路折线，应新增独立数据层，把真实步行 geometry 与艺术化 `poiSequence` 区分管理。
