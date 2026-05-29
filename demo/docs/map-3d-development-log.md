@@ -4048,3 +4048,87 @@ tmp/
 - 结合 `docs/lingshan-route-geometry-review.md` 对候选道路网络逐段复核。
 - 对明显穿湖、穿建筑或不贴路的段落生成 `hybrid_corrected` routeGeometry。
 - 后续如获得真实湖岸线或园区水系数据，再替换当前艺术化水面大色块。
+
+## 阶段四十三：腾讯地图增强模式设计文档生成
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+生成腾讯地图增强模式设计文档，明确 `/map` 如何作为真实地理底座承接 POI、路线、调试图层、实时定位和导航兜底，并说明它与 `/scenic-3d-map` 的互补关系。
+
+### 本次约束
+
+- 只新增/更新文档。
+- 不修改功能代码。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 `routeGeometry` 数据。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `docs/tencent-map-enhanced-mode-plan.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么需要腾讯地图增强模式
+
+当前项目已经形成 `/scenic-3d-map` 与 `/map` 的双地图结构。3D 地图适合作为沉浸式主视觉，但真实导航仍需要腾讯地图底图、真实坐标、POI 聚焦、路线兜底和后续实时定位能力。
+
+腾讯地图增强模式用于把 `/map` 从真实地图页升级为真实地理工作台：保留腾讯底图，同时叠加项目自有 POI、routeGeometry、调试层、定位层和导航辅助层。
+
+### 道路与水体数据策略
+
+文档明确：
+
+- 腾讯底图可以显示道路、水体、建筑轮廓和地名。
+- 但腾讯底图是渲染服务，不等于项目可以直接批量提取完整道路网、水体 polygon 或建筑矢量数据。
+- 道路应基于腾讯 walking path、routeGeometry candidate、相邻站点 segment path 和人工复核逐步建设。
+- 水体在 `/map` 中直接依赖腾讯底图显示，在 `/scenic-3d-map` 中先作为艺术化水面意象；如需精确湖岸线，后续应使用官方或合规来源数据。
+
+### 实时导航分阶段设计
+
+文档将实时导航拆为五个阶段：
+
+1. 当前位置显示：`navigator.geolocation`、用户 Marker、accuracy circle、自动跟随开关。
+2. 路线进度：用户位置到 routeGeometry 最近点、进度百分比、下一站和距离。
+3. 偏航判断：超过阈值后提示并提供重规划入口。
+4. 重规划：用户当前位置到下一站 `navLocation` 的腾讯 walking 临时路线。
+5. 3D 同步：将真实 lat/lng 通过 `geoToScenePosition` 映射到 3D，仅表达大致位置和导览进度。
+
+### 与 /scenic-3d-map 的关系
+
+文档明确两者不是互斥关系：
+
+- `/scenic-3d-map` 负责主视觉、沉浸式游览、文化路线讲述和景点符号化。
+- `/map` 负责真实底图、真实路线、实时定位、POI / `navLocation` 和现场导航纠偏。
+
+交互流保持为：3D 选景点跳 `/map?poi=xxx`，3D 选路线跳 `/map?sceneRoute=xxx`，未来 `/map` 可增加返回 3D 导览模式的入口。
+
+### 为什么本阶段只做文档、不改代码
+
+腾讯地图增强模式涉及图层架构、实时定位、路线进度、偏航判断、重规划和 `navLocation` 校准。直接进入实现容易影响现有 `/map` 稳定性，因此本阶段先明确设计边界、数据策略、阶段拆分和风险，再分阶段开发。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯 walking route、Marker、Polyline、InfoWindow、query 参数或调试导出能力。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、routeGeometry 渲染、水系层、道路网络层、POI 节点或模型资产。
+
+### 下一步建议
+
+- 阶段 44：先做 `/map` 增强模式 UI 方案，包括图层开关、真实地图 / 3D 导览模式切换、POI 分类图例和路线状态卡片。
+- 阶段 45：做实时定位基础能力和手机端局域网测试。
+- 阶段 46：做 routeGeometry 最近点吸附、路线进度和下一站距离。
+- 阶段 47：做偏航与重规划。
+- 阶段 48：校准核心 POI 的 `navLocation`。
