@@ -152,7 +152,7 @@ function buildRoutePoints(sequence: string[], layoutMode: Scenic3DLayoutMode) {
   return points
 }
 
-function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'manual' }: Scenic3DMapSceneProps) {
+function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'projected' }: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(layoutMode), [layoutMode])
   const scenicRouteNodes = useMemo(() => buildScenicRouteNodes(layoutMode), [layoutMode])
   const activePoiId = selectedPoiId || 'giant_buddha'
@@ -356,7 +356,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode
   )
 }
 
-function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'manual' }: Scenic3DMapSceneProps) {
+function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'projected' }: Scenic3DMapSceneProps) {
   return (
     <Canvas camera={{ position: [4.8, 7.8, 8.6], fov: 38 }}>
       <SceneContent

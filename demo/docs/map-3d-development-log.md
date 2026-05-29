@@ -3058,3 +3058,95 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 手动打开 `/scenic-3d-map`，在三条 3D 导览路线下分别切换艺术构图和真实投影，观察节点相对方位、标签遮挡和路线可读性。
 - 如果 projected 模式的真实空间关系更合理，下一阶段可新增独立 `lingshanSceneLayout.ts`，保存 projected 坐标、artistic offset 和最终布局坐标。
 - 不建议直接把 projected 模式写回 `scenePosition`，应先通过 UI 对比确认视觉和导览体验。
+
+## 阶段三十五：默认使用 projected 真实投影布局
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+将 `/scenic-3d-map` 的用户可见布局收敛到 `projected` 真实投影模式，让沉浸式 3D 地图默认依据景点真实经纬度生成空间骨架。
+
+### 本次约束
+
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改现有 `scenePosition` 数值。
+- 不删除 `scenePositionSource` 或 `sceneOffset` 字段。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/Scenic3DMapPage.tsx`
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么废弃 manual 作为用户可见模式
+
+`manual` 使用人工 `scenePosition`，适合作为开发回退和早期构图试验，但当前效果既不够真实，也不适合作为用户主视觉继续优化。继续把 `manual` 暴露给普通用户会让 3D 地图方向分散，并可能误导用户把人工构图理解为真实空间关系。
+
+本阶段移除 `/scenic-3d-map` 页面中用户可见的“艺术构图 / 真实投影”切换入口，让普通用户只看到基于真实坐标近似投影的 3D 地图。
+
+### 为什么 projected 更适合作为真实空间骨架
+
+`projected` 模式基于 `displayLocation` 的真实经纬度计算 3D 场景坐标，能保留核心景点之间更接近真实的相对方向和空间关系。后续水墨风格、低模节点、金线路线和 Blender 资产都可以在这个真实空间骨架上继续美化，而不是围绕人工坐标反复调整。
+
+### projected 模式如何计算坐标
+
+`Scenic3DMapScene` 默认 `layoutMode` 改为 `projected`。
+
+在 `projected` 模式下，组件通过 `geoToScenePosition(displayLocation, { center: scenicCenter })` 将 POI 的真实 `lat/lng` 近似投影为 Three.js 场景坐标：
+
+- `x` 表示东西方向。
+- `z` 表示南北方向。
+- `y` 保持为 `0`。
+- 核心地标、19 个核心游线节点、标签、高亮状态和金色路线都使用该模式下计算出的坐标。
+
+该计算只发生在前端运行时，不写回 `lingshanMapData.ts`。
+
+### manual 模式保留用途
+
+`Scenic3DMapScene` 仍保留 `layoutMode?: 'manual' | 'projected'` 的兼容能力，避免已有调用或后续开发调试需要回退时失效。
+
+`manual` 分支继续读取现有 `scenePosition`，但不再作为 `/scenic-3d-map` 的普通用户可见入口。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 默认并固定传入 `layoutMode="projected"`。页面文案更新为真实投影说明，强调该 3D 地图依据景点真实经纬度进行近似投影，用于表达景区核心游线与空间关系。
+
+路线选择、站点点击、高亮、`/map?poi=xxx`、`/map?sceneRoute=xxx` 和返回真实地图按钮保持不变。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实 POI 坐标、Marker、Polyline 或 InfoWindow。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `/scenic-3d-map` 页面不再显示“艺术构图 / 真实投影”切换入口。
+- 检查 `Scenic3DMapPage` 固定向 `Scenic3DMapScene` 传入 `layoutMode="projected"`。
+- 检查 `Scenic3DMapScene` 的 `layoutMode` 默认值为 `projected`。
+- 检查 `projected` 模式仍使用 `displayLocation` 和 `geoToScenePosition` 运行时计算坐标。
+- 检查没有修改 `displayLocation`、`navLocation` 或现有 `scenePosition` 数值。
+- 检查没有修改 `/map`、`GuideMapPage.tsx`、`routePlanning.ts` 或腾讯地图路线规划逻辑。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，检查三条 3D 导览路线在 projected 布局下的节点分布、标签遮挡和金线路线可读性。
+- 后续可基于 projected 真实空间骨架做视觉优化，例如局部 artistic offset、标签避让、镜头参数、山水背景与路线层级。
+- 不建议重新把 `manual` 作为用户可见模式，除非作为开发调试入口单独隔离。
