@@ -1129,3 +1129,173 @@ Three.js、React Three Fiber 和 Drei 相关代码体积较大。默认关闭可
 - 手动打开 `/map`，确认默认不显示 3D 面板。
 - 点击“打开 3D 预览”，确认低模占位模型可见且不会影响地图 Marker、Polyline、InfoWindow 和路线切换。
 - 后续可为 `lingshanAssetMap` 扩展更多 POI 映射，逐步把真实 `.glb` 模型替换到核心景点。
+
+## 2026-05-29 阶段十六回滚：撤掉地图页 3D 小面板
+
+### 本次目标
+
+撤掉 `/map` 页面中阶段十六接入的 3D 预览小面板，让地图页恢复为腾讯地图导览主流程，同时保留独立 3D 测试页和已有 3D 基础能力。
+
+### 本次约束
+
+- 只撤掉 `/map` 页面里的 3D 预览小面板。
+- 不删除 `/three-preview` 测试页。
+- 不删除 `Scenic3DPreview`、`PlaceholderLandmark`、`lingshanAssetMap`。
+- 不卸载 `three`、`@react-three/fiber`、`@react-three/drei`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 POI 数据层。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不读取、不输出、不修改 API Key、`.env` 或敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么撤掉地图页 3D 小面板
+
+阶段十六的小面板验证了 3D 预览可以接入地图页，但它仍然属于附加浮层能力。当前更清晰的方向是把 3D 能力从普通地图导览页中拆出来，后续新增独立的沉浸式 `/scenic-3d-map` 页面，避免在 `/map` 中混合腾讯地图导览、景点抽屉、数字人讲解入口和 3D 场景预览。
+
+撤掉小面板后，`/map` 可以继续专注腾讯地图、路线、POI 和讲解入口，3D 资产验证继续通过独立页面承载。
+
+### 保留了哪些 3D 基础能力
+
+- 保留 `/three-preview` 作为 3D 资产测试页。
+- 保留 Three.js 相关依赖。
+- 保留 `Scenic3DPreview` 组件。
+- 保留 `PlaceholderLandmark` 低模占位组件。
+- 保留 `src/data/scenic3d/lingshanAssetMap.ts` 资产映射占位数据。
+- 保留 `/three-preview` 的懒加载路由。
+
+### 对 /map 的影响
+
+已从 `GuideMapPage.tsx` 撤掉：
+
+- `Scenic3DPreview` 的 `lazy` import。
+- 3D 面板相关 `Suspense`。
+- `show3DPreview` 状态。
+- 打开/关闭 3D 预览按钮。
+- 3D 预览面板 UI。
+- 将 `selectedSpot.id` 传给 `Scenic3DPreview` 的逻辑。
+
+保留原腾讯地图初始化、Marker、Polyline、InfoWindow、路线切换、看全线、预设路线开关逻辑、`buildWalkingRoute` 兜底逻辑和景点点击跳转逻辑。
+
+### 对 /three-preview 的影响
+
+无影响。`/three-preview` 仍保留为独立 3D 资产测试页，并继续通过懒加载方式加载 3D 预览能力。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建结果仍生成独立 `Scenic3DPreviewPage-*.js` chunk，说明 `/three-preview` 测试页和 3D 基础能力仍保留。构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 后续不要再把 3D 小面板直接塞回 `/map`。
+- 新增独立沉浸式 `/scenic-3d-map` 页面，专门承载 3D 场景、路线 Ribbon、资产 POI 绑定和场景交互。
+- `/map` 继续保持腾讯地图导览主流程，真实导航仍以腾讯地图和 `navLocation` 为准。
+
+## 2026-05-29 阶段十七：全屏沉浸式 3D 景区地图原型页新增
+
+### 本次目标
+
+新增独立的 `/scenic-3d-map` 页面，作为灵山胜境艺术化 3D 景区地图原型。该页面不替换 `/map`，而是用于验证类似酒庄探索地图/水墨杭州风格的全屏 3D 景区导览方向。
+
+### 本次约束
+
+- 新增一个全屏 3D 景区地图原型页。
+- 新增沉浸式 3D 场景组件。
+- 使用现有 `lingshanPois` 和 `lingshanAssetMap` 数据。
+- 不替换 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不删除 `/three-preview`。
+- 不修改腾讯地图路线规划逻辑。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `src/App.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么从小面板转向全屏 3D 景区地图
+
+阶段十六的小面板更适合验证 3D 预览能否嵌入地图页，但不适合承载完整的艺术化景区导览体验。全屏 3D 地图可以把地形、水面、远山、路线、景点标签和模型占位组织成一个完整主视觉，避免与腾讯地图真实导览页争夺空间和交互焦点。
+
+因此本阶段将 3D 方向拆成独立页面：`/map` 继续负责真实腾讯地图导览，`/scenic-3d-map` 负责艺术化 3D 景区地图原型。
+
+### 新增 Scenic3DMapScene 说明
+
+新增 `src/components/scenic3d/Scenic3DMapScene.tsx`：
+
+- 使用 `Canvas` 渲染全屏 3D 场景。
+- 不依赖腾讯地图对象。
+- 不依赖数字人组件。
+- 不加载真实 `.glb`。
+- 不加载贴图。
+- 复用 `lingshanPois` 获取核心景点名称。
+- 复用 `lingshanAssetMap` 获取核心 3D POI。
+- 包含大面积地形底盘、太湖/水面意象区域、远景山体、淡色雾效、半球光和方向光。
+- 放置 4 个核心低模 placeholder：
+  - `giant_buddha`
+  - `jiulong_guanyu`
+  - `fan_gong`
+  - `wuyin_tancheng`
+- 使用金色路线曲线作为艺术化路线占位。
+- 使用 `Html` 标签显示景点名称。
+- 支持 `OrbitControls`。
+- 支持 `selectedPoiId` 和 `onSelectPoi`，点击模型或标签可切换高亮。
+
+### 新增 /scenic-3d-map 页面说明
+
+新增 `src/pages/Scenic3DMapPage.tsx`：
+
+- 全屏展示 3D 景区地图。
+- 页面标题为“灵山胜境 3D 导览地图”。
+- 左侧浮层显示 4 个核心景点列表：
+  - 灵山大佛
+  - 九龙灌浴
+  - 梵宫
+  - 五印坛城
+- 点击列表项会更新 `selectedPoiId`，并高亮 3D 场景中的对应模型。
+- 右下角信息浮层显示当前景点名称、`poiId`、低模占位说明和真实导航提示。
+- 提供“返回真实地图”按钮，点击后跳转到 `/map`。
+
+### 与腾讯地图 /map 的关系
+
+`/scenic-3d-map` 是独立艺术化 3D 导览原型，不替换 `/map`。真实 POI、真实导航、路线规划、腾讯地图底图和 `navLocation` 仍以 `/map` 为准。
+
+`/map` 是真实导览页，`/three-preview` 是单资产测试页，`/scenic-3d-map` 是全屏艺术化 3D 景区地图原型页。
+
+### 对现有地图行为的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，没有修改腾讯地图路线规划逻辑，没有新增真实 `.glb`、`.gltf` 模型，也没有修改数字人、聊天、语音、RAG、Live2D 相关模块。
+
+现有 `/map`、`/three-preview`、首页和景点页路由行为保持不变。
+
+### 验证方式
+
+- 检查新增 `Scenic3DMapScene.tsx` 和 `Scenic3DMapPage.tsx`。
+- 检查 `src/App.tsx` 中新增 `/scenic-3d-map` 懒加载路由。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建结果生成独立 `Scenic3DMapPage-*.js` chunk。构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，检查全屏布局、OrbitControls、POI 列表切换、模型高亮和返回真实地图按钮。
+- 后续可继续增加水墨风格层次、路线 Ribbon、区域雾效和更多 POI。
+- 在接入真实 `.glb` 前，继续保持 placeholder 兜底。
+- 后续真实导航仍应以腾讯地图 POI 与 `navLocation` 为准。
