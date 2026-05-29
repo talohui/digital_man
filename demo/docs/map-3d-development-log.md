@@ -3799,3 +3799,71 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 在 `/map` 中增加可控开关，使用 `lingshanRouteGeometries` 绘制候选 routeGeometry，与腾讯实时 walking route 对比。
 - 在 `/scenic-3d-map` 中把 candidate routeGeometry 转换为 3D 曲线，替代简单 POI 顺序金线。
 - 对明显不贴合园区步道的点段建立人工修正流程，再升级为 `hybrid_corrected`。
+
+## 阶段四十一 A：忽略临时路线导出目录
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+将 `tmp/` 临时目录加入 `.gitignore`，防止浏览器导出的腾讯 walking path 原始 JSON 被误提交。
+
+### 本次约束
+
+- 只修改 `.gitignore` 和开发记录。
+- 不修改任何功能代码。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 routeGeometry 数据。
+- 不读取、不提交 `tmp/route-exports` 中的原始 JSON。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `.gitignore`
+- `docs/map-3d-development-log.md`
+
+### 临时目录说明
+
+`tmp/route-exports` 是腾讯 walking path 原始导出的临时目录，用于浏览器下载运行时路线 JSON 后进行人工中转。
+
+这些原始 JSON 是中间产物，不应提交到仓库。正式可复用的候选路线数据已经整理到 `src/data/lingshanRouteGeometries.ts`，后续应维护结构化 routeGeometry 数据，而不是提交临时导出文件。
+
+### .gitignore 更新说明
+
+新增忽略规则：
+
+```gitignore
+tmp/
+```
+
+保留已有环境变量忽略规则：
+
+```gitignore
+.env.local
+.env*.local
+```
+
+本阶段没有添加普通 `.env` 忽略规则，也没有读取或修改任何环境变量文件。
+
+### 对功能代码的影响
+
+本阶段没有修改功能代码，不影响 `/map`、`/scenic-3d-map`、腾讯 walking route、routeGeometry、数字人、聊天、语音、RAG、Fay 或 Live2D 模块。
+
+### 验证方式
+
+- 检查 `.gitignore` 已包含 `tmp/`。
+- 检查已有 `.env.local` / `.env*.local` 忽略规则仍保留。
+- 运行 `git status`，确认 `tmp/` 不再作为未跟踪目录出现。
+- 只添加 `.gitignore` 和 `docs/map-3d-development-log.md` 并提交。
+
+### npm run build 结果
+
+本阶段只修改 `.gitignore` 和 Markdown 文档，不涉及 TypeScript 或功能代码，因此未运行 `npm run build`。
+
+### 下一步建议
+
+- 保持 `tmp/route-exports` 作为本地人工导出中转目录。
+- 后续如需整理路线数据，应从人工确认后的导出文件生成正式 `routeGeometry`，不要提交临时原始 JSON。
