@@ -3,14 +3,19 @@ import { Canvas } from '@react-three/fiber'
 import { useMemo } from 'react'
 import { Vector3 } from 'three'
 
+import { scenicCenter } from '../../data/guideData'
 import { lingshanPois } from '../../data/lingshanMapData'
 import { lingshanAssetMap } from '../../data/scenic3d/lingshanAssetMap'
+import { geoToScenePosition } from '../../lib/scenic3d/geoToScene'
 import PlaceholderLandmark from './PlaceholderLandmark'
+
+export type Scenic3DLayoutMode = 'manual' | 'projected'
 
 type Scenic3DMapSceneProps = {
   selectedPoiId?: string
   onSelectPoi?: (poiId: string) => void
   routePoiSequence?: string[]
+  layoutMode?: Scenic3DLayoutMode
 }
 
 type LandmarkNode = {
@@ -60,8 +65,15 @@ function getPoiName(poiId: string) {
   return lingshanPois.find((poi) => poi.id === poiId)?.name ?? fallbackName[poiId] ?? poiId
 }
 
-function getScenePosition(poiId: string): [number, number, number] {
-  const scenePosition = lingshanPois.find((poi) => poi.id === poiId)?.scenePosition
+function getScenePosition(poiId: string, layoutMode: Scenic3DLayoutMode): [number, number, number] {
+  const poi = lingshanPois.find((item) => item.id === poiId)
+
+  if (layoutMode === 'projected' && poi?.displayLocation) {
+    const projectedPosition = geoToScenePosition(poi.displayLocation, { center: scenicCenter })
+    return [projectedPosition.x, projectedPosition.y, projectedPosition.z]
+  }
+
+  const scenePosition = poi?.scenePosition
 
   if (scenePosition) {
     return [scenePosition.x, scenePosition.y, scenePosition.z]
@@ -70,50 +82,60 @@ function getScenePosition(poiId: string): [number, number, number] {
   return landmarkFallbackLayout[poiId]?.position ?? [0, 0, 0]
 }
 
-function buildLandmarks(): LandmarkNode[] {
+function hasScenePositionForMode(poiId: string, layoutMode: Scenic3DLayoutMode) {
+  const poi = lingshanPois.find((item) => item.id === poiId)
+
+  if (layoutMode === 'projected') {
+    return Boolean(poi?.displayLocation || poi?.scenePosition || landmarkFallbackLayout[poiId])
+  }
+
+  return Boolean(poi?.scenePosition || landmarkFallbackLayout[poiId])
+}
+
+function buildLandmarks(layoutMode: Scenic3DLayoutMode): LandmarkNode[] {
   return lingshanAssetMap
     .filter((asset) => asset.status !== 'disabled' && landmarkFallbackLayout[asset.poiId])
     .map((asset) => ({
       poiId: asset.poiId,
       name: getPoiName(asset.poiId),
-      position: getScenePosition(asset.poiId),
+      position: getScenePosition(asset.poiId, layoutMode),
       scale: landmarkFallbackLayout[asset.poiId].scale,
     }))
 }
 
-function buildScenicRouteNodes(): ScenicRouteNode[] {
+function buildScenicRouteNodes(layoutMode: Scenic3DLayoutMode): ScenicRouteNode[] {
   return lingshanPois
-    .filter((poi) => poi.scenePosition && !landmarkFallbackLayout[poi.id])
+    .filter((poi) => hasScenePositionForMode(poi.id, layoutMode) && !landmarkFallbackLayout[poi.id])
     .map((poi) => ({
       poiId: poi.id,
       name: poi.name,
-      position: [poi.scenePosition!.x, poi.scenePosition!.y, poi.scenePosition!.z] as [number, number, number],
+      position: getScenePosition(poi.id, layoutMode),
       nodeType: cultureNodeIds.has(poi.id) ? 'culture' : 'route',
     }))
 }
 
-function getRouteSequence(routePoiSequence?: string[]) {
-  const validSequence = routePoiSequence?.filter((poiId) => lingshanPois.some((poi) => poi.id === poiId && poi.scenePosition))
+function getRouteSequence(routePoiSequence: string[] | undefined, layoutMode: Scenic3DLayoutMode) {
+  const validSequence = routePoiSequence?.filter((poiId) => hasScenePositionForMode(poiId, layoutMode))
 
   return validSequence && validSequence.length >= 2 ? validSequence : defaultRoutePoiSequence
 }
 
-function buildRoutePoints(sequence: string[]) {
+function buildRoutePoints(sequence: string[], layoutMode: Scenic3DLayoutMode) {
   const points: Vector3[] = []
   const firstPoiId = sequence[0]
 
   if (firstPoiId) {
-    const [firstX, , firstZ] = getScenePosition(firstPoiId)
+    const [firstX, , firstZ] = getScenePosition(firstPoiId, layoutMode)
     points.push(new Vector3(firstX - 0.95, 0.1, firstZ + 0.58))
   }
 
   sequence.forEach((poiId, index) => {
-    const [x, , z] = getScenePosition(poiId)
+    const [x, , z] = getScenePosition(poiId, layoutMode)
     points.push(new Vector3(x, 0.12, z))
 
     const nextPoiId = sequence[index + 1]
     if (nextPoiId) {
-      const [nextX, , nextZ] = getScenePosition(nextPoiId)
+      const [nextX, , nextZ] = getScenePosition(nextPoiId, layoutMode)
       const dx = nextX - x
       const dz = nextZ - z
       const length = Math.hypot(dx, dz) || 1
@@ -130,13 +152,13 @@ function buildRoutePoints(sequence: string[]) {
   return points
 }
 
-function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
-  const landmarks = useMemo(() => buildLandmarks(), [])
-  const scenicRouteNodes = useMemo(() => buildScenicRouteNodes(), [])
+function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'manual' }: Scenic3DMapSceneProps) {
+  const landmarks = useMemo(() => buildLandmarks(layoutMode), [layoutMode])
+  const scenicRouteNodes = useMemo(() => buildScenicRouteNodes(layoutMode), [layoutMode])
   const activePoiId = selectedPoiId || 'giant_buddha'
-  const routeSequence = useMemo(() => getRouteSequence(routePoiSequence), [routePoiSequence])
+  const routeSequence = useMemo(() => getRouteSequence(routePoiSequence, layoutMode), [layoutMode, routePoiSequence])
   const routePoiSet = useMemo(() => new Set(routeSequence), [routeSequence])
-  const routePoints = useMemo(() => buildRoutePoints(routeSequence), [routeSequence])
+  const routePoints = useMemo(() => buildRoutePoints(routeSequence, layoutMode), [layoutMode, routeSequence])
 
   return (
     <>
@@ -190,7 +212,7 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
       <Line points={routePoints} color="#fff0b8" lineWidth={1.2} dashed={false} />
 
       {routeSequence.map((poiId) => {
-        const [x, , z] = getScenePosition(poiId)
+        const [x, , z] = getScenePosition(poiId, layoutMode)
         const active = poiId === activePoiId
 
         return (
@@ -334,10 +356,15 @@ function SceneContent({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3D
   )
 }
 
-function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence }: Scenic3DMapSceneProps) {
+function Scenic3DMapScene({ selectedPoiId, onSelectPoi, routePoiSequence, layoutMode = 'manual' }: Scenic3DMapSceneProps) {
   return (
     <Canvas camera={{ position: [4.8, 7.8, 8.6], fov: 38 }}>
-      <SceneContent selectedPoiId={selectedPoiId} onSelectPoi={onSelectPoi} routePoiSequence={routePoiSequence} />
+      <SceneContent
+        selectedPoiId={selectedPoiId}
+        onSelectPoi={onSelectPoi}
+        routePoiSequence={routePoiSequence}
+        layoutMode={layoutMode}
+      />
     </Canvas>
   )
 }

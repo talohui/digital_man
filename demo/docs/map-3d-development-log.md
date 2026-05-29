@@ -2953,3 +2953,108 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 后续可新增 `src/data/scenic3d/lingshanSceneLayout.ts`，集中管理 projected 坐标、artistic offset、final scene position、标签偏移和显示层级。
 - 可在不影响当前页面的前提下做一套 projected layout 预览，用于和现有 manual 布局 A/B 对比。
 - 等视觉和空间关系确认后，再考虑将部分 POI 迁移为 `projected_with_offset`。
+
+## 2026-05-29 阶段三十四：3D 布局模式切换对比
+
+### 本次目标
+
+为 `/scenic-3d-map` 增加 3D 布局模式切换能力，用于对比当前艺术构图布局和基于真实经纬度投影生成的真实投影布局。
+
+本阶段只做可视化对比能力，不覆盖现有 `scenePosition`，不修改真实 POI 坐标。
+
+### 本次约束
+
+- 只修改 `/scenic-3d-map` 的布局模式选择和 3D 场景位置计算。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改现有 `scenePosition` 数值。
+- 不新增真实 `.glb` / `.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### layoutMode 说明
+
+`Scenic3DMapScene` 新增 `layoutMode?: 'manual' | 'projected'`。
+
+默认值为 `manual`，确保 `/scenic-3d-map` 打开后仍保持现有艺术化视觉构图。
+
+### manual 模式说明
+
+`manual` 模式保持原有行为：
+
+- 核心地标读取 `lingshanPois.scenePosition`。
+- 19 个核心游线节点读取 `lingshanPois.scenePosition`。
+- `routePoiSequence` 生成金色路线时也读取 `scenePosition`。
+- 如果某个点没有 `scenePosition`，继续使用原有核心地标 fallback。
+
+该模式对应当前人工艺术化构图，更适合演示、讲解和水墨导览视觉。
+
+### projected 模式说明
+
+`projected` 模式在运行时基于真实坐标计算 3D 位置：
+
+- 对每个 POI 读取 `displayLocation`。
+- 使用 `geoToScenePosition(displayLocation, { center: scenicCenter })` 得到 3D 坐标。
+- 核心地标、19 个节点、标签、选中高亮和金色路线都使用 projected 坐标。
+- 如果某个点无法生成 projected 坐标，则 fallback 到现有 `scenePosition`。
+
+该模式用于对比真实空间方位，不代表最终视觉方案已经采用。
+
+### geoToScenePosition 如何用于 projected 模式
+
+`Scenic3DMapScene` 在 `projected` 模式下调用阶段三十二新增的 `geoToScenePosition` 工具。工具使用 `scenicCenter` 作为中心点，将经纬度近似投影为 Three.js 场景中的 `x/y/z`。
+
+`x` 表示东西方向，`z` 表示南北方向，`y` 保持为 `0`。该计算只发生在前端运行时，不写回数据文件。
+
+### 为什么本阶段不覆盖 scenePosition
+
+现有 `scenePosition` 已经服务于当前水墨导览构图、镜头、标签、路线和核心地标摆放。直接覆盖会破坏当前可演示效果。
+
+本阶段增加切换对比，是为了评估真实投影布局是否适合作为后续 `projected + artisticOffset` 的基础。确认方案前，不应修改现有数据。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 左侧新增“3D 布局模式”切换：
+
+- 艺术构图：默认选中，使用现有人工 `scenePosition`。
+- 真实投影：使用真实 `lat/lng` 运行时投影结果。
+
+切换后，核心地标、节点、标签、选中高亮和金色路线会随布局模式更新。路线选择、站点列表、真实地图跳转按钮和 `/map?poi`、`/map?sceneRoute` 参数保持不变。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、`GuideMapPage.tsx`、腾讯地图路线规划逻辑、真实 POI 坐标、Marker、Polyline 或 InfoWindow。真实地图导览页行为不变。
+
+### 验证方式
+
+- 检查 `Scenic3DMapScene` 新增 `layoutMode` 并默认为 `manual`。
+- 检查 `manual` 模式继续使用 `lingshanPois.scenePosition`。
+- 检查 `projected` 模式使用 `geoToScenePosition(displayLocation, { center: scenicCenter })`。
+- 检查核心地标、19 个节点和 `routePoiSequence` 金线都按当前 `layoutMode` 计算位置。
+- 检查 `/scenic-3d-map` 页面可以切换“艺术构图 / 真实投影”。
+- 检查没有修改 `lingshanMapData.ts`、真实坐标、现有 `scenePosition`、`/map`、`GuideMapPage.tsx` 或 `routePlanning.ts`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，在三条 3D 导览路线下分别切换艺术构图和真实投影，观察节点相对方位、标签遮挡和路线可读性。
+- 如果 projected 模式的真实空间关系更合理，下一阶段可新增独立 `lingshanSceneLayout.ts`，保存 projected 坐标、artistic offset 和最终布局坐标。
+- 不建议直接把 projected 模式写回 `scenePosition`，应先通过 UI 对比确认视觉和导览体验。

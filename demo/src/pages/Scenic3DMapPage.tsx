@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import Scenic3DMapScene from '../components/scenic3d/Scenic3DMapScene'
+import Scenic3DMapScene, { type Scenic3DLayoutMode } from '../components/scenic3d/Scenic3DMapScene'
 import { lingshanPois, lingshanSceneRoutes } from '../data/lingshanMapData'
 
 const fallbackRoute = {
@@ -36,6 +36,7 @@ function Scenic3DMapPage() {
   const initialSceneRoute = lingshanSceneRoutes[0] ?? fallbackRoute
   const [currentSceneRouteId, setCurrentSceneRouteId] = useState(initialSceneRoute.id)
   const [selectedPoiId, setSelectedPoiId] = useState(initialSceneRoute.poiSequence[0] ?? '')
+  const [layoutMode, setLayoutMode] = useState<Scenic3DLayoutMode>('manual')
   const currentRoute = useMemo(
     () => lingshanSceneRoutes.find((route) => route.id === currentSceneRouteId) ?? initialSceneRoute,
     [currentSceneRouteId, initialSceneRoute]
@@ -101,6 +102,7 @@ function Scenic3DMapPage() {
           selectedPoiId={selectedPoiId}
           onSelectPoi={setSelectedPoiId}
           routePoiSequence={currentRoute.poiSequence}
+          layoutMode={layoutMode}
         />
       </div>
 
@@ -197,6 +199,74 @@ function Scenic3DMapPage() {
               )
             })}
           </div>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 10,
+            border: '1px solid rgba(129, 142, 113, 0.12)',
+            borderRadius: 14,
+            background: 'rgba(255, 255, 255, 0.42)',
+          }}
+        >
+          <p
+            style={{
+              margin: '0 0 8px',
+              color: '#6d776e',
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            3D 布局模式
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            {[
+              { id: 'manual', label: '艺术构图' },
+              { id: 'projected', label: '真实投影' },
+            ].map((item) => {
+              const active = item.id === layoutMode
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setLayoutMode(item.id as Scenic3DLayoutMode)}
+                  style={{
+                    minHeight: 34,
+                    border: active ? '1px solid rgba(169, 111, 30, 0.58)' : '1px solid rgba(68, 83, 73, 0.12)',
+                    borderRadius: 12,
+                    background: active ? 'rgba(255, 246, 219, 0.96)' : 'rgba(255, 255, 255, 0.52)',
+                    color: active ? '#815516' : '#465b51',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 800,
+                  }}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+          <p
+            style={{
+              margin: 0,
+              color: '#7a6a44',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            {layoutMode === 'manual'
+              ? '艺术构图更适合展示和讲解，保持当前水墨导览构图。'
+              : '真实投影更接近真实空间方位，用于评估后续 projected + artisticOffset 方案。'}
+          </p>
         </div>
 
         <div
@@ -367,6 +437,17 @@ function Scenic3DMapPage() {
           }}
         >
           3D 地图为艺术化导览，当前 3D 路线不等同于真实步行导航；真实定位和导航以腾讯地图页 POI 与 navLocation 为准。
+        </p>
+        <p
+          style={{
+            margin: '0 0 14px',
+            color: '#6d5b37',
+            fontSize: 12,
+            lineHeight: 1.55,
+          }}
+        >
+          当前布局模式：{layoutMode === 'manual' ? '艺术构图' : '真实投影'}。
+          {layoutMode === 'manual' ? ' 使用人工 scenePosition。' : ' 使用真实 lat/lng 运行时投影，不写回数据。'}
         </p>
         <div
           style={{
