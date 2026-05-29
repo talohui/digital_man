@@ -22,7 +22,7 @@ import {
   USE_LINGSHAN_PRESET_ROUTE_PATHS
 } from '../data/lingshanMapData'
 import { loadTMap } from '../lib/loadTMap'
-import { buildPlannedRouteFromPath, buildWalkingRoute } from '../lib/routePlanning'
+import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 
@@ -90,6 +90,8 @@ function GuideMapPage() {
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutePanel, setShowRoutePanel] = useState(false)
   const [routeDiagnostics, setRouteDiagnostics] = useState<RouteDiagnostics | null>(null)
+  const [currentPlannedRouteForDebug, setCurrentPlannedRouteForDebug] = useState<PlannedRoute | null>(null)
+  const [routeExportMessage, setRouteExportMessage] = useState('')
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
@@ -334,6 +336,8 @@ function GuideMapPage() {
     async function renderRoute() {
       setRouteStatus('loading')
       setRouteDiagnostics(null)
+      setCurrentPlannedRouteForDebug(null)
+      setRouteExportMessage('')
       setPageMessage(`${route.name}正在规划景区步行路线...`)
 
       const presetRoutePath = USE_LINGSHAN_PRESET_ROUTE_PATHS ? getLingshanPresetRoutePath(route.id) : undefined
@@ -353,6 +357,7 @@ function GuideMapPage() {
         usedFallback: plannedRoute.usedFallback,
         fallbackReason: plannedRoute.fallbackReason
       })
+      setCurrentPlannedRouteForDebug(plannedRoute)
 
       routeLayerRef.current?.setMap?.(null)
       routeLayerRef.current = new window.TMap.MultiPolyline({
@@ -421,6 +426,39 @@ function GuideMapPage() {
     navigate(`/spot/${selectedSpot.id}`)
   }
 
+  const handleCopyWalkingRoutePathJson = async () => {
+    if (!currentPlannedRouteForDebug) {
+      setRouteExportMessage('路线尚未生成')
+      return
+    }
+
+    const payload = {
+      routeId: activeRouteId,
+      sceneRoute: querySceneRouteId,
+      generatedAt: new Date().toISOString(),
+      source: 'tencent_walking_runtime',
+      pointCount: currentPlannedRouteForDebug.path.length,
+      distanceMeters: currentPlannedRouteForDebug.distanceMeters,
+      durationMinutes: currentPlannedRouteForDebug.durationMinutes,
+      usedFallback: currentPlannedRouteForDebug.usedFallback,
+      fallbackReason: currentPlannedRouteForDebug.fallbackReason ?? null,
+      path: currentPlannedRouteForDebug.path
+    }
+    const jsonText = JSON.stringify(payload, null, 2)
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(jsonText)
+      setRouteExportMessage('已复制')
+    } catch {
+      console.log('[GuideMapPage] walking route path JSON', jsonText)
+      setRouteExportMessage('复制失败，已输出到控制台。')
+    }
+  }
+
   const selectedNarrative = route.stops.find((stop) => stop.spotId === selectedSpot.id)?.narrative ?? selectedSpot.intro
 
   return (
@@ -471,7 +509,7 @@ function GuideMapPage() {
               color: '#4b3b17',
               fontSize: 12,
               lineHeight: 1.6,
-              pointerEvents: 'none'
+              pointerEvents: 'auto'
             }}
           >
             <strong style={{ display: 'block', marginBottom: 4, color: '#9a5a08' }}>sceneRoute 调试叠加</strong>
@@ -504,6 +542,38 @@ function GuideMapPage() {
               ) : (
                 <span>路线生成中...</span>
               )}
+            </div>
+            <div
+              style={{
+                marginTop: 8,
+                paddingTop: 8,
+                borderTop: '1px solid rgba(154, 90, 8, 0.18)'
+              }}
+            >
+              <p style={{ margin: '0 0 8px', color: '#665326' }}>
+                可复制腾讯 walking 路线 path，后续作为人工 routeGeometry 的候选数据。该 path 是经纬度点串，不能直接作为 Three.js 坐标，需要再经过 geoToScenePosition 或后续路线映射。
+              </p>
+              <button
+                type="button"
+                onClick={handleCopyWalkingRoutePathJson}
+                disabled={!currentPlannedRouteForDebug}
+                style={{
+                  width: '100%',
+                  minHeight: 34,
+                  border: '1px solid rgba(154, 90, 8, 0.28)',
+                  borderRadius: 10,
+                  background: currentPlannedRouteForDebug ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+                  color: currentPlannedRouteForDebug ? '#7a4b08' : '#9a8d6b',
+                  cursor: currentPlannedRouteForDebug ? 'pointer' : 'not-allowed',
+                  fontSize: 12,
+                  fontWeight: 800
+                }}
+              >
+                复制腾讯路线 path JSON
+              </button>
+              {routeExportMessage ? (
+                <span style={{ display: 'block', marginTop: 6, color: '#7a4b08' }}>{routeExportMessage}</span>
+              ) : null}
             </div>
             {sceneRouteDebugPath.length < 2 ? (
               <span style={{ display: 'block', marginTop: 4, color: '#8a4f0b' }}>当前 sceneRoute 未找到可绘制的骨架线。</span>

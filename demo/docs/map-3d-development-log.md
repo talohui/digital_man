@@ -3354,3 +3354,105 @@ export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
 - 使用手机访问 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1`、`natural_3d_scene`、`family_3d_scene`，记录 `usedFallback` 和路线贴路情况。
 - 如果 `usedFallback=true`，优先排查腾讯 walking 请求、Key 权限和网络加载。
 - 如果 `usedFallback=false` 但仍明显不贴园区道路，后续应优先建设 `navLocation` 人工修正和园区 `routeGeometry` 数据。
+
+## 阶段三十八：腾讯 walking path JSON 导出按钮
+
+### 日期
+
+2026-05-29
+
+### 本次目标
+
+在 `/map` 的 `debugSceneRoute` 调试模式中增加“复制腾讯路线 path JSON”按钮，让开发者可以把当前运行时腾讯 walking 返回的 `plannedRoute.path` 复制出来，作为后续整理静态 `routeGeometry` 的候选数据。
+
+### 本次约束
+
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不新增 `routeGeometry` 静态数据。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么 usedFallback=false 后仍需要导出 path
+
+`usedFallback=false` 只能说明腾讯 walking route 请求成功，并且返回了 polyline。它不代表路线一定完全贴合园区内部真实步道。
+
+园区内部道路可能存在腾讯路网不完整、POI 终点落在建筑中心、入口点不准确等问题。因此需要先把腾讯返回的 path 导出，作为第一版候选路线，再结合真实园区导览图和人工观察进行修正。
+
+### 导出 JSON 字段说明
+
+调试按钮复制的 JSON 结构包含：
+
+- `routeId`：当前真实地图使用的 guideRoute id。
+- `sceneRoute`：URL 中的 3D sceneRoute id。
+- `generatedAt`：导出时间，ISO 字符串。
+- `source`：固定为 `tencent_walking_runtime`。
+- `pointCount`：`plannedRoute.path.length`。
+- `distanceMeters`：腾讯 walking 或兜底结果距离。
+- `durationMinutes`：腾讯 walking 或兜底结果耗时。
+- `usedFallback`：是否存在 fallback。
+- `fallbackReason`：fallback 原因，没有则为 `null`。
+- `path`：腾讯 walking 返回的经纬度点串。
+
+复制优先使用 `navigator.clipboard.writeText`。如果浏览器不支持或复制失败，则把 JSON 字符串输出到控制台，并在页面提示“复制失败，已输出到控制台。”
+
+### 导出的 path 后续如何用于 routeGeometry
+
+导出的 `path` 是真实经纬度点串，可以作为人工建设 `routeGeometry` 的第一版候选数据：
+
+1. 先按 guideRoute / sceneRoute 收集三条路线的腾讯 walking path。
+2. 在真实地图上对照园区道路，删除不合理绕行或穿越建筑的点段。
+3. 对关键路线段补充人工控制点。
+4. 保存为后续静态 `routeGeometry` 数据。
+5. 3D 场景中使用时，需要通过 `geoToScenePosition` 或后续路线映射转换为 Three.js 坐标。
+
+### 为什么本阶段不自动写入静态数据
+
+运行时腾讯 path 只是候选数据，仍需要人工确认是否贴合园区真实步道。自动写入源码会把未经校验的路线固化，后续可能误导真实导航和 3D 路线表达。
+
+本阶段只提供复制能力，不下载文件、不写入源码、不新增静态 `routeGeometry`。
+
+### 对 /map 的影响
+
+普通 `/map` 行为不变。只有 `debugSceneRoute=1` 或 `debugSceneRoute=true` 时，调试卡片中显示导出说明和复制按钮。
+
+本阶段没有改变 Marker、Polyline、InfoWindow、`/map?poi=xxx` 聚焦逻辑、sceneRoute 映射逻辑或腾讯 walking route 规划逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、3D 场景、3D 路线、`scenePosition`、`layoutMode` 或任何模型资产。
+
+### 验证方式
+
+- 检查普通 `/map` 不显示“复制腾讯路线 path JSON”按钮。
+- 检查 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1` 显示复制按钮。
+- 检查路线尚未生成时按钮不可用或提示“路线尚未生成”。
+- 检查路线生成后点击按钮能复制包含 routeId、sceneRoute、generatedAt、source、pointCount、distanceMeters、durationMinutes、usedFallback、fallbackReason 和 path 的 JSON。
+- 检查 Clipboard API 不可用或失败时，JSON 输出到控制台并显示失败提示。
+- 检查没有修改 `routePlanning.ts`、腾讯 walking route 规划算法、POI 坐标、`displayLocation`、`navLocation`、`scenePosition` 或 `/scenic-3d-map`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 分别打开三条路线的 debug URL，复制腾讯 walking path JSON。
+- 将导出的 JSON 先保存为人工工作材料，不直接进入源码。
+- 下一阶段可以新增 routeGeometry 草稿文档或数据导入任务，对腾讯 path 进行人工修正和分段标注。
