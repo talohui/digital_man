@@ -21,6 +21,13 @@ import {
   lingshanSceneRouteToGuideRouteMap,
   USE_LINGSHAN_PRESET_ROUTE_PATHS
 } from '../data/lingshanMapData'
+import {
+  clearUserLocationWatch,
+  isGeolocationSupported,
+  watchUserLocation,
+  type BrowserLocation,
+  type GeolocationErrorState
+} from '../lib/geolocation'
 import { loadTMap } from '../lib/loadTMap'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
@@ -36,6 +43,8 @@ type RouteDiagnostics = {
   fallbackReason?: string
 }
 type RouteSource = 'unknown' | 'tencent_walking' | 'preset' | 'fallback'
+type LocationMode = 'gps' | 'mock'
+type LocationStatus = 'idle' | 'watching' | 'located' | 'error'
 
 const QUERY_POI_FOCUS_ZOOM = 17
 
@@ -67,6 +76,29 @@ const activeMarkerIcon = createSvgDataUri(`
   </svg>
 `)
 
+const userLocationIcon = createSvgDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+    <defs>
+      <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(37,99,235,0.3)"/>
+      </filter>
+    </defs>
+    <g filter="url(#shadow)">
+      <circle cx="22" cy="22" r="16" fill="rgba(59,130,246,0.22)" stroke="#ffffff" stroke-width="2"/>
+      <circle cx="22" cy="22" r="8" fill="#2563EB" stroke="#ffffff" stroke-width="3"/>
+    </g>
+  </svg>
+`)
+
+const mockLocationTargets = [
+  { poiId: 'south_gate', label: '模拟在南门' },
+  { poiId: 'jiulong_guanyu', label: '模拟在九龙灌浴' },
+  { poiId: 'giant_buddha', label: '模拟在灵山大佛' },
+  { poiId: 'fan_gong', label: '模拟在梵宫' },
+  { poiId: 'wuyin_tancheng', label: '模拟在五印坛城' },
+  { poiId: 'exit', label: '模拟在景区出口' }
+]
+
 function GuideMapPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -75,11 +107,14 @@ function GuideMapPage() {
   const markerLayerRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
   const sceneRouteDebugLayerRef = useRef<any>(null)
+  const userLocationMarkerRef = useRef<any>(null)
+  const userAccuracyCircleRef = useRef<any>(null)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
   const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
   const appliedSceneRouteIdRef = useRef<string | null>(null)
   const showCurrentRouteRef = useRef(true)
+  const userLocationWatchIdRef = useRef<number | null>(null)
 
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
@@ -95,6 +130,10 @@ function GuideMapPage() {
   const [currentPlannedRouteForDebug, setCurrentPlannedRouteForDebug] = useState<PlannedRoute | null>(null)
   const [routeExportMessage, setRouteExportMessage] = useState('')
   const [routeSource, setRouteSource] = useState<RouteSource>('unknown')
+  const [locationMode, setLocationMode] = useState<LocationMode>('mock')
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
+  const [userLocation, setUserLocation] = useState<BrowserLocation | null>(null)
+  const [locationError, setLocationError] = useState<GeolocationErrorState | null>(null)
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
@@ -124,6 +163,10 @@ function GuideMapPage() {
   )
   const selectedSpot = getGuideSpotById(selectedSpotId || getDefaultSpotId(route.id))
   const selectedIndex = route.stops.findIndex((stop) => stop.spotId === selectedSpot.id)
+  const isGeolocationSecureContext = isBrowserGeolocationSecureContext()
+  const userDistanceFromScenicCenter = userLocation ? getDistanceMeters(userLocation, scenicCenter) : null
+  const isUserFarFromScenicArea =
+    userLocation?.source === 'gps' && userDistanceFromScenicCenter !== null && userDistanceFromScenicCenter > 2000
 
   const focusQueryPoiOnce = (spot: GuideSpot) => {
     if (appliedQueryPoiFocusIdRef.current === spot.id) {
@@ -240,13 +283,19 @@ function GuideMapPage() {
 
     return () => {
       cancelled = true
+      clearUserLocationWatch(userLocationWatchIdRef.current)
+      userLocationWatchIdRef.current = null
       infoWindowRef.current?.close?.()
       sceneRouteDebugLayerRef.current?.setMap?.(null)
+      userLocationMarkerRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current?.setMap?.(null)
       mapRef.current?.destroy?.()
       mapRef.current = null
       markerLayerRef.current = null
       routeLayerRef.current = null
       sceneRouteDebugLayerRef.current = null
+      userLocationMarkerRef.current = null
+      userAccuracyCircleRef.current = null
       infoWindowRef.current = null
     }
   }, [])
@@ -339,6 +388,75 @@ function GuideMapPage() {
   }, [mapStatus, querySceneRouteId, sceneRouteDebugPath, shouldShowSceneRouteDebugLine])
 
   useEffect(() => {
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    userLocationMarkerRef.current?.setMap?.(null)
+    userAccuracyCircleRef.current?.setMap?.(null)
+    userLocationMarkerRef.current = null
+    userAccuracyCircleRef.current = null
+
+    if (!userLocation) {
+      return
+    }
+
+    const position = new window.TMap.LatLng(userLocation.lat, userLocation.lng)
+
+    userLocationMarkerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      styles: {
+        userLocation: new window.TMap.MarkerStyle({
+          width: 34,
+          height: 34,
+          anchor: { x: 17, y: 17 },
+          src: userLocationIcon
+        })
+      },
+      geometries: [
+        {
+          id: 'user-location',
+          styleId: 'userLocation',
+          position
+        }
+      ]
+    })
+
+    try {
+      if (typeof window.TMap.MultiCircle === 'function' && typeof window.TMap.CircleStyle === 'function') {
+        userAccuracyCircleRef.current = new window.TMap.MultiCircle({
+          map: mapRef.current,
+          styles: {
+            accuracy: new window.TMap.CircleStyle({
+              color: 'rgba(37, 99, 235, 0.14)',
+              borderColor: 'rgba(37, 99, 235, 0.36)',
+              borderWidth: 1
+            })
+          },
+          geometries: [
+            {
+              id: 'user-location-accuracy',
+              styleId: 'accuracy',
+              center: position,
+              radius: Math.max(userLocation.accuracyMeters, 1)
+            }
+          ]
+        })
+      }
+    } catch {
+      userAccuracyCircleRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current = null
+    }
+
+    return () => {
+      userLocationMarkerRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current?.setMap?.(null)
+      userLocationMarkerRef.current = null
+      userAccuracyCircleRef.current = null
+    }
+  }, [mapStatus, userLocation])
+
+  useEffect(() => {
     if (mapStatus !== 'ready' || !queryPoiSpot || selectedSpot.id !== queryPoiSpot.id) {
       return
     }
@@ -429,6 +547,76 @@ function GuideMapPage() {
       cancelled = true
     }
   }, [mapStatus, queryPoiSpot, route, routeSpots])
+
+  const stopUserLocationWatch = () => {
+    clearUserLocationWatch(userLocationWatchIdRef.current)
+    userLocationWatchIdRef.current = null
+  }
+
+  const startGpsLocation = () => {
+    setLocationMode('gps')
+    setLocationError(null)
+
+    if (userLocationWatchIdRef.current !== null) {
+      return
+    }
+
+    if (!isGeolocationSupported()) {
+      setLocationStatus('error')
+      setLocationError({ message: '浏览器不支持定位' })
+      return
+    }
+
+    setLocationStatus('watching')
+
+    const watchId = watchUserLocation(
+      (location) => {
+        setUserLocation(location)
+        setLocationStatus('located')
+        setLocationError(null)
+      },
+      (error) => {
+        setLocationStatus('error')
+        setLocationError(error)
+      }
+    )
+
+    userLocationWatchIdRef.current = watchId
+  }
+
+  const stopGpsLocation = () => {
+    stopUserLocationWatch()
+    setLocationStatus(userLocation ? 'located' : 'idle')
+  }
+
+  const centerUserLocation = () => {
+    if (!userLocation || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    mapRef.current.setCenter(new window.TMap.LatLng(userLocation.lat, userLocation.lng))
+  }
+
+  const handleMockLocation = (poiId: string) => {
+    const location = getMockLocationByPoiId(poiId)
+
+    if (!location) {
+      setLocationMode('mock')
+      setLocationStatus('error')
+      setLocationError({ message: `未找到模拟定位点：${poiId}` })
+      return
+    }
+
+    stopUserLocationWatch()
+    setLocationMode('mock')
+    setUserLocation(location)
+    setLocationStatus('located')
+    setLocationError(null)
+
+    if (window.TMap && mapRef.current) {
+      mapRef.current.setCenter(new window.TMap.LatLng(location.lat, location.lng))
+    }
+  }
 
   const [rateOpen, setRateOpen] = useState(false)
   const [rateStars, setRateStars] = useState(0)
@@ -679,6 +867,131 @@ function GuideMapPage() {
                     {routeDiagnostics ? `${routeDiagnostics.distanceMeters} 米 / ${routeDiagnostics.durationMinutes} 分钟` : '生成中'}
                   </span>
                   {routeDiagnostics?.fallbackReason && isMapDebugMode ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10, padding: 10, borderRadius: 12, background: 'rgba(255, 255, 255, 0.58)' }}>
+                <strong
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 8,
+                    color: '#244d43',
+                    fontSize: 13
+                  }}
+                >
+                  <EnvironmentOutlined />
+                  当前位置
+                </strong>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocationMode('gps')
+                      setLocationError(null)
+
+                      if (userLocation?.source === 'mock') {
+                        setUserLocation(null)
+                        setLocationStatus('idle')
+                      }
+                    }}
+                    style={getLocationModeButtonStyle(locationMode === 'gps')}
+                  >
+                    真实定位
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopUserLocationWatch()
+                      setLocationMode('mock')
+                      setLocationError(null)
+
+                      if (userLocation?.source === 'mock') {
+                        setLocationStatus('located')
+                      } else {
+                        setUserLocation(null)
+                        setLocationStatus('idle')
+                      }
+                    }}
+                    style={getLocationModeButtonStyle(locationMode === 'mock')}
+                  >
+                    模拟定位
+                  </button>
+                </div>
+
+                <p style={{ margin: '0 0 8px', color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                  {locationMode === 'gps'
+                    ? '真实定位使用浏览器 GPS，适合在景区现场测试。'
+                    : '模拟定位用于开发、答辩或不在景区时体验导览流程。'}
+                </p>
+
+                {locationMode === 'gps' ? (
+                  <>
+                    {!isGeolocationSecureContext ? (
+                      <p style={{ margin: '0 0 8px', color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                        当前访问环境可能不支持浏览器定位；本地调试建议使用 localhost、HTTPS 或模拟定位。
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={locationStatus === 'watching' ? stopGpsLocation : startGpsLocation}
+                      style={getLocationActionButtonStyle(true)}
+                    >
+                      {locationStatus === 'watching' ? '停止真实定位' : '开始真实定位'}
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {mockLocationTargets.map((target) => (
+                      <button
+                        key={target.poiId}
+                        type="button"
+                        onClick={() => handleMockLocation(target.poiId)}
+                        style={getLocationActionButtonStyle(true)}
+                      >
+                        {target.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {userLocation ? (
+                  <button
+                    type="button"
+                    onClick={centerUserLocation}
+                    style={{ ...getLocationActionButtonStyle(true), marginTop: 8 }}
+                  >
+                    定位到我
+                  </button>
+                ) : null}
+
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(13, 148, 136, 0.1)' }}>
+                  <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
+                    <span>定位模式：{getLocationModeLabel(locationMode)}</span>
+                    <span>定位状态：{getLocationStatusLabel(locationStatus)}</span>
+                    {userLocation ? (
+                      <>
+                        <span>
+                          坐标：{userLocation.lat.toFixed(6)},{userLocation.lng.toFixed(6)}
+                        </span>
+                        <span>精度：{Math.round(userLocation.accuracyMeters)} 米</span>
+                        <span>更新时间：{formatLocationTime(userLocation.timestamp)}</span>
+                        <span>
+                          {userLocation.source === 'mock'
+                            ? '当前为模拟定位，不代表真实 GPS 位置。'
+                            : '当前位置来自浏览器定位。'}
+                        </span>
+                      </>
+                    ) : null}
+                    {locationError ? <span style={{ color: '#9a3412' }}>错误信息：{locationError.message}</span> : null}
+                    {isUserFarFromScenicArea ? (
+                      <span style={{ color: '#9a5a08' }}>你当前可能不在灵山胜境景区内，可使用模拟定位体验导览流程。</span>
+                    ) : null}
+                    <span>本阶段仅显示当前位置，尚未启用路线进度、偏航判断和重规划。</span>
+                    {userLocation ? <span>精度圆：浏览器支持圆形覆盖物时会显示，否则仅展示精度数值。</span> : null}
+                  </div>
                 </div>
               </div>
 
@@ -1008,6 +1321,102 @@ function getLayerToggleStyle(disabled = false): CSSProperties {
     fontSize: 12,
     fontWeight: 700
   }
+}
+
+function getLocationModeButtonStyle(active: boolean): CSSProperties {
+  return {
+    minHeight: 30,
+    border: active ? '1px solid rgba(13, 148, 136, 0.55)' : '1px solid rgba(13, 148, 136, 0.16)',
+    borderRadius: 10,
+    background: active ? 'rgba(13, 148, 136, 0.12)' : 'rgba(255, 255, 255, 0.5)',
+    color: active ? '#0f766e' : '#48665e',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 800
+  }
+}
+
+function getLocationActionButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 30,
+    border: '1px solid rgba(37, 99, 235, 0.16)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(239, 246, 255, 0.78)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#1d4ed8' : '#8a97a6',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getLocationModeLabel(mode: LocationMode) {
+  return mode === 'gps' ? '真实定位' : '模拟定位'
+}
+
+function getLocationStatusLabel(status: LocationStatus) {
+  switch (status) {
+    case 'watching':
+      return '定位中'
+    case 'located':
+      return '已定位'
+    case 'error':
+      return '定位失败'
+    default:
+      return '未开启'
+  }
+}
+
+function getMockLocationByPoiId(poiId: string): BrowserLocation | null {
+  const poi = lingshanPois.find((item) => item.id === poiId)
+
+  if (!poi) {
+    return null
+  }
+
+  const location = poi.navLocation || poi.displayLocation
+
+  return {
+    lat: location.lat,
+    lng: location.lng,
+    accuracyMeters: 8,
+    timestamp: Date.now(),
+    source: 'mock'
+  }
+}
+
+function getDistanceMeters(from: LatLngPoint, to: LatLngPoint) {
+  const earthRadiusMeters = 6371000
+  const fromLat = degreesToRadians(from.lat)
+  const toLat = degreesToRadians(to.lat)
+  const deltaLat = degreesToRadians(to.lat - from.lat)
+  const deltaLng = degreesToRadians(to.lng - from.lng)
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(fromLat) * Math.cos(toLat) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return earthRadiusMeters * c
+}
+
+function degreesToRadians(value: number) {
+  return (value * Math.PI) / 180
+}
+
+function formatLocationTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+function isBrowserGeolocationSecureContext() {
+  if (typeof window === 'undefined') {
+    return true
+  }
+
+  return window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 }
 
 export default GuideMapPage

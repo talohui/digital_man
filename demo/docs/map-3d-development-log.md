@@ -4396,3 +4396,110 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 
 - 若验收通过，可进入实时定位基础能力阶段。
 - 后续移动端可继续把增强模式卡片改成更完整的底部抽屉或浮动工具栏。
+
+## 阶段四十七 A：真实地图基础定位与模拟定位能力
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+在 `/map` 腾讯地图增强模式中增加基础当前位置显示能力，同时提供真实定位和模拟定位两种模式。真实定位用于景区现场测试，模拟定位用于开发、答辩或用户不在灵山胜境时演示后续导航流程。
+
+### 本次约束
+
+- 只修改 `/map` 页面和必要的定位工具代码。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/lib/geolocation.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 真实定位说明
+
+新增 `src/lib/geolocation.ts`，封装浏览器 `navigator.geolocation.watchPosition`：
+
+- `isGeolocationSupported()` 判断浏览器是否支持定位。
+- `watchUserLocation()` 以 `enableHighAccuracy: true`、`timeout: 10000`、`maximumAge: 5000` 获取定位。
+- `clearUserLocationWatch()` 用于停止定位监听。
+- 错误信息会转换为“浏览器不支持定位”“用户拒绝定位权限”“定位超时”“无法获取当前位置”等可读文案。
+
+真实定位得到的位置标记为 `source: 'gps'`。
+
+### 模拟定位说明
+
+`/map` 增强模式中新增模拟定位模式，提供以下快捷点：
+
+- 南门
+- 九龙灌浴
+- 灵山大佛
+- 梵宫
+- 五印坛城
+- 景区出口
+
+模拟定位会优先使用对应 `lingshanPois.navLocation`，如果没有则使用 `displayLocation`。本阶段没有修改任何 POI 坐标或 `navLocation`，只是读取现有数据设置一个 `source: 'mock'` 的当前位置，精度默认 8 米。
+
+### 用户位置 Marker 说明
+
+真实定位和模拟定位都会在腾讯地图上显示独立的用户位置 Marker。该 Marker 使用蓝色圆点图标，与景点 POI Marker 区分，并通过独立 `userLocationMarkerRef` 管理，不影响现有 Marker layer、Polyline、InfoWindow 或调试图层。
+
+### 精度圆说明
+
+当 `window.TMap.MultiCircle` 和 `window.TMap.CircleStyle` 可用时，会显示淡蓝色半透明精度圆。若当前腾讯地图 JS API 环境不支持圆形覆盖物，则跳过精度圆渲染，只在 UI 中显示 `accuracyMeters` 数值，避免页面报错。
+
+### 不在景区时的提示说明
+
+如果真实定位成功但当前位置距离 `scenicCenter` 超过 2km，页面会提示：
+
+> 你当前可能不在灵山胜境景区内，可使用模拟定位体验导览流程。
+
+距离判断使用前端 haversine 近似计算，仅用于 UI 提示，不参与导航判断。
+
+### 为什么本阶段不做路线进度、偏航和重规划
+
+本阶段只建立“当前位置可视化”和“模拟定位”基础能力。路线进度、下一站、偏航判断和重规划需要依赖稳定的 `routeGeometry`、最近点吸附、阈值策略和更多手机端实测，因此后续单独阶段实现，避免一次性改变真实地图导览逻辑。
+
+### 手机端局域网定位限制说明
+
+手机端真实定位依赖浏览器权限、HTTPS / localhost 安全上下文、系统定位授权和网络环境。通过局域网 IP 访问 Vite dev server 时，部分浏览器可能限制 geolocation，因此保留模拟定位作为答辩和开发兜底。
+
+### 对 /map 的影响
+
+`/map` 新增定位控制区、真实定位按钮、模拟定位按钮、定位到我按钮、定位状态卡片、用户位置 Marker 和可选精度圆。原有 `/map` 默认路线、`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 路线映射、debugSceneRoute 调试层、复制 / 下载 walking path JSON、图层开关、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、routeGeometry 金线、道路网络层、水系层、POI 节点或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查 `/map` 增强模式卡片中出现“当前位置”控制区。
+- 检查“真实定位 / 模拟定位”模式切换。
+- 检查模拟南门、九龙灌浴、灵山大佛、梵宫、五印坛城、景区出口后，地图显示蓝色用户位置 Marker。
+- 检查“定位到我”可以把地图居中到当前用户位置。
+- 检查真实定位不支持或权限失败时显示可读错误。
+- 检查普通路线、POI 聚焦、sceneRoute 映射和 debugSceneRoute 调试能力不受影响。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 手机端局域网环境实测真实定位权限和 GPS 精度表现。
+- 阶段四十七 B 可增加用户位置到当前 `routeGeometry` 的最近点吸附和路线进度计算。
+- 后续再做下一站提示、偏航判断和重规划到下一站。
