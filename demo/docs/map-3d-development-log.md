@@ -1769,3 +1769,105 @@ export type LingshanSceneRoute = {
 - 手动从 `/scenic-3d-map` 点击“查看该景点真实地图”，确认 `/map?poi=giant_buddha` 最终聚焦大佛 Marker 并打开 InfoWindow。
 - 后续可继续处理 `/map?sceneRoute=xxx` 到真实 `guideRoutes` 的映射。
 - 后续如增加用户手动交互状态，可进一步区分 query 初始化聚焦和用户主动地图操作。
+
+## 2026-05-29 阶段二十三：query poi 景点级缩放修复
+
+### 本次目标
+
+为 `/map?poi=xxx` 的真实地图聚焦增加景点级缩放。目标是 URL 带有效 `poi` 参数时，地图最终居中到该景点，并缩放到适合查看景点的级别，而不是停留在整条路线或景区全貌级别。
+
+### 本次约束
+
+- 只修复 `/map?poi=xxx` 的景点级缩放体验。
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 坐标。
+- 不修改 InfoWindow 内容。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+`/map?poi=jiulong_guanyu` 已经能识别 POI，页面右下角景点信息和 InfoWindow 都能显示九龙灌浴，但地图视野仍偏向整条路线或景区全貌，没有缩放到景点级别。
+
+### 原因分析
+
+阶段二十二已经确保路线绘制完成后最终执行 query poi 的 `focusSpot`，因此居中与 InfoWindow 打开已生效。但现有 `focusSpot` 只负责 `setCenter` 和打开 InfoWindow，没有设置 zoom。地图保留了之前 `fitMapToRoute` 或初始化阶段的较低缩放级别，所以视觉上仍像全貌视野。
+
+### 修复方式
+
+新增常量：
+
+```ts
+const QUERY_POI_FOCUS_ZOOM = 17
+```
+
+新增 query poi 专用聚焦函数：
+
+```ts
+function focusQueryPoiSpot(map, infoWindow, spot) {
+  focusSpot(map, infoWindow, spot)
+  if (map && typeof map.setZoom === 'function') {
+    map.setZoom(QUERY_POI_FOCUS_ZOOM)
+  }
+}
+```
+
+仅在 URL query poi 触发的聚焦路径中使用 `focusQueryPoiSpot`。普通 `focusSpot`、Marker 点击、路线切换、InfoWindow 内容和路线规划逻辑保持不变。
+
+### QUERY_POI_FOCUS_ZOOM 说明
+
+`QUERY_POI_FOCUS_ZOOM` 当前设置为 `17`。该值用于灵山景区内部点位的景点级查看，相比更大的 zoom 更稳，不会过度放大到只看到极小局部。
+
+### 对 /map?poi=xxx 的影响
+
+有效 URL：
+
+```text
+/map?poi=<spotId>
+```
+
+现在会：
+
+- 选中对应景点。
+- 正常加载路线、Marker、Polyline 和 InfoWindow。
+- 路线绘制完成后最终聚焦该景点。
+- 将地图 zoom 设置到 `17`。
+
+无效 `poi` 仍保持默认行为，不报错。
+
+### 对普通 /map 的影响
+
+普通 `/map` 没有 query poi，不会调用 `focusQueryPoiSpot`。路线绘制完成后仍走原来的 `fitMapToRoute`，继续显示整条路线全貌。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。它已有的 `/map?poi=...` 跳转入口会受益于真实地图页的景点级缩放体验。
+
+### 验证方式
+
+- 检查 `GuideMapPage.tsx` 中 `QUERY_POI_FOCUS_ZOOM` 为 `17`。
+- 检查 query poi 聚焦路径调用 `focusQueryPoiSpot`。
+- 检查普通 `/map` 仍保留 `fitMapToRoute`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动验证 `/map?poi=jiulong_guanyu` 和 `/map?poi=giant_buddha`，确认最终 zoom 为景点级别。
+- 如后续发现局部仍不够清晰，可在验证后将 `QUERY_POI_FOCUS_ZOOM` 从 `17` 调整为 `18`。
+- 继续保持 `/map` 普通入口的全路线视野和真实导航职责。

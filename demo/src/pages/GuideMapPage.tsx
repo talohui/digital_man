@@ -23,6 +23,8 @@ import { useChatStore } from '../store/useChatStore'
 type MapStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'fallback'
 
+const QUERY_POI_FOCUS_ZOOM = 17
+
 const scenicMarkerIcon = createSvgDataUri(`
   <svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
     <defs>
@@ -233,7 +235,7 @@ function GuideMapPage() {
       return
     }
 
-    focusSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+    focusQueryPoiSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
   }, [mapStatus, queryPoiSpot, selectedSpot.id])
 
   useEffect(() => {
@@ -279,7 +281,7 @@ function GuideMapPage() {
       })
 
       if (queryPoiSpot && route.stops.some((stop) => stop.spotId === queryPoiSpot.id)) {
-        focusSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
+        focusQueryPoiSpot(mapRef.current, infoWindowRef.current, queryPoiSpot)
       } else {
         fitMapToRoute(mapRef.current, routeSpots)
       }
@@ -471,6 +473,14 @@ function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {
   infoWindow.setPosition(position)
   infoWindow.setContent(renderInfoWindowContent(spot))
   infoWindow.open()
+}
+
+function focusQueryPoiSpot(map: any, infoWindow: any, spot: GuideSpot) {
+  focusSpot(map, infoWindow, spot)
+
+  if (map && typeof map.setZoom === 'function') {
+    map.setZoom(QUERY_POI_FOCUS_ZOOM)
+  }
 }
 
 function fitMapToRoute(map: any, spots: GuideSpot[]) {
