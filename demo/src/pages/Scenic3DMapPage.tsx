@@ -224,25 +224,69 @@ function Scenic3DMapPage() {
             lineHeight: 1.6,
           }}
         >
-          当前 3D 路线是艺术化路线，不等同于真实步行导航；真实导航仍以腾讯地图 POI 与 navLocation 为准。
+          3D 地图为艺术化导览，当前 3D 路线不等同于真实步行导航；真实定位和导航以腾讯地图页 POI 与 navLocation 为准。
         </p>
-        <button
-          type="button"
-          onClick={() => navigate('/map')}
+        <div
           style={{
-            minHeight: 40,
-            padding: '0 16px',
-            border: 0,
-            borderRadius: 8,
-            background: '#0d9488',
-            color: '#ffffff',
-            cursor: 'pointer',
-            fontSize: 14,
-            fontWeight: 700,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
           }}
         >
-          返回真实地图
-        </button>
+          {selectedPoiId ? (
+            <button
+              type="button"
+              onClick={() => navigate(`/map?poi=${encodeURIComponent(selectedPoiId)}`)}
+              style={{
+                minHeight: 40,
+                padding: '0 14px',
+                border: 0,
+                borderRadius: 8,
+                background: '#0d9488',
+                color: '#ffffff',
+                cursor: 'pointer',
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            >
+              查看该景点真实地图
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => navigate(`/map?sceneRoute=${encodeURIComponent(currentRoute.id)}`)}
+            style={{
+              minHeight: 40,
+              padding: '0 14px',
+              border: '1px solid rgba(13, 148, 136, 0.3)',
+              borderRadius: 8,
+              background: 'rgba(255, 255, 255, 0.72)',
+              color: '#0b746b',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            查看整条路线真实地图
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/map')}
+            style={{
+              minHeight: 40,
+              padding: '0 14px',
+              border: '1px solid rgba(79, 96, 104, 0.2)',
+              borderRadius: 8,
+              background: 'rgba(255, 255, 255, 0.58)',
+              color: '#43565e',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            返回真实地图
+          </button>
+        </div>
       </aside>
     </main>
   )

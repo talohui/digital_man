@@ -1476,3 +1476,106 @@ export type LingshanSceneRoute = {
 - 手动打开 `/scenic-3d-map`，检查站点列表顺序、路线曲线和模型高亮是否一致。
 - 后续可为 `LingshanSceneRoute` 增加路线主题、颜色、控制点或停留讲解文案。
 - 后续可将 3D 艺术路线与真实 `guideRoutes` 或园区步道折线建立映射，但不要让它替代腾讯地图真实导航。
+
+## 2026-05-29 阶段二十：3D 地图跳转真实地图参数入口
+
+### 本次目标
+
+在 `/scenic-3d-map` 中增加跳转真实腾讯地图页 `/map` 的参数入口，让 3D 地图可以向真实地图传递当前景点或当前 3D 路线意图，为后续 `/map` 聚焦真实 POI 做准备。
+
+### 本次约束
+
+- 只修改 `/scenic-3d-map` 页面跳转真实地图的入口逻辑。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 新增跳转入口说明
+
+在 `/scenic-3d-map` 的右下信息卡中新增两个真实地图入口：
+
+- `查看该景点真实地图`
+- `查看整条路线真实地图`
+
+同时保留原有 `返回真实地图` 普通入口。
+
+页面提示文案也进一步明确：3D 地图为艺术化导览，真实定位和导航以腾讯地图页 POI 与 `navLocation` 为准。
+
+### /map?poi=xxx 的作用
+
+点击 `查看该景点真实地图` 时，会跳转到：
+
+```text
+/map?poi=<selectedPoiId>
+```
+
+例如：
+
+```text
+/map?poi=giant_buddha
+```
+
+该参数用于表达“希望真实地图聚焦某个 POI”的意图。本阶段只负责从 3D 地图传出参数，暂不要求 `/map` 解析。
+
+### /map?sceneRoute=xxx 的作用
+
+点击 `查看整条路线真实地图` 时，会跳转到：
+
+```text
+/map?sceneRoute=<currentSceneRoute.id>
+```
+
+例如：
+
+```text
+/map?sceneRoute=classic_3d_scene
+```
+
+该参数用于表达“希望真实地图理解当前 3D 场景路线”的意图。后续可以把 `sceneRoute` 映射到 `guideRoutes` 或真实园区路线。
+
+### 为什么本阶段不让 /map 解析参数
+
+当前任务只建立从 3D 地图到真实地图的跳转意图，不改变 `/map` 的腾讯地图导览行为。让 `/map` 解析 `poi` 或 `sceneRoute` 会涉及选中点初始化、路线切换、地图聚焦、InfoWindow 展示和可能的 route 映射，应该放到独立阶段处理，避免本阶段影响真实地图主流程。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 现在可以：
+
+- 从当前选中的 3D 景点跳转到 `/map?poi=<selectedPoiId>`。
+- 从当前 3D 导览路线跳转到 `/map?sceneRoute=<currentSceneRoute.id>`。
+- 继续保留路线站点列表、`selectedPoiId` 高亮和 `Scenic3DMapScene` 的 `routePoiSequence` 传参。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`，没有修改 `GuideMapPage.tsx`，没有修改腾讯地图路线规划逻辑，也没有影响 Marker、Polyline、InfoWindow、路线切换或腾讯地图初始化。
+
+当前 `/map` 是否解析 `poi` 或 `sceneRoute` 参数，留到下一阶段实现。
+
+### 验证方式
+
+- 检查 `Scenic3DMapPage.tsx` 中两个新按钮的 `navigate` 目标。
+- 检查未修改 `/map` 和 `GuideMapPage.tsx`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 下一阶段可让 `/map` 读取 `poi` 参数，初始化 `selectedSpotId` 并聚焦对应 Marker/InfoWindow。
+- 再下一步可让 `/map` 读取 `sceneRoute` 参数，并映射到真实 `guideRoutes` 或园区路线。
+- 继续保持 3D 艺术路线和真实腾讯地图导航的职责边界。
