@@ -22,6 +22,10 @@ import {
   USE_LINGSHAN_PRESET_ROUTE_PATHS
 } from '../data/lingshanMapData'
 import {
+  getLingshanRouteGeometryByGuideRouteId,
+  getLingshanRouteGeometryBySceneRouteId
+} from '../data/lingshanRouteGeometries'
+import {
   clearUserLocationWatch,
   isGeolocationSupported,
   watchUserLocation,
@@ -29,6 +33,12 @@ import {
   type GeolocationErrorState
 } from '../lib/geolocation'
 import { loadTMap } from '../lib/loadTMap'
+import {
+  findNearestRoutePoint,
+  findNextStop,
+  formatDistanceMeters,
+  haversineDistanceMeters
+} from '../lib/routeProgress'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
@@ -167,6 +177,30 @@ function GuideMapPage() {
   const userDistanceFromScenicCenter = userLocation ? getDistanceMeters(userLocation, scenicCenter) : null
   const isUserFarFromScenicArea =
     userLocation?.source === 'gps' && userDistanceFromScenicCenter !== null && userDistanceFromScenicCenter > 2000
+  const currentRouteGeometry = useMemo(() => {
+    const sceneRouteGeometry = querySceneRouteId
+      ? getLingshanRouteGeometryBySceneRouteId(querySceneRouteId)
+      : undefined
+
+    return sceneRouteGeometry ?? getLingshanRouteGeometryByGuideRouteId(activeRouteId)
+  }, [activeRouteId, querySceneRouteId])
+  const routeForProgress = currentRouteGeometry ? getGuideRouteById(currentRouteGeometry.guideRouteId) : route
+  const routeProgressEstimate = useMemo(() => {
+    if (!userLocation || !currentRouteGeometry || currentRouteGeometry.path.length < 2) {
+      return null
+    }
+
+    const nearestRoutePoint = findNearestRoutePoint(userLocation, currentRouteGeometry.path)
+
+    if (!nearestRoutePoint) {
+      return null
+    }
+
+    return {
+      nearestRoutePoint,
+      nextStop: findNextStop(userLocation, routeForProgress.stops, getRouteProgressSpot)
+    }
+  }, [currentRouteGeometry, routeForProgress.stops, userLocation])
 
   const focusQueryPoiOnce = (spot: GuideSpot) => {
     if (appliedQueryPoiFocusIdRef.current === spot.id) {
@@ -993,6 +1027,39 @@ function GuideMapPage() {
                     {userLocation ? <span>精度圆：浏览器支持圆形覆盖物时会显示，否则仅展示精度数值。</span> : null}
                   </div>
                 </div>
+
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(37, 99, 235, 0.1)' }}>
+                  <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线进度预估</strong>
+                  {!userLocation ? (
+                    <p style={{ margin: 0, color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                      开启真实定位或模拟定位后查看路线进度。
+                    </p>
+                  ) : !currentRouteGeometry || currentRouteGeometry.path.length < 2 ? (
+                    <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                      当前路线暂无 routeGeometry，无法计算路线进度。
+                    </p>
+                  ) : routeProgressEstimate ? (
+                    <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
+                      <span>routeGeometry：{currentRouteGeometry.status} / {currentRouteGeometry.pointCount} 点</span>
+                      <span>距离当前路线：{formatDistanceMeters(routeProgressEstimate.nearestRoutePoint.distanceMeters)}</span>
+                      <span>路线进度：约 {Math.round(routeProgressEstimate.nearestRoutePoint.progressRatio * 100)}%</span>
+                      <span>下一站：{routeProgressEstimate.nextStop.nextStopName ?? '已接近路线终点'}</span>
+                      {routeProgressEstimate.nextStop.distanceToNextStopMeters !== undefined ? (
+                        <span>距离下一站：约 {formatDistanceMeters(routeProgressEstimate.nextStop.distanceToNextStopMeters)}</span>
+                      ) : null}
+                      <span>
+                        {userLocation.source === 'mock'
+                          ? '当前为模拟定位，仅用于开发和演示。'
+                          : '当前位置来自浏览器定位。'}
+                      </span>
+                      <span>当前为基础路线吸附估算，尚未启用偏航判断和重新规划。</span>
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                      当前定位无法计算路线进度。
+                    </p>
+                  )}
+                </div>
               </div>
 
               {isMapDebugMode ? (
@@ -1385,22 +1452,36 @@ function getMockLocationByPoiId(poiId: string): BrowserLocation | null {
   }
 }
 
-function getDistanceMeters(from: LatLngPoint, to: LatLngPoint) {
-  const earthRadiusMeters = 6371000
-  const fromLat = degreesToRadians(from.lat)
-  const toLat = degreesToRadians(to.lat)
-  const deltaLat = degreesToRadians(to.lat - from.lat)
-  const deltaLng = degreesToRadians(to.lng - from.lng)
-  const a =
-    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-    Math.cos(fromLat) * Math.cos(toLat) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+function getRouteProgressSpot(spotId: string) {
+  const poi = lingshanPois.find((item) => item.id === spotId)
 
-  return earthRadiusMeters * c
+  if (poi) {
+    const location = poi.navLocation || poi.displayLocation
+
+    return {
+      id: poi.id,
+      name: poi.name,
+      lat: location.lat,
+      lng: location.lng
+    }
+  }
+
+  const spot = guideSpots.find((item) => item.id === spotId)
+
+  if (!spot) {
+    return undefined
+  }
+
+  return {
+    id: spot.id,
+    name: spot.name,
+    lat: spot.lat,
+    lng: spot.lng
+  }
 }
 
-function degreesToRadians(value: number) {
-  return (value * Math.PI) / 180
+function getDistanceMeters(from: LatLngPoint, to: LatLngPoint) {
+  return haversineDistanceMeters(from, to)
 }
 
 function formatLocationTime(timestamp: number) {

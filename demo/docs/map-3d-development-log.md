@@ -4503,3 +4503,98 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 手机端局域网环境实测真实定位权限和 GPS 精度表现。
 - 阶段四十七 B 可增加用户位置到当前 `routeGeometry` 的最近点吸附和路线进度计算。
 - 后续再做下一站提示、偏航判断和重规划到下一站。
+
+## 阶段四十八 A：routeGeometry 最近点吸附与下一站计算
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+在 `/map` 中基于当前用户位置和候选 `routeGeometry` 增加路线进度预估能力，显示用户距离当前路线的距离、路线大致进度、下一站和距离下一站的大致距离。
+
+### 本次约束
+
+- 只修改 `/map` 页面和必要的几何计算工具。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/lib/routeProgress.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### routeProgress 工具说明
+
+新增 `src/lib/routeProgress.ts`，提供无副作用、无第三方依赖、无腾讯地图对象依赖的几何计算工具：
+
+- `haversineDistanceMeters(a, b)`：计算两个经纬度点的近似距离。
+- `findNearestRoutePoint(position, path)`：在 `routeGeometry.path` 中查找距离用户位置最近的点，并用 `nearestIndex / (path.length - 1)` 估算路线进度。
+- `findNextStop(position, routeStops, spotLookup)`：根据当前路线站点和用户位置估算下一站。
+- `formatDistanceMeters(distance)`：格式化米 / 公里显示。
+
+### 最近点计算说明
+
+本阶段使用 `routeGeometry.path` 的离散点做最近点查找，不做线段投影。返回结果包含最近点、最近点索引、距离路线多少米和近似 `progressRatio`。该结果用于导览 UI 的粗略进度展示，不参与真实导航判断。
+
+### 下一站计算说明
+
+第一版下一站计算采用简单规则：
+
+- 先查找当前路线站点中距离用户最近的站点。
+- 如果用户距离最近站点仍较远，则把该最近站点作为下一站。
+- 如果用户已经接近最近站点，则把路线中的下一个站点作为下一站。
+- 如果已经到终点附近，则保留终点作为下一站。
+
+站点坐标优先使用 `lingshanPois.navLocation`，没有时使用 `displayLocation`，再 fallback 到 `guideSpots` 坐标。本阶段只读取这些数据，不修改任何坐标。
+
+### 为什么本阶段只做估算、不做偏航和重规划
+
+最近点和下一站只是后续导航流程的基础。偏航需要连续定位、阈值策略、用户速度和路线可信度判断；重规划需要调用腾讯 walking route 或自有 verified routeGeometry。本阶段先保持轻量，只显示估算，不触发自动偏航提示和重新规划。
+
+### 模拟定位如何用于测试
+
+阶段四十七 A 已提供南门、九龙灌浴、灵山大佛、梵宫、五印坛城、景区出口等模拟定位点。本阶段的路线进度估算会同时使用真实定位和模拟定位，因此开发和答辩时即使不在灵山胜境，也可以测试“距离路线、路线进度、下一站、距离下一站”的 UI。
+
+### 对 /map 的影响
+
+`/map` 增强模式卡片中新增“路线进度预估”区域：
+
+- 未开启定位时提示开启真实定位或模拟定位。
+- 已定位且存在 `routeGeometry` 时显示距离路线、约百分比进度、下一站、距离下一站。
+- 无 `routeGeometry` 或路径点不足时显示不可计算提示。
+
+原有 `/map` 默认路线、`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 路线映射、debugSceneRoute 调试层、复制 / 下载 walking path JSON、图层开关、真实 / 模拟定位、用户位置 Marker、精度圆、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、routeGeometry 金线、道路网络层、水系层、POI 节点或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map`，确认未定位时显示“开启真实定位或模拟定位后查看路线进度”。
+- 使用模拟南门、九龙灌浴、灵山大佛、梵宫、五印坛城或景区出口，确认路线进度预估区域显示距离路线、进度、下一站、距离下一站。
+- 打开 `/map?sceneRoute=historical_3d_scene`、`/map?sceneRoute=natural_3d_scene`、`/map?sceneRoute=family_3d_scene`，确认会优先使用对应 sceneRoute 的 `routeGeometry`。
+- 检查真实定位 / 模拟定位、用户位置 Marker、精度圆、POI 聚焦、sceneRoute 映射和 debugSceneRoute 调试能力不受影响。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 在手机端局域网环境用模拟定位和真实定位对比路线进度 UI。
+- 后续可做阶段四十八 B：加入基于最近点距离的偏航提示，但先不自动重规划。
+- 再后续可做重规划到下一站和当前站 / 下一站的导览状态机。
