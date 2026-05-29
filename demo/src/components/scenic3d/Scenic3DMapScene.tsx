@@ -19,21 +19,21 @@ type LandmarkNode = {
   scale: [number, number, number]
 }
 
-const landmarkLayout: Record<string, Pick<LandmarkNode, 'position' | 'scale'>> = {
+const landmarkFallbackLayout: Record<string, Pick<LandmarkNode, 'position' | 'scale'>> = {
   jiulong_guanyu: {
-    position: [-3.4, 0, 1.75],
+    position: [-2.8, 0, 2.35],
     scale: [0.72, 0.72, 0.72],
   },
   giant_buddha: {
-    position: [0, 0, -1.45],
+    position: [0, 0, -1.2],
     scale: [0.92, 0.92, 0.92],
   },
   fan_gong: {
-    position: [3.4, 0, 1.1],
+    position: [3.45, 0, -0.15],
     scale: [0.76, 0.76, 0.76],
   },
   wuyin_tancheng: {
-    position: [1.45, 0, -4.0],
+    position: [-1.75, 0, -4.05],
     scale: [0.78, 0.78, 0.78],
   },
 }
@@ -49,14 +49,24 @@ function getPoiName(poiId: string) {
   return lingshanPois.find((poi) => poi.id === poiId)?.name ?? fallbackName[poiId] ?? poiId
 }
 
+function getScenePosition(poiId: string): [number, number, number] {
+  const scenePosition = lingshanPois.find((poi) => poi.id === poiId)?.scenePosition
+
+  if (scenePosition) {
+    return [scenePosition.x, scenePosition.y, scenePosition.z]
+  }
+
+  return landmarkFallbackLayout[poiId]?.position ?? [0, 0, 0]
+}
+
 function buildLandmarks(): LandmarkNode[] {
   return lingshanAssetMap
-    .filter((asset) => asset.status !== 'disabled' && landmarkLayout[asset.poiId])
+    .filter((asset) => asset.status !== 'disabled' && landmarkFallbackLayout[asset.poiId])
     .map((asset) => ({
       poiId: asset.poiId,
       name: getPoiName(asset.poiId),
-      position: landmarkLayout[asset.poiId].position,
-      scale: landmarkLayout[asset.poiId].scale,
+      position: getScenePosition(asset.poiId),
+      scale: landmarkFallbackLayout[asset.poiId].scale,
     }))
 }
 
@@ -64,17 +74,23 @@ function SceneContent({ selectedPoiId, onSelectPoi }: Scenic3DMapSceneProps) {
   const landmarks = useMemo(() => buildLandmarks(), [])
   const activePoiId = selectedPoiId || 'giant_buddha'
   const routePoints = useMemo(
-    () =>
-      [
-        [-4.2, 0.08, 2.35],
-        [-3.35, 0.1, 1.75],
-        [-1.35, 0.12, 0.2],
-        [0, 0.12, -1.45],
-        [1.55, 0.12, -2.65],
-        [1.45, 0.12, -4],
-        [2.55, 0.12, -1.2],
-        [3.4, 0.12, 1.1],
-      ].map((point) => new Vector3(point[0], point[1], point[2])),
+    () => {
+      const jiulong = getScenePosition('jiulong_guanyu')
+      const buddha = getScenePosition('giant_buddha')
+      const tancheng = getScenePosition('wuyin_tancheng')
+      const fanGong = getScenePosition('fan_gong')
+
+      return [
+        [-4.2, 0.08, 2.65],
+        [jiulong[0], 0.12, jiulong[2]],
+        [-1.25, 0.12, 0.45],
+        [buddha[0], 0.12, buddha[2]],
+        [-1.05, 0.12, -2.55],
+        [tancheng[0], 0.12, tancheng[2]],
+        [1.2, 0.12, -2.35],
+        [fanGong[0], 0.12, fanGong[2]],
+      ].map((point) => new Vector3(point[0], point[1], point[2]))
+    },
     []
   )
 

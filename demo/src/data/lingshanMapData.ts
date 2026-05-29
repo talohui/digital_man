@@ -84,6 +84,14 @@ const POI_CATEGORY_KEYWORDS: Array<{
 const CORE_SPOT_KEYWORDS = ['灵山大佛', '大佛', '九龙灌浴', '梵宫', '五印坛城', '祥符禅寺']
 const CORE_3D_SPOT_IDS = ['giant_buddha', 'jiulong_guanyu', 'fan_gong', 'wuyin_tancheng']
 
+// scenePosition 是艺术化 3D 场景坐标，不是经纬度，也不用于真实导航。
+const CORE_3D_SCENE_POSITIONS: Record<string, NonNullable<LingshanPoi['scenePosition']>> = {
+  giant_buddha: { x: 0, y: 0, z: -1.2 },
+  jiulong_guanyu: { x: -2.8, y: 0, z: 2.35 },
+  fan_gong: { x: 3.45, y: 0, z: -0.15 },
+  wuyin_tancheng: { x: -1.75, y: 0, z: -4.05 }
+}
+
 function includesAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword))
 }
@@ -190,6 +198,18 @@ function inferAssetBindingPriority(
   return 'marker_only'
 }
 
+function inferScenePosition(spot: GuideSpot): LingshanPoi['scenePosition'] {
+  return CORE_3D_SCENE_POSITIONS[spot.id]
+}
+
+function inferPoiNote(spot: GuideSpot): string | undefined {
+  if (!CORE_3D_SCENE_POSITIONS[spot.id]) {
+    return undefined
+  }
+
+  return 'scenePosition 为艺术化 3D 场景坐标，不是经纬度，也不用于真实导航。'
+}
+
 export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
   const location: LatLngPoint = {
     lat: spot.lat,
@@ -212,7 +232,9 @@ export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
     stayMinutes: spot.stayMinutes,
     intro: spot.intro,
     triggerRadiusMeters: 35,
-    bindStatus: 'candidate'
+    bindStatus: 'candidate',
+    scenePosition: inferScenePosition(spot),
+    note: inferPoiNote(spot)
   }
 })
 

@@ -1299,3 +1299,84 @@ Three.js、React Three Fiber 和 Drei 相关代码体积较大。默认关闭可
 - 后续可继续增加水墨风格层次、路线 Ribbon、区域雾效和更多 POI。
 - 在接入真实 `.glb` 前，继续保持 placeholder 兜底。
 - 后续真实导航仍应以腾讯地图 POI 与 `navLocation` 为准。
+
+## 2026-05-29 阶段十八：3D 景点 scenePosition 数据化
+
+### 本次目标
+
+将沉浸式 3D 景区地图中的核心景点位置改为数据驱动，为后续路线、导航和 Blender 模型绑定打基础。本阶段让 `/scenic-3d-map` 中 4 个核心 POI 的摆放位置来自 `lingshanPois.scenePosition`，而不是写死在 `Scenic3DMapScene.tsx` 中。
+
+### 本次约束
+
+- 只处理 3D 场景位置数据化。
+- 不替换 `/map`。
+- 不修改腾讯地图路线规划逻辑。
+- 不新增真实 `.glb`、`.gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+- 不使用 `git add .`。
+
+### 修改文件清单
+
+- `src/data/lingshanMapData.ts`
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `docs/map-3d-development-log.md`
+
+### scenePosition 字段说明
+
+为 4 个核心 POI 补充 `scenePosition`：
+
+- `giant_buddha`
+- `jiulong_guanyu`
+- `fan_gong`
+- `wuyin_tancheng`
+
+`scenePosition` 结构为：
+
+```ts
+scenePosition: { x: number; y: number; z: number }
+```
+
+本阶段没有修改 `displayLocation`、`navLocation`、腾讯 POI 字段或 `bindStatus`。
+
+### 为什么 scenePosition 不等于经纬度
+
+`scenePosition` 是艺术化 3D 场景坐标，用于 Three.js 场景中的视觉摆放，不是经纬度，也不用于真实导航。真实地图展示、真实路线规划和导航点仍以腾讯地图、`displayLocation`、`navLocation` 和后续人工 POI 绑定结果为准。
+
+将它独立出来，可以让 3D 场景根据视觉构图调整位置，同时不污染真实地理数据。
+
+### Scenic3DMapScene 如何从数据层读取位置
+
+`Scenic3DMapScene.tsx` 现在通过 `lingshanPois.find((poi) => poi.id === poiId)?.scenePosition` 读取 POI 的 3D 场景坐标。
+
+如果某个 POI 暂时没有 `scenePosition`，组件会使用 `landmarkFallbackLayout` 中的 fallback 位置，避免页面报错。
+
+场景中的金色路线曲线也改为基于核心 POI 的 `scenePosition` 生成关键节点，同时保留地形底盘、水面意象、山体、雾效、景点标签、`OrbitControls` 和 selectedPoiId 高亮逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 的 4 个核心低模地标位置现在由 `lingshanPois.scenePosition` 驱动。页面仍保持全屏艺术化 3D 景区地图原型，不加载真实 `.glb` 模型。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`，没有修改 `GuideMapPage.tsx`，没有修改腾讯地图路线规划逻辑，也没有影响 Marker、Polyline、InfoWindow 或腾讯地图初始化。
+
+### 验证方式
+
+- 检查 4 个核心 POI 已生成 `scenePosition`。
+- 检查 `Scenic3DMapScene.tsx` 从 `lingshanPois` 读取 `scenePosition`。
+- 运行 `npm run build`。
+- 运行 `git status`。
+- 只添加本阶段允许修改文件并提交。
+
+### npm run build 结果
+
+`npm run build` 通过。
+
+构建输出仍有 Vite chunk size warning，这是体积提示，不是失败。
+
+### 下一步建议
+
+- 手动打开 `/scenic-3d-map`，确认 4 个核心 POI 的空间分布符合艺术化导览预期。
+- 后续可将艺术化路线 Ribbon 的控制点也抽到数据层。
+- 后续真实 `.glb` 接入时，通过 `poiId` 同时关联 `scenePosition`、模型 URL、缩放和旋转。
