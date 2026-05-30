@@ -27,6 +27,7 @@ export type NextStopResult = {
 
 export type RouteDeviationLevel =
   | 'on_route'
+  | 'near_route_stop'
   | 'maybe_off_route'
   | 'off_route'
 
@@ -127,34 +128,48 @@ export function formatDistanceMeters(distance: number) {
 }
 
 export function evaluateRouteDeviation(
-  distanceMeters: number,
+  distanceToRouteMeters: number,
   options?: {
     maybeThresholdMeters?: number
     offRouteThresholdMeters?: number
+    distanceToNearestStopMeters?: number
+    stopProximityThresholdMeters?: number
   }
 ): RouteDeviationResult {
   const maybeThresholdMeters = options?.maybeThresholdMeters ?? 30
   const offRouteThresholdMeters = options?.offRouteThresholdMeters ?? 80
+  const stopProximityThresholdMeters = options?.stopProximityThresholdMeters ?? 80
 
-  if (distanceMeters <= maybeThresholdMeters) {
+  if (distanceToRouteMeters <= maybeThresholdMeters) {
     return {
       level: 'on_route',
-      distanceMeters,
+      distanceMeters: distanceToRouteMeters,
       message: '你在推荐路线附近'
     }
   }
 
-  if (distanceMeters <= offRouteThresholdMeters) {
+  if (
+    options?.distanceToNearestStopMeters !== undefined &&
+    options.distanceToNearestStopMeters <= stopProximityThresholdMeters
+  ) {
+    return {
+      level: 'near_route_stop',
+      distanceMeters: distanceToRouteMeters,
+      message: '你在路线站点附近'
+    }
+  }
+
+  if (distanceToRouteMeters <= offRouteThresholdMeters) {
     return {
       level: 'maybe_off_route',
-      distanceMeters,
+      distanceMeters: distanceToRouteMeters,
       message: '你可能偏离推荐路线'
     }
   }
 
   return {
     level: 'off_route',
-    distanceMeters,
+    distanceMeters: distanceToRouteMeters,
     message: '你已明显偏离推荐路线'
   }
 }

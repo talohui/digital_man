@@ -198,10 +198,15 @@ function GuideMapPage() {
       return null
     }
 
+    const distanceToNearestStopMeters = getNearestRouteStopDistanceMeters(userLocation, routeForProgress.stops)
+
     return {
       nearestRoutePoint,
+      distanceToNearestStopMeters,
       nextStop: findNextStop(userLocation, routeForProgress.stops, getRouteProgressSpot),
-      routeDeviation: evaluateRouteDeviation(nearestRoutePoint.distanceMeters)
+      routeDeviation: evaluateRouteDeviation(nearestRoutePoint.distanceMeters, {
+        distanceToNearestStopMeters
+      })
     }
   }, [currentRouteGeometry, routeForProgress.stops, userLocation])
 
@@ -1041,6 +1046,9 @@ function GuideMapPage() {
                         路线状态：{routeProgressEstimate.routeDeviation.message}
                       </span>
                       <span>距离当前路线：{formatDistanceMeters(routeProgressEstimate.nearestRoutePoint.distanceMeters)}</span>
+                      {routeProgressEstimate.distanceToNearestStopMeters !== undefined ? (
+                        <span>距离最近路线站点：{formatDistanceMeters(routeProgressEstimate.distanceToNearestStopMeters)}</span>
+                      ) : null}
                       <span>路线进度：约 {Math.round(routeProgressEstimate.nearestRoutePoint.progressRatio * 100)}%</span>
                       <span>下一站：{routeProgressEstimate.nextStop.nextStopName ?? '已接近路线终点'}</span>
                       {routeProgressEstimate.nextStop.distanceToNextStopMeters !== undefined ? (
@@ -1450,6 +1458,11 @@ function getRouteDeviationStyle(level: RouteDeviationLevel): CSSProperties {
       border: '1px solid rgba(22, 163, 74, 0.22)',
       color: '#166534'
     },
+    near_route_stop: {
+      background: 'rgba(13, 148, 136, 0.12)',
+      border: '1px solid rgba(13, 148, 136, 0.24)',
+      color: '#0f766e'
+    },
     maybe_off_route: {
       background: 'rgba(217, 119, 6, 0.12)',
       border: '1px solid rgba(217, 119, 6, 0.24)',
@@ -1532,6 +1545,18 @@ function getRouteProgressSpot(spotId: string) {
     lat: spot.lat,
     lng: spot.lng
   }
+}
+
+function getNearestRouteStopDistanceMeters(position: LatLngPoint, routeStops: { spotId: string }[]) {
+  const distances = routeStops
+    .map((stop) => {
+      const spot = getRouteProgressSpot(stop.spotId)
+
+      return spot ? haversineDistanceMeters(position, spot) : null
+    })
+    .filter((distance): distance is number => distance !== null)
+
+  return distances.length > 0 ? Math.min(...distances) : undefined
 }
 
 function getDistanceMeters(from: LatLngPoint, to: LatLngPoint) {

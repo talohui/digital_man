@@ -4773,3 +4773,100 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 手机端实测不同 GPS 精度下的偏航阈值是否合理。
 - 后续可做阶段四十九 B：连续多次偏离后再提示偏航，降低 GPS 抖动误报。
 - 再后续可做“重规划到下一站”能力，但需要用户确认和临时路线图层。
+
+## 阶段四十九 A 修正：偏航判断加入路线站点容忍区
+
+### 日期
+
+2026-05-30
+
+### 本次目标
+
+修正 `/map` 中仅按用户到候选 `routeGeometry` 最近距离判断偏航的问题，让偏航判断同时考虑用户是否靠近当前路线站点，避免模拟定位在当前路线景点中心时被误判为偏航。
+
+### 本次约束
+
+- 不做连续偏离计数。
+- 不做自动重规划。
+- 不调用新的腾讯路线接口。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/lib/routeProgress.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+阶段四十九 A 的偏航提示只依据“用户位置到 `routeGeometry` 折线最近点距离”。当模拟定位落在当前路线包含的景点中心时，如果该景点中心不在腾讯 walking path 折线上，页面仍可能显示“明显偏离推荐路线”。
+
+### 原因分析：景点中心不一定在 routeGeometry 上
+
+灵山大佛、梵宫、九龙灌浴、五印坛城等大体量景点的展示中心、观赏区、入口点和真实步道位置可能并不重合。`routeGeometry` 来自腾讯 walking runtime 的候选路径，更接近步行线；模拟定位使用 POI 的 `navLocation` 或 `displayLocation`，可能落在景点中心或广场点。景区导览中，靠近路线站点应视为合理上下文，不应直接按折线距离判为偏航。
+
+### 新增 near_route_stop 状态说明
+
+`src/lib/routeProgress.ts` 将 `RouteDeviationLevel` 扩展为：
+
+- `on_route`
+- `near_route_stop`
+- `maybe_off_route`
+- `off_route`
+
+当用户离 `routeGeometry` 超过 30 米，但离当前路线任一站点不超过容忍距离时，返回 `near_route_stop`，提示“你在路线站点附近”。
+
+### 路线站点容忍距离说明
+
+本阶段默认阈值：
+
+- `distanceToRouteMeters <= 30m`：`on_route`。
+- `distanceToNearestStopMeters <= 80m`：`near_route_stop`。
+- `distanceToRouteMeters <= 80m`：`maybe_off_route`。
+- 其它情况：`off_route`。
+
+80 米站点容忍区用于覆盖景区大体量景点、广场和观赏区，后续可结合手机端现场测试微调。
+
+### 为什么本阶段不做连续偏航和重规划
+
+本阶段只修复误判，不引入连续偏离计数、自动重规划或腾讯路线请求。连续偏航需要处理 GPS 抖动、定位精度、用户确认和临时路线图层；重规划还需要明确“下一站”与“恢复主路线”的状态机，适合后续独立阶段实现。
+
+### 模拟定位如何用于测试
+
+使用 `/map` 中已有模拟定位按钮，将位置设置到南门、九龙灌浴、灵山大佛、梵宫、五印坛城或景区出口。若该模拟点属于当前路线站点，即使它离 `routeGeometry` 折线较远，也应显示 `near_route_stop` 或 `on_route`，不应直接进入 `off_route`。
+
+### 对 /map 的影响
+
+`/map` 的“路线进度预估”区域新增“距离最近路线站点”展示，并将偏航状态判断改为同时参考路线折线距离和路线站点距离。原有默认路线、`/map?poi=xxx` 聚焦、`/map?sceneRoute=xxx` 映射、debugSceneRoute、路线 path JSON 复制 / 下载、图层开关、真实 / 模拟定位、用户位置 Marker、精度圆、路线进度、下一站、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、3D 金线、POI 节点、道路网络层、水系层或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map`，选择包含模拟点的当前路线，点击“模拟在九龙灌浴 / 灵山大佛 / 梵宫 / 五印坛城”。
+- 确认路线进度区域显示“距离最近路线站点”。
+- 确认模拟定位在当前路线景点附近时显示“你在路线站点附近”或“你在推荐路线附近”，不再直接误判为明显偏航。
+- 确认不触发新的腾讯路线请求、不做自动重规划、不影响 POI 聚焦和 sceneRoute 映射。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 结合手机端实测调整 80 米站点容忍阈值。
+- 后续可做连续多次偏离后再提示偏航，降低 GPS 抖动误报。
+- 再后续可设计“重规划到下一站”流程，但应保持用户确认和临时路线图层。
