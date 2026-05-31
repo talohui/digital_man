@@ -37,6 +37,12 @@ export type RouteDeviationResult = {
   message: string
 }
 
+export type RouteDeviationConfirmState = {
+  consecutiveOffRouteCount: number
+  shouldWarn: boolean
+  shouldSuggestReroute: boolean
+}
+
 export function haversineDistanceMeters(a: LatLngPoint, b: LatLngPoint) {
   const earthRadiusMeters = 6371000
   const fromLat = degreesToRadians(a.lat)
@@ -171,6 +177,31 @@ export function evaluateRouteDeviation(
     level: 'off_route',
     distanceMeters: distanceToRouteMeters,
     message: '你已明显偏离推荐路线'
+  }
+}
+
+export function evaluateRouteDeviationConfirmation(params: {
+  level: RouteDeviationLevel
+  previousCount: number
+  confirmThreshold?: number
+}): RouteDeviationConfirmState {
+  const confirmThreshold = params.confirmThreshold ?? 3
+
+  if (params.level === 'on_route' || params.level === 'near_route_stop') {
+    return {
+      consecutiveOffRouteCount: 0,
+      shouldWarn: false,
+      shouldSuggestReroute: false
+    }
+  }
+
+  const consecutiveOffRouteCount = params.previousCount + 1
+  const shouldWarn = consecutiveOffRouteCount >= confirmThreshold
+
+  return {
+    consecutiveOffRouteCount,
+    shouldWarn,
+    shouldSuggestReroute: params.level === 'off_route' && shouldWarn
   }
 }
 

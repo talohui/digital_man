@@ -34,10 +34,12 @@ import {
 import { loadTMap } from '../lib/loadTMap'
 import {
   evaluateRouteDeviation,
+  evaluateRouteDeviationConfirmation,
   findNearestRoutePoint,
   findNextStop,
   formatDistanceMeters,
   haversineDistanceMeters,
+  type RouteDeviationConfirmState,
   type RouteDeviationLevel
 } from '../lib/routeProgress'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
@@ -58,6 +60,11 @@ type LocationMode = 'gps' | 'mock'
 type LocationStatus = 'idle' | 'watching' | 'located' | 'error'
 
 const QUERY_POI_FOCUS_ZOOM = 17
+const emptyRouteDeviationConfirmation: RouteDeviationConfirmState = {
+  consecutiveOffRouteCount: 0,
+  shouldWarn: false,
+  shouldSuggestReroute: false
+}
 
 const scenicMarkerIcon = createSvgDataUri(`
   <svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
@@ -120,6 +127,7 @@ function GuideMapPage() {
   const sceneRouteDebugLayerRef = useRef<any>(null)
   const userLocationMarkerRef = useRef<any>(null)
   const userAccuracyCircleRef = useRef<any>(null)
+  const routeDeviationRouteIdRef = useRef<string | null>(null)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
   const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
@@ -146,6 +154,9 @@ function GuideMapPage() {
   const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
   const [userLocation, setUserLocation] = useState<BrowserLocation | null>(null)
   const [locationError, setLocationError] = useState<GeolocationErrorState | null>(null)
+  const [routeDeviationConfirmation, setRouteDeviationConfirmation] =
+    useState<RouteDeviationConfirmState>(emptyRouteDeviationConfirmation)
+  const [reroutePlaceholderMessage, setReroutePlaceholderMessage] = useState('')
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
@@ -212,6 +223,29 @@ function GuideMapPage() {
     focusQueryPoiSpot(mapRef.current, infoWindowRef.current, spot)
     appliedQueryPoiFocusIdRef.current = spot.id
   }
+
+  useEffect(() => {
+    setRouteDeviationConfirmation((previous) => {
+      const previousCount =
+        routeDeviationRouteIdRef.current === activeRouteId ? previous.consecutiveOffRouteCount : 0
+      routeDeviationRouteIdRef.current = activeRouteId
+
+      if (!userLocation || !routeProgressEstimate) {
+        return emptyRouteDeviationConfirmation
+      }
+
+      return evaluateRouteDeviationConfirmation({
+        level: routeProgressEstimate.routeDeviation.level,
+        previousCount
+      })
+    })
+  }, [activeRouteId, routeProgressEstimate, userLocation])
+
+  useEffect(() => {
+    if (!routeDeviationConfirmation.shouldSuggestReroute) {
+      setReroutePlaceholderMessage('')
+    }
+  }, [routeDeviationConfirmation.shouldSuggestReroute])
 
   useEffect(() => {
     showCurrentRouteRef.current = showCurrentRoute
@@ -592,6 +626,8 @@ function GuideMapPage() {
   const startGpsLocation = () => {
     setLocationMode('gps')
     setLocationError(null)
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
 
     if (userLocationWatchIdRef.current !== null) {
       return
@@ -623,6 +659,8 @@ function GuideMapPage() {
   const stopGpsLocation = () => {
     stopUserLocationWatch()
     setLocationStatus(userLocation ? 'located' : 'idle')
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
   }
 
   const centerUserLocation = () => {
@@ -645,6 +683,8 @@ function GuideMapPage() {
 
     stopUserLocationWatch()
     setLocationMode('mock')
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
     setUserLocation(location)
     setLocationStatus('located')
     setLocationError(null)
@@ -666,6 +706,8 @@ function GuideMapPage() {
 
   const handleRouteSwitch = (routeId: string) => {
     hasManualRouteSwitchRef.current = true
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
     setActiveRouteId(routeId)
     setShowRoutePanel(false)
   }
@@ -1040,6 +1082,24 @@ function GuideMapPage() {
                       <span style={getRouteDeviationStyle(routeProgressEstimate.routeDeviation.level)}>
                         路线状态：{routeProgressEstimate.routeDeviation.message}
                       </span>
+                      <span>连续偏离次数：{routeDeviationConfirmation.consecutiveOffRouteCount}</span>
+                      {routeDeviationConfirmation.shouldWarn ? (
+                        <span style={getConfirmedDeviationStyle(routeDeviationConfirmation.shouldSuggestReroute)}>
+                          连续多次检测到你可能偏离推荐路线
+                        </span>
+                      ) : null}
+                      {routeDeviationConfirmation.shouldSuggestReroute ? (
+                        <button
+                          type="button"
+                          onClick={() => setReroutePlaceholderMessage('重新规划功能将在后续阶段接入')}
+                          style={getReroutePlaceholderButtonStyle()}
+                        >
+                          重新规划到下一站（暂未启用）
+                        </button>
+                      ) : null}
+                      {reroutePlaceholderMessage ? (
+                        <span style={{ color: '#9a5a08', fontWeight: 700 }}>{reroutePlaceholderMessage}</span>
+                      ) : null}
                       <span>距离当前路线：{formatDistanceMeters(routeProgressEstimate.nearestRoutePoint.distanceMeters)}</span>
                       {routeProgressEstimate.distanceToNearestStopMeters !== undefined ? (
                         <span>距离最近路线站点：{formatDistanceMeters(routeProgressEstimate.distanceToNearestStopMeters)}</span>
@@ -1055,6 +1115,7 @@ function GuideMapPage() {
                           : '当前位置来自浏览器定位。'}
                       </span>
                       <span>当前仅基于候选 routeGeometry 距离判断，尚未启用自动重规划。</span>
+                      <span>真实导航仍以腾讯地图和后续 verified routeGeometry 为准。</span>
                     </div>
                   ) : (
                     <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
@@ -1476,6 +1537,33 @@ function getRouteDeviationStyle(level: RouteDeviationLevel): CSSProperties {
     borderRadius: 8,
     fontWeight: 800,
     ...styleByLevel[level]
+  }
+}
+
+function getConfirmedDeviationStyle(shouldSuggestReroute: boolean): CSSProperties {
+  return {
+    display: 'block',
+    padding: '5px 7px',
+    borderRadius: 8,
+    background: shouldSuggestReroute ? 'rgba(220, 38, 38, 0.1)' : 'rgba(217, 119, 6, 0.12)',
+    border: shouldSuggestReroute ? '1px solid rgba(220, 38, 38, 0.24)' : '1px solid rgba(217, 119, 6, 0.24)',
+    color: shouldSuggestReroute ? '#991b1b' : '#92400e',
+    fontWeight: 800
+  }
+}
+
+function getReroutePlaceholderButtonStyle(): CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid rgba(217, 119, 6, 0.32)',
+    borderRadius: 9,
+    background: 'rgba(255, 251, 235, 0.86)',
+    color: '#92400e',
+    cursor: 'pointer',
+    fontSize: 11,
+    fontWeight: 800,
+    padding: '7px 9px',
+    textAlign: 'center'
   }
 }
 
