@@ -5118,3 +5118,79 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 制作或导出一个小体积测试 GLB，先在 `/three-preview` 验证加载、比例和原点。
 - 制定核心四个地标的模型命名、比例、原点和压缩规范。
 - 后续再逐个将 `lingshanAssetMap` 的 `modelUrl` 从空值切换为已存在模型路径。
+
+## 阶段五十一：首个 GLB 模型接入与验收流程文档
+
+### 日期
+
+2026-05-31
+
+### 本次目标
+
+生成首个 GLB 模型接入与验收流程文档，指导后续将灵山大佛、梵宫、九龙灌浴、五印坛城等模型安全接入 `/three-preview` 和 `/scenic-3d-map`。
+
+### 本次约束
+
+- 不修改功能代码。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `ScenicModel`。
+- 不修改 `lingshanAssetMap`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `docs/lingshan-first-glb-integration-guide.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么先做文档而不是直接接模型
+
+阶段五十已经打通前端 GLB 加载与 placeholder fallback 能力，但真实模型接入容易出现路径 404、比例错误、方向错误、原点偏移、材质丢失、文件过大和移动端性能问题。先建立接入流程和验收表，可以避免把大模型直接提交进仓库，也能让后续每个模型按同一标准验证。
+
+### 首个模型推荐
+
+文档建议首个接入模型为灵山大佛 `giant_buddha`。它是灵山胜境最核心地标，替换 placeholder 后视觉提升最明显，也适合作为模型加载、比例、朝向、原点、标签关系和 fallback 的首个验证对象。备选模型包括梵宫、九龙灌浴和五印坛城。
+
+### 模型目录与 lingshanAssetMap 配置说明
+
+文档建议模型放在：
+
+- `public/models/lingshan/landmarks/`
+- `public/models/lingshan/thumbnails/`
+
+并说明 `public` 目录资源通过 `/models/...` 访问，不应放入 `src`。文档给出 `lingshanAssetMap` 配置示例，明确 `modelUrl`、`thumbnailUrl`、`status: 'model_ready'`、`transform` 和 fallback 行为，但本阶段没有实际修改资产映射代码。
+
+### 验收流程说明
+
+文档列出从放置 GLB、配置 `modelUrl`、运行 `npm run dev`、打开 `/three-preview`、检查模型问题，到打开 `/scenic-3d-map` 检查场景关系的完整流程。验收表覆盖加载、fallback、控制台错误、比例、原点、方向、贴地、标签、高亮和移动端性能。
+
+### 对 /three-preview 的影响
+
+本阶段没有修改 `/three-preview` 功能。文档说明后续首个模型应优先在 `/three-preview` 验证，确认加载、比例、朝向和 fallback 后再观察 `/scenic-3d-map` 中的实际表现。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map` 功能。文档说明后续模型接入后，需要检查模型在沉浸式 3D 地图中的位置、比例、标签遮挡和选中高亮效果。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、导航、定位、路线进度、偏航提示、腾讯地图路线规划或任何真实地图逻辑。模型接入流程不应影响真实导航兜底。
+
+### 下一步建议
+
+- 阶段五十二：接入第一个轻量 GLB 模型，例如灵山大佛。
+- 阶段五十三：修正模型 `transform`。
+- 阶段五十四：为核心 4 个地标批量接入模型。
+- 阶段五十五：模型体积压缩与移动端性能测试。
+
+### 验证方式
+
+- 检查 `docs/lingshan-first-glb-integration-guide.md` 是否生成。
+- 检查文档是否包含推荐模型、目录结构、制作规范、配置示例、验收流程、验收表格、常见问题和下一步建议。
+- 运行 `git status`，确认只修改允许的 Markdown 文档。
+
+### npm run build 结果
+
+本阶段只修改 Markdown 文档，不涉及功能代码，不需要运行 `npm run build`。
