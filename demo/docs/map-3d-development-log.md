@@ -5194,3 +5194,83 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 ### npm run build 结果
 
 本阶段只修改 Markdown 文档，不涉及功能代码，不需要运行 `npm run build`。
+
+## 阶段五十二：Blender MCP 与 AI 3D 建模路线方案
+
+### 日期
+
+2026-05-31
+
+### 本次目标
+
+生成 Blender MCP、AI 3D 生成 / 重建和手工 Blender 清理三种建模路线的调研与制作方案，明确灵山胜境首批 3D 模型资产的制作路线和首个模型建议。
+
+### 本次约束
+
+- 不修改功能代码。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `ScenicModel`。
+- 不修改 `lingshanAssetMap`。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `docs/lingshan-blender-mcp-ai3d-modeling-plan.md`
+- `docs/map-3d-development-log.md`
+
+### Blender MCP 适用边界
+
+Blender MCP 适合让 AI 在本地受控 Blender 环境中辅助创建低模符号化资产、规则几何体、地台、材质、缩放、居中、设置原点和 GLB 导出自动化。它不适合自动生成高质量佛像细节，也不能替代人工审美和宗教文化表达把关。因为可能执行 Blender Python，使用前应保存文件，并避免接触项目敏感配置。
+
+### AI 3D 生成/重建适用边界
+
+AI 3D 生成 / 重建适合快速获得复杂形体的第一版粗模或参考 mesh，但生成结果常见结构不准、贴图脏、面数高、原点 / 比例 / 法线混乱等问题。宗教建筑和佛像还存在失真风险，因此 AI 生成结果不能直接作为最终前端资产，必须进入 Blender 清理。
+
+### 首个模型推荐
+
+文档推荐首个模型为灵山大佛。原因是它是灵山胜境最核心地标，替换 placeholder 后视觉提升最大，也适合先做低模庄重剪影来验证 GLB 加载、比例、原点、朝向、fallback 和移动端性能。
+
+### 为什么本阶段不直接生成模型
+
+当前还没有经过验收的参考资产和 Blender 工作文件。直接生成模型容易引入体积过大、比例错误、宗教形象失真、移动端性能不稳定和仓库误提交大文件等问题。本阶段先制定路线和验收标准，确保后续模型制作和接入有明确边界。
+
+### 对 /three-preview 的影响
+
+本阶段没有修改 `/three-preview` 功能。文档说明后续第一个 GLB 应先在 `/three-preview` 验证加载、比例、朝向、原点和 fallback，再进入沉浸式地图。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map` 功能。文档说明后续模型通过 `/three-preview` 验收后，再接入 `/scenic-3d-map` 检查场景比例、标签关系和选中高亮。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、导航、定位、路线进度、偏航提示、腾讯地图路线规划或任何真实地图逻辑。模型制作路线不影响真实导航兜底。
+
+### 下一步建议
+
+- 先制作灵山大佛低模 GLB。
+- 接入 `/three-preview`。
+- 调整 `transform`。
+- 再接入 `/scenic-3d-map`。
+- 通过后再制作梵宫、九龙灌浴、五印坛城。
+
+### 验证方式
+
+- 检查 `docs/lingshan-blender-mcp-ai3d-modeling-plan.md` 是否生成。
+- 检查文档是否包含三种路线对比、Blender MCP 边界、AI 3D 边界、首个模型推荐、制作流程、验收标准和下一步建议。
+- 运行 `git status`，确认只修改允许的 Markdown 文档。
+
+### npm run build 结果
+
+本阶段只修改 Markdown 文档，不涉及功能代码，不需要运行 `npm run build`。
+
+### 明确记录
+
+- 本阶段没有修改功能代码。
+- 本阶段没有新增真实模型文件。
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改导航功能。
+- 本阶段只是制定建模路线。
