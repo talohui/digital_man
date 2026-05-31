@@ -4870,3 +4870,84 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 结合手机端实测调整 80 米站点容忍阈值。
 - 后续可做连续多次偏离后再提示偏航，降低 GPS 抖动误报。
 - 再后续可设计“重规划到下一站”流程，但应保持用户确认和临时路线图层。
+
+## 阶段四十九 C：sceneRoute query 与手动路线切换解耦
+
+### 日期
+
+2026-05-31
+
+### 本次目标
+
+修复 `/map?sceneRoute=xxx` 进入后，用户在页面内手动切换路线时，路线进度、下一站、偏航判断和 `routeGeometry` 状态仍可能继续受 URL 中 `sceneRoute` 影响的问题。
+
+### 本次约束
+
+- 不调用新的腾讯路线接口。
+- 不做自动重规划。
+- 不修改腾讯 walking route 规划算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 3D 场景。
+- 不修改 POI 坐标。
+- 不修改 `displayLocation` / `navLocation`。
+- 不修改 `scenePosition`。
+- 不修改 `lingshanRouteGeometries.ts` 数据内容。
+- 不新增真实 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+直接打开 `/map?sceneRoute=family_3d_scene` 时，初始亲子路线正常；但如果从 `/map?sceneRoute=historical_3d_scene` 进入后手动切换到亲子路线，页面中的路线进度、下一站、偏航状态或 `routeGeometry` 状态可能仍按 URL 中的 `historical_3d_scene` 计算。
+
+### 原因分析：query sceneRoute 长期影响 routeGeometry / routeProgress
+
+此前 `currentRouteGeometry` 会优先通过 `querySceneRouteId` 查找 `lingshanRouteGeometries`，再 fallback 到 `activeRouteId`。这会让 URL 中的 `sceneRoute` 在用户手动切换路线后仍持续覆盖当前路线的几何数据，导致主路线状态与用户选择的 `activeRouteId` 不一致。
+
+### 修复方式：sceneRoute 只作为初始意图，手动切换优先
+
+`sceneRoute` 查询参数仍用于页面初次进入时映射真实 `guideRoute` 并设置 `activeRouteId`。同时新增手动路线切换标记：用户点击路线切换后，后续不再让 query sceneRoute effect 拉回原路线。这样 URL query 只表达初始进入意图，页面内交互以用户手动选择为准。
+
+### routeGeometry 按 activeRouteId 查找的说明
+
+普通路线进度、下一站、偏航判断和 `routeGeometry` 状态改为通过 `getLingshanRouteGeometryByGuideRouteId(activeRouteId)` 获取。手动切换到亲子路线后，对应数据会切换为 `family` 的 routeGeometry；切换到自然风光路线后，对应数据会切换为 `natural_scenery`。
+
+### debugSceneRoute 保留 query sceneRoute 调试能力的说明
+
+`debugSceneRoute=1` 的 sceneRoute 骨架线仍按 URL 中的 `querySceneRouteId` 绘制，因为它是调试指定 3D sceneRoute 的能力。该调试图层不再影响普通路线进度、下一站、偏航判断和主路线状态。
+
+### 对 /map 的影响
+
+- `/map?sceneRoute=historical_3d_scene` 初始仍切换到历史文化路线。
+- `/map?sceneRoute=natural_3d_scene` 初始仍切换到自然风光路线。
+- `/map?sceneRoute=family_3d_scene` 初始仍切换到亲子路线。
+- 用户手动切换路线后，`routeGeometry`、路线进度、下一站和偏航状态跟随当前 `activeRouteId`。
+- `poi` 与 `sceneRoute` 同时存在时，仍保持 `poi` 优先。
+- debugSceneRoute、复制 / 下载腾讯路线 path JSON、图层开关、真实 / 模拟定位、用户位置 Marker、精度圆、Marker、Polyline、InfoWindow 和路线切换逻辑保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`、Three.js 场景、3D routeGeometry 金线、道路网络层、水系层、POI 节点或模型资产。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map?sceneRoute=family_3d_scene`，确认初始显示亲子路线，`routeGeometry`、下一站和偏航判断按 `family` 处理。
+- 打开 `/map?sceneRoute=historical_3d_scene`，确认初始显示历史文化路线；手动切换到亲子路线后，`routeGeometry`、下一站和偏航判断改为 `family`，不继续使用 `historical_3d_scene`。
+- 打开 `/map?sceneRoute=historical_3d_scene&debugSceneRoute=1`，确认调试骨架线仍按 query sceneRoute 显示，但主路线状态跟随手动选择的 `activeRouteId`。
+- 打开 `/map?poi=jiulong_guanyu&sceneRoute=historical_3d_scene`，确认仍以 `poi` 聚焦九龙灌浴为优先。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，但这是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 浏览器人工验证上述 4 个入口场景。
+- 后续如需让 debug route path 导出严格绑定当前手动路线，可单独增加“按当前 activeRoute 导出”的调试选项。

@@ -22,8 +22,7 @@ import {
   USE_LINGSHAN_PRESET_ROUTE_PATHS
 } from '../data/lingshanMapData'
 import {
-  getLingshanRouteGeometryByGuideRouteId,
-  getLingshanRouteGeometryBySceneRouteId
+  getLingshanRouteGeometryByGuideRouteId
 } from '../data/lingshanRouteGeometries'
 import {
   clearUserLocationWatch,
@@ -125,6 +124,7 @@ function GuideMapPage() {
   const appliedQueryPoiIdRef = useRef<string | null>(null)
   const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
   const appliedSceneRouteIdRef = useRef<string | null>(null)
+  const hasManualRouteSwitchRef = useRef(false)
   const showCurrentRouteRef = useRef(true)
   const userLocationWatchIdRef = useRef<number | null>(null)
 
@@ -179,13 +179,7 @@ function GuideMapPage() {
   const userDistanceFromScenicCenter = userLocation ? getDistanceMeters(userLocation, scenicCenter) : null
   const isUserFarFromScenicArea =
     userLocation?.source === 'gps' && userDistanceFromScenicCenter !== null && userDistanceFromScenicCenter > 2000
-  const currentRouteGeometry = useMemo(() => {
-    const sceneRouteGeometry = querySceneRouteId
-      ? getLingshanRouteGeometryBySceneRouteId(querySceneRouteId)
-      : undefined
-
-    return sceneRouteGeometry ?? getLingshanRouteGeometryByGuideRouteId(activeRouteId)
-  }, [activeRouteId, querySceneRouteId])
+  const currentRouteGeometry = useMemo(() => getLingshanRouteGeometryByGuideRouteId(activeRouteId), [activeRouteId])
   const routeForProgress = currentRouteGeometry ? getGuideRouteById(currentRouteGeometry.guideRouteId) : route
   const routeProgressEstimate = useMemo(() => {
     if (!userLocation || !currentRouteGeometry || currentRouteGeometry.path.length < 2) {
@@ -256,7 +250,7 @@ function GuideMapPage() {
   }, [activeRouteId, queryPoiRoute, queryPoiSpot, selectedSpotId, setActiveRouteId, setSelectedSpotId])
 
   useEffect(() => {
-    if (!querySceneRouteId || queryPoiSpot) {
+    if (!querySceneRouteId || queryPoiSpot || hasManualRouteSwitchRef.current) {
       return
     }
 
@@ -671,6 +665,7 @@ function GuideMapPage() {
   }
 
   const handleRouteSwitch = (routeId: string) => {
+    hasManualRouteSwitchRef.current = true
     setActiveRouteId(routeId)
     setShowRoutePanel(false)
   }
