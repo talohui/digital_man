@@ -5040,3 +5040,81 @@ debug 模式仍支持 sceneRoute 骨架线、plannedRoute 详细诊断、复制 
 - 导航能力暂时收尾，优先回到 3D 模型资产和沉浸式场景优化。
 - 后续如继续导航，可实现“用户确认后重规划到下一站”的临时路线图层。
 - 手机端实测连续偏离阈值和站点容忍区是否需要按 GPS 精度动态调整。
+
+## 阶段五十：GLB 模型加载能力接入
+
+### 日期
+
+2026-05-31
+
+### 本次目标
+
+为 `/three-preview` 和 `/scenic-3d-map` 打通前端 GLB 模型加载能力，让后续灵山大佛、九龙灌浴、梵宫、五印坛城等核心地标可以从低模 placeholder 渐进替换为 Blender / 3D 重建导出的 GLB 模型。
+
+### 本次约束
+
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改定位、路线进度、偏航相关代码。
+- 不修改 POI 真实坐标。
+- 不修改 `routeGeometry` 数据。
+- 不新增真实大型 `glb` / `gltf` 模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/components/scenic3d/ScenicModel.tsx`
+- `src/components/scenic3d/PlaceholderLandmark.tsx`
+- `src/components/scenic3d/Scenic3DPreview.tsx`
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/data/scenic3d/lingshanAssetMap.ts`
+- `public/models/lingshan/README.md`
+- `docs/map-3d-development-log.md`
+
+### ScenicModel 组件说明
+
+新增 `ScenicModel` 通用组件，接收 `poiId`、`active`、`modelUrl` 和可选 `transform`。组件内部使用 `@react-three/drei` 的 `useGLTF` 加载 GLB 模型，并保留 active 状态的基础高亮表达。该组件不引入新依赖，不加载远程未知模型，只根据资产映射中提供的 `modelUrl` 加载。
+
+### GLB 加载与 placeholder fallback 机制
+
+当 `modelUrl` 为空时，`ScenicModel` 直接渲染现有 `PlaceholderLandmark`。当 `modelUrl` 存在时，组件通过 `Suspense` 显示 placeholder 作为加载占位，并通过错误边界捕获 GLB 加载失败；加载失败时不会让整个 3D 页面崩溃，而是回退到 `PlaceholderLandmark`。
+
+### /three-preview 如何使用模型加载能力
+
+`Scenic3DPreview` 现在从 `lingshanAssetMap` 获取当前 `selectedPoiId` 对应资产，并将 `asset.modelUrl` 和 `asset.transform` 传给 `ScenicModel`。因此 `/three-preview` 后续只要在资产映射中填写存在的 `modelUrl`，即可验证对应 GLB；当前没有模型文件时仍显示低模 placeholder，并保留四个核心 POI 切换能力。
+
+### /scenic-3d-map 如何使用模型加载能力
+
+`Scenic3DMapScene` 的四个核心地标层改为渲染 `ScenicModel`。当前 `modelUrl` 为空时仍显示原有 placeholder；未来配置 GLB 后，核心地标会优先加载模型。19 个普通游线节点、routeGeometry 金线、道路网络层、水系层、标签、选中高亮和 `onSelectPoi` 逻辑保持不变。
+
+### 为什么本阶段不提交真实大模型文件
+
+本阶段目标是打通前端加载和 fallback 能力，不是制作资产。真实 GLB 可能体积较大，且需要统一原点、比例、朝向、面数、贴图压缩和双端兼容规范。仓库中只新增 `public/models/lingshan/README.md` 说明后续模型建议目录，不提交真实大型模型文件。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、腾讯地图增强模式、Marker、Polyline、InfoWindow、sceneRoute query、POI 聚焦、debugSceneRoute、定位、路线进度、偏航提示或重规划占位。
+
+### 对导航功能的影响
+
+本阶段没有修改导航 / 定位 / 偏航代码，没有调用新的腾讯路线接口，没有修改腾讯 walking route 规划算法，也没有修改 `routePlanning.ts`。导航阶段现有能力保持不变。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/three-preview`，切换 `giant_buddha`、`jiulong_guanyu`、`fan_gong`、`wuyin_tancheng`，确认没有模型文件时仍显示 placeholder。
+- 打开 `/scenic-3d-map`，确认核心地标仍显示 placeholder，19 个节点、routeGeometry 金线、道路网络层和水系层不受影响。
+- 后续可放入轻量测试 GLB 并在 `lingshanAssetMap` 填写 `modelUrl`，验证模型加载与失败 fallback。
+
+### npm run build 结果
+
+`npm run build` 已通过。构建过程中仍有 Vite chunk size warning，本阶段新增 `ScenicModel` 后相关 Three.js / drei 代码仍会进入懒加载 3D chunk；该 warning 是体积提示，不是构建失败。
+
+### 下一步建议
+
+- 制作或导出一个小体积测试 GLB，先在 `/three-preview` 验证加载、比例和原点。
+- 制定核心四个地标的模型命名、比例、原点和压缩规范。
+- 后续再逐个将 `lingshanAssetMap` 的 `modelUrl` 从空值切换为已存在模型路径。

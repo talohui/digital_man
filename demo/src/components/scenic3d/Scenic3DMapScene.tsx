@@ -8,7 +8,7 @@ import { lingshanPois } from '../../data/lingshanMapData'
 import { lingshanRouteGeometries } from '../../data/lingshanRouteGeometries'
 import { lingshanAssetMap } from '../../data/scenic3d/lingshanAssetMap'
 import { geoToScenePosition } from '../../lib/scenic3d/geoToScene'
-import PlaceholderLandmark from './PlaceholderLandmark'
+import ScenicModel from './ScenicModel'
 
 export type Scenic3DLayoutMode = 'manual' | 'projected'
 
@@ -23,6 +23,7 @@ type Scenic3DMapSceneProps = {
 type LandmarkNode = {
   poiId: string
   name: string
+  modelUrl?: string
   position: [number, number, number]
   scale: [number, number, number]
 }
@@ -100,6 +101,7 @@ function buildLandmarks(layoutMode: Scenic3DLayoutMode): LandmarkNode[] {
     .map((asset) => ({
       poiId: asset.poiId,
       name: getPoiName(asset.poiId),
+      modelUrl: asset.modelUrl,
       position: getScenePosition(asset.poiId, layoutMode),
       scale: landmarkFallbackLayout[asset.poiId].scale,
     }))
@@ -365,7 +367,11 @@ function SceneContent({
               <ringGeometry args={active ? [0.72, 0.94, 64] : [0.5, 0.58, 48]} />
               <meshBasicMaterial color={active ? '#d0a14a' : '#d4d0ba'} transparent opacity={active ? 0.36 : 0.2} />
             </mesh>
-            <PlaceholderLandmark poiId={landmark.poiId} active={active} />
+            <ScenicModel
+              poiId={landmark.poiId}
+              active={active}
+              modelUrl={landmark.modelUrl}
+            />
             <Html center position={[0, 2.15, 0]} distanceFactor={8}>
               <button
                 type="button"

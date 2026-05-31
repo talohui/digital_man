@@ -2,7 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 
 import { lingshanAssetMap } from '../../data/scenic3d/lingshanAssetMap'
-import { PlaceholderLandmark } from './PlaceholderLandmark'
+import ScenicModel from './ScenicModel'
 
 type Scenic3DPreviewProps = {
   selectedPoiId?: string
@@ -45,13 +45,12 @@ export function Scenic3DPreview({
         <hemisphereLight args={['#ffffff', '#b8c7cd', 0.68]} />
         <directionalLight position={[4, 6, 3]} intensity={1.35} />
         <directionalLight position={[-3, 4, -2]} intensity={0.42} />
-        <group
-          position={transform.position}
-          rotation={transform.rotation}
-          scale={transform.scale}
-        >
-          <PlaceholderLandmark poiId={activePoiId} active />
-        </group>
+        <ScenicModel
+          poiId={activePoiId}
+          active
+          modelUrl={activeAsset?.modelUrl}
+          transform={transform}
+        />
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]}>
           <circleGeometry args={[4.2, 64]} />
           <meshStandardMaterial color="#edf1ea" roughness={0.86} />

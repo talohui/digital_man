@@ -1,4 +1,4 @@
-type PlaceholderLandmarkProps = {
+export type PlaceholderLandmarkProps = {
   poiId: string
   active?: boolean
 }

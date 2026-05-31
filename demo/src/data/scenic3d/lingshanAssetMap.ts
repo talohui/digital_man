@@ -21,6 +21,8 @@ export type LingshanAssetBinding = {
   note?: string
 }
 
+export const lingshanModelDirectory = '/models/lingshan/landmarks/'
+
 export const lingshanAssetMap: LingshanAssetBinding[] = [
   {
     poiId: 'giant_buddha',
@@ -30,7 +32,7 @@ export const lingshanAssetMap: LingshanAssetBinding[] = [
       rotation: [0, 0, 0],
       scale: [1, 1, 1],
     },
-    note: '灵山大佛 core_3d 占位，后续替换为 lingshan_buddha.glb。',
+    note: '灵山大佛 core_3d 占位。后续 GLB 建议放在 /models/lingshan/landmarks/lingshan_buddha.glb；文件存在后再填写 modelUrl。',
   },
   {
     poiId: 'jiulong_guanyu',
@@ -40,7 +42,7 @@ export const lingshanAssetMap: LingshanAssetBinding[] = [
       rotation: [0, 0, 0],
       scale: [0.9, 0.9, 0.9],
     },
-    note: '九龙灌浴 core_3d 占位，后续替换为 jiulong_guanyu.glb。',
+    note: '九龙灌浴 core_3d 占位。后续 GLB 建议放在 /models/lingshan/landmarks/jiulong_guanyu.glb；文件存在后再填写 modelUrl。',
   },
   {
     poiId: 'fan_gong',
@@ -50,7 +52,7 @@ export const lingshanAssetMap: LingshanAssetBinding[] = [
       rotation: [0, 0, 0],
       scale: [0.9, 0.9, 0.9],
     },
-    note: '梵宫 core_3d 占位，后续替换为 fan_gong.glb。',
+    note: '梵宫 core_3d 占位。后续 GLB 建议放在 /models/lingshan/landmarks/fan_gong.glb；文件存在后再填写 modelUrl。',
   },
   {
     poiId: 'wuyin_tancheng',
@@ -60,6 +62,6 @@ export const lingshanAssetMap: LingshanAssetBinding[] = [
       rotation: [0, 0, 0],
       scale: [0.85, 0.85, 0.85],
     },
-    note: '五印坛城 core_3d 占位，后续替换为 wuyin_tancheng.glb。',
+    note: '五印坛城 core_3d 占位。后续 GLB 建议放在 /models/lingshan/landmarks/wuyin_tancheng.glb；文件存在后再填写 modelUrl。',
   },
 ]
