@@ -25,7 +25,7 @@ type LandmarkNode = {
   name: string
   modelUrl?: string
   position: [number, number, number]
-  scale: [number, number, number]
+  modelTransform: ScenicModelTransform
 }
 
 type ScenicRouteNode = {
@@ -35,22 +35,49 @@ type ScenicRouteNode = {
   nodeType: 'culture' | 'route'
 }
 
-const landmarkFallbackLayout: Record<string, Pick<LandmarkNode, 'position' | 'scale'>> = {
+type ScenicModelTransform = {
+  position: [number, number, number]
+  rotation: [number, number, number]
+  scale: [number, number, number]
+}
+
+type LandmarkFallbackLayout = {
+  position: [number, number, number]
+  transform: ScenicModelTransform
+}
+
+const landmarkFallbackLayout: Record<string, LandmarkFallbackLayout> = {
   jiulong_guanyu: {
     position: [-2.8, 0, 2.35],
-    scale: [0.72, 0.72, 0.72],
+    transform: {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [0.72, 0.72, 0.72],
+    },
   },
   giant_buddha: {
     position: [0, 0, -1.2],
-    scale: [0.92, 0.92, 0.92],
+    transform: {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [0.92, 0.92, 0.92],
+    },
   },
   fan_gong: {
     position: [3.45, 0, -0.15],
-    scale: [0.76, 0.76, 0.76],
+    transform: {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [0.76, 0.76, 0.76],
+    },
   },
   wuyin_tancheng: {
     position: [-1.75, 0, -4.05],
-    scale: [0.78, 0.78, 0.78],
+    transform: {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [0.78, 0.78, 0.78],
+    },
   },
 }
 
@@ -98,13 +125,24 @@ function hasScenePositionForMode(poiId: string, layoutMode: Scenic3DLayoutMode) 
 function buildLandmarks(layoutMode: Scenic3DLayoutMode): LandmarkNode[] {
   return lingshanAssetMap
     .filter((asset) => asset.status !== 'disabled' && landmarkFallbackLayout[asset.poiId])
-    .map((asset) => ({
-      poiId: asset.poiId,
-      name: getPoiName(asset.poiId),
-      modelUrl: asset.modelUrl,
-      position: getScenePosition(asset.poiId, layoutMode),
-      scale: landmarkFallbackLayout[asset.poiId].scale,
-    }))
+    .map((asset) => {
+      const fallbackLayout = landmarkFallbackLayout[asset.poiId]
+
+      return {
+        poiId: asset.poiId,
+        name: getPoiName(asset.poiId),
+        modelUrl: asset.modelUrl,
+        position: getScenePosition(asset.poiId, layoutMode),
+        modelTransform: asset.transform ?? fallbackLayout.transform,
+      }
+    })
+}
+
+function scaleTransform(transform: ScenicModelTransform, scaleMultiplier: number): ScenicModelTransform {
+  return {
+    ...transform,
+    scale: transform.scale.map((value) => value * scaleMultiplier) as [number, number, number],
+  }
 }
 
 function buildScenicRouteNodes(layoutMode: Scenic3DLayoutMode): ScenicRouteNode[] {
@@ -352,12 +390,12 @@ function SceneContent({
 
       {landmarks.map((landmark) => {
         const active = landmark.poiId === activePoiId
+        const modelTransform = active ? scaleTransform(landmark.modelTransform, 1.08) : landmark.modelTransform
 
         return (
           <group
             key={landmark.poiId}
             position={landmark.position}
-            scale={active ? landmark.scale.map((value) => value * 1.12) as [number, number, number] : landmark.scale}
             onClick={(event) => {
               event.stopPropagation()
               onSelectPoi?.(landmark.poiId)
@@ -371,6 +409,7 @@ function SceneContent({
               poiId={landmark.poiId}
               active={active}
               modelUrl={landmark.modelUrl}
+              transform={modelTransform}
             />
             <Html center position={[0, 2.15, 0]} distanceFactor={8}>
               <button

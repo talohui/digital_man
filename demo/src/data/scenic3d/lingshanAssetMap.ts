@@ -26,13 +26,14 @@ export const lingshanModelDirectory = '/models/lingshan/landmarks/'
 export const lingshanAssetMap: LingshanAssetBinding[] = [
   {
     poiId: 'giant_buddha',
-    status: 'placeholder',
+    modelUrl: '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb',
+    status: 'model_ready',
     transform: {
       position: [0, 0, 0],
       rotation: [0, 0, 0],
-      scale: [1, 1, 1],
+      scale: [0.15, 0.15, 0.15],
     },
-    note: '灵山大佛 core_3d 占位。后续 GLB 建议放在 /models/lingshan/landmarks/lingshan_buddha.glb；文件存在后再填写 modelUrl。',
+    note: 'Blender MCP 生成的灵山大佛低模 blockout v1，用于本地预览和 transform 验证。',
   },
   {
     poiId: 'jiulong_guanyu',

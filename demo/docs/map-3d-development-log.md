@@ -5274,3 +5274,101 @@ AI 3D 生成 / 重建适合快速获得复杂形体的第一版粗模或参考 m
 - 本阶段没有修改 `/map`。
 - 本阶段没有修改导航功能。
 - 本阶段只是制定建模路线。
+
+## 阶段五十二 B：scenic map GLB transform 数据流修复
+
+### 日期
+
+2026-06-01
+
+### 本次目标
+
+修复 `/scenic-3d-map` 中核心地标模型没有真正使用 `lingshanAssetMap.transform` 的问题，让灵山大佛 GLB 的本体缩放、旋转和局部偏移由资产映射数据控制。
+
+### 本次约束
+
+- 不修改 `/map`。
+- 不修改导航、定位、路线进度、偏航相关代码。
+- 不修改腾讯地图路线规划逻辑。
+- 不修改 `routePlanning.ts`。
+- 不修改 POI 真实坐标。
+- 不修改 `routeGeometry` 数据。
+- 不新增其它大型 `glb` / `gltf` 模型文件。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/data/scenic3d/lingshanAssetMap.ts`
+- `public/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+`lingshan_buddha_blockout_v1.glb` 已经能加载，`giant_buddha` 也已经在 `lingshanAssetMap.ts` 中配置了 `transform.scale: [0.15, 0.15, 0.15]`，但 `/scenic-3d-map` 中模型大小没有明显变化。
+
+### 原因分析
+
+`Scenic3DMapScene.tsx` 的 `buildLandmarks()` 只读取了 `asset.modelUrl`，没有读取 `asset.transform`。核心地标外层 group 使用 `landmarkFallbackLayout` 中的硬编码 scale，`ScenicModel` 没有收到 `transform`，因此 `lingshanAssetMap.transform.scale` 只会影响 `/three-preview`，不会影响 `/scenic-3d-map`。
+
+### 修复方式
+
+将地图世界位置和模型局部 transform 分离：
+
+- POI 的 projected / scenePosition 继续决定外层 group 的地图位置。
+- `lingshanAssetMap.transform` 传给 `ScenicModel`，用于控制模型本体的局部 position、rotation 和 scale。
+- `landmarkFallbackLayout` 仅作为没有 asset transform 时的兜底。
+- 选中态只在最终模型 scale 基础上乘以小倍率，不再用硬编码 scale 覆盖 asset transform。
+
+### giant_buddha GLB 当前 modelUrl 和 transform
+
+`giant_buddha` 当前使用：
+
+```ts
+modelUrl: '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb'
+status: 'model_ready'
+transform: {
+  position: [0, 0, 0],
+  rotation: [0, 0, 0],
+  scale: [0.15, 0.15, 0.15],
+}
+```
+
+该模型为 Blender MCP 生成的灵山大佛低模 blockout v1，用于本地预览和 transform 验证。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 中核心地标模型现在会使用 `lingshanAssetMap.transform`。灵山大佛 GLB 的缩放可通过 `transform.scale` 调整，POI 在地图上的位置仍由真实投影 / scenePosition 决定。
+
+### 对 /three-preview 的影响
+
+`/three-preview` 原本已经读取并传递 `asset.transform`，本阶段未改变该页面的模型加载语义。它仍可用于单模型 transform 验证。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`、导航功能、定位能力、路线进度、偏航提示或腾讯地图路线规划逻辑。
+
+### 验证方式
+
+- 检查 `/scenic-3d-map` 核心地标渲染是否将 `asset.transform` 传给 `ScenicModel`。
+- 检查 `giant_buddha` 的 GLB 文件是否位于 `public/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb`。
+- 运行 `npm run build`。
+- 运行 `git status`，确认仅暂存本阶段允许文件。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+- 在浏览器中打开 `/three-preview` 和 `/scenic-3d-map`，人工确认灵山大佛模型比例。
+- 如仍不合适，继续只调整 `giant_buddha.transform.scale`、`position` 或 `rotation`。
+- 确认效果后，再为梵宫、九龙灌浴和五印坛城接入低模 GLB。
+
+### 明确记录
+
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改导航功能。
+- 本阶段没有修改腾讯地图路线规划逻辑。
+- 本阶段只是修复 `/scenic-3d-map` 的模型 transform 应用。
+- 本阶段保留首个灵山大佛低模 GLB 本地模型接入。
