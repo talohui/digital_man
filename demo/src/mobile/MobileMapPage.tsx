@@ -9,7 +9,6 @@ import {
   SwapOutlined,
   UpOutlined
 } from '@ant-design/icons'
-import { Rate } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -26,9 +25,23 @@ import { loadTMap } from '../lib/loadTMap'
 import { buildWalkingRoute } from '../lib/routePlanning'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
+import { useBottomSheetDrag } from '../hooks/useBottomSheetDrag'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 
 type MapStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'fallback'
+type SheetState = 'collapsed' | 'half' | 'expanded'
+
+const nextSheetState: Record<SheetState, SheetState> = {
+  collapsed: 'half',
+  half: 'expanded',
+  expanded: 'collapsed'
+}
+
+// 拖拽手势调参(便于真机调):px/ms,正=向上
+const DRAG_VELOCITY_THRESHOLD = 0.55
+// 拖拽过冲极限(吸附前允许超出 expanded 高度多少 px,做 rubber-band 视觉)
+const DRAG_OVERSHOOT = 60
 
 const scenicMarkerIcon = createSvgDataUri(`
   <svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
@@ -61,7 +74,7 @@ function MobileMapPage() {
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('idle')
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutes, setShowRoutes] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [sheetState, setSheetState] = useState<SheetState>('collapsed')
   const [routeRating, setRouteRating] = useState(0)
   const [submittedRouteRatings, setSubmittedRouteRatings] = useState<Record<string, number>>({})
 
@@ -77,13 +90,13 @@ function MobileMapPage() {
   const submittedRating = submittedRouteRatings[route.id] ?? 0
   const routeStatusLabel =
     routeStatus === 'loading'
-      ? '规划中'
+      ? '路线规划中'
       : routeStatus === 'fallback'
-        ? '兜底路线'
+        ? '路线就绪'
         : routeStatus === 'ready'
           ? '路线就绪'
           : mapStatus === 'error'
-            ? '地图异常'
+            ? '地图加载失败'
             : '准备中'
 
   useEffect(() => {
@@ -137,6 +150,8 @@ function MobileMapPage() {
     }
   }, [])
 
+  // Effect A:仅 routeSpots / selectedSpot.id 变化时重建 marker layer
+  // (之前把 sheetState 也写进 deps,导致拖拽 sheet 时不断重建 MultiMarker → GC 抖)
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) return
 
@@ -166,15 +181,18 @@ function MobileMapPage() {
       }))
     })
 
-    // 点击 marker 只更新底部 sheet 选中态 + 居中，不弹任何原生气泡
     markerLayerRef.current.on('click', (event: any) => {
       const spotId = event.geometry?.id
       if (!spotId) return
       setSelectedSpotId(spotId)
     })
+  }, [mapStatus, routeSpots, selectedSpot.id, setSelectedSpotId])
 
-    focusSpot(mapRef.current, selectedSpot)
-  }, [mapStatus, routeSpots, selectedSpot, setSelectedSpotId])
+  // Effect B:仅居中,独立追踪 sheetState 决定是否保留 zoom
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !mapRef.current) return
+    focusSpot(mapRef.current, selectedSpot, sheetState !== 'collapsed')
+  }, [mapStatus, selectedSpot.id, sheetState])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current || routeSpots.length < 2) return
@@ -213,7 +231,7 @@ function MobileMapPage() {
 
       if (plannedRoute.usedFallback) {
         setRouteStatus('fallback')
-        setPageMessage(`${route.name}当前使用直线兜底连线，地图仍可正常导览。`)
+        setPageMessage(`${route.name}已为你连好途经景点，按顺序游览即可。`)
         return
       }
 
@@ -228,18 +246,59 @@ function MobileMapPage() {
     }
   }, [mapStatus, route.id, route.name, routeSpots])
 
+  // 切换 sheet 状态时重新取景，保证路线始终落在 sheet 之上、不被遮挡
+  useEffect(() => {
+    if (mapStatus !== 'ready' || routeSpots.length < 2) return
+    fitMapToRoute(mapRef.current, routeSpots, SHEET_BOTTOM_PADDING[sheetState])
+  }, [sheetState, mapStatus, routeSpots])
+
   const switchRoute = (routeId: string) => {
     setActiveRouteId(routeId)
     setRouteRating(0)
     setShowRoutes(false)
-    setExpanded(false)
+    setSheetState('collapsed')
   }
 
   const setSpot = (spotId: string) => {
     const spot = getGuideSpotById(spotId)
     setSelectedSpotId(spot.id)
-    focusSpot(mapRef.current, spot)
+    focusSpot(mapRef.current, spot, sheetState !== 'collapsed')
   }
+
+  // 路线浮层焦点管理 → 提到通用 hook
+  const routeDialogRef = useRef<HTMLDivElement | null>(null)
+  const routeCloseBtnRef = useRef<HTMLButtonElement | null>(null)
+  useDialogFocusTrap({
+    open: showRoutes,
+    ref: routeDialogRef,
+    onClose: () => setShowRoutes(false),
+    initialFocusRef: routeCloseBtnRef
+  })
+
+  // sheet 拖拽 → 提到通用 hook
+  const sheetRef = useRef<HTMLElement | null>(null)
+  const getSnapHeights = (): Record<SheetState, number> => {
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    return {
+      collapsed: 116,
+      half: Math.min(vh * 0.4, 312),
+      expanded: Math.min(vh * 0.6, 470)
+    }
+  }
+  const {
+    onTouchStart: handleSheetTouchStart,
+    onTouchMove: handleSheetTouchMove,
+    onTouchEnd: finishSheetDrag
+  } = useBottomSheetDrag<SheetState>({
+    sheetRef,
+    snapsOf: getSnapHeights,
+    state: sheetState,
+    setState: setSheetState,
+    order: ['collapsed', 'half', 'expanded'],
+    dragSelector: '.mobile-map-sheet__handle, .mobile-map-sheet__summary',
+    velocityThreshold: DRAG_VELOCITY_THRESHOLD,
+    overshoot: DRAG_OVERSHOOT
+  })
 
   const submitRouteRating = () => {
     if (routeRating <= 0 || submittedRating > 0) return
@@ -249,15 +308,35 @@ function MobileMapPage() {
 
   return (
     <div className="mobile-map-page">
-      <div ref={mapElementRef} className="mobile-map-page__map" />
+      <div
+        ref={mapElementRef}
+        className="mobile-map-page__map"
+        role="application"
+        aria-label={`灵山胜境地图,当前路线 ${route.name},共 ${route.stops.length} 站`}
+      />
+      {/* 屏幕阅读器实时播报 sheet 状态变化 */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {sheetState === 'collapsed'
+          ? '景点详情已收起'
+          : sheetState === 'half'
+            ? '景点详情已半展开,显示景点列表'
+            : '景点详情已完全展开,显示简介与评分'}
+      </div>
 
-      {/* 浮动顶栏：返回 / 当前路线 / 切路线 */}
+      {/* 浮动顶栏：返回 / 当前路线(含状态小圆点) / 切路线 */}
       <header className="mobile-map-floating-header">
         <button type="button" className="mobile-map-icon-btn" onClick={() => navigate('/')} aria-label="返回首页">
           <ArrowLeftOutlined />
         </button>
         <div className="mobile-map-floating-header__title">
-          <strong>{route.name}</strong>
+          <strong>
+            {route.name}
+            <span
+              className={`mobile-map-status-dot is-${routeStatus === 'ready' || routeStatus === 'fallback' ? 'ready' : routeStatus === 'loading' ? 'loading' : mapStatus === 'error' ? 'error' : 'idle'}`}
+              aria-label={routeStatusLabel}
+              title={routeStatusLabel}
+            />
+          </strong>
           <span>{route.durationLabel}</span>
         </div>
         <button
@@ -270,12 +349,12 @@ function MobileMapPage() {
         </button>
       </header>
 
-      {/* 看全线：折叠态时浮动在右下、地图之上；展开态移入 sheet 内 */}
-      {!expanded ? (
+      {/* 看全线：折叠态时浮动在右下、地图之上；展开后移入 sheet 内 */}
+      {sheetState === 'collapsed' ? (
         <button
           type="button"
           className="mobile-map-focus-btn"
-          onClick={() => fitMapToRoute(mapRef.current, routeSpots)}
+          onClick={() => fitMapToRoute(mapRef.current, routeSpots, SHEET_BOTTOM_PADDING[sheetState])}
           aria-label="查看全线"
         >
           <AimOutlined />
@@ -286,10 +365,21 @@ function MobileMapPage() {
       {showRoutes ? (
         <>
           <div className="mobile-map-scrim" onClick={() => setShowRoutes(false)} />
-          <div className="mobile-route-switcher" role="dialog" aria-label="切换路线">
+          <div
+            ref={routeDialogRef}
+            className="mobile-route-switcher"
+            role="dialog"
+            aria-modal="true"
+            aria-label="切换路线"
+          >
             <div className="mobile-route-switcher__head">
               <strong>切换路线</strong>
-              <button type="button" onClick={() => setShowRoutes(false)} aria-label="关闭路线切换">
+              <button
+                ref={routeCloseBtnRef}
+                type="button"
+                onClick={() => setShowRoutes(false)}
+                aria-label="关闭路线切换"
+              >
                 <CloseOutlined />
               </button>
             </div>
@@ -308,16 +398,23 @@ function MobileMapPage() {
         </>
       ) : null}
 
-      {/* 底部 sheet：默认极简，可上拉展开 */}
-      <section className={`mobile-map-sheet ${expanded ? 'is-expanded' : 'is-collapsed'}`}>
+      {/* 底部 sheet：默认极简，可上拉展开（折叠 → 半展开 → 展开） */}
+      <section
+        ref={sheetRef}
+        className={`mobile-map-sheet is-${sheetState}`}
+        onTouchStart={handleSheetTouchStart}
+        onTouchMove={handleSheetTouchMove}
+        onTouchEnd={finishSheetDrag}
+        onTouchCancel={finishSheetDrag}
+      >
         <button
           className="mobile-map-sheet__handle"
           type="button"
-          onClick={() => setExpanded((value) => !value)}
-          aria-label={expanded ? '收起景点详情' : '展开景点详情'}
+          onClick={() => setSheetState((value) => nextSheetState[value])}
+          aria-label={sheetState === 'expanded' ? '收起景点详情' : '展开景点详情'}
         >
           <span className="mobile-map-sheet__grip" />
-          {expanded ? <DownOutlined /> : <UpOutlined />}
+          {sheetState === 'expanded' ? <DownOutlined /> : <UpOutlined />}
         </button>
 
         {/* 概要：始终显示（站序 / 站名 / 下一站 / 讲解） */}
@@ -341,22 +438,16 @@ function MobileMapPage() {
           </button>
         </div>
 
-        {/* 展开态：简介 / 景点横滑 / 评分 */}
-        {expanded ? (
+        {/* 半展开：景点横滑 + 下一站 + 进入讲解；完全展开再加简介/评分 */}
+        {sheetState !== 'collapsed' ? (
           <div className="mobile-map-sheet__body">
-            <div className="mobile-map-sheet__statusline">
-              <span className={`mobile-map-status ${routeStatus === 'fallback' ? 'is-warn' : ''}`}>
-                {routeStatus === 'loading' ? <LoadingOutlined /> : <AimOutlined />}
-                {routeStatusLabel}
-              </span>
-              <span className="mobile-map-sheet__message">{pageMessage}</span>
-            </div>
-
-            <p className="mobile-map-sheet__narrative">{selectedNarrative}</p>
+            {sheetState === 'expanded' ? (
+              <p className="mobile-map-sheet__narrative">{selectedNarrative}</p>
+            ) : null}
 
             <div className="mobile-map-sheet__meta">
               <span>{nextSpot ? `下一站 · ${nextSpot.name}` : '已到路线终点'}</span>
-              <button type="button" onClick={() => fitMapToRoute(mapRef.current, routeSpots)}>
+              <button type="button" onClick={() => fitMapToRoute(mapRef.current, routeSpots, SHEET_BOTTOM_PADDING[sheetState])}>
                 <AimOutlined />
                 看全线
               </button>
@@ -376,28 +467,42 @@ function MobileMapPage() {
               ))}
             </div>
 
-            <div className="mobile-map-sheet__rating">
-              <div>
-                <span>路线体验评分</span>
-                {submittedRating > 0 ? <small>已提交 {submittedRating} 星</small> : null}
+            {sheetState === 'expanded' ? (
+              <div className="mobile-map-sheet__rating">
+                <div>
+                  <span>路线体验评分</span>
+                  {submittedRating > 0 ? <small>已提交 {submittedRating} 星</small> : null}
+                </div>
+                <div className="mobile-map-sheet__rate-actions">
+                  <div className="mobile-star-rate" role="radiogroup" aria-label="路线评分">
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const active = (submittedRating || routeRating) >= star
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          disabled={submittedRating > 0}
+                          className={`mobile-star-rate__star ${active ? 'is-on' : ''}`}
+                          onClick={() => setRouteRating(star)}
+                          aria-label={`${star} 星`}
+                        >
+                          ★
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={routeRating <= 0 || submittedRating > 0}
+                    onClick={submitRouteRating}
+                  >
+                    {submittedRating > 0 ? <CheckOutlined /> : '提交'}
+                  </button>
+                </div>
               </div>
-              <div className="mobile-map-sheet__rate-actions">
-                <Rate
-                  value={submittedRating || routeRating}
-                  onChange={setRouteRating}
-                  disabled={submittedRating > 0}
-                  allowClear={false}
-                  style={{ fontSize: 18 }}
-                />
-                <button
-                  type="button"
-                  disabled={routeRating <= 0 || submittedRating > 0}
-                  onClick={submitRouteRating}
-                >
-                  {submittedRating > 0 ? <CheckOutlined /> : '提交'}
-                </button>
-              </div>
-            </div>
+            ) : null}
 
             <button
               className="mobile-primary-action"
@@ -424,15 +529,24 @@ function MobileMapPage() {
   )
 }
 
-function focusSpot(map: any, spot: GuideSpot) {
+function focusSpot(map: any, spot: GuideSpot, keepZoom = false) {
   if (!window.TMap || !map) return
 
   const position = new window.TMap.LatLng(spot.lat, spot.lng)
   map.setCenter(position)
-  map.setZoom?.(16)
+  if (!keepZoom) {
+    map.setZoom?.(16)
+  }
 }
 
-function fitMapToRoute(map: any, spots: GuideSpot[]) {
+// 不同 sheet 状态下底部 sheet 占据的高度（约），用于给路线让出底部空间
+const SHEET_BOTTOM_PADDING: Record<SheetState, number> = {
+  collapsed: 150,
+  half: 360,
+  expanded: 510
+}
+
+function fitMapToRoute(map: any, spots: GuideSpot[], bottomPadding = SHEET_BOTTOM_PADDING.collapsed) {
   if (!window.TMap || !map || spots.length === 0) return
 
   const lats = spots.map((spot) => spot.lat)
@@ -442,7 +556,8 @@ function fitMapToRoute(map: any, spots: GuideSpot[]) {
     const southWest = new window.TMap.LatLng(Math.min(...lats), Math.min(...lngs))
     const northEast = new window.TMap.LatLng(Math.max(...lats), Math.max(...lngs))
     const bounds = new window.TMap.LatLngBounds(southWest, northEast)
-    map.fitBounds(bounds, { padding: 64 })
+    // 顶栏 + 底部 sheet 各自让出空间，路线不会被浮层压住
+    map.fitBounds(bounds, { padding: { top: 96, right: 48, bottom: bottomPadding, left: 48 } })
     return
   }
 

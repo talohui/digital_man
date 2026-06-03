@@ -1,16 +1,19 @@
 import {
   ArrowLeftOutlined,
+  CheckCircleFilled,
   ClockCircleOutlined,
   CompassOutlined,
   EnvironmentOutlined,
   LikeOutlined,
   MessageOutlined,
-  RightOutlined
+  RightOutlined,
+  SoundOutlined
 } from '@ant-design/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ChatPanel from '../components/ChatPanel'
-import Live2DStage from '../components/Live2DStage'
+const ChatPanel = lazy(() => import('../components/ChatPanel'))
+const Live2DStage = lazy(() => import('../components/Live2DStage'))
+import RouteSkeleton from '../components/RouteSkeleton'
 import QuickAsks from '../components/QuickAsks'
 import {
   buildSpotQuestions,
@@ -32,7 +35,11 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
   const setSelectedSpotId = useGuideStore((state) => state.setSelectedSpotId)
+  const markStopVisited = useGuideStore((state) => state.markStopVisited)
+  const markStopListened = useGuideStore((state) => state.markStopListened)
+  const listenedStops = useGuideStore((state) => state.listenedStops)
   const setActiveScene = useChatStore((state) => state.setActiveScene)
+  const sendQuickAsk = useChatStore((state) => state.sendQuickAsk)
   const [likedSpots, setLikedSpots] = useState<Record<string, boolean>>({})
 
   const route = getGuideRouteById(activeRouteId)
@@ -46,6 +53,7 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
   const sceneId = hasSpotScene ? `spot:${route.id}:${spot.id}` : `map:${route.id}`
   const narrative = stop?.narrative ?? spot.intro
   const hasLikedSpot = Boolean(likedSpots[spot.id])
+  const hasListened = listenedStops.includes(spot.id)
 
   const questions = useMemo(() => {
     if (hasSpotScene) return buildSpotQuestions(route.id, spot.id)
@@ -66,6 +74,7 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
         spotNarrative: narrative
       })
       captureSpotEnter(spot.id, route.id)
+      markStopVisited(spot.id)
       const enteredAt = Date.now()
       return () => {
         captureSpotLeave(spot.id, Date.now() - enteredAt)
@@ -81,6 +90,7 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
     return undefined
   }, [
     hasSpotScene,
+    markStopVisited,
     narrative,
     route.id,
     route.name,
@@ -91,6 +101,12 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
     spot.intro,
     spot.name
   ])
+
+  const handleNarrate = () => {
+    if (!hasSpotScene) return
+    markStopListened(spot.id)
+    sendQuickAsk(`请用导览员的语气，为我讲解一下${spot.name}这一站。`, sceneId)
+  }
 
   const handleNext = () => {
     if (!hasSpotScene) {
@@ -126,16 +142,18 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
         </div>
       </section>
 
-      <Live2DStage
-        sceneId={sceneId}
-        variant="embedded"
-        eager
-        highlightsOverride={[
-          { title: '当前路线', value: route.name, icon: <CompassOutlined /> },
-          { title: '当前景点', value: hasSpotScene ? spot.name : '路线总览', icon: <EnvironmentOutlined /> },
-          { title: '建议停留', value: hasSpotScene ? `${spot.stayMinutes} 分钟` : route.durationLabel, icon: <ClockCircleOutlined /> }
-        ]}
-      />
+      <Suspense fallback={<RouteSkeleton variant="inline" />}>
+        <Live2DStage
+          sceneId={sceneId}
+          variant="embedded"
+          eager
+          highlightsOverride={[
+            { title: '当前路线', value: route.name, icon: <CompassOutlined /> },
+            { title: '当前景点', value: hasSpotScene ? spot.name : '路线总览', icon: <EnvironmentOutlined /> },
+            { title: '建议停留', value: hasSpotScene ? `${spot.stayMinutes} 分钟` : route.durationLabel, icon: <ClockCircleOutlined /> }
+          ]}
+        />
+      </Suspense>
 
       <section className="mobile-panel mobile-guide-context">
         <div className="mobile-panel__head">
@@ -143,9 +161,21 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
             <span className="mobile-section-kicker">当前上下文</span>
             <h3>{hasSpotScene ? '这一站讲解重点' : '路线讲解重点'}</h3>
           </div>
-          <MessageOutlined />
+          {hasSpotScene && hasListened ? (
+            <span className="mobile-guide-context__listened">
+              <CheckCircleFilled /> 已听讲解
+            </span>
+          ) : (
+            <MessageOutlined />
+          )}
         </div>
         <p>{hasSpotScene ? narrative : '小灵会围绕当前路线、已选偏好和景区知识回答，聊天记录与其他路线/景点互相隔离。'}</p>
+        {hasSpotScene ? (
+          <button type="button" className="mobile-guide-narrate" onClick={handleNarrate}>
+            <SoundOutlined />
+            {hasListened ? '让小灵再讲一遍' : '让小灵讲这一段'}
+          </button>
+        ) : null}
         <div className="mobile-guide-context__actions">
           {hasSpotScene ? (
             <button
@@ -173,7 +203,9 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
         questions={questions}
       />
 
-      <ChatPanel sceneId={sceneId} />
+      <Suspense fallback={<RouteSkeleton variant="inline" />}>
+        <ChatPanel sceneId={sceneId} />
+      </Suspense>
     </div>
   )
 }

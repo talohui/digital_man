@@ -21,6 +21,9 @@ export type GuideRouteStop = {
   narrative: string
 }
 
+// 步行强度为路线的静态属性（基于路线长度与地形预估），不是实时人流/排队数据
+export type WalkIntensity = '轻松' | '适中' | '较多步行'
+
 export type GuideRoute = {
   id: string
   name: string
@@ -29,6 +32,7 @@ export type GuideRoute = {
   description: string
   stops: GuideRouteStop[]
   experiences: string[]
+  walkIntensity: WalkIntensity
 }
 
 export type GuideRecommendationCard = {
@@ -247,7 +251,8 @@ export const guideRoutes: GuideRoute[] = [
       '在梵宫欣赏《吉祥颂》，体验沉浸式佛教艺术空间。',
       '登上灵山大佛平台俯瞰太湖全景，拍摄大佛与山水同框。',
       '在五印坛城转动经筒，体验转经祈福的仪式感。'
-    ]
+    ],
+    walkIntensity: '较多步行'
   },
   {
     id: 'natural_scenery',
@@ -271,7 +276,8 @@ export const guideRoutes: GuideRoute[] = [
       '在灵山大佛平台拍摄太湖日落，体验金色光影落在大佛与水面的层次感。',
       '在灵山精舍一带放慢脚步，感受清静园林与素雅禅意带来的放松体验。',
       '沿菩提大道漫步看太湖与山体轮廓，体会佛教文化与自然环境的协调关系。'
-    ]
+    ],
+    walkIntensity: '适中'
   },
   {
     id: 'family',
@@ -293,7 +299,8 @@ export const guideRoutes: GuideRoute[] = [
       '在梵宫圣坛观看沉浸式演出，通过光影效果让故事更容易理解。',
       '体验适合家庭口味的素食餐点，顺带认识佛门饮食的清淡风格。',
       '一路保持轻松节奏，让孩子在玩和看之间自然吸收景区故事。'
-    ]
+    ],
+    walkIntensity: '轻松'
   }
 ]
 
@@ -336,6 +343,18 @@ export function getRouteStop(routeId: string, spotId: string) {
     stop,
     stopIndex,
     nextStop
+  }
+}
+
+// 可执行行程卡所需的静态行程元信息：站点数、亮点、步行强度等，全部来自路线静态定义
+export function getRouteItineraryMeta(routeId?: string | null) {
+  const route = getGuideRouteById(routeId)
+  return {
+    durationLabel: route.durationLabel,
+    stopCount: route.stops.length,
+    walkIntensity: route.walkIntensity,
+    tags: route.tags,
+    highlights: route.experiences.slice(0, 2)
   }
 }
 

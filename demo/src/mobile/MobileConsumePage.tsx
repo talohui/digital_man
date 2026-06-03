@@ -1,67 +1,137 @@
-import { CarOutlined, CoffeeOutlined, GiftOutlined, PlayCircleOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import {
+  CarOutlined,
+  CheckCircleFilled,
+  CoffeeOutlined,
+  EnvironmentOutlined,
+  GiftOutlined,
+  MinusOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  ShoppingCartOutlined,
+} from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
+import { lingshanProducts, type Product } from '../data/shopData'
 import { capturePurchase } from '../lib/analytics'
 import { useGuideStore } from '../store/useGuideStore'
 import {
   purchaseCategoryLabels,
   useTicketStore,
+  type OrderItem,
   type PurchaseCategory,
 } from '../store/useTicketStore'
 
-const categoryMeta: Array<{
-  id: PurchaseCategory
-  icon: ReactNode
-  title: string
-  description: string
-  amounts: number[]
-}> = [
-  { id: 'food', icon: <CoffeeOutlined />, title: '餐饮', description: '素食、茶饮、简餐', amounts: [28, 48, 68] },
-  { id: 'shopping', icon: <GiftOutlined />, title: '文创', description: '纪念品、香囊、明信片', amounts: [58, 128, 198] },
-  { id: 'transport', icon: <CarOutlined />, title: '交通', description: '观光车、接驳、停车', amounts: [20, 40, 60] },
-  { id: 'entertainment', icon: <PlayCircleOutlined />, title: '演艺', description: '表演、体验、讲解', amounts: [80, 128, 168] },
+const categoryMeta: Array<{ id: PurchaseCategory; icon: ReactNode; title: string }> = [
+  { id: 'food', icon: <CoffeeOutlined />, title: '餐饮' },
+  { id: 'shopping', icon: <GiftOutlined />, title: '文创' },
+  { id: 'transport', icon: <CarOutlined />, title: '交通' },
+  { id: 'entertainment', icon: <PlayCircleOutlined />, title: '演艺' },
 ]
 
 function formatMoney(value: number) {
   return `¥${Math.round(value)}`
 }
 
+function formatOrderTime(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => `${n}`.padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function MobileConsumePage() {
   const navigate = useNavigate()
   const ticket = useTicketStore((state) => state.ticketProfile)
   const purchases = useTicketStore((state) => state.purchases)
-  const addPurchase = useTicketStore((state) => state.addPurchase)
-  const totalSpend = useTicketStore((state) => state.totalSpend())
-  const spendByCategory = useTicketStore((state) => state.spendByCategory())
+  const orders = useTicketStore((state) => state.orders)
+  const placeOrder = useTicketStore((state) => state.placeOrder)
+  // selector 不能返回新对象（zustand v5 / useSyncExternalStore 会无限循环白屏），
+  // 改为只订阅 purchases，再用 useMemo 派生汇总。
+  const totalSpend = useMemo(
+    () => purchases.reduce((sum, item) => sum + item.amount, 0),
+    [purchases]
+  )
+  const spendByCategory = useMemo(
+    () =>
+      purchases.reduce<Record<PurchaseCategory, number>>(
+        (acc, item) => {
+          acc[item.category] += item.amount
+          return acc
+        },
+        { food: 0, shopping: 0, transport: 0, entertainment: 0 }
+      ),
+    [purchases]
+  )
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
   const [category, setCategory] = useState<PurchaseCategory>('food')
-  const [amount, setAmount] = useState(48)
-  const [customAmount, setCustomAmount] = useState('')
-  const [submittedAt, setSubmittedAt] = useState(0)
+  // 购物车为临时态：{ productId: 数量 }，结算后清空。
+  const [cart, setCart] = useState<Record<string, number>>({})
+  const [lastOrderId, setLastOrderId] = useState('')
   const activeRoute = getGuideRouteById(activeRouteId)
   const activeSpot = selectedSpotId ? getGuideSpotById(selectedSpotId) : null
 
-  const selectedMeta = useMemo(
-    () => categoryMeta.find((item) => item.id === category) ?? categoryMeta[0],
+  const nearbyProducts = useMemo(
+    () => (selectedSpotId ? lingshanProducts.filter((item) => item.spotIds.includes(selectedSpotId)) : []),
+    [selectedSpotId]
+  )
+  const categoryProducts = useMemo(
+    () => lingshanProducts.filter((item) => item.category === category),
     [category]
   )
-  const finalAmount = Number(customAmount) > 0 ? Number(customAmount) : amount
-  const isCoolingDown = Date.now() - submittedAt < 900
 
-  const handleSubmit = () => {
-    if (!ticket || finalAmount <= 0 || isCoolingDown) return
-    const record = addPurchase({
-      category,
-      amount: finalAmount,
-      routeId: activeRouteId,
+  const cartLines = useMemo(
+    () =>
+      Object.entries(cart)
+        .map(([id, qty]) => {
+          const product = lingshanProducts.find((item) => item.id === id)
+          return product ? { product, qty } : null
+        })
+        .filter((line): line is { product: Product; qty: number } => Boolean(line) && line!.qty > 0),
+    [cart]
+  )
+  const cartTotal = useMemo(
+    () => cartLines.reduce((sum, line) => sum + line.product.price * line.qty, 0),
+    [cartLines]
+  )
+  const cartCount = useMemo(
+    () => cartLines.reduce((sum, line) => sum + line.qty, 0),
+    [cartLines]
+  )
+
+  const addToCart = (product: Product) => {
+    setLastOrderId('')
+    setCart((current) => ({ ...current, [product.id]: (current[product.id] ?? 0) + 1 }))
+  }
+  const decFromCart = (productId: string) => {
+    setCart((current) => {
+      const next = { ...current }
+      const qty = (next[productId] ?? 0) - 1
+      if (qty <= 0) delete next[productId]
+      else next[productId] = qty
+      return next
+    })
+  }
+
+  const handleCheckout = () => {
+    if (!ticket || cartLines.length === 0) return
+    const items: OrderItem[] = cartLines.map((line) => ({
+      productId: line.product.id,
+      name: line.product.name,
+      category: line.product.category,
+      price: line.product.price,
+      qty: line.qty,
+    }))
+    const { order, records } = placeOrder(items, {
       spotId: selectedSpotId ?? undefined,
+      routeId: activeRouteId,
       ticketId: ticket.ticketId,
     })
-    capturePurchase(record)
-    setSubmittedAt(Date.now())
+    records.forEach((record) => capturePurchase(record))
+    setCart({})
+    setLastOrderId(order.id)
   }
 
   if (!ticket) {
@@ -69,8 +139,8 @@ function MobileConsumePage() {
       <div className="mobile-consume-page">
         <section className="mobile-ticket-hero">
           <div>
-            <span className="mobile-section-kicker">消费闭环</span>
-            <h2>先购票再模拟消费</h2>
+            <span className="mobile-section-kicker">景区商城</span>
+            <h2>先购票再开始点单</h2>
             <p>购票后系统才能把消费行为和本次游览画像关联起来。</p>
           </div>
           <ShoppingCartOutlined />
@@ -82,12 +152,42 @@ function MobileConsumePage() {
     )
   }
 
+  const renderProductCard = (product: Product, highlight = false) => {
+    const qty = cart[product.id] ?? 0
+    return (
+      <div key={product.id} className={`mobile-shop-item ${highlight ? 'is-nearby' : ''}`}>
+        <div className="mobile-shop-item__info">
+          <strong>{product.name}</strong>
+          <span>{product.description}</span>
+          <b>{formatMoney(product.price)}</b>
+        </div>
+        {qty > 0 ? (
+          <div className="mobile-shop-stepper">
+            <button type="button" aria-label="减少" onClick={() => decFromCart(product.id)}>
+              <MinusOutlined />
+            </button>
+            <strong>{qty}</strong>
+            <button type="button" aria-label="增加" onClick={() => addToCart(product)}>
+              <PlusOutlined />
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="mobile-shop-add" onClick={() => addToCart(product)}>
+            <PlusOutlined /> 加入
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const lastOrder = lastOrderId ? orders.find((item) => item.id === lastOrderId) : null
+
   return (
     <div className="mobile-consume-page">
       <section className="mobile-ticket-hero">
         <div>
-          <span className="mobile-section-kicker">CONSUMPTION</span>
-          <h2>景区消费</h2>
+          <span className="mobile-section-kicker">灵山景区商城</span>
+          <h2>边逛边点单</h2>
           <p>{activeSpot ? `当前位置：${activeSpot.name}` : `当前路线：${activeRoute.name}`}</p>
         </div>
         <ShoppingCartOutlined />
@@ -99,8 +199,8 @@ function MobileConsumePage() {
           <strong>{formatMoney(totalSpend)}</strong>
         </div>
         <div>
-          <span>消费笔数</span>
-          <strong>{purchases.length}</strong>
+          <span>订单数</span>
+          <strong>{orders.length}</strong>
         </div>
         <div>
           <span>门票</span>
@@ -108,69 +208,119 @@ function MobileConsumePage() {
         </div>
       </section>
 
+      {lastOrder ? (
+        <section className="mobile-shop-success">
+          <CheckCircleFilled />
+          <div>
+            <strong>下单成功 · {formatMoney(lastOrder.total)}</strong>
+            <span>订单号 {lastOrder.id.slice(-8).toUpperCase()} · 共 {lastOrder.items.reduce((s, i) => s + i.qty, 0)} 件，已记入本次游览消费</span>
+          </div>
+        </section>
+      ) : null}
+
+      {nearbyProducts.length > 0 ? (
+        <section className="mobile-panel mobile-shop-nearby">
+          <div className="mobile-panel__head">
+            <div>
+              <span className="mobile-section-kicker">附近可购</span>
+              <h3>{activeSpot?.name} 周边</h3>
+            </div>
+            <EnvironmentOutlined />
+          </div>
+          <div className="mobile-shop-list">
+            {nearbyProducts.map((product) => renderProductCard(product, true))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="mobile-consume-grid">
         {categoryMeta.map((item) => (
           <button
             key={item.id}
             type="button"
             className={category === item.id ? 'is-active' : ''}
-            onClick={() => {
-              setCategory(item.id)
-              setAmount(item.amounts[1])
-              setCustomAmount('')
-            }}
+            onClick={() => setCategory(item.id)}
           >
             {item.icon}
             <strong>{item.title}</strong>
-            <span>{item.description}</span>
+            <span>{lingshanProducts.filter((p) => p.category === item.id).length} 件</span>
           </button>
         ))}
       </section>
 
-      <section className="mobile-panel mobile-consume-pay">
+      <section className="mobile-panel">
         <div className="mobile-panel__head">
           <div>
-            <span className="mobile-section-kicker">模拟支付</span>
-            <h3>{selectedMeta.title}消费</h3>
+            <span className="mobile-section-kicker">商品目录</span>
+            <h3>{purchaseCategoryLabels[category]}</h3>
           </div>
-          {selectedMeta.icon}
+          {categoryMeta.find((item) => item.id === category)?.icon}
         </div>
-        <div className="mobile-amount-list">
-          {selectedMeta.amounts.map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={!customAmount && amount === item ? 'is-active' : ''}
-              onClick={() => {
-                setAmount(item)
-                setCustomAmount('')
-              }}
-            >
-              {formatMoney(item)}
-            </button>
-          ))}
+        <div className="mobile-shop-list">
+          {categoryProducts.map((product) => renderProductCard(product, selectedSpotId ? product.spotIds.includes(selectedSpotId) : false))}
         </div>
-        <label className="mobile-field">
-          <span>自定义金额</span>
-          <input
-            className="mobile-money-input"
-            inputMode="decimal"
-            min="0"
-            placeholder="输入金额"
-            type="number"
-            value={customAmount}
-            onChange={(event) => setCustomAmount(event.target.value)}
-          />
-        </label>
-        <button
-          className="mobile-primary-action"
-          type="button"
-          disabled={finalAmount <= 0 || isCoolingDown}
-          onClick={handleSubmit}
-        >
-          {isCoolingDown ? '已记录' : `确认支付 ${formatMoney(finalAmount)}`}
-        </button>
       </section>
+
+      {cartLines.length > 0 ? (
+        <section className="mobile-panel mobile-shop-cart">
+          <div className="mobile-panel__head">
+            <div>
+              <span className="mobile-section-kicker">购物车</span>
+              <h3>{cartCount} 件商品</h3>
+            </div>
+            <ShoppingCartOutlined />
+          </div>
+          <div className="mobile-shop-cart__list">
+            {cartLines.map((line) => (
+              <div key={line.product.id} className="mobile-shop-cart__line">
+                <div>
+                  <strong>{line.product.name}</strong>
+                  <span>{formatMoney(line.product.price)} × {line.qty}</span>
+                </div>
+                <div className="mobile-shop-stepper">
+                  <button type="button" aria-label="减少" onClick={() => decFromCart(line.product.id)}>
+                    <MinusOutlined />
+                  </button>
+                  <strong>{line.qty}</strong>
+                  <button type="button" aria-label="增加" onClick={() => addToCart(line.product)}>
+                    <PlusOutlined />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="mobile-primary-action" type="button" onClick={handleCheckout}>
+            结算 · 合计 {formatMoney(cartTotal)}
+          </button>
+          <p className="mobile-muted">演示版不接真实支付，下单即模拟完成，仅记录消费品类与金额。</p>
+        </section>
+      ) : null}
+
+      {orders.length > 0 ? (
+        <section className="mobile-panel">
+          <div className="mobile-panel__head">
+            <div>
+              <span className="mobile-section-kicker">订单记录</span>
+              <h3>本次游览订单</h3>
+            </div>
+            <ShoppingCartOutlined />
+          </div>
+          <div className="mobile-shop-orders">
+            {orders.slice(0, 5).map((order) => (
+              <div key={order.id} className="mobile-shop-order">
+                <div className="mobile-shop-order__head">
+                  <span>订单 {order.id.slice(-8).toUpperCase()}</span>
+                  <strong>{formatMoney(order.total)}</strong>
+                </div>
+                <p className="mobile-shop-order__items">
+                  {order.items.map((item) => `${item.name}×${item.qty}`).join('、')}
+                </p>
+                <span className="mobile-shop-order__time">{formatOrderTime(order.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="mobile-panel">
         <div className="mobile-panel__head">
@@ -187,14 +337,6 @@ function MobileConsumePage() {
               <strong>{formatMoney(spendByCategory[item.id])}</strong>
             </div>
           ))}
-        </div>
-        <div className="mobile-purchase-list">
-          {purchases.length ? purchases.slice(0, 5).map((item) => (
-            <div key={item.id}>
-              <span>{purchaseCategoryLabels[item.category]}</span>
-              <strong>{formatMoney(item.amount)}</strong>
-            </div>
-          )) : <p className="mobile-muted">还没有消费记录。</p>}
         </div>
       </section>
     </div>

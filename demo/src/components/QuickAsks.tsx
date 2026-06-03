@@ -1,5 +1,4 @@
 import { MessageOutlined } from '@ant-design/icons'
-import { Button, Card, Space, Typography } from 'antd'
 import { useChatStore } from '../store/useChatStore'
 
 const defaultQuestions = [
@@ -27,31 +26,28 @@ function QuickAsks({
   const sendQuickAsk = useChatStore((state) => state.sendQuickAsk)
 
   return (
-    <Card className="quick-asks-card" bordered={false}>
-      <Space direction="vertical" size={14} style={{ width: '100%' }}>
+    <section className="quick-asks-card">
+      <div className="quick-asks-card__stack">
         <div>
-          <Typography.Text className="section-kicker">
-            {subtitle}
-          </Typography.Text>
-          <Typography.Title level={5} className="quick-asks-card__title">
-            {title}
-          </Typography.Title>
+          <span className="section-kicker">{subtitle}</span>
+          <h5 className="quick-asks-card__title">{title}</h5>
         </div>
 
         <div className="quick-asks-card__list">
           {questions.map((question) => (
-            <Button
+            <button
               key={question}
+              type="button"
               className="quick-asks-card__button"
-              icon={<MessageOutlined />}
               onClick={() => sendQuickAsk(question, sceneId)}
             >
-              {question}
-            </Button>
+              <MessageOutlined />
+              <span>{question}</span>
+            </button>
           ))}
         </div>
-      </Space>
-    </Card>
+      </div>
+    </section>
   )
 }
 

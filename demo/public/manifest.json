@@ -1,0 +1,26 @@
+{
+  "name": "灵山胜境 AI 导览",
+  "short_name": "灵山导览",
+  "description": "灵山胜境数字人 AI 导览·小程序式体验",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fafaed",
+  "theme_color": "#1b5e20",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

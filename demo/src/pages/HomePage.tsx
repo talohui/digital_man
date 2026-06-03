@@ -1,10 +1,10 @@
 import { CompassOutlined, LoadingOutlined } from '@ant-design/icons'
-import { Col, Row, Space, Typography } from 'antd'
-import { useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
-import ChatPanel from '../components/ChatPanel'
-import Live2DStage from '../components/Live2DStage'
+const ChatPanel = lazy(() => import('../components/ChatPanel'))
+const Live2DStage = lazy(() => import('../components/Live2DStage'))
+import RouteSkeleton from '../components/RouteSkeleton'
 import ProfileBadge from '../components/ProfileBadge'
 import QuickAsks from '../components/QuickAsks'
 import RouteCard from '../components/RouteCard'
@@ -14,7 +14,6 @@ import { useChatStore } from '../store/useChatStore'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { capturePreferenceUpdate, captureRecommendationClick, captureRecommendationExposure, captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
 
-const { Paragraph, Text, Title } = Typography
 
 function HomePage() {
   const navigate = useNavigate()
@@ -39,6 +38,8 @@ function HomePage() {
   useEffect(() => {
     ensureUserId()
     setActiveScene(DEFAULT_SCENE_ID, null)
+    // 空闲帧预热 SpotGuide / GuideMap / ChatPanel chunk
+    void import('../lib/prefetch').then((m) => m.prefetchHeavyTabs())
   }, [ensureUserId, setActiveScene])
 
   useEffect(() => {
@@ -98,13 +99,13 @@ function HomePage() {
       <main className="app-content">
         <section className="guide-home-hero">
           <div className="guide-home-greeting">
-            <Text className="guide-home-greeting__eyebrow">LINGSHAN SMART TOUR</Text>
-            <Title level={2} className="guide-home-greeting__title">
+            <span className="guide-home-greeting__eyebrow">LINGSHAN SMART TOUR</span>
+            <h2 className="guide-home-greeting__title">
               现有数字人主界面里，直接开始一场地图导览
-            </Title>
-            <Paragraph className="guide-home-greeting__desc">
+            </h2>
+            <p className="guide-home-greeting__desc">
               保留 Live2D、聊天和 Fay 通信链路，在首页先感知游客偏好，再把路线推荐、地图导览和景点讲解串成一条连续体验。
-            </Paragraph>
+            </p>
           </div>
 
           <div className="glass-card guide-home-panel">
@@ -179,18 +180,22 @@ function HomePage() {
           </div>
         </section>
 
-        <Row gutter={[24, 24]} align="stretch">
-          <Col xs={24} xl={15}>
-            <Live2DStage sceneId={DEFAULT_SCENE_ID} />
-          </Col>
+        <div className="home-grid">
+          <div className="home-grid__main">
+            <Suspense fallback={<RouteSkeleton variant="inline" />}>
+              <Live2DStage sceneId={DEFAULT_SCENE_ID} />
+            </Suspense>
+          </div>
 
-          <Col xs={24} xl={9}>
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <div className="home-grid__side">
+            <div className="home-grid__stack">
               <QuickAsks sceneId={DEFAULT_SCENE_ID} />
-              <ChatPanel sceneId={DEFAULT_SCENE_ID} />
-            </Space>
-          </Col>
-        </Row>
+              <Suspense fallback={<RouteSkeleton variant="inline" />}>
+                <ChatPanel sceneId={DEFAULT_SCENE_ID} />
+              </Suspense>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   )

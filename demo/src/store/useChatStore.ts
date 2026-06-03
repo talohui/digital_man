@@ -139,6 +139,48 @@ function getMessageSceneId(message: FayMessage): string | null {
   return getSceneIdFromFayUsername(username)
 }
 
+// ===== WebSocket 重连 & 发送离线队列(模块级,跨 store 实例稳定) =====
+let _wsReconnectAttempts = 0
+let _wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+const _pendingSends: Array<{ sceneId: string; prompt: string; username: string }> = []
+
+async function flushPendingSends(
+  get: () => ChatState,
+  patchSession: (sceneId: string | undefined, updater: any) => void
+) {
+  if (_pendingSends.length === 0) return
+  const queue = _pendingSends.splice(0)
+  const { sendTextToFay } = await import('../api/fay')
+  for (const item of queue) {
+    try {
+      await sendTextToFay(item.prompt, item.username)
+    } catch {
+      // 仍失败则放回队首,等待下次重连
+      _pendingSends.unshift(item)
+      break
+    }
+  }
+  if (_pendingSends.length === 0) {
+    patchSession(undefined, (s: any) => ({ ...s, lastError: '' }))
+  } else {
+    patchSession(undefined, (s: any) => ({
+      ...s,
+      lastError: `还有 ${_pendingSends.length} 条消息正在排队重发…`
+    }))
+  }
+  // 异步导入,使用 get 占位避免未使用报错
+  void get
+}
+
+// 浏览器从 offline 恢复 online 时主动 flush
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    // 通过 import.meta 触发当前 store 实例的 flush
+    // 这里只能触发重连;sendMessage 的 flushPendingSends 走重连 onOpen 回调路径
+    try { useChatStore.getState().initializeConnection() } catch { /* noop */ }
+  })
+}
+
 export const useChatStore = create<ChatState>((set, get) => {
   const targetScene = (sceneId?: string) => normalizeSceneId(sceneId ?? get().activeSceneId)
   const patchSession = (
@@ -191,17 +233,50 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       set({ wsStatus: 'connecting' })
 
+      // 指数退避重连(最多 30s):移动网络切前后台/过隧道时不再永久掉线
+      const scheduleReconnect = () => {
+        const attempt = _wsReconnectAttempts++
+        const base = Math.min(30000, 1000 * Math.pow(2, attempt))
+        const jitter = Math.random() * 500
+        const delay = base + jitter
+        if (_wsReconnectTimer) clearTimeout(_wsReconnectTimer)
+        _wsReconnectTimer = setTimeout(() => {
+          _wsReconnectTimer = null
+          // 若期间已主动断开,跳过
+          if (get().wsStatus === 'disconnected' || get().wsStatus === 'error') {
+            get().initializeConnection()
+          }
+        }, delay)
+      }
+
       const socket = connectFayWS(get().handleFayMessage, {
         username: getFayUsername(get().activeSceneId),
-        onOpen: () => { set({ wsStatus: 'connected' }); captureSessionStart() },
-        onClose: () => { set({ wsStatus: 'disconnected', socket: null }); captureSessionEnd() },
+        onOpen: () => {
+          _wsReconnectAttempts = 0
+          if (_wsReconnectTimer) {
+            clearTimeout(_wsReconnectTimer)
+            _wsReconnectTimer = null
+          }
+          set({ wsStatus: 'connected' })
+          captureSessionStart()
+          // 重连后清空 lastError 提示
+          patchSession(undefined, (session) => ({ ...session, lastError: '' }))
+          // 重连后回放离线发送队列
+          flushPendingSends(get, patchSession)
+        },
+        onClose: () => {
+          set({ wsStatus: 'disconnected', socket: null })
+          captureSessionEnd()
+          scheduleReconnect()
+        },
         onError: () => {
           patchSession(undefined, (session) => ({
             ...session,
-            lastError: 'Fay WebSocket 连接失败，请确认本地服务是否启动。'
+            lastError: 'Fay 连接断开,正在重连…'
           }))
           set({ wsStatus: 'error' })
           captureSessionEnd('ws_error')
+          scheduleReconnect()
         }
       })
 
@@ -209,6 +284,12 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
     disconnectConnection: () => {
       const socket = get().socket
+
+      if (_wsReconnectTimer) {
+        clearTimeout(_wsReconnectTimer)
+        _wsReconnectTimer = null
+      }
+      _wsReconnectAttempts = 0
 
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.close()
@@ -289,12 +370,26 @@ export const useChatStore = create<ChatState>((set, get) => {
         const message =
           error instanceof Error ? error.message : '消息发送失败，请稍后重试。'
 
-        patchSession(id, (session) => ({ ...session, lastError: `发送失败：${message}` }))
-        get().appendMessage(
-          'system',
-          '当前无法连接到 Fay 服务，请检查本地接口或稍后再试。',
-          id
-        )
+        // 网络断/服务暂时不可达 → 入离线队列,等 WS 重连成功后自动重发
+        const isNetworkLike =
+          (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          (error instanceof TypeError) || // fetch 网络错误典型是 TypeError
+          /Failed to fetch|NetworkError|HTTP 5\d\d/.test(message)
+        if (isNetworkLike) {
+          const prompt = buildGuidePrompt(content, getSession(get().sessions, id).guideContext)
+          _pendingSends.push({ sceneId: id, prompt, username: getFayUsername(id) })
+          patchSession(id, (session) => ({
+            ...session,
+            lastError: `网络不稳定,已加入队列(${_pendingSends.length}),重连后自动重发。`
+          }))
+        } else {
+          patchSession(id, (session) => ({ ...session, lastError: `发送失败：${message}` }))
+          get().appendMessage(
+            'system',
+            '当前无法连接到 Fay 服务，请检查本地接口或稍后再试。',
+            id
+          )
+        }
       } finally {
         patchSession(id, (session) => ({ ...session, isSending: false }))
       }

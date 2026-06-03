@@ -5,7 +5,6 @@ import {
   SendOutlined,
   SyncOutlined
 } from '@ant-design/icons'
-import { App, Avatar, Button, Card, Input, Space, Tag, Tooltip, Typography } from 'antd'
 import { useChatStore } from '../store/useChatStore'
 import { getSession } from '../store/chatSessions'
 import { getBrowserVoiceHint, type BrowserAsr } from '../lib/browserAsr'
@@ -17,14 +16,12 @@ import {
 } from '../lib/voiceAsr'
 import VoiceRecorderBar from './VoiceRecorderBar'
 
-const { TextArea } = Input
-
-const statusColorMap = {
-  connected: 'success',
-  connecting: 'processing',
-  disconnected: 'default',
-  error: 'error',
-  idle: 'default'
+const statusClassMap = {
+  connected: 'chat-card__status--connected',
+  connecting: 'chat-card__status--connecting',
+  disconnected: 'chat-card__status--idle',
+  error: 'chat-card__status--error',
+  idle: 'chat-card__status--idle'
 } as const
 
 const roleLabelMap = {
@@ -51,7 +48,6 @@ type ChatPanelProps = {
 }
 
 function ChatPanel({ sceneId }: ChatPanelProps) {
-  const { message } = App.useApp()
   const activeSceneId = useChatStore((state) => state.activeSceneId)
   const resolvedSceneId = sceneId ?? activeSceneId
   const session = useChatStore((state) => getSession(state.sessions, resolvedSceneId))
@@ -67,13 +63,32 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   const lastError = session.lastError
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const asrRef = useRef<BrowserAsr | null>(null)
   const holdActiveRef = useRef(false)
   const releaseCleanupRef = useRef<(() => void) | null>(null)
   const [voiceDraft, setVoiceDraft] = useState('')
   const [justSent, setJustSent] = useState(false)
+  const [localToast, setLocalToast] = useState<{ kind: 'warn' | 'error'; text: string } | null>(null)
+
+  const showToast = (kind: 'warn' | 'error', text: string) => {
+    setLocalToast({ kind, text })
+    window.setTimeout(() => setLocalToast(null), 3000)
+  }
 
   const voiceHint = useMemo(() => getBrowserVoiceHint(), [])
+
+  // textarea 自动撑高(代替 antd Input.TextArea autoSize)
+  const autoSizeTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    const maxRowsPx = 24 * 4 + 24 // 4 rows + padding
+    el.style.height = `${Math.min(el.scrollHeight, maxRowsPx)}px`
+  }
+
+  useEffect(() => {
+    autoSizeTextarea(textareaRef.current)
+  }, [inputText])
 
   const detachGlobalRelease = () => {
     releaseCleanupRef.current?.()
@@ -141,20 +156,20 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         stopRecord(resolvedSceneId)
         setVoiceDraft('')
         setInputText('', resolvedSceneId)
-        void message.error(msg)
+        showToast('error', msg)
       }
     })
 
   const startRecording = async () => {
     if (!isVoiceAsrAvailable()) {
-      void message.warning('当前浏览器无法使用麦克风录音，请换 Chrome / Edge 或打字提问。')
+      showToast('warn', '当前浏览器无法使用麦克风录音，请换 Chrome / Edge 或打字提问。')
       return
     }
     if (asrRef.current) return
 
     const micOk = await ensureMicPermission()
     if (!micOk) {
-      void message.error('无法使用麦克风：请在浏览器地址栏允许麦克风权限，或使用 localhost 访问。')
+      showToast('error', '无法使用麦克风：请在浏览器地址栏允许麦克风权限，或使用 localhost 访问。')
       return
     }
 
@@ -214,26 +229,18 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   }
 
   return (
-    <Card
-      className="chat-card"
-      bordered={false}
-      title={
-        <div className="chat-card__titlebar">
-          <div>
-            <Typography.Text className="section-kicker">对话窗口</Typography.Text>
-            <Typography.Title level={5} className="chat-card__title">
-              和灵山小灵实时交流
-            </Typography.Title>
-          </div>
-          <Tag
-            color={statusColorMap[wsStatus]}
-            icon={wsStatus === 'connecting' ? <SyncOutlined spin /> : undefined}
-          >
-            {statusText}
-          </Tag>
+    <section className="chat-card">
+      <header className="chat-card__titlebar">
+        <div>
+          <span className="section-kicker">对话窗口</span>
+          <h5 className="chat-card__title">和灵山小灵实时交流</h5>
         </div>
-      }
-    >
+        <span className={`chat-card__status ${statusClassMap[wsStatus]}`}>
+          {wsStatus === 'connecting' ? <SyncOutlined spin /> : null}
+          {statusText}
+        </span>
+      </header>
+
       <VoiceRecorderBar
         isRecording={isRecording}
         isSupported={isVoiceAsrAvailable()}
@@ -244,9 +251,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
       />
 
       {voiceHint ? (
-        <Typography.Text type="warning" className="chat-card__voice-env-hint">
-          {voiceHint}
-        </Typography.Text>
+        <p className="chat-card__voice-env-hint">{voiceHint}</p>
       ) : null}
 
       <div className="chat-card__messages chat-scroll" ref={scrollRef}>
@@ -257,13 +262,11 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
               className={`chat-bubble-row ${isUser ? 'chat-bubble-row--user' : ''}`}
               key={msg.id}
             >
-              <Avatar className={`chat-bubble__avatar chat-bubble__avatar--${msg.role}`}>
+              <div className={`chat-bubble__avatar chat-bubble__avatar--${msg.role}`} aria-hidden>
                 {roleLabelMap[msg.role]}
-              </Avatar>
+              </div>
               <div className={`chat-bubble ${isUser ? 'chat-bubble--user' : ''}`}>
-                <Typography.Paragraph className="chat-bubble__content">
-                  {msg.content}
-                </Typography.Paragraph>
+                <p className="chat-bubble__content">{msg.content}</p>
               </div>
             </div>
           )
@@ -277,54 +280,65 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         </div>
       ) : null}
 
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {/* 简易本地 toast,替代 antd App.message */}
+      {localToast ? (
+        <div
+          className={`chat-card__toast chat-card__toast--${localToast.kind}`}
+          role="status"
+          aria-live="polite"
+        >
+          {localToast.text}
+        </div>
+      ) : null}
+
+      <div className="chat-card__composer-stack">
         <div className="chat-card__composer">
           <div className="chat-card__mic-wrap">
-            <Tooltip title="按住说话，松手发送（可在按钮外松手）">
-              <Button
-                htmlType="button"
-                className={
-                  isRecording ? 'chat-card__mic chat-card__mic--active' : 'chat-card__mic'
-                }
-                icon={<AudioOutlined />}
-                onPointerDown={handleMicPointerDown}
-                onPointerCancel={cancelRecording}
-                onContextMenu={(event) => event.preventDefault()}
-              />
-            </Tooltip>
+            <button
+              type="button"
+              title="按住说话，松手发送（可在按钮外松手）"
+              className={isRecording ? 'chat-card__mic chat-card__mic--active' : 'chat-card__mic'}
+              onPointerDown={handleMicPointerDown}
+              onPointerCancel={cancelRecording}
+              onContextMenu={(event) => event.preventDefault()}
+              aria-label="按住录音"
+            >
+              <AudioOutlined />
+            </button>
             {isRecording ? <span className="chat-card__mic-label">松手发送</span> : null}
           </div>
 
-          <TextArea
-            autoSize={{ minRows: 1, maxRows: 4 }}
+          <textarea
+            ref={textareaRef}
+            rows={1}
             className="chat-card__textarea"
             placeholder={isRecording ? '正在听您说话…' : '输入您的问题...'}
             value={inputText}
             onChange={(event) => setInputText(event.target.value, resolvedSceneId)}
-            onPressEnter={(event) => {
-              if (event.shiftKey) return
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
               event.preventDefault()
               void handleSend()
             }}
           />
 
-          <Button
-            type="primary"
-            size="large"
-            icon={<SendOutlined />}
-            loading={isSending}
+          <button
+            type="button"
+            className="chat-card__send"
             onClick={() => void handleSend()}
-            disabled={!inputText.trim() || isRecording}
+            disabled={!inputText.trim() || isRecording || isSending}
+            aria-label="发送"
           >
-            发送
-          </Button>
+            {isSending ? <SyncOutlined spin /> : <SendOutlined />}
+            <span>发送</span>
+          </button>
         </div>
 
-        <Typography.Text className="chat-card__hint" type="secondary">
+        <p className="chat-card__hint">
           回车发送，Shift+回车换行。按住麦克风说话，在页面任意位置松手即发送。
-        </Typography.Text>
-      </Space>
-    </Card>
+        </p>
+      </div>
+    </section>
   )
 }
 

@@ -84,24 +84,30 @@ function MobileShell() {
   if (location.pathname === '/ticket') page = <MobileTicketPage />
   if (location.pathname === '/consume') page = <MobileConsumePage />
 
+  // 地图页让出全部空间给地图本身:隐藏 shell 顶栏 + 内容区零 padding
+  // 顶栏冗余信息(路线名、时长)由 MobileMapPage 自己的浮动 header 承担
+  const fullBleed = activeTab === 'map'
+
   return (
-    <div className="mobile-shell">
-      <header className="mobile-shell__topbar">
-        <div>
-          <span className="mobile-shell__eyebrow">LINGSHAN MINI TOUR</span>
-          <h1>{pageTitle}</h1>
-          <p>{pageSubtitle}</p>
-        </div>
-        <button
-          className="mobile-shell__route-chip"
-          type="button"
-          onClick={() => navigate('/map')}
-          aria-label="查看当前路线"
-        >
-          <CompassOutlined />
-          <span>{route.name.replace('路线', '')}</span>
-        </button>
-      </header>
+    <div className={`mobile-shell ${fullBleed ? 'is-fullbleed' : ''}`}>
+      {fullBleed ? null : (
+        <header className="mobile-shell__topbar">
+          <div>
+            <span className="mobile-shell__eyebrow">LINGSHAN MINI TOUR</span>
+            <h1>{pageTitle}</h1>
+            <p>{pageSubtitle}</p>
+          </div>
+          <button
+            className="mobile-shell__route-chip"
+            type="button"
+            onClick={() => navigate('/map')}
+            aria-label="查看当前路线"
+          >
+            <CompassOutlined />
+            <span>{route.name.replace('路线', '')}</span>
+          </button>
+        </header>
+      )}
 
       <main className="mobile-shell__content">{page}</main>
 

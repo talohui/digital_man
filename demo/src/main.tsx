@@ -1,49 +1,28 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { App as AntdApp, ConfigProvider } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
-import posthog from 'posthog-js'
 import App from './App'
 import './styles/global.css'
-import { POSTHOG_KEY, POSTHOG_HOST } from './lib/analytics'
+import { initPostHogIdle } from './lib/analytics'
 
-// 初始化 PostHog（Key 为空时跳过，analytics-server 通道仍正常）
-if (POSTHOG_KEY) {
-  posthog.init(POSTHOG_KEY, {
-    api_host: POSTHOG_HOST,
-    capture_pageview: true,
-    capture_pageleave: true,
-    autocapture: false,       // 关闭自动点击采集，只保留手动埋点
-    persistence: 'localStorage',
+// PostHog 改为空闲帧懒加载,首屏不再背 ~180kB SDK
+initPostHogIdle()
+
+// 生产环境注册 Service Worker:预缓存 vendor-* / CSS / 字体,
+// 第二次访问近 0 网络请求;开发环境跳过避免 HMR 被劫持。
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* SW 注册失败不影响应用,静默 */
+    })
   })
 }
 
-// 暂时不用 StrictMode 包,避免开发模式下 useEffect 双跑导致 WS / Live2D
-// 双初始化(Fay 部分版本会把消息只推给第一个连上的 socket)。
-// 上线前可以再加回来。
+// antd 的 ConfigProvider/AntdApp 不在首屏注入(那两个 import 会把整包 antd
+// 拉进 eager chunk);改为在真正用 antd 组件的页面里按需引入。
 void React
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <BrowserRouter>
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: '#1b5e20',
-          colorInfo: '#1b5e20',
-          colorSuccess: '#2f7d35',
-          colorWarning: '#d97706',
-          colorBgBase: '#fafaed',
-          colorTextBase: '#2c3e50',
-          borderRadius: 18,
-          fontFamily:
-            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
-        }
-      }}
-    >
-      <AntdApp>
-        <App />
-      </AntdApp>
-    </ConfigProvider>
+    <App />
   </BrowserRouter>
 )
