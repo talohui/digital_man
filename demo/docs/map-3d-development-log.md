@@ -5564,3 +5564,127 @@ transform: {
 - 本阶段没有修改 `routeGeometry`。
 - 本阶段没有修改 POI 坐标。
 - 本阶段只是为后续道路网络采样建立 pair 计划。
+
+## 阶段五十五 A：道路网络浏览器采样导出工具
+
+### 日期
+
+2026-06-03
+
+### 本次目标
+
+在 `/map` 的 `debugRoadNetwork` 模式中增加 roadNetwork 腾讯 walking 采样导出工具。用户进入 `/map?debugRoadNetwork=1` 或 `/map?debugRoadNetwork=true` 后，可手动点击按钮，让浏览器按 `lingshanRoadNetworkSamplingPlan` 的 76 个 pair 逐个调用现有 `buildWalkingRoute`，并下载 candidate roadNetwork JSON。
+
+### 本次约束
+
+- 只修改 `/map` debug 工具 UI 和开发记录。
+- 新增 `roadNetworkExport` 工具只负责组织 JSON 和浏览器下载。
+- 不修改腾讯 walking route 算法。
+- 不修改 `routePlanning.ts`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `Scenic3DMapScene.tsx`。
+- 不修改 POI 坐标。
+- 不修改 `routeGeometry` 数据。
+- 不生成最终 `lingshanRoadNetwork.ts`。
+- 不自动调用腾讯 API，只有用户在浏览器中点击按钮才会采样。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/pages/GuideMapPage.tsx`
+- `src/lib/roadNetworkExport.ts`
+- `docs/map-3d-development-log.md`
+
+### 为什么在浏览器 debug 模式采样而不是 Codex/Node 直接调用腾讯 API
+
+当前腾讯地图 Key 和 JSONP 路线请求逻辑已经在前端 `/map` 中运行。让浏览器复用现有 `buildWalkingRoute` 更符合当前调用方式，也避免 Codex / Node 直接读取 Key 或在命令行调用腾讯 API。本阶段只是增加手动触发的 debug 工具，不会在页面加载时自动采样。
+
+### debugRoadNetwork 参数说明
+
+访问以下地址可显示道路网络采样导出工具：
+
+- `/map?debugRoadNetwork=1`
+- `/map?debugRoadNetwork=true`
+
+普通 `/map` 不显示该工具。
+
+### sampling plan 76 pairs 说明
+
+采样计划来自 `src/data/lingshanRoadNetworkSamplingPlan.ts`，总计 76 个 pair：
+
+- `guide_route_adjacent`：24 个。
+- `poi_nearby`：32 个。
+- `core_anchor`：20 个。
+- `nearbyThresholdMeters`：350。
+
+### 采样状态 UI 说明
+
+debug 工具显示：
+
+- pair 总数。
+- 按来源统计。
+- 当前状态：未开始、采样中、已停止、已完成。
+- 当前进度 `x / 76`。
+- 成功 segment 数。
+- 失败 / 跳过数。
+- 当前 pair id / from / to。
+- “开始采样并下载 JSON”按钮。
+- “停止采样”按钮。
+- “复制采样摘要”按钮。
+
+采样并发为 1，每个 pair 之间等待 650ms，避免过快请求。
+
+### 导出 JSON 字段说明
+
+导出文件名为 `lingshan-road-network-candidates.json`。payload 包含：
+
+- `version`
+- `generatedAt`
+- `source: tencent_walking_batch_export`
+- `pairCount`
+- `segmentCount`
+- `segments`
+- `skipped`
+
+每个 segment 包含 pair id、from/to POI、source、guideRouteId、priority、status、path、distanceMeters、durationMinutes、pointCount、usedFallback、fallbackReason、generatedAt 和 notes。
+
+### candidate / verified 边界说明
+
+导出结果为 `candidate`，不代表官方道路网，也不代表 verified roadNetwork。下一阶段需要人工复核、地图比对和必要的现场验证后，才能整理为正式 `lingshanRoadNetwork` 数据。
+
+### 对 /map 的影响
+
+`/map` 新增 debugRoadNetwork 模式下的采样导出工具。普通 `/map`、`/map?poi=xxx`、`/map?sceneRoute=xxx`、`debugSceneRoute=1`、路线 path JSON 复制 / 下载、图层开关、定位、路线进度和偏航状态均保持原有逻辑。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。后续阶段五十五 B 可读取浏览器下载的 JSON，生成 `lingshanRoadNetwork` candidate 数据，再供 3D 地图使用。
+
+### 对导航功能的影响
+
+本阶段没有修改导航功能。采样工具只为后续道路网络生成提供候选 segments，不改变当前路线规划、定位、偏航或重规划占位逻辑。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查 `/map?debugRoadNetwork=1` 仅在 debugRoadNetwork 模式显示采样导出工具。
+- 检查工具不会自动开始采样，必须用户点击“开始采样并下载 JSON”。
+- 检查停止按钮和采样摘要按钮存在。
+- 运行 `git status`，确认只暂存本阶段允许文件。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段五十五 B 读取浏览器导出的 `lingshan-road-network-candidates.json`，生成 `src/data/lingshanRoadNetwork.ts` candidate 数据文件，并继续保持 candidate / verified 边界。
+
+### 明确记录
+
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改 `routePlanning.ts`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 POI 坐标。
+- 本阶段没有生成最终 roadNetwork 数据。
+- 本阶段不会自动调用腾讯 API，只有用户在浏览器 debugRoadNetwork 模式点击按钮才会采样。

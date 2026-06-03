@@ -25,6 +25,11 @@ import {
   getLingshanRouteGeometryByGuideRouteId
 } from '../data/lingshanRouteGeometries'
 import {
+  lingshanRoadNetworkSamplingPlan,
+  type RoadSamplingPair,
+  type RoadSamplingPairSource
+} from '../data/lingshanRoadNetworkSamplingPlan'
+import {
   clearUserLocationWatch,
   isGeolocationSupported,
   watchUserLocation,
@@ -43,6 +48,13 @@ import {
   type RouteDeviationLevel
 } from '../lib/routeProgress'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
+import {
+  buildRoadNetworkExportPayload,
+  buildRoadNetworkExportSegment,
+  downloadRoadNetworkJson,
+  type RoadNetworkExportSegment,
+  type RoadNetworkExportSkippedPair
+} from '../lib/roadNetworkExport'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 
@@ -58,8 +70,26 @@ type RouteDiagnostics = {
 type RouteSource = 'unknown' | 'tencent_walking' | 'preset' | 'fallback'
 type LocationMode = 'gps' | 'mock'
 type LocationStatus = 'idle' | 'watching' | 'located' | 'error'
+type RoadNetworkExportStatus = 'idle' | 'sampling' | 'completed' | 'stopped'
+type RoadNetworkExportProgress = {
+  status: RoadNetworkExportStatus
+  currentIndex: number
+  successCount: number
+  skippedCount: number
+  currentPair?: RoadSamplingPair
+  message: string
+}
 
 const QUERY_POI_FOCUS_ZOOM = 17
+const ROAD_NETWORK_EXPORT_FILENAME = 'lingshan-road-network-candidates.json'
+const ROAD_NETWORK_EXPORT_DELAY_MS = 650
+const emptyRoadNetworkExportProgress: RoadNetworkExportProgress = {
+  status: 'idle',
+  currentIndex: 0,
+  successCount: 0,
+  skippedCount: 0,
+  message: '未开始'
+}
 const emptyRouteDeviationConfirmation: RouteDeviationConfirmState = {
   consecutiveOffRouteCount: 0,
   shouldWarn: false,
@@ -128,6 +158,7 @@ function GuideMapPage() {
   const userLocationMarkerRef = useRef<any>(null)
   const userAccuracyCircleRef = useRef<any>(null)
   const routeDeviationRouteIdRef = useRef<string | null>(null)
+  const stopRoadNetworkExportRef = useRef(false)
   const infoWindowRef = useRef<any>(null)
   const appliedQueryPoiIdRef = useRef<string | null>(null)
   const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
@@ -157,11 +188,18 @@ function GuideMapPage() {
   const [routeDeviationConfirmation, setRouteDeviationConfirmation] =
     useState<RouteDeviationConfirmState>(emptyRouteDeviationConfirmation)
   const [reroutePlaceholderMessage, setReroutePlaceholderMessage] = useState('')
+  const [roadNetworkExportProgress, setRoadNetworkExportProgress] =
+    useState<RoadNetworkExportProgress>(emptyRoadNetworkExportProgress)
+  const [roadNetworkExportSegments, setRoadNetworkExportSegments] = useState<RoadNetworkExportSegment[]>([])
+  const [roadNetworkExportSkipped, setRoadNetworkExportSkipped] = useState<RoadNetworkExportSkippedPair[]>([])
+  const [roadNetworkExportMessage, setRoadNetworkExportMessage] = useState('')
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
   const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
+  const queryDebugRoadNetwork = searchParams.get('debugRoadNetwork')?.trim().toLowerCase() ?? ''
   const isMapDebugMode = queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true'
+  const isRoadNetworkDebugMode = queryDebugRoadNetwork === '1' || queryDebugRoadNetwork === 'true'
   const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && isMapDebugMode
   const [showPoiMarkers, setShowPoiMarkers] = useState(true)
   const [showCurrentRoute, setShowCurrentRoute] = useState(true)
@@ -180,6 +218,7 @@ function GuideMapPage() {
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
   const routeSpots = useMemo(() => getGuideRouteSpots(route.id), [route.id])
+  const roadNetworkPairSourceCounts = useMemo(() => getRoadSamplingPairSourceCounts(), [])
   const sceneRouteDebugPath = useMemo(
     () => (querySceneRouteId ? getSceneRouteDebugPath(querySceneRouteId) : []),
     [querySceneRouteId]
@@ -786,6 +825,131 @@ function GuideMapPage() {
     }
   }
 
+  const handleStartRoadNetworkExport = async () => {
+    if (roadNetworkExportProgress.status === 'sampling') {
+      return
+    }
+
+    stopRoadNetworkExportRef.current = false
+    setRoadNetworkExportSegments([])
+    setRoadNetworkExportSkipped([])
+    setRoadNetworkExportMessage('')
+    setRoadNetworkExportProgress({
+      status: 'sampling',
+      currentIndex: 0,
+      successCount: 0,
+      skippedCount: 0,
+      message: '采样中'
+    })
+
+    const segments: RoadNetworkExportSegment[] = []
+    const skipped: RoadNetworkExportSkippedPair[] = []
+    const pairs = lingshanRoadNetworkSamplingPlan.pairs
+
+    for (let index = 0; index < pairs.length; index += 1) {
+      const pair = pairs[index]
+
+      if (stopRoadNetworkExportRef.current) {
+        setRoadNetworkExportProgress({
+          status: 'stopped',
+          currentIndex: index,
+          successCount: segments.length,
+          skippedCount: skipped.length,
+          currentPair: pair,
+          message: '已停止采样'
+        })
+        setRoadNetworkExportSegments(segments)
+        setRoadNetworkExportSkipped(skipped)
+        setRoadNetworkExportMessage('采样已停止，未自动下载。')
+        return
+      }
+
+      setRoadNetworkExportProgress({
+        status: 'sampling',
+        currentIndex: index + 1,
+        successCount: segments.length,
+        skippedCount: skipped.length,
+        currentPair: pair,
+        message: '采样中'
+      })
+
+      const fromLocation = getRoadSamplingPoiLocation(pair.fromPoiId)
+      const toLocation = getRoadSamplingPoiLocation(pair.toPoiId)
+
+      if (!fromLocation || !toLocation) {
+        skipped.push({
+          pairId: pair.id,
+          fromPoiId: pair.fromPoiId,
+          toPoiId: pair.toPoiId,
+          reason: '未找到 from/to POI 坐标'
+        })
+        continue
+      }
+
+      try {
+        const plannedRoute = await buildWalkingRoute([fromLocation, toLocation])
+        segments.push(buildRoadNetworkExportSegment(pair, plannedRoute))
+      } catch (error) {
+        skipped.push({
+          pairId: pair.id,
+          fromPoiId: pair.fromPoiId,
+          toPoiId: pair.toPoiId,
+          reason: error instanceof Error ? error.message : '采样失败'
+        })
+      }
+
+      setRoadNetworkExportSegments([...segments])
+      setRoadNetworkExportSkipped([...skipped])
+
+      if (index < pairs.length - 1) {
+        await waitForRoadNetworkExportDelay(ROAD_NETWORK_EXPORT_DELAY_MS)
+      }
+    }
+
+    const payload = buildRoadNetworkExportPayload({
+      pairCount: pairs.length,
+      segments,
+      skipped
+    })
+
+    downloadRoadNetworkJson(payload, ROAD_NETWORK_EXPORT_FILENAME)
+    setRoadNetworkExportProgress({
+      status: 'completed',
+      currentIndex: pairs.length,
+      successCount: segments.length,
+      skippedCount: skipped.length,
+      message: '已完成'
+    })
+    setRoadNetworkExportSegments(segments)
+    setRoadNetworkExportSkipped(skipped)
+    setRoadNetworkExportMessage(`已生成下载文件：${ROAD_NETWORK_EXPORT_FILENAME}`)
+  }
+
+  const handleStopRoadNetworkExport = () => {
+    stopRoadNetworkExportRef.current = true
+    setRoadNetworkExportMessage('正在停止，将在当前 pair 完成后停止。')
+  }
+
+  const handleCopyRoadNetworkExportSummary = async () => {
+    const summary = buildRoadNetworkExportSummary({
+      progress: roadNetworkExportProgress,
+      segments: roadNetworkExportSegments,
+      skipped: roadNetworkExportSkipped
+    })
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(summary)
+      setRoadNetworkExportMessage('采样摘要已复制')
+    } catch {
+      console.log('[GuideMapPage] roadNetwork export summary', summary)
+      setRoadNetworkExportMessage('复制失败，已输出到控制台。')
+    }
+  }
+
   const selectedNarrative = route.stops.find((stop) => stop.spotId === selectedSpot.id)?.narrative ?? selectedSpot.intro
 
   return (
@@ -1157,6 +1321,76 @@ function GuideMapPage() {
                   调试模式：可查看诊断信息；访问 <code>/map?sceneRoute=xxx&amp;debugSceneRoute=1</code> 可打开骨架线和路线 path 导出能力。
                 </p>
               ) : null}
+
+              {isRoadNetworkDebugMode ? (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    border: '1px solid rgba(154, 90, 8, 0.2)',
+                    borderRadius: 12,
+                    background: 'rgba(255, 251, 235, 0.74)'
+                  }}
+                >
+                  <strong style={{ display: 'block', marginBottom: 6, color: '#7a4b08', fontSize: 13 }}>
+                    道路网络采样导出
+                  </strong>
+                  <p style={{ margin: '0 0 8px', color: '#665326', fontSize: 11, lineHeight: 1.55 }}>
+                    基于 {lingshanRoadNetworkSamplingPlan.pairs.length} 个 sampling pair，逐个调用腾讯 walking route，生成 candidate roadNetwork segments。该工具只在 debugRoadNetwork 模式显示，不建议普通游客使用。
+                  </p>
+                  <div style={{ display: 'grid', gap: 3, marginBottom: 8, color: '#58451d', fontSize: 11, lineHeight: 1.45 }}>
+                    <span>pair 总数：{lingshanRoadNetworkSamplingPlan.pairs.length}</span>
+                    <span>guide_route_adjacent：{roadNetworkPairSourceCounts.guide_route_adjacent}</span>
+                    <span>poi_nearby：{roadNetworkPairSourceCounts.poi_nearby}</span>
+                    <span>core_anchor：{roadNetworkPairSourceCounts.core_anchor}</span>
+                    <span>
+                      当前状态：{getRoadNetworkExportStatusLabel(roadNetworkExportProgress.status)}
+                      {' '}
+                      {roadNetworkExportProgress.currentIndex} / {lingshanRoadNetworkSamplingPlan.pairs.length}
+                    </span>
+                    <span>成功：{roadNetworkExportProgress.successCount}</span>
+                    <span>失败 / 跳过：{roadNetworkExportProgress.skippedCount}</span>
+                    {roadNetworkExportProgress.currentPair ? (
+                      <span>
+                        当前 pair：{roadNetworkExportProgress.currentPair.id}（{roadNetworkExportProgress.currentPair.fromPoiId} -&gt; {roadNetworkExportProgress.currentPair.toPoiId}）
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleStartRoadNetworkExport}
+                      disabled={roadNetworkExportProgress.status === 'sampling'}
+                      style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status !== 'sampling')}
+                    >
+                      开始采样并下载 JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopRoadNetworkExport}
+                      disabled={roadNetworkExportProgress.status !== 'sampling'}
+                      style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status === 'sampling')}
+                    >
+                      停止采样
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyRoadNetworkExportSummary}
+                      style={getRoadNetworkExportButtonStyle(true)}
+                    >
+                      复制采样摘要
+                    </button>
+                  </div>
+                  <p style={{ margin: '8px 0 0', color: '#7a4b08', fontSize: 11, lineHeight: 1.55 }}>
+                    导出结果为 candidate，不代表官方道路网。采样会调用腾讯 walking route，可能受 API Key、网络和额度影响。生成的 JSON 需要人工复核后才能进入后续 roadNetwork 数据。
+                  </p>
+                  {roadNetworkExportMessage ? (
+                    <span style={{ display: 'block', marginTop: 6, color: '#7a4b08', fontSize: 11, fontWeight: 800 }}>
+                      {roadNetworkExportMessage}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -1452,6 +1686,97 @@ function getRouteExportButtonStyle(enabled: boolean): CSSProperties {
     fontSize: 12,
     fontWeight: 800
   }
+}
+
+function getRoadNetworkExportButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 32,
+    border: '1px solid rgba(154, 90, 8, 0.28)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#7a4b08' : '#9a8d6b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getRoadNetworkExportStatusLabel(status: RoadNetworkExportStatus) {
+  switch (status) {
+    case 'sampling':
+      return '采样中'
+    case 'completed':
+      return '已完成'
+    case 'stopped':
+      return '已停止'
+    default:
+      return '未开始'
+  }
+}
+
+function getRoadSamplingPairSourceCounts() {
+  return lingshanRoadNetworkSamplingPlan.pairs.reduce<Record<RoadSamplingPairSource, number>>(
+    (counts, pair) => ({
+      ...counts,
+      [pair.source]: counts[pair.source] + 1
+    }),
+    {
+      guide_route_adjacent: 0,
+      poi_nearby: 0,
+      core_anchor: 0
+    }
+  )
+}
+
+function getRoadSamplingPoiLocation(poiId: string): LatLngPoint | null {
+  const lingshanPoi = lingshanPois.find((poi) => poi.id === poiId)
+
+  if (lingshanPoi) {
+    return lingshanPoi.navLocation || lingshanPoi.displayLocation
+  }
+
+  const guideSpot = guideSpots.find((spot) => spot.id === poiId)
+
+  if (!guideSpot) {
+    return null
+  }
+
+  return {
+    lat: guideSpot.lat,
+    lng: guideSpot.lng
+  }
+}
+
+function waitForRoadNetworkExportDelay(durationMs: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, durationMs)
+  })
+}
+
+function buildRoadNetworkExportSummary(options: {
+  progress: RoadNetworkExportProgress
+  segments: RoadNetworkExportSegment[]
+  skipped: RoadNetworkExportSkippedPair[]
+}) {
+  const counts = getRoadSamplingPairSourceCounts()
+
+  return [
+    '灵山 roadNetwork 采样摘要',
+    `状态：${getRoadNetworkExportStatusLabel(options.progress.status)}`,
+    `总 pair：${lingshanRoadNetworkSamplingPlan.pairs.length}`,
+    `guide_route_adjacent：${counts.guide_route_adjacent}`,
+    `poi_nearby：${counts.poi_nearby}`,
+    `core_anchor：${counts.core_anchor}`,
+    `已处理：${options.progress.currentIndex}`,
+    `成功 segment：${options.segments.length}`,
+    `失败 / 跳过：${options.skipped.length}`,
+    options.progress.currentPair
+      ? `当前 pair：${options.progress.currentPair.id} ${options.progress.currentPair.fromPoiId} -> ${options.progress.currentPair.toPoiId}`
+      : '当前 pair：-',
+    '导出 JSON：lingshan-road-network-candidates.json',
+    '说明：导出结果为 candidate，不代表 official / verified road network。'
+  ].join('\n')
 }
 
 function getRouteSourceLabel(routeSource: RouteSource) {
