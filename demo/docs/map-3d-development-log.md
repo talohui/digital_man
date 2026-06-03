@@ -5372,3 +5372,99 @@ transform: {
 - 本阶段没有修改腾讯地图路线规划逻辑。
 - 本阶段只是修复 `/scenic-3d-map` 的模型 transform 应用。
 - 本阶段保留首个灵山大佛低模 GLB 本地模型接入。
+
+## 阶段五十三：3D 道路网络生成与导航绑定方案
+
+### 日期
+
+2026-06-03
+
+### 本次目标
+
+生成灵山胜境 3D 道路网络生成与导航绑定方案，明确后续如何围绕现有 19 个 POI、`guideRoutes` 相邻站点、近邻 POI 和核心锚点，通过腾讯 walking route 批量采样形成候选道路底网，并让该道路网服务 3D 道路视觉、定位吸附、路线进度、偏航判断和自动重规划后的 3D 路线显示。
+
+### 本次约束
+
+- 只新增 / 更新 Markdown 文档。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `Scenic3DMapScene.tsx`。
+- 不修改 `routePlanning.ts`。
+- 不修改 `routeGeometry` 数据。
+- 不修改 POI 坐标。
+- 不调用腾讯 API。
+- 不生成道路网数据文件。
+- 不新增模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `docs/lingshan-3d-road-network-generation-plan.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么当前 routeGeometry 不够
+
+当前 `routeGeometry` 只有三条主题路线：`historical_3d_scene`、`natural_3d_scene` 和 `family_3d_scene`。它们适合作为导览主线候选路径，但只覆盖主题路线主干，不覆盖所有可走道路。用户偏离路线后缺少局部道路结构，重规划结果也难以和已有道路底网融合，因此不足以支撑 3D 地图内的完整导航吸附和偏航恢复。
+
+### 为什么使用腾讯 walking route 批量采样
+
+腾讯 walking route 可以根据真实经纬度返回步行 path。围绕 19 个 POI、`guideRoutes` 相邻站点和近邻 POI 批量采样，可以先形成比人工随意描线更接近真实地图服务的候选道路网络。该方式不从腾讯底图提取矢量道路，只保存 walking route 返回的候选 path。
+
+### 为什么第一版不人工描线
+
+人工描线容易受主观判断影响，也难以覆盖后续定位吸附、偏航判断和重规划融合所需的路径结构。第一版先用腾讯 walking route 采样建立候选底网，再做人工复核和局部修正，更适合作为可迭代的数据路线。
+
+### roadNetwork 数据结构设计
+
+方案文档建议后续新增 `src/data/lingshanRoadNetwork.ts`，包含：
+
+- `RoadNetworkNode`：POI 或人工控制点。
+- `RoadNetworkSegment`：由腾讯 walking route 返回的 segment path。
+- `LingshanRoadNetwork`：包含版本、nodes 和 segments。
+
+源数据保持经纬度，运行时由 `/scenic-3d-map` 使用 `geoToScenePosition` 投影到 3D，避免把 3D 坐标作为道路网络权威数据。
+
+### candidate / verified 状态说明
+
+第一版 segments 初始状态为 `candidate`，表示来自腾讯 walking route 批量采样但尚未人工验证。人工复核后可升级为 `verified`，人工修正后的路径可标记为 `corrected`。`candidate` 不能说成官方道路或已验证路线。
+
+### 与 /scenic-3d-map 的关系
+
+后续 `/scenic-3d-map` 可读取 roadNetwork segments，将 path 投影到 3D 中显示为道路底网，并用于用户位置吸附、路线进度、偏航判断和临时 reroute path 显示。当前路线仍可用金线高亮。
+
+### 与 /map 的关系
+
+`/map` 仍作为真实地图和导航兜底页面。`/map` 与 `/scenic-3d-map` 应共享 `guideRoute`、`sceneRoute`、`navLocation`、`roadNetwork` 和 reroute path。腾讯 walking route 仍通过现有 `routePlanning.ts` 或后续封装调用，不复制腾讯底图矢量数据。
+
+### 为什么本阶段不写代码
+
+本阶段需要先明确采样范围、数据结构、状态语义、3D 投影关系和导航绑定流程。如果直接写采样工具或道路网数据，容易在未确定边界时生成难以复核的 candidate 数据。本阶段只做方案，为后续阶段五十四到五十八拆分实现。
+
+### 下一步建议
+
+- 阶段五十四：roadNetwork 采样工具设计，只生成 POI pair / segment 计划，不调用 API。
+- 阶段五十五：腾讯 walking 批量采样，导出 candidate segments。
+- 阶段五十六：`/scenic-3d-map` 接入 3D 道路底网。
+- 阶段五十七：3D 定位吸附与偏航判断。
+- 阶段五十八：3D 自动重规划到下一站。
+
+### 验证方式
+
+- 检查 `docs/lingshan-3d-road-network-generation-plan.md` 是否生成。
+- 检查文档是否包含 routeGeometry 不足、腾讯 walking 批量采样、roadNetwork 数据结构、candidate / verified 状态、3D 坐标投影关系、3D 导航逻辑和后续阶段建议。
+- 运行 `git status`，确认只修改允许的 Markdown 文档。
+
+### npm run build 结果
+
+本阶段只修改 Markdown 文档，不涉及功能代码，不需要运行 `npm run build`。
+
+### 明确记录
+
+- 本阶段没有修改功能代码。
+- 本阶段没有调用腾讯 API。
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `routeGeometry`。
+- 本阶段只是明确后续 3D 导航道路网络的生成方案。
