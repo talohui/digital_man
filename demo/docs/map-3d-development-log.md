@@ -5468,3 +5468,99 @@ transform: {
 - 本阶段没有修改 `/scenic-3d-map`。
 - 本阶段没有修改 `routeGeometry`。
 - 本阶段只是明确后续 3D 导航道路网络的生成方案。
+
+## 阶段五十四：3D 道路网络采样计划生成
+
+### 日期
+
+2026-06-03
+
+### 本次目标
+
+新增 3D 道路网络腾讯 walking route 采样计划数据，围绕现有 19 个 POI、3 条 `guideRoutes`、POI 近邻关系和核心锚点生成后续需要请求腾讯 walking route 的 POI pair 清单。本阶段只生成采样计划，不包含真实 walking path。
+
+### 本次约束
+
+- 不调用腾讯 API。
+- 不修改 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `Scenic3DMapScene.tsx`。
+- 不修改 `routePlanning.ts`。
+- 不修改 `routeGeometry` 数据。
+- 不修改 POI 坐标。
+- 不新增模型文件。
+- 不修改数字人、聊天、语音、RAG、Fay、Live2D 相关模块。
+- 不读取、不输出、不修改 API Key、`.env` 或任何敏感配置。
+
+### 修改文件清单
+
+- `src/data/lingshanRoadNetworkSamplingPlan.ts`
+- `docs/map-3d-development-log.md`
+
+### 为什么本阶段只生成采样计划、不调用腾讯 API
+
+道路网络采样需要先明确哪些 POI pair 应该请求 walking route，避免下一阶段重复调用、漏采样或在未确定边界时消耗腾讯 API 调用额度。本阶段只生成 pair 计划，不读取 API Key，不请求腾讯服务，不生成真实道路 path。
+
+### 采样 pair 来源
+
+- `guide_route_adjacent`：从 3 条 `guideRoutes` 的相邻站点生成，优先级 `high`。
+- `poi_nearby`：从 19 个 `guideSpots` 的经纬度近邻关系生成，优先级 `medium`。
+- `core_anchor`：从南门、胜境广场、九龙灌浴、灵山大佛、梵宫、五印坛城、出口等核心锚点补充生成，优先级 `medium` 或 `low`。
+
+### nearbyThresholdMeters 设置
+
+`nearbyThresholdMeters` 设置为 `350`。距离小于等于 350 米的 POI 对会进入 `poi_nearby` 候选采样范围。核心锚点补充采样使用 500 米作为内部筛选上限。
+
+### pair 去重策略
+
+同一个无向 pair 只保留一次，避免下一阶段重复调用腾讯 walking route。如果同一 pair 同时被多个来源命中，保留优先级更高的来源：
+
+1. `guide_route_adjacent`
+2. `poi_nearby`
+3. `core_anchor`
+
+本次生成的采样计划共有 76 个 pair：
+
+- `guide_route_adjacent`：24 个。
+- `poi_nearby`：32 个。
+- `core_anchor`：20 个。
+
+### candidate / verified 边界说明
+
+本阶段的 pair 只是采样计划，不包含真实道路几何，也不代表官方道路。下一阶段腾讯 walking route 返回的 segment 初始也只能标记为 `candidate`，需要人工复核和现场验证后才能升级为 `verified` 或 `corrected`。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。后续阶段可基于该采样计划调用腾讯 walking route 生成 candidate roadNetwork segments，再投影到 3D 地图中作为道路底网和导航吸附数据。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`。真实地图页仍保持现有腾讯地图增强模式、定位、路线进度、偏航提示和重规划占位逻辑。
+
+### 对导航功能的影响
+
+本阶段没有修改导航功能，只为后续 3D 道路网络采样建立 pair 清单。后续生成 roadNetwork segments 后，才能进一步服务 3D 定位吸附、偏航判断和自动重规划显示。
+
+### 验证方式
+
+- 运行 `npm run build`，验证新增 TypeScript 数据文件通过类型检查和构建。
+- 临时编译采样计划到 `/private/tmp` 后统计 pair 数量，确认总数和各来源数量。
+- 运行 `git status`，确认只暂存本阶段允许文件。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段五十五基于 `lingshanRoadNetworkSamplingPlan` 进行腾讯 walking route 批量采样，生成 roadNetwork candidate segments，并记录每段的 `usedFallback`、`fallbackReason`、pointCount、distanceMeters、durationMinutes 和 status。
+
+### 明确记录
+
+- 本阶段没有调用腾讯 API。
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `routeGeometry`。
+- 本阶段没有修改 POI 坐标。
+- 本阶段只是为后续道路网络采样建立 pair 计划。
