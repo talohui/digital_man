@@ -5860,3 +5860,84 @@ debug 工具显示：
 - 本阶段没有修改腾讯地图路线规划逻辑。
 - 本阶段只是修复 `/scenic-3d-map` 的模型 transform 应用。
 - 本阶段保留首个灵山大佛低模 GLB 本地模型接入。
+
+## 阶段五十六：3D 地图接入 candidate roadNetwork 道路底网
+
+2026-06-04
+
+### 本次目标
+
+让 `/scenic-3d-map` 读取 `src/data/lingshanRoadNetwork.ts` 中的 candidate roadNetwork，并将 76 段候选道路 segment 投影为 3D 道路底网，增强 3D 景区地图的道路空间表达。
+
+### 本次约束
+
+- 只修改 `/scenic-3d-map` 的 3D 道路底网显示、页面说明和开发记录。
+- 不修改 `/map`。
+- 不修改 `GuideMapPage.tsx`。
+- 不修改 `routePlanning.ts`。
+- 不修改腾讯 walking route 算法。
+- 不修改 roadNetwork 数据内容。
+- 不修改 routeGeometry 数据内容。
+- 不修改 POI 坐标。
+- 不调用腾讯 API。
+
+### 修改文件
+
+- `src/components/scenic3d/Scenic3DMapScene.tsx`
+- `src/pages/Scenic3DMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### roadNetwork 数据概况
+
+- nodes：19。
+- segments：76。
+- skipped：0。
+- status：全部为 `candidate`。
+- `duplicate_points_removed`：75 段。
+- `very_short`：1 段。
+- `short_path`：1 段。
+- 没有 `verified` segment。
+
+### 3D 投影方式
+
+`Scenic3DMapScene.tsx` 读取 `lingshanRoadNetwork.segments`，对每个 segment 的 `path` 使用 `geoToScenePosition(point, { center: scenicCenter })` 投影到 3D 坐标。roadNetwork 源数据仍保持经纬度，3D 坐标只作为运行时渲染结果。
+
+### 视觉层级
+
+- roadNetwork candidate 底网：最淡、细线、低透明度，用浅灰绿 / 青灰色表达。
+- routeGeometry candidate 层：保留原有三条腾讯 walking routeGeometry 的中等淡色道路网络层。
+- 当前路线高亮层：继续使用金色多层线条，保持最高视觉优先级。
+
+`very_short` 或 `short_path` segment 没有删除，仍以更低透明度绘制，方便后续人工复核。
+
+### candidate / verified 边界说明
+
+roadNetwork 来自腾讯 walking route 批量采样，是候选道路底网，不代表官方景区道路，也不是 verified roadNetwork。页面说明中明确 candidate 不等于 verified，不能对游客宣称为精确道路网。
+
+### 对 /scenic-3d-map 的影响
+
+`/scenic-3d-map` 现在显示更完整的候选道路底网。现有路线切换、当前路线金线、POI 节点、标签、水体意象层、placeholder / GLB 模型、跳转 `/map?poi=xxx` 和 `/map?sceneRoute=xxx` 保持不变。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`。
+
+### 对导航功能的影响
+
+本阶段只做 3D 道路底网视觉接入，没有做定位吸附、偏航判断或自动重规划。后续阶段可基于 roadNetwork 继续做 3D 定位吸附和导航逻辑。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段五十七可做 roadNetwork 质量审计或 3D 定位吸附，将当前 candidate 道路底网逐步用于路线吸附、距离路线、下一站和偏航判断。
+
+### 明确记录
+
+- 本阶段没有调用腾讯 API。
+- 本阶段没有修改 roadNetwork 数据内容。
+- 本阶段没有修改 routeGeometry 数据。
+- 本阶段没有修改 `/map`。
+- 本阶段没有做定位吸附、偏航或重规划，只做道路底网视觉接入。

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 import Scenic3DMapScene from '../components/scenic3d/Scenic3DMapScene'
 import { lingshanPois, lingshanSceneRoutes } from '../data/lingshanMapData'
+import { lingshanRoadNetwork } from '../data/lingshanRoadNetwork'
 import { getLingshanRouteGeometryBySceneRouteId } from '../data/lingshanRouteGeometries'
 
 const fallbackRoute = {
@@ -45,6 +46,7 @@ function Scenic3DMapPage() {
     () => getLingshanRouteGeometryBySceneRouteId(currentRoute.id),
     [currentRoute.id]
   )
+  const roadNetworkSegmentCount = lingshanRoadNetwork.segments.length
   const scenePois = useMemo(
     () =>
       lingshanPois
@@ -278,7 +280,17 @@ function Scenic3DMapPage() {
               lineHeight: 1.5,
             }}
           >
-            底层淡色线为候选游览道路网络，来自腾讯 walking 路线导出，仍需人工复核。
+            3D 道路底网已接入 candidate roadNetwork，来源于腾讯 walking route 批量采样的 {roadNetworkSegmentCount} 段候选 segment，用于增强道路视觉和后续导航吸附基础。
+          </p>
+          <p
+            style={{
+              margin: '6px 0 0',
+              color: '#607166',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            candidate 不代表 verified，也不代表官方景区道路；当前路线仍以 routeGeometry / guideRoute 金线高亮展示。
           </p>
           <p
             style={{

@@ -5,6 +5,7 @@ import { Vector3 } from 'three'
 
 import { scenicCenter } from '../../data/guideData'
 import { lingshanPois } from '../../data/lingshanMapData'
+import { lingshanRoadNetwork } from '../../data/lingshanRoadNetwork'
 import { lingshanRouteGeometries } from '../../data/lingshanRouteGeometries'
 import { lingshanAssetMap } from '../../data/scenic3d/lingshanAssetMap'
 import { geoToScenePosition } from '../../lib/scenic3d/geoToScene'
@@ -205,7 +206,20 @@ function buildRouteGeometryPoints(routeGeometryPath: Array<{ lat: number; lng: n
   })
 }
 
-function buildRoadNetworkLines() {
+function buildCandidateRoadNetworkLines() {
+  return lingshanRoadNetwork.segments
+    .map((segment) => ({
+      id: segment.id,
+      subtle: Boolean(segment.qualityFlags?.some((flag) => flag === 'very_short' || flag === 'short_path')),
+      points: segment.path.map((point) => {
+        const position = geoToScenePosition(point, { center: scenicCenter })
+        return new Vector3(position.x, 0.082, position.z)
+      }),
+    }))
+    .filter((line) => line.points.length >= 2)
+}
+
+function buildRouteGeometryNetworkLines() {
   return lingshanRouteGeometries
     .map((geometry) => ({
       id: geometry.id,
@@ -230,7 +244,8 @@ function SceneContent({
   const routeSequence = useMemo(() => getRouteSequence(routePoiSequence, layoutMode), [layoutMode, routePoiSequence])
   const routePoiSet = useMemo(() => new Set(routeSequence), [routeSequence])
   const routeGeometryPoints = useMemo(() => buildRouteGeometryPoints(routeGeometryPath), [routeGeometryPath])
-  const roadNetworkLines = useMemo(() => buildRoadNetworkLines(), [])
+  const candidateRoadNetworkLines = useMemo(() => buildCandidateRoadNetworkLines(), [])
+  const routeGeometryNetworkLines = useMemo(() => buildRouteGeometryNetworkLines(), [])
   const routePoints = useMemo(
     () => routeGeometryPoints ?? buildRoutePoints(routeSequence, layoutMode),
     [layoutMode, routeGeometryPoints, routeSequence]
@@ -288,11 +303,23 @@ function SceneContent({
         </mesh>
       ))}
 
-      {roadNetworkLines.map((line) => (
+      {candidateRoadNetworkLines.map((line) => (
+        <Line
+          key={`candidate-road-${line.id}`}
+          points={line.points}
+          color="#8da79f"
+          lineWidth={line.subtle ? 0.55 : 0.82}
+          transparent
+          opacity={line.subtle ? 0.12 : 0.26}
+          dashed={false}
+        />
+      ))}
+
+      {routeGeometryNetworkLines.map((line) => (
         <Line key={line.id} points={line.points} color="#9f9a83" lineWidth={1.3} transparent opacity={0.42} dashed={false} />
       ))}
 
-      {roadNetworkLines.map((line) => (
+      {routeGeometryNetworkLines.map((line) => (
         <Line key={`${line.id}-wash`} points={line.points} color="#efe7cf" lineWidth={3.2} transparent opacity={0.18} dashed={false} />
       ))}
 
