@@ -206,8 +206,9 @@ function GuideMapPage() {
   const [showSceneRouteDebugLine, setShowSceneRouteDebugLine] = useState(isSceneRouteDebugEnabled)
   const [showRouteDiagnosticsPanel, setShowRouteDiagnosticsPanel] = useState(isMapDebugMode)
   const [showEnhancedMapPanelBody, setShowEnhancedMapPanelBody] = useState(true)
-  const [showRoadNetworkExportDetails, setShowRoadNetworkExportDetails] = useState(false)
+  const [showRoadNetworkExportDetails, setShowRoadNetworkExportDetails] = useState(true)
   const shouldShowSceneRouteDebugLine = isSceneRouteDebugEnabled && showSceneRouteDebugLine
+  const roadNetworkDebugPanelTop = isMapDebugMode && showRouteDiagnosticsPanel ? 340 : 92
   const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
   const queryPoiRoute = queryPoiSpot
     ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
@@ -1323,106 +1324,118 @@ function GuideMapPage() {
                 </p>
               ) : null}
 
-              {isRoadNetworkDebugMode ? (
-                <div
-                  style={{
-                    marginTop: 10,
-                    padding: 10,
-                    border: '1px solid rgba(154, 90, 8, 0.2)',
-                    borderRadius: 12,
-                    background: 'rgba(255, 251, 235, 0.74)'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                    <div>
-                      <strong style={{ display: 'block', marginBottom: 4, color: '#7a4b08', fontSize: 13 }}>
-                        道路网络采样导出
-                      </strong>
-                      <span style={{ color: '#665326', fontSize: 11, lineHeight: 1.45 }}>
-                        pair 总数：{lingshanRoadNetworkSamplingPlan.pairs.length}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowRoadNetworkExportDetails((current) => !current)}
-                      style={{
-                        minWidth: 48,
-                        minHeight: 26,
-                        border: '1px solid rgba(154, 90, 8, 0.22)',
-                        borderRadius: 999,
-                        background: 'rgba(255, 255, 255, 0.66)',
-                        color: '#7a4b08',
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        fontWeight: 800
-                      }}
-                    >
-                      {showRoadNetworkExportDetails ? '收起' : '展开'}
-                    </button>
-                  </div>
-
-                  {showRoadNetworkExportDetails ? (
-                    <>
-                      <p style={{ margin: '8px 0', color: '#665326', fontSize: 11, lineHeight: 1.55 }}>
-                        基于 {lingshanRoadNetworkSamplingPlan.pairs.length} 个 sampling pair，逐个调用腾讯 walking route，生成 candidate roadNetwork segments。该工具只在 debugRoadNetwork 模式显示，不建议普通游客使用。
-                      </p>
-                      <div style={{ display: 'grid', gap: 3, marginBottom: 8, color: '#58451d', fontSize: 11, lineHeight: 1.45 }}>
-                        <span>guide_route_adjacent：{roadNetworkPairSourceCounts.guide_route_adjacent}</span>
-                        <span>poi_nearby：{roadNetworkPairSourceCounts.poi_nearby}</span>
-                        <span>core_anchor：{roadNetworkPairSourceCounts.core_anchor}</span>
-                        <span>
-                          当前状态：{getRoadNetworkExportStatusLabel(roadNetworkExportProgress.status)}
-                          {' '}
-                          {roadNetworkExportProgress.currentIndex} / {lingshanRoadNetworkSamplingPlan.pairs.length}
-                        </span>
-                        <span>成功：{roadNetworkExportProgress.successCount}</span>
-                        <span>失败 / 跳过：{roadNetworkExportProgress.skippedCount}</span>
-                        {roadNetworkExportProgress.currentPair ? (
-                          <span>
-                            当前 pair：{roadNetworkExportProgress.currentPair.id}（{roadNetworkExportProgress.currentPair.fromPoiId} -&gt; {roadNetworkExportProgress.currentPair.toPoiId}）
-                          </span>
-                        ) : null}
-                      </div>
-                      <div style={{ display: 'grid', gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={handleStartRoadNetworkExport}
-                          disabled={roadNetworkExportProgress.status === 'sampling'}
-                          style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status !== 'sampling')}
-                        >
-                          开始采样并下载 JSON
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleStopRoadNetworkExport}
-                          disabled={roadNetworkExportProgress.status !== 'sampling'}
-                          style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status === 'sampling')}
-                        >
-                          停止采样
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCopyRoadNetworkExportSummary}
-                          style={getRoadNetworkExportButtonStyle(true)}
-                        >
-                          复制采样摘要
-                        </button>
-                      </div>
-                      <p style={{ margin: '8px 0 0', color: '#7a4b08', fontSize: 11, lineHeight: 1.55 }}>
-                        导出结果为 candidate，不代表官方道路网。采样会调用腾讯 walking route，可能受 API Key、网络和额度影响。生成的 JSON 需要人工复核后才能进入后续 roadNetwork 数据。
-                      </p>
-                      {roadNetworkExportMessage ? (
-                        <span style={{ display: 'block', marginTop: 6, color: '#7a4b08', fontSize: 11, fontWeight: 800 }}>
-                          {roadNetworkExportMessage}
-                        </span>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           ) : null}
         </section>
+
+        {isRoadNetworkDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              top: roadNetworkDebugPanelTop,
+              left: 16,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: `calc(100vh - ${roadNetworkDebugPanelTop + 24}px)`,
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#58451d',
+              pointerEvents: 'auto',
+              zIndex: 8,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div>
+                <p style={{ margin: '0 0 4px', color: '#9a5a08', fontSize: 12, fontWeight: 800 }}>
+                  debugRoadNetwork
+                </p>
+                <strong style={{ display: 'block', marginBottom: 4, color: '#7a4b08', fontSize: 15 }}>
+                  道路网络采样导出
+                </strong>
+                <span style={{ color: '#665326', fontSize: 11, lineHeight: 1.45 }}>
+                  pair 总数：{lingshanRoadNetworkSamplingPlan.pairs.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoadNetworkExportDetails((current) => !current)}
+                style={{
+                  minWidth: 48,
+                  minHeight: 26,
+                  border: '1px solid rgba(154, 90, 8, 0.22)',
+                  borderRadius: 999,
+                  background: 'rgba(255, 255, 255, 0.66)',
+                  color: '#7a4b08',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 800
+                }}
+              >
+                {showRoadNetworkExportDetails ? '收起' : '展开'}
+              </button>
+            </div>
+
+            {showRoadNetworkExportDetails ? (
+              <>
+                <p style={{ margin: '8px 0', color: '#665326', fontSize: 11, lineHeight: 1.55 }}>
+                  基于 {lingshanRoadNetworkSamplingPlan.pairs.length} 个 sampling pair，逐个调用腾讯 walking route，生成 candidate roadNetwork segments。该工具只在 debugRoadNetwork 模式显示，不建议普通游客使用。
+                </p>
+                <div style={{ display: 'grid', gap: 3, marginBottom: 8, color: '#58451d', fontSize: 11, lineHeight: 1.45 }}>
+                  <span>guide_route_adjacent：{roadNetworkPairSourceCounts.guide_route_adjacent}</span>
+                  <span>poi_nearby：{roadNetworkPairSourceCounts.poi_nearby}</span>
+                  <span>core_anchor：{roadNetworkPairSourceCounts.core_anchor}</span>
+                  <span>
+                    当前状态：{getRoadNetworkExportStatusLabel(roadNetworkExportProgress.status)}
+                    {' '}
+                    {roadNetworkExportProgress.currentIndex} / {lingshanRoadNetworkSamplingPlan.pairs.length}
+                  </span>
+                  <span>成功：{roadNetworkExportProgress.successCount}</span>
+                  <span>失败 / 跳过：{roadNetworkExportProgress.skippedCount}</span>
+                  {roadNetworkExportProgress.currentPair ? (
+                    <span>
+                      当前 pair：{roadNetworkExportProgress.currentPair.id}（{roadNetworkExportProgress.currentPair.fromPoiId} -&gt; {roadNetworkExportProgress.currentPair.toPoiId}）
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleStartRoadNetworkExport}
+                    disabled={roadNetworkExportProgress.status === 'sampling'}
+                    style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status !== 'sampling')}
+                  >
+                    开始采样并下载 JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStopRoadNetworkExport}
+                    disabled={roadNetworkExportProgress.status !== 'sampling'}
+                    style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status === 'sampling')}
+                  >
+                    停止采样
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyRoadNetworkExportSummary}
+                    style={getRoadNetworkExportButtonStyle(true)}
+                  >
+                    复制采样摘要
+                  </button>
+                </div>
+                <p style={{ margin: '8px 0 0', color: '#7a4b08', fontSize: 11, lineHeight: 1.55 }}>
+                  导出结果为 candidate，不代表官方道路网。采样会调用腾讯 walking route，可能受 API Key、网络和额度影响。生成的 JSON 需要人工复核后才能进入后续 roadNetwork 数据。
+                </p>
+                {roadNetworkExportMessage ? (
+                  <span style={{ display: 'block', marginTop: 6, color: '#7a4b08', fontSize: 11, fontWeight: 800 }}>
+                    {roadNetworkExportMessage}
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {isMapDebugMode && showRouteDiagnosticsPanel ? (
           <div

@@ -5733,3 +5733,48 @@ debug 工具显示：
 ### npm run build 结果
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+## 阶段五十五 A 补充 2：道路网络采样工具移至左侧独立面板
+
+2026-06-04
+
+### 问题现象
+
+`/map?debugRoadNetwork=1` 中道路网络采样导出工具原本放在右侧增强模式卡片内。右侧同时承载真实地图增强模式、图层开关、定位、路线状态等内容，右下角还有景点信息卡，即使加入滚动和折叠后，roadNetwork 工具仍然容易与右侧信息区域冲突。
+
+### 修复目标
+
+将 `debugRoadNetwork` 工具移动到地图左侧独立浮动面板，让道路网络采样导出入口更清晰，并让右侧增强模式卡片回到游客 / 导览信息承载职责。
+
+### 修改文件
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 修复方式
+
+- 新增左侧独立 `debugRoadNetwork` 浮动面板。
+- 左侧面板使用独立宽度、`maxHeight` 和 `overflowY: auto`，便于查看较长采样状态。
+- 面板默认展开，同时保留“收起 / 展开”按钮。
+- 从右侧增强模式卡片中移除道路网络采样导出工具。
+- 同时开启 `debugSceneRoute` 诊断面板时，roadNetwork 面板会下移，减少左侧调试面板之间的冲突。
+
+### 不修改采样逻辑
+
+本阶段只移动 UI 位置，不修改 roadNetwork 采样循环、pair 查询、`buildWalkingRoute` 调用、停止采样、复制摘要或下载 JSON 逻辑。
+
+### 不调用腾讯 API
+
+本阶段没有调用腾讯 API。浏览器仍然只有在用户进入 `debugRoadNetwork` 页面并点击“开始采样并下载 JSON”后，才会触发腾讯 walking route 请求。
+
+### 对 /map 的影响
+
+`/map?debugRoadNetwork=1` 会在左侧显示独立道路网络采样面板。普通 `/map`、`/map?poi=xxx`、`/map?sceneRoute=xxx`、`debugSceneRoute=1`、图层开关、定位、路线进度、偏航状态和路线 path JSON 复制 / 下载功能保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
