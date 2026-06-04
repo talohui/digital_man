@@ -6169,3 +6169,69 @@ scale 调试从连续滑块改为离散选项：`50`、`100`、`500`、`1000`、
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有修改定位、偏航或重规划逻辑。
 - 本阶段没有新增大型模型文件。
+
+## 阶段五十七补充 2：GLTF 模型实时调试与多视角预设
+
+2026-06-04
+
+### 问题现象
+
+`/map?debugGltfModel=1` 已能显示 GLB 模型，但调节 `scale` 时视觉反馈不明显；同时调试面板只有一个固定 3D 视角，不方便从不同方向观察腾讯地图 Web GLTF 覆盖物。
+
+### 原因分析
+
+此前调试实现主要依赖参数变化后重建 `GLTFModel`，没有优先使用腾讯官方文档中的运行时更新方法。因此 `scale`、`height`、`rotation` 的调试反馈不够直接，也缺少运行时 getter 读数辅助判断。
+
+### 修复方式
+
+`debugGltfModel` 调试逻辑现在优先复用已创建的 `GLTFModel` 实例：
+
+- `scale` 变化时优先调用 `model.setScale(scale)`。
+- `rotationZ` 变化时优先调用 `model.setRotation([0, 0, rotationZ])`。
+- `height` 变化时优先调用 `model.setPosition(new TMap.LatLng(lat, lng, height))`。
+- 显示 / 隐藏模型时优先调用 `model.show()` / `model.hide()`。
+- 如果对应方法不存在或调用失败，再 fallback 到重建模型。
+
+调试面板同时显示 `getScale()`、`getRotation()`、`getPosition()` 的运行时读数；如果 getter 不可用则显示不可用。
+
+### 多视角预设
+
+新增 5 个 3D 视角预设：
+
+- 正面近景：`zoom=19.5`、`pitch=65`、`rotation=0`。
+- 左前侧：`zoom=19.5`、`pitch=65`、`rotation=-45`。
+- 右前侧：`zoom=19.5`、`pitch=65`、`rotation=45`。
+- 俯视检查：`zoom=18.5`、`pitch=0`、`rotation=0`。
+- 远景鸟瞰：`zoom=17.5`、`pitch=55`、`rotation=-30`。
+
+视角切换优先调用 `map.easeTo({ center, zoom, pitch, rotation }, { duration: 500 })`，并在方法存在时回退调用 `setCenter`、`setZoom`、`setPitch`、`setRotation`。所有方法调用均做存在性判断和异常保护。
+
+### 默认参数
+
+`debugGltfModel` 默认参数保持：
+
+- `scale=1000`。
+- `height=50`。
+- `rotationZ=0`。
+- 默认目标视角：`zoom=19.5`、`pitch=65`、`rotation=0`。
+
+### 对 /map 的影响
+
+普通 `/map` 不受影响。实时参数更新、多视角预设和运行时读数只在 `debugGltfModel=1` 或 `debugGltfModel=true` 时启用。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map` 行为。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改腾讯 walking route、定位、偏航或重规划逻辑。
+- 本阶段没有新增模型文件。

@@ -103,11 +103,18 @@ const ROAD_NETWORK_EXPORT_DELAY_MS = 650
 const DEBUG_GLTF_MODEL_ID = 'debug_lingshan_buddha_gltf_model'
 const DEBUG_GLTF_MODEL_URL = '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb'
 const DEBUG_GLTF_MODEL_POI_ID = 'giant_buddha'
-const DEBUG_GLTF_TARGET_ZOOM = 19
-const DEBUG_GLTF_TARGET_PITCH = 60
-const DEBUG_GLTF_TARGET_ROTATION = -25
+const DEBUG_GLTF_TARGET_ZOOM = 19.5
+const DEBUG_GLTF_TARGET_PITCH = 65
+const DEBUG_GLTF_TARGET_ROTATION = 0
 const DEBUG_GLTF_RESTORE_ZOOM = 16
 const DEBUG_GLTF_SCALE_OPTIONS = [50, 100, 500, 1000, 3000, 5000]
+const DEBUG_GLTF_VIEW_PRESETS = [
+  { label: '正面近景', zoom: 19.5, pitch: 65, rotation: 0 },
+  { label: '左前侧', zoom: 19.5, pitch: 65, rotation: -45 },
+  { label: '右前侧', zoom: 19.5, pitch: 65, rotation: 45 },
+  { label: '俯视检查', zoom: 18.5, pitch: 0, rotation: 0 },
+  { label: '远景鸟瞰', zoom: 17.5, pitch: 55, rotation: -30 }
+] as const
 const emptyRoadNetworkExportProgress: RoadNetworkExportProgress = {
   status: 'idle',
   currentIndex: 0,
@@ -226,9 +233,18 @@ function GuideMapPage() {
   const [gltfModelScale, setGltfModelScale] = useState(1000)
   const [gltfModelHeight, setGltfModelHeight] = useState(50)
   const [gltfModelRotationZ, setGltfModelRotationZ] = useState(0)
+  const [gltfModelRebuildToken, setGltfModelRebuildToken] = useState(0)
   const [gltfModelDebugMessage, setGltfModelDebugMessage] = useState('')
   const [gltfModelLoadStatus, setGltfModelLoadStatus] = useState('未创建')
   const [gltfModelErrorMessage, setGltfModelErrorMessage] = useState('')
+  const [gltfModelApplyMessage, setGltfModelApplyMessage] = useState('')
+  const [gltfModelRuntimeReadout, setGltfModelRuntimeReadout] = useState('等待模型创建')
+  const [gltfCameraTarget, setGltfCameraTarget] = useState({
+    label: '默认近景',
+    zoom: DEBUG_GLTF_TARGET_ZOOM,
+    pitch: DEBUG_GLTF_TARGET_PITCH,
+    rotation: DEBUG_GLTF_TARGET_ROTATION
+  })
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
@@ -455,29 +471,28 @@ function GuideMapPage() {
 
   useEffect(() => {
     gltfDebugModelRef.current?.setMap?.(null)
+    gltfDebugModelRef.current?.remove?.()
+    gltfDebugModelRef.current?.destroy?.()
     gltfDebugModelRef.current = null
     setGltfModelErrorMessage('')
 
     if (!isGltfModelDebugMode) {
       setGltfModelLoadStatus('未创建')
-      return
-    }
-
-    if (!showGltfDebugModel) {
-      setGltfModelDebugMessage('测试 GLB 模型已隐藏。')
-      setGltfModelLoadStatus('已隐藏')
+      setGltfModelRuntimeReadout('等待模型创建')
       return
     }
 
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
       setGltfModelDebugMessage('地图尚未就绪，暂不能创建 GLTFModel。')
       setGltfModelLoadStatus('等待地图就绪')
+      setGltfModelRuntimeReadout('等待地图就绪')
       return
     }
 
     if (!window.TMap.model || typeof window.TMap.model.GLTFModel !== 'function') {
       setGltfModelDebugMessage('当前 TMap 未加载 model 附加库或 GLTFModel 不可用。')
       setGltfModelLoadStatus('GLTFModel 不可用')
+      setGltfModelRuntimeReadout('GLTFModel 不可用')
       return
     }
 
@@ -486,6 +501,7 @@ function GuideMapPage() {
     if (!anchor) {
       setGltfModelDebugMessage('未找到灵山大佛模型锚点，无法创建 GLTFModel。')
       setGltfModelLoadStatus('锚点缺失')
+      setGltfModelRuntimeReadout('锚点缺失')
       return
     }
 
@@ -503,6 +519,7 @@ function GuideMapPage() {
         `已尝试创建 GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotationZ=${gltfModelRotationZ}。`
       )
       setGltfModelLoadStatus('已创建，等待模型事件')
+      setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfModel))
 
       if (typeof gltfModel.on === 'function') {
         gltfModel.on('loaded', () => {
@@ -522,14 +539,107 @@ function GuideMapPage() {
       gltfDebugModelRef.current = null
       setGltfModelLoadStatus('创建失败')
       setGltfModelErrorMessage(getErrorMessage(error))
+      setGltfModelRuntimeReadout('创建失败')
       setGltfModelDebugMessage(`GLTFModel 创建失败：${getErrorMessage(error)}`)
     }
 
     return () => {
       gltfDebugModelRef.current?.setMap?.(null)
+      gltfDebugModelRef.current?.remove?.()
+      gltfDebugModelRef.current?.destroy?.()
       gltfDebugModelRef.current = null
     }
-  }, [gltfModelHeight, gltfModelRotationZ, gltfModelScale, isGltfModelDebugMode, mapStatus, showGltfDebugModel])
+  }, [gltfModelRebuildToken, isGltfModelDebugMode, mapStatus])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (showGltfDebugModel) {
+      if (typeof gltfDebugModelRef.current.show === 'function') {
+        gltfDebugModelRef.current.show()
+        setGltfModelApplyMessage('模型已 show()。')
+      } else if (typeof gltfDebugModelRef.current.setMap === 'function') {
+        gltfDebugModelRef.current.setMap(mapRef.current)
+        setGltfModelApplyMessage('show() 不可用，已通过 setMap(map) 显示模型。')
+      }
+    } else if (typeof gltfDebugModelRef.current.hide === 'function') {
+      gltfDebugModelRef.current.hide()
+      setGltfModelApplyMessage('模型已 hide()。')
+    } else if (typeof gltfDebugModelRef.current.setMap === 'function') {
+      gltfDebugModelRef.current.setMap(null)
+      setGltfModelApplyMessage('hide() 不可用，已通过 setMap(null) 隐藏模型。')
+    }
+
+    setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+  }, [isGltfModelDebugMode, showGltfDebugModel])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setScale === 'function') {
+      try {
+        gltfDebugModelRef.current.setScale(gltfModelScale)
+        setGltfModelApplyMessage('scale 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setScale 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setScale 不可用，scale 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelScale, isGltfModelDebugMode])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setRotation === 'function') {
+      try {
+        gltfDebugModelRef.current.setRotation([0, 0, gltfModelRotationZ])
+        setGltfModelApplyMessage('rotation 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setRotation 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setRotation 不可用，rotation 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelRotationZ, isGltfModelDebugMode])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current || !window.TMap) {
+      return
+    }
+
+    const anchor = getGltfDebugModelAnchor()
+
+    if (!anchor) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setPosition === 'function') {
+      try {
+        gltfDebugModelRef.current.setPosition(new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight))
+        setGltfModelApplyMessage('height / position 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setPosition 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setPosition 不可用，height 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelHeight, isGltfModelDebugMode])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -953,12 +1063,12 @@ function GuideMapPage() {
     setTencent3DDebugMessage(messages.join(' '))
   }
 
-  const handleEnterGltfDebug3DView = () => {
+  const applyGltfDebugCameraPreset = (preset: (typeof DEBUG_GLTF_VIEW_PRESETS)[number]) => {
     const map = mapRef.current
     const anchor = getGltfDebugModelAnchor()
 
     if (!map || !window.TMap || !anchor) {
-      setGltfModelDebugMessage('地图或灵山大佛锚点尚未就绪，无法进入 3D 视角。')
+      setGltfModelDebugMessage('地图或灵山大佛锚点尚未就绪，无法切换视角。')
       return
     }
 
@@ -972,16 +1082,17 @@ function GuideMapPage() {
 
     const center = new window.TMap.LatLng(anchor.lat, anchor.lng)
     const messages: string[] = []
+    setGltfCameraTarget(preset)
 
     if (typeof map.easeTo === 'function') {
       try {
         map.easeTo({
           center,
-          zoom: DEBUG_GLTF_TARGET_ZOOM,
-          pitch: DEBUG_GLTF_TARGET_PITCH,
-          rotation: DEBUG_GLTF_TARGET_ROTATION
-        })
-        messages.push('已尝试 easeTo 进入 3D 视角。')
+          zoom: preset.zoom,
+          pitch: preset.pitch,
+          rotation: preset.rotation
+        }, { duration: 500 })
+        messages.push(`已尝试 easeTo 切换到${preset.label}。`)
       } catch (error) {
         messages.push(`easeTo 调用失败：${getErrorMessage(error)}`)
       }
@@ -998,8 +1109,8 @@ function GuideMapPage() {
 
     if (typeof map.setZoom === 'function') {
       try {
-        map.setZoom(DEBUG_GLTF_TARGET_ZOOM)
-        messages.push(`已设置 zoom=${DEBUG_GLTF_TARGET_ZOOM}。`)
+        map.setZoom(preset.zoom)
+        messages.push(`已设置 zoom=${preset.zoom}。`)
       } catch (error) {
         messages.push(`setZoom 调用失败：${getErrorMessage(error)}`)
       }
@@ -1007,8 +1118,8 @@ function GuideMapPage() {
 
     if (typeof map.setPitch === 'function') {
       try {
-        map.setPitch(DEBUG_GLTF_TARGET_PITCH)
-        messages.push(`已设置 pitch=${DEBUG_GLTF_TARGET_PITCH}。`)
+        map.setPitch(preset.pitch)
+        messages.push(`已设置 pitch=${preset.pitch}。`)
       } catch (error) {
         messages.push(`setPitch 调用失败：${getErrorMessage(error)}`)
       }
@@ -1018,8 +1129,8 @@ function GuideMapPage() {
 
     if (typeof map.setRotation === 'function') {
       try {
-        map.setRotation(DEBUG_GLTF_TARGET_ROTATION)
-        messages.push(`已设置 rotation=${DEBUG_GLTF_TARGET_ROTATION}。`)
+        map.setRotation(preset.rotation)
+        messages.push(`已设置 rotation=${preset.rotation}。`)
       } catch (error) {
         messages.push(`setRotation 调用失败：${getErrorMessage(error)}`)
       }
@@ -1028,6 +1139,10 @@ function GuideMapPage() {
     }
 
     setGltfModelDebugMessage(messages.join(' '))
+  }
+
+  const handleEnterGltfDebug3DView = () => {
+    applyGltfDebugCameraPreset(DEBUG_GLTF_VIEW_PRESETS[0])
   }
 
   const handleRestoreGltfDebug2DView = () => {
@@ -1040,6 +1155,12 @@ function GuideMapPage() {
 
     const restoreZoom = gltfDebugPreviousZoomRef.current ?? DEBUG_GLTF_RESTORE_ZOOM
     const messages: string[] = []
+    setGltfCameraTarget({
+      label: '恢复 2D',
+      zoom: restoreZoom,
+      pitch: 0,
+      rotation: 0
+    })
 
     if (typeof map.setPitch === 'function') {
       try {
@@ -1889,6 +2010,16 @@ function GuideMapPage() {
               仅在调试模式下尝试创建 <code>TMap.model.GLTFModel</code>，模型锚点为灵山大佛，不影响普通游客页面。
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+              {DEBUG_GLTF_VIEW_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => applyGltfDebugCameraPreset(preset)}
+                  style={getGltfDebugButtonStyle(true)}
+                >
+                  {preset.label}
+                </button>
+              ))}
               <button type="button" onClick={handleEnterGltfDebug3DView} style={getGltfDebugButtonStyle(true)}>
                 进入 3D 视角
               </button>
@@ -1902,9 +2033,11 @@ function GuideMapPage() {
               <span>锚点 POI：{DEBUG_GLTF_MODEL_POI_ID}</span>
               <span>position：{getGltfDebugModelPositionLabel(gltfModelHeight)}</span>
               <span>
-                目标视角：zoom={DEBUG_GLTF_TARGET_ZOOM}，pitch={DEBUG_GLTF_TARGET_PITCH}，rotation={DEBUG_GLTF_TARGET_ROTATION}
+                当前目标：{gltfCameraTarget.label}，zoom={gltfCameraTarget.zoom}，pitch={gltfCameraTarget.pitch}，rotation={gltfCameraTarget.rotation}
               </span>
               <span>model loaded/error 状态：{gltfModelLoadStatus}</span>
+              <span>参数应用：{gltfModelApplyMessage || '等待参数调整'}</span>
+              <span>运行时读数：{gltfModelRuntimeReadout}</span>
               {gltfModelErrorMessage ? <span style={{ color: '#9a3412' }}>model error：{gltfModelErrorMessage}</span> : null}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800 }}>
                 <input
@@ -2230,6 +2363,52 @@ function getGltfDebugModelPositionLabel(height: number) {
   }
 
   return `${anchor.lat.toFixed(6)},${anchor.lng.toFixed(6)}, height=${height}`
+}
+
+function readGltfModelRuntimeReadout(model: any) {
+  if (!model) {
+    return '模型实例不存在'
+  }
+
+  const values: string[] = []
+
+  values.push(`getScale=${readSdkGetterValue(model, 'getScale')}`)
+  values.push(`getRotation=${readSdkGetterValue(model, 'getRotation')}`)
+  values.push(`getPosition=${readSdkGetterValue(model, 'getPosition')}`)
+
+  return values.join('；')
+}
+
+function readSdkGetterValue(target: any, methodName: string) {
+  if (!target || typeof target[methodName] !== 'function') {
+    return '不可用'
+  }
+
+  try {
+    return formatSdkDebugValue(target[methodName]())
+  } catch (error) {
+    return `读取失败：${getErrorMessage(error)}`
+  }
+}
+
+function formatSdkDebugValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return String(value)
+  }
+
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatSdkDebugValue(item)).join(', ')}]`
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {
