@@ -5688,3 +5688,48 @@ debug 工具显示：
 - 本阶段没有修改 POI 坐标。
 - 本阶段没有生成最终 roadNetwork 数据。
 - 本阶段不会自动调用腾讯 API，只有用户在浏览器 debugRoadNetwork 模式点击按钮才会采样。
+
+## 阶段五十五 A 补充：道路网络采样导出工具 UI 防遮挡修正
+
+2026-06-04
+
+### 问题现象
+
+访问 `/map?debugRoadNetwork=1` 时，右侧“道路网络采样导出”工具内容较长，展开后容易与右下角景点信息卡产生视觉遮挡，影响查看采样状态、按钮和说明。
+
+### 修复目标
+
+让道路网络采样导出工具在右侧增强模式卡片中可完整查看，同时保持普通 `/map` 页面不受影响。
+
+### 修改文件
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 修复方式
+
+- 将右侧增强模式卡片高度限制调整为 `calc(100vh - 140px)`。
+- 保持卡片内部滚动，并将内部滚动区域高度调整为 `calc(100vh - 218px)`。
+- 将 `debugRoadNetwork` 工具改为默认折叠，只显示标题、pair 总数和“展开”按钮。
+- 展开后再显示采样状态、来源统计、开始采样、停止采样、复制摘要和安全说明。
+- 保留已有主卡片“收起 / 展开”能力。
+
+### 不修改采样逻辑
+
+本阶段只调整 UI 布局，不修改 roadNetwork 采样循环、pair 查找、`buildWalkingRoute` 调用、停止采样、复制摘要或下载 JSON 逻辑。
+
+### 不调用腾讯 API
+
+本阶段没有调用腾讯 API。`debugRoadNetwork` 工具仍然只有在用户进入 debug 页面并点击“开始采样并下载 JSON”后，才会由浏览器触发腾讯 walking route 请求。
+
+### 对 /map 的影响
+
+`/map?debugRoadNetwork=1` 中道路网络采样导出工具默认折叠，展开后可在右侧卡片内部滚动查看。普通 `/map`、`/map?poi=xxx`、`/map?sceneRoute=xxx`、`debugSceneRoute=1`、图层开关、定位、路线进度、偏航状态和路线 path JSON 复制 / 下载功能保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
