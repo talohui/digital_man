@@ -5941,3 +5941,82 @@ roadNetwork 来自腾讯 walking route 批量采样，是候选道路底网，�
 - 本阶段没有修改 routeGeometry 数据。
 - 本阶段没有修改 `/map`。
 - 本阶段没有做定位吸附、偏航或重规划，只做道路底网视觉接入。
+
+## 阶段五十七 A：腾讯地图 Web 3D 能力最小验证与调研
+
+2026-06-04
+
+### 本次目标
+
+在不重构 `/map` 主线逻辑的前提下，为腾讯地图 JS API GL 增加一个运行时 3D 能力调试入口，用于确认当前 Web 项目中可尝试的地图 3D 视角、三维底图 / 3D 建筑、自定义 WebGL 图层和 Web 模型覆盖物相关能力。
+
+### 本次约束
+
+- 不修改 `/scenic-3d-map`。
+- 不修改 `routePlanning.ts`。
+- 不修改腾讯 walking route 算法。
+- 不调用额外腾讯路线 API。
+- 不新增 GLB / glTF 模型。
+- 不读取、不输出、不修改 API Key、`.env` 或敏感配置。
+- 调试 UI 只在 `debugTencent3D=1` 或 `debugTencent3D=true` 时显示。
+
+### 修改文件
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### debugTencent3D 参数说明
+
+访问 `/map?debugTencent3D=1` 或 `/map?debugTencent3D=true` 时，页面显示“腾讯地图 Web 3D 能力调试”面板。普通 `/map` 页面不显示该面板。
+
+### 调试能力说明
+
+调试面板提供三个按钮：
+
+- 切换 3D 视角：在确认方法存在后尝试调用 `easeTo`、`setPitch`、`setRotation` 和 `setZoom`。
+- 恢复 2D 视角：在确认方法存在后尝试将 pitch / rotation 恢复为 0。
+- 打印当前 TMap 能力：只打印当前 `TMap.Map` 实例方法名和 `window.TMap` 暴露的类名，不打印地图 Key 或配置。
+
+### Web 3D 能力判断方式
+
+本阶段只做运行时最小验证：
+
+- 3D 视角通过当前 `TMap.Map` 实例是否暴露 `setPitch`、`setRotation`、`easeTo`、`setZoom` 等方法判断。
+- 3D 建筑 / 三维底图通过 `window.TMap` 运行时类名中是否存在 building 相关类名做初步探测。
+- Web GLB / glTF 模型覆盖物通过 `window.TMap` 类名中是否存在 model / glTF / GLB 相关类名做初步探测。
+- CustomLayer / WebGLLayer 通过 `window.TMap` 类名中是否存在 custom layer / WebGL layer 相关类名做初步探测。
+
+这些结果是当前浏览器运行时检查结果，不等同官方完整能力矩阵；正式集成仍需核对腾讯地图 JS API GL 官方文档。
+
+### 与 Android GLModelOverlay 的差异
+
+Android GLModelOverlay 仍属于腾讯地图 Android Map SDK 方向，不能直接用于当前 React + Vite Web 页面。本阶段只是确认 Web 端 JS API GL 的运行时能力，Android GLModelOverlay 仍作为后续 Android APK 原生增强方案。
+
+### 对 /map 的影响
+
+`/map` 普通模式、POI 聚焦、sceneRoute 初始切换、debugSceneRoute、debugRoadNetwork、路线导出、定位、路线进度和偏航提示均保持不变。新增面板只在 `debugTencent3D` 查询参数开启时显示。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 对导航功能的影响
+
+本阶段没有修改导航、定位、路线进度、偏航判断或重规划占位逻辑，也没有调用新的腾讯路线接口。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+在浏览器中打开 `/map?debugTencent3D=1`，点击“打印当前 TMap 能力”和“切换 3D 视角”，根据实际运行时结果判断是否继续做 Web 地图 3D 视角增强。若需要 GLB / glTF 与真实底图融合，仍建议将 Android GLModelOverlay 作为 Android 原生后续方案，Web 端优先保持 `/scenic-3d-map` 与 `/map` 双模式。
+
+### 明确记录
+
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `routePlanning.ts`。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有调用额外腾讯路线 API。
+- 本阶段没有新增 GLB / glTF 模型。
+- 本阶段只是增加 `/map` 的腾讯地图 Web 3D 能力调试入口。

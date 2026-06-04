@@ -68,6 +68,23 @@ type RouteDiagnostics = {
   fallbackReason?: string
 }
 type RouteSource = 'unknown' | 'tencent_walking' | 'preset' | 'fallback'
+type Tencent3DCapabilityReport = {
+  generatedAt: string
+  mapMethods: string[]
+  tmapClasses: string[]
+  supports: {
+    setPitch: boolean
+    setRotation: boolean
+    easeTo: boolean
+    setZoom: boolean
+    getPitch: boolean
+    getRotation: boolean
+    buildingClasses: string[]
+    customLayerClasses: string[]
+    webGLLayerClasses: string[]
+    modelOverlayClasses: string[]
+  }
+}
 type LocationMode = 'gps' | 'mock'
 type LocationStatus = 'idle' | 'watching' | 'located' | 'error'
 type RoadNetworkExportStatus = 'idle' | 'sampling' | 'completed' | 'stopped'
@@ -193,13 +210,17 @@ function GuideMapPage() {
   const [roadNetworkExportSegments, setRoadNetworkExportSegments] = useState<RoadNetworkExportSegment[]>([])
   const [roadNetworkExportSkipped, setRoadNetworkExportSkipped] = useState<RoadNetworkExportSkippedPair[]>([])
   const [roadNetworkExportMessage, setRoadNetworkExportMessage] = useState('')
+  const [tencent3DCapabilityReport, setTencent3DCapabilityReport] = useState<Tencent3DCapabilityReport | null>(null)
+  const [tencent3DDebugMessage, setTencent3DDebugMessage] = useState('')
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
   const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
   const queryDebugRoadNetwork = searchParams.get('debugRoadNetwork')?.trim().toLowerCase() ?? ''
+  const queryDebugTencent3D = searchParams.get('debugTencent3D')?.trim().toLowerCase() ?? ''
   const isMapDebugMode = queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true'
   const isRoadNetworkDebugMode = queryDebugRoadNetwork === '1' || queryDebugRoadNetwork === 'true'
+  const isTencent3DDebugMode = queryDebugTencent3D === '1' || queryDebugTencent3D === 'true'
   const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && isMapDebugMode
   const [showPoiMarkers, setShowPoiMarkers] = useState(true)
   const [showCurrentRoute, setShowCurrentRoute] = useState(true)
@@ -733,6 +754,104 @@ function GuideMapPage() {
     if (window.TMap && mapRef.current) {
       mapRef.current.setCenter(new window.TMap.LatLng(location.lat, location.lng))
     }
+  }
+
+  const inspectTencent3DCapabilities = () => {
+    const report = buildTencent3DCapabilityReport(mapRef.current, window.TMap)
+    setTencent3DCapabilityReport(report)
+    setTencent3DDebugMessage('已打印当前 TMap.Map 方法和 TMap 可用类名。')
+    console.log('[debugTencent3D] Tencent Maps Web runtime capabilities', report)
+    return report
+  }
+
+  const handleTryTencent3DView = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      setTencent3DDebugMessage('地图尚未初始化，无法切换 3D 视角。')
+      return
+    }
+
+    const report = inspectTencent3DCapabilities()
+    const messages: string[] = []
+
+    if (report.supports.easeTo && typeof map.easeTo === 'function') {
+      try {
+        map.easeTo({ pitch: 55, rotation: 35, zoom: 17 })
+        messages.push('已尝试调用 easeTo 设置 pitch / rotation / zoom。')
+      } catch (error) {
+        messages.push(`easeTo 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (report.supports.setPitch && typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(55)
+        messages.push('已尝试 setPitch(55)。')
+      } catch (error) {
+        messages.push(`setPitch 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('未发现 setPitch。')
+    }
+
+    if (report.supports.setRotation && typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(35)
+        messages.push('已尝试 setRotation(35)。')
+      } catch (error) {
+        messages.push(`setRotation 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('未发现 setRotation。')
+    }
+
+    if (report.supports.setZoom && typeof map.setZoom === 'function') {
+      try {
+        map.setZoom(17)
+        messages.push('已尝试 setZoom(17)。')
+      } catch (error) {
+        messages.push(`setZoom 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    setTencent3DDebugMessage(messages.join(' '))
+  }
+
+  const handleRestoreTencent2DView = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      setTencent3DDebugMessage('地图尚未初始化，无法恢复 2D 视角。')
+      return
+    }
+
+    const report = inspectTencent3DCapabilities()
+    const messages: string[] = []
+
+    if (report.supports.setPitch && typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(0)
+        messages.push('已尝试 setPitch(0)。')
+      } catch (error) {
+        messages.push(`setPitch(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (report.supports.setRotation && typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(0)
+        messages.push('已尝试 setRotation(0)。')
+      } catch (error) {
+        messages.push(`setRotation(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (!messages.length) {
+      messages.push('未发现可用的 pitch / rotation 恢复方法。')
+    }
+
+    setTencent3DDebugMessage(messages.join(' '))
   }
 
   const [rateOpen, setRateOpen] = useState(false)
@@ -1437,6 +1556,94 @@ function GuideMapPage() {
           </div>
         ) : null}
 
+        {isTencent3DDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              left: isRoadNetworkDebugMode ? 372 : 16,
+              bottom: 24,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 140px)',
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#1f3f46',
+              pointerEvents: 'auto',
+              zIndex: 9,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <p style={{ margin: '0 0 4px', color: '#0f766e', fontSize: 12, fontWeight: 800 }}>
+              debugTencent3D
+            </p>
+            <strong style={{ display: 'block', marginBottom: 6, color: '#164e63', fontSize: 15 }}>
+              腾讯地图 Web 3D 能力调试
+            </strong>
+            <p style={{ margin: '0 0 10px', color: '#42636a', fontSize: 11, lineHeight: 1.55 }}>
+              只检查当前运行时 <code>TMap.Map</code> 和 <code>window.TMap</code> 能力，不读取 Key，不调用路线 API。
+            </p>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <button type="button" onClick={handleTryTencent3DView} style={getTencent3DDebugButtonStyle(true)}>
+                切换 3D 视角
+              </button>
+              <button type="button" onClick={handleRestoreTencent2DView} style={getTencent3DDebugButtonStyle(true)}>
+                恢复 2D 视角
+              </button>
+              <button type="button" onClick={inspectTencent3DCapabilities} style={getTencent3DDebugButtonStyle(true)}>
+                打印当前 TMap 能力
+              </button>
+            </div>
+            {tencent3DDebugMessage ? (
+              <p style={{ margin: '8px 0 0', color: '#0f766e', fontSize: 11, fontWeight: 800, lineHeight: 1.5 }}>
+                {tencent3DDebugMessage}
+              </p>
+            ) : null}
+            <div
+              style={{
+                display: 'grid',
+                gap: 4,
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: '1px solid rgba(15, 118, 110, 0.14)',
+                color: '#31545b',
+                fontSize: 11,
+                lineHeight: 1.5
+              }}
+            >
+              <span>3D 视角：{tencent3DCapabilityReport ? getTencent3DViewSupportLabel(tencent3DCapabilityReport) : '点击打印后检查'}</span>
+              <span>
+                3D 建筑 / 三维底图：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel(tencent3DCapabilityReport.supports.buildingClasses)
+                  : '点击打印后检查'}
+              </span>
+              <span>
+                Web GLB / glTF 模型覆盖物：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel(tencent3DCapabilityReport.supports.modelOverlayClasses)
+                  : '点击打印后检查'}
+              </span>
+              <span>
+                CustomLayer / WebGLLayer：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel([
+                      ...tencent3DCapabilityReport.supports.customLayerClasses,
+                      ...tencent3DCapabilityReport.supports.webGLLayerClasses
+                    ])
+                  : '点击打印后检查'}
+              </span>
+              {tencent3DCapabilityReport ? (
+                <>
+                  <span>Map 方法数：{tencent3DCapabilityReport.mapMethods.length}</span>
+                  <span>TMap 类名数：{tencent3DCapabilityReport.tmapClasses.length}</span>
+                </>
+              ) : null}
+              <span>Android GLModelOverlay：仍按 Android 原生后续方案处理，不能直接用于当前 Web React 页面。</span>
+            </div>
+          </div>
+        ) : null}
+
         {isMapDebugMode && showRouteDiagnosticsPanel ? (
           <div
             className="glass-card"
@@ -1716,6 +1923,96 @@ function createSvgDataUri(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
+function buildTencent3DCapabilityReport(map: any, tmap: any): Tencent3DCapabilityReport {
+  const mapMethods = getObjectMethodNames(map)
+  const tmapClasses = getTMapClassNames(tmap)
+
+  return {
+    generatedAt: new Date().toISOString(),
+    mapMethods,
+    tmapClasses,
+    supports: {
+      setPitch: mapMethods.includes('setPitch'),
+      setRotation: mapMethods.includes('setRotation'),
+      easeTo: mapMethods.includes('easeTo'),
+      setZoom: mapMethods.includes('setZoom'),
+      getPitch: mapMethods.includes('getPitch'),
+      getRotation: mapMethods.includes('getRotation'),
+      buildingClasses: filterClassNames(tmapClasses, ['building', 'buildings']),
+      customLayerClasses: filterClassNames(tmapClasses, ['customlayer', 'custom_layer', 'custom']),
+      webGLLayerClasses: filterClassNames(tmapClasses, ['webgl', 'gllayer', 'gl_layer']),
+      modelOverlayClasses: filterClassNames(tmapClasses, ['glmodel', 'modeloverlay', 'gltf', 'glb', 'model'])
+    }
+  }
+}
+
+function getObjectMethodNames(target: any): string[] {
+  if (!target) {
+    return []
+  }
+
+  const methodNames = new Set<string>()
+  let current = target
+
+  while (current && current !== Object.prototype) {
+    Object.getOwnPropertyNames(current).forEach((name) => {
+      if (name === 'constructor') {
+        return
+      }
+
+      try {
+        if (typeof target[name] === 'function') {
+          methodNames.add(name)
+        }
+      } catch {
+        // Some SDK accessors may throw when inspected. Ignore them for debug reporting.
+      }
+    })
+    current = Object.getPrototypeOf(current)
+  }
+
+  return Array.from(methodNames).sort((a, b) => a.localeCompare(b))
+}
+
+function getTMapClassNames(tmap: any): string[] {
+  if (!tmap || typeof tmap !== 'object') {
+    return []
+  }
+
+  return Object.keys(tmap)
+    .filter((name) => {
+      const value = tmap[name]
+      return typeof value === 'function' || (value && typeof value === 'object')
+    })
+    .sort((a, b) => a.localeCompare(b))
+}
+
+function filterClassNames(classNames: string[], keywords: string[]) {
+  return classNames.filter((name) => {
+    const normalized = name.toLowerCase()
+    return keywords.some((keyword) => normalized.includes(keyword))
+  })
+}
+
+function getCapabilityListLabel(items: string[]) {
+  return items.length ? `发现 ${items.join(', ')}` : '未发现运行时类名'
+}
+
+function getTencent3DViewSupportLabel(report: Tencent3DCapabilityReport) {
+  const supported = [
+    report.supports.setPitch ? 'setPitch' : '',
+    report.supports.setRotation ? 'setRotation' : '',
+    report.supports.easeTo ? 'easeTo' : '',
+    report.supports.setZoom ? 'setZoom' : ''
+  ].filter(Boolean)
+
+  return supported.length ? `可试：${supported.join(', ')}` : '未发现 pitch / rotation 相关方法'
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function getRouteExportButtonStyle(enabled: boolean): CSSProperties {
   return {
     width: '100%',
@@ -1738,6 +2035,20 @@ function getRoadNetworkExportButtonStyle(enabled: boolean): CSSProperties {
     borderRadius: 10,
     background: enabled ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
     color: enabled ? '#7a4b08' : '#9a8d6b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getTencent3DDebugButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 32,
+    border: '1px solid rgba(15, 118, 110, 0.24)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(236, 253, 245, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#0f766e' : '#8aa09b',
     cursor: enabled ? 'pointer' : 'not-allowed',
     fontSize: 11,
     fontWeight: 800
