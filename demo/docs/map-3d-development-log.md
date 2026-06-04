@@ -6109,3 +6109,63 @@ Web 端 `TMap.model.GLTFModel` 与 Android SDK 的 GLModelOverlay 不是同一�
 - 本阶段没有修改 roadNetwork 或 routeGeometry 数据。
 - 本阶段没有新增大型 GLB / glTF 模型文件。
 - 本阶段只新增 `/map` 的 Web GLTFModel 调试覆盖物能力。
+
+## 阶段五十七补充：腾讯地图 GLTF 调试 3D 视角修正
+
+2026-06-04
+
+### 问题现象
+
+`/map?debugGltfModel=1` 中已尝试创建 `TMap.model.GLTFModel`，但人工调试时模型不明显或不可见，地图仍停留在 2D 俯视视角。腾讯官方 GLTFModel 示例使用更高 zoom 和倾斜视角，例如 `zoom: 19`、`pitch: 50`、`rotation: -20`，当前调试页面缺少专门的相机切换入口。
+
+### 修复方式
+
+在 `debugGltfModel` 面板中增加：
+
+- “进入 3D 视角”按钮：将地图中心移动到灵山大佛锚点，并尝试设置 `zoom=19`、`pitch=60`、`rotation=-25`。优先调用 `map.easeTo`，并在方法存在时回退调用 `setCenter`、`setZoom`、`setPitch`、`setRotation`。
+- “恢复 2D 视角”按钮：尝试恢复 `pitch=0`、`rotation=0`，并将 zoom 恢复为进入调试前的 zoom 或 16。
+- 所有地图方法调用前均做存在性判断，并用 `try/catch` 防止页面崩溃。
+
+### 模型可见性增强
+
+调整 `debugGltfModel` 默认参数：
+
+- `scale=1000`。
+- `height=50`。
+- `rotationZ=0`。
+
+scale 调试从连续滑块改为离散选项：`50`、`100`、`500`、`1000`、`3000`、`5000`，方便快速验证模型尺度。
+
+### 加载诊断增强
+
+`debugGltfModel` 面板现在显示：
+
+- `GLTFModel` 是否可用。
+- 当前模型 URL。
+- 当前 position 的 lat / lng / height。
+- 当前 scale。
+- 目标 zoom / pitch / rotation。
+- 模型 loaded / error 事件状态。
+
+创建 GLTFModel 后，如果运行时对象提供 `on` 方法，则尝试监听 `loaded` 和 `error` 事件；如果没有事件监听方法，则显示“当前 SDK 未发现事件监听方法”，不阻断调试。
+
+### 对 /map 的影响
+
+普通 `/map` 不受影响。GLTFModel 调试覆盖物、3D 视角切换和模型诊断只在 `debugGltfModel=1` 或 `debugGltfModel=true` 时启用。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 明确记录
+
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改定位、偏航或重规划逻辑。
+- 本阶段没有新增大型模型文件。
