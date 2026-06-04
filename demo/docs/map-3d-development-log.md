@@ -6020,3 +6020,92 @@ Android GLModelOverlay 仍属于腾讯地图 Android Map SDK 方向，不能直�
 - 本阶段没有调用额外腾讯路线 API。
 - 本阶段没有新增 GLB / glTF 模型。
 - 本阶段只是增加 `/map` 的腾讯地图 Web 3D 能力调试入口。
+
+## 阶段五十七：腾讯地图 Web GLTF 模型覆盖物最小验证
+
+2026-06-04
+
+### 本次目标
+
+基于腾讯地图 JavaScript API GL 的 GLTF 模型能力，在 `/map?debugGltfModel=1` 下做最小验证：加载 `libraries=model`，检查 `TMap.model.GLTFModel` 是否可用，并尝试在真实腾讯地图上叠加一个灵山大佛低模 GLB 调试覆盖物。
+
+### 本次约束
+
+- 只修改腾讯地图 loader、`/map` 调试 UI 和开发记录。
+- 不修改 `/scenic-3d-map`。
+- 不修改 roadNetwork 数据。
+- 不修改 routeGeometry 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改定位、路线进度、偏航和重规划逻辑。
+- 不新增大型 GLB / glTF 模型文件。
+- 不读取、不输出、不修改 API Key、`.env` 或敏感配置。
+
+### 修改文件
+
+- `src/lib/loadTMap.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 官方能力确认
+
+腾讯地图 JavaScript API GL 的 GL 模型文档说明 Web 端支持 GLTF 模型加载，文档路径为：
+
+`https://lbs.qq.com/webApi/javascriptGL/glGuide/glModelGuide`
+
+该能力需要在脚本加载时包含 `libraries=model`，并通过 `TMap.model.GLTFModel` 创建模型覆盖物。GLTFModel 可配置 `url`、`map`、`id`、`position`、`rotation` 和 `scale`，位置可绑定到 `TMap.LatLng(lat, lng, height)`。
+
+### libraries=model 加载
+
+`loadTMap.ts` 在腾讯地图 JS API GL 脚本 URL 中追加 `libraries=model`，使 `/map` 页面初始化时尝试加载 model 附加库。loader 仍只读取现有 Vite 环境变量，不输出 Key，也不改变地图路线请求逻辑。
+
+### debugGltfModel 参数说明
+
+访问 `/map?debugGltfModel=1` 或 `/map?debugGltfModel=true` 时，页面显示“腾讯地图 GLTF 模型覆盖物”调试面板。普通 `/map` 页面不显示该面板，也不会创建 GLTFModel。
+
+### GLTFModel 最小实验
+
+调试面板使用已有模型：
+
+`/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb`
+
+模型锚点为 `giant_buddha`，优先使用 `lingshanPois.navLocation`，回退到 `displayLocation`。创建模型前会检查 `window.TMap?.model?.GLTFModel` 是否存在；如果不可用，页面显示“当前 TMap 未加载 model 附加库或 GLTFModel 不可用”，不会导致页面崩溃。
+
+### 调试控制
+
+调试面板提供：
+
+- 显示 / 隐藏测试 GLB 模型。
+- 调整 `scale`。
+- 调整 `height`。
+- 调整 `rotationZ / yaw`。
+
+由于 GLTFModel 的运行时增量更新 API 需要以官方文档为准，本阶段在参数变化时安全重建调试覆盖物，并在隐藏、组件卸载或关闭调试时调用 `setMap(null)` 清理。
+
+### 与 Android GLModelOverlay 的关系
+
+Web 端 `TMap.model.GLTFModel` 与 Android SDK 的 GLModelOverlay 不是同一个接口。前者属于腾讯地图 JavaScript API GL，可用于当前 React Web 页面调试模型覆盖物；后者仍是 Android 原生地图增强方案。两者都可能复用 GLB / glTF 模型资产，但加载方式、坐标、生命周期和性能约束需要分别验证。
+
+### 对 /map 的影响
+
+普通 `/map` 行为保持不变。POI Marker、路线、InfoWindow、sceneRoute、debugSceneRoute、debugRoadNetwork、定位、路线进度、偏航提示和路线导出功能均不受影响。GLTFModel 只在 `debugGltfModel` 查询参数开启时创建。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 下一步建议
+
+在浏览器访问 `/map?debugGltfModel=1` 验证 GLTFModel 是否可用、模型是否能正确显示、scale / height / rotation 是否符合预期。如果验证成功，后续可设计 `/map` 的真实 3D 景点模型增强模式，并建立 Web GLTFModel 与 `/scenic-3d-map` 模型资产的共用规范。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 明确记录
+
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改定位、路线进度、偏航和重规划逻辑。
+- 本阶段没有修改 roadNetwork 或 routeGeometry 数据。
+- 本阶段没有新增大型 GLB / glTF 模型文件。
+- 本阶段只新增 `/map` 的 Web GLTFModel 调试覆盖物能力。

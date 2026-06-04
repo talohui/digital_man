@@ -1,5 +1,6 @@
 const TMAP_SCRIPT_ID = 'tmap-gl-script'
 const TMAP_SCRIPT_BASE = 'https://map.qq.com/api/gljs?v=1.exp'
+const TMAP_SCRIPT_LIBRARIES = 'model'
 
 function getMapKey() {
   const key = import.meta.env.VITE_TMAP_WEB_KEY?.trim()
@@ -44,7 +45,7 @@ export async function loadTMap() {
     script.id = TMAP_SCRIPT_ID
     script.async = true
     script.charset = 'utf-8'
-    script.src = `${TMAP_SCRIPT_BASE}&key=${encodeURIComponent(key)}`
+    script.src = `${TMAP_SCRIPT_BASE}&key=${encodeURIComponent(key)}&libraries=${encodeURIComponent(TMAP_SCRIPT_LIBRARIES)}`
     script.onload = () => {
       if (!window.TMap) {
         window.__tmapLoader = undefined

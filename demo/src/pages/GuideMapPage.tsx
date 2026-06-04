@@ -100,6 +100,9 @@ type RoadNetworkExportProgress = {
 const QUERY_POI_FOCUS_ZOOM = 17
 const ROAD_NETWORK_EXPORT_FILENAME = 'lingshan-road-network-candidates.json'
 const ROAD_NETWORK_EXPORT_DELAY_MS = 650
+const DEBUG_GLTF_MODEL_ID = 'debug_lingshan_buddha_gltf_model'
+const DEBUG_GLTF_MODEL_URL = '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb'
+const DEBUG_GLTF_MODEL_POI_ID = 'giant_buddha'
 const emptyRoadNetworkExportProgress: RoadNetworkExportProgress = {
   status: 'idle',
   currentIndex: 0,
@@ -174,6 +177,7 @@ function GuideMapPage() {
   const sceneRouteDebugLayerRef = useRef<any>(null)
   const userLocationMarkerRef = useRef<any>(null)
   const userAccuracyCircleRef = useRef<any>(null)
+  const gltfDebugModelRef = useRef<any>(null)
   const routeDeviationRouteIdRef = useRef<string | null>(null)
   const stopRoadNetworkExportRef = useRef(false)
   const infoWindowRef = useRef<any>(null)
@@ -212,15 +216,22 @@ function GuideMapPage() {
   const [roadNetworkExportMessage, setRoadNetworkExportMessage] = useState('')
   const [tencent3DCapabilityReport, setTencent3DCapabilityReport] = useState<Tencent3DCapabilityReport | null>(null)
   const [tencent3DDebugMessage, setTencent3DDebugMessage] = useState('')
+  const [showGltfDebugModel, setShowGltfDebugModel] = useState(true)
+  const [gltfModelScale, setGltfModelScale] = useState(1)
+  const [gltfModelHeight, setGltfModelHeight] = useState(0)
+  const [gltfModelRotationZ, setGltfModelRotationZ] = useState(0)
+  const [gltfModelDebugMessage, setGltfModelDebugMessage] = useState('')
 
   const queryPoiId = searchParams.get('poi')?.trim() ?? ''
   const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
   const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
   const queryDebugRoadNetwork = searchParams.get('debugRoadNetwork')?.trim().toLowerCase() ?? ''
   const queryDebugTencent3D = searchParams.get('debugTencent3D')?.trim().toLowerCase() ?? ''
+  const queryDebugGltfModel = searchParams.get('debugGltfModel')?.trim().toLowerCase() ?? ''
   const isMapDebugMode = queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true'
   const isRoadNetworkDebugMode = queryDebugRoadNetwork === '1' || queryDebugRoadNetwork === 'true'
   const isTencent3DDebugMode = queryDebugTencent3D === '1' || queryDebugTencent3D === 'true'
+  const isGltfModelDebugMode = queryDebugGltfModel === '1' || queryDebugGltfModel === 'true'
   const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && isMapDebugMode
   const [showPoiMarkers, setShowPoiMarkers] = useState(true)
   const [showCurrentRoute, setShowCurrentRoute] = useState(true)
@@ -421,6 +432,7 @@ function GuideMapPage() {
       sceneRouteDebugLayerRef.current?.setMap?.(null)
       userLocationMarkerRef.current?.setMap?.(null)
       userAccuracyCircleRef.current?.setMap?.(null)
+      gltfDebugModelRef.current?.setMap?.(null)
       mapRef.current?.destroy?.()
       mapRef.current = null
       markerLayerRef.current = null
@@ -428,9 +440,63 @@ function GuideMapPage() {
       sceneRouteDebugLayerRef.current = null
       userLocationMarkerRef.current = null
       userAccuracyCircleRef.current = null
+      gltfDebugModelRef.current = null
       infoWindowRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    gltfDebugModelRef.current?.setMap?.(null)
+    gltfDebugModelRef.current = null
+
+    if (!isGltfModelDebugMode) {
+      return
+    }
+
+    if (!showGltfDebugModel) {
+      setGltfModelDebugMessage('测试 GLB 模型已隐藏。')
+      return
+    }
+
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      setGltfModelDebugMessage('地图尚未就绪，暂不能创建 GLTFModel。')
+      return
+    }
+
+    if (!window.TMap.model || typeof window.TMap.model.GLTFModel !== 'function') {
+      setGltfModelDebugMessage('当前 TMap 未加载 model 附加库或 GLTFModel 不可用。')
+      return
+    }
+
+    const anchor = getGltfDebugModelAnchor()
+
+    if (!anchor) {
+      setGltfModelDebugMessage('未找到灵山大佛模型锚点，无法创建 GLTFModel。')
+      return
+    }
+
+    try {
+      gltfDebugModelRef.current = new window.TMap.model.GLTFModel({
+        id: DEBUG_GLTF_MODEL_ID,
+        map: mapRef.current,
+        url: DEBUG_GLTF_MODEL_URL,
+        position: new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight),
+        rotation: [0, 0, gltfModelRotationZ],
+        scale: gltfModelScale
+      })
+      setGltfModelDebugMessage(
+        `已尝试创建 GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotationZ=${gltfModelRotationZ}。`
+      )
+    } catch (error) {
+      gltfDebugModelRef.current = null
+      setGltfModelDebugMessage(`GLTFModel 创建失败：${getErrorMessage(error)}`)
+    }
+
+    return () => {
+      gltfDebugModelRef.current?.setMap?.(null)
+      gltfDebugModelRef.current = null
+    }
+  }, [gltfModelHeight, gltfModelRotationZ, gltfModelScale, isGltfModelDebugMode, mapStatus, showGltfDebugModel])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -1644,6 +1710,87 @@ function GuideMapPage() {
           </div>
         ) : null}
 
+        {isGltfModelDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              left: isRoadNetworkDebugMode ? 372 : 16,
+              bottom: isTencent3DDebugMode ? 248 : 24,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 140px)',
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#43302c',
+              pointerEvents: 'auto',
+              zIndex: 9,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <p style={{ margin: '0 0 4px', color: '#9a3412', fontSize: 12, fontWeight: 800 }}>
+              debugGltfModel
+            </p>
+            <strong style={{ display: 'block', marginBottom: 6, color: '#7c2d12', fontSize: 15 }}>
+              腾讯地图 GLTF 模型覆盖物
+            </strong>
+            <p style={{ margin: '0 0 10px', color: '#65423a', fontSize: 11, lineHeight: 1.55 }}>
+              仅在调试模式下尝试创建 <code>TMap.model.GLTFModel</code>，模型锚点为灵山大佛，不影响普通游客页面。
+            </p>
+            <div style={{ display: 'grid', gap: 8, color: '#43302c', fontSize: 11, lineHeight: 1.45 }}>
+              <span>模型 URL：{DEBUG_GLTF_MODEL_URL}</span>
+              <span>锚点 POI：{DEBUG_GLTF_MODEL_POI_ID}</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800 }}>
+                <input
+                  type="checkbox"
+                  checked={showGltfDebugModel}
+                  onChange={(event) => setShowGltfDebugModel(event.target.checked)}
+                />
+                显示测试 GLB 模型
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>scale：{gltfModelScale.toFixed(2)}</span>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="12"
+                  step="0.1"
+                  value={gltfModelScale}
+                  onChange={(event) => setGltfModelScale(Number(event.target.value))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>height：{gltfModelHeight.toFixed(1)} 米</span>
+                <input
+                  type="range"
+                  min="-20"
+                  max="120"
+                  step="1"
+                  value={gltfModelHeight}
+                  onChange={(event) => setGltfModelHeight(Number(event.target.value))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>rotationZ / yaw：{gltfModelRotationZ}°</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="360"
+                  step="5"
+                  value={gltfModelRotationZ}
+                  onChange={(event) => setGltfModelRotationZ(Number(event.target.value))}
+                />
+              </label>
+              {gltfModelDebugMessage ? (
+                <span style={{ color: '#9a3412', fontWeight: 800 }}>{gltfModelDebugMessage}</span>
+              ) : null}
+              <span>
+                如果页面提示 GLTFModel 不可用，说明当前腾讯地图脚本未成功加载 <code>libraries=model</code> 或运行时未暴露该类。
+              </span>
+            </div>
+          </div>
+        ) : null}
+
         {isMapDebugMode && showRouteDiagnosticsPanel ? (
           <div
             className="glass-card"
@@ -1868,6 +2015,25 @@ function getSceneRouteDebugPath(sceneRouteId: string): LatLngPoint[] {
       }
     })
     .filter((point): point is LatLngPoint => point !== null)
+}
+
+function getGltfDebugModelAnchor(): LatLngPoint | null {
+  const lingshanPoi = lingshanPois.find((poi) => poi.id === DEBUG_GLTF_MODEL_POI_ID)
+
+  if (lingshanPoi) {
+    return lingshanPoi.navLocation ?? lingshanPoi.displayLocation
+  }
+
+  const guideSpot = guideSpots.find((spot) => spot.id === DEBUG_GLTF_MODEL_POI_ID)
+
+  if (!guideSpot) {
+    return null
+  }
+
+  return {
+    lat: guideSpot.lat,
+    lng: guideSpot.lng
+  }
 }
 
 function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {
