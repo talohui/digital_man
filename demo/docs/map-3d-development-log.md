@@ -5359,20 +5359,6 @@ transform: {
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
 
-### 下一步建议
-
-- 在浏览器中打开 `/three-preview` 和 `/scenic-3d-map`，人工确认灵山大佛模型比例。
-- 如仍不合适，继续只调整 `giant_buddha.transform.scale`、`position` 或 `rotation`。
-- 确认效果后，再为梵宫、九龙灌浴和五印坛城接入低模 GLB。
-
-### 明确记录
-
-- 本阶段没有修改 `/map`。
-- 本阶段没有修改导航功能。
-- 本阶段没有修改腾讯地图路线规划逻辑。
-- 本阶段只是修复 `/scenic-3d-map` 的模型 transform 应用。
-- 本阶段保留首个灵山大佛低模 GLB 本地模型接入。
-
 ## 阶段五十三：3D 道路网络生成与导航绑定方案
 
 ### 日期
@@ -5778,3 +5764,99 @@ debug 工具显示：
 ### npm run build 结果
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+## 阶段五十五 B：roadNetwork candidate 数据导入
+
+2026-06-04
+
+### 本次目标
+
+读取浏览器 `/map?debugRoadNetwork=1` 导出的 roadNetwork candidate JSON，并转换为项目源码中的 `src/data/lingshanRoadNetwork.ts`。该数据作为后续 3D 道路底网、路线吸附、偏航判断和重规划显示的候选道路网络基础。
+
+### 修改文件
+
+- `src/data/lingshanRoadNetwork.ts`
+- `docs/map-3d-development-log.md`
+
+### 原始 JSON 来源
+
+原始文件为 `tmp/road-network/lingshan-road-network-candidates.json`，来自阶段五十五 A 的浏览器 debug 工具导出。该 JSON 不提交到 Git，只作为本阶段转换输入。
+
+### pairCount / segmentCount / skipped 数量
+
+- `pairCount`：76。
+- `segmentCount`：76。
+- `skipped`：0。
+- `source`：`tencent_walking_batch_export`。
+
+按来源统计：
+
+- `guide_route_adjacent`：24。
+- `poi_nearby`：32。
+- `core_anchor`：20。
+
+### 清洗规则
+
+- 删除 path 中连续重复的经纬度点。
+- 本次共删除连续重复点 872 个。
+- 如果删除过连续重复点，segment 标记 `duplicate_points_removed`。
+- 如果 `distanceMeters <= 5`，segment 标记 `very_short`。
+- 如果清洗后 `path.length <= 2`，segment 标记 `short_path`。
+- 不删除 `very_short` 或 `short_path` segment，只打 `qualityFlags`，保留候选数据供后续人工复核。
+
+质量标记统计：
+
+- `duplicate_points_removed`：75 段。
+- `very_short`：1 段。
+- `short_path`：1 段。
+
+### candidate / verified 边界说明
+
+`lingshanRoadNetwork.ts` 中所有 segment 均保持 `status: candidate`，没有任何 `verified` segment。candidate roadNetwork 来自腾讯 walking route 批量采样，不代表官方景区道路，也未经人工复核或现场验证，不能对游客宣称为精确道路网。
+
+### 为什么原始 JSON 不提交
+
+`tmp/road-network/lingshan-road-network-candidates.json` 是浏览器运行时导出的临时采样文件。源码只提交规范化后的 TypeScript 数据文件，避免提交临时导出物，也便于后续统一类型、质量标记和数据访问函数。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map`。真实地图增强模式、debugRoadNetwork 导出工具、定位、路线进度、偏航提示和 route path JSON 导出能力保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。新增的 `lingshanRoadNetwork` 将在阶段五十六用于 3D 道路底网显示。
+
+### 对导航功能的影响
+
+本阶段不改变当前导航逻辑，只新增 candidate roadNetwork 源数据。后续可在 `/map` 和 `/scenic-3d-map` 中逐步复用该数据进行道路吸附、路线进度和偏航判断。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段五十六在 `/scenic-3d-map` 接入 `lingshanRoadNetwork`，以淡色道路底网显示 candidate segments，并继续明确 candidate 不等于 verified。
+
+### 明确记录
+
+- 本阶段没有调用腾讯 API。
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改 POI 坐标。
+- 本阶段只是把浏览器导出的 candidate roadNetwork 转成源码数据。
+
+### 下一步建议
+
+- 在浏览器中打开 `/three-preview` 和 `/scenic-3d-map`，人工确认灵山大佛模型比例。
+- 如仍不合适，继续只调整 `giant_buddha.transform.scale`、`position` 或 `rotation`。
+- 确认效果后，再为梵宫、九龙灌浴和五印坛城接入低模 GLB。
+
+### 明确记录
+
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改导航功能。
+- 本阶段没有修改腾讯地图路线规划逻辑。
+- 本阶段只是修复 `/scenic-3d-map` 的模型 transform 应用。
+- 本阶段保留首个灵山大佛低模 GLB 本地模型接入。
