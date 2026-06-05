@@ -6571,3 +6571,77 @@ roadNetwork candidate 仍有价值，可用于 `/scenic-3d-map` 道路底网、�
 - 本阶段没有修改 routeGeometry。
 - 本阶段没有新增模型文件。
 - 本阶段没有调用腾讯 API。
+
+## 阶段六十一：接入 MeshyAI 灵山大佛正式 GLB
+
+2026-06-05
+
+### 本次目标
+
+将 MeshyAI 生成的灵山大佛正式 GLB 接入腾讯地图 Web GLTFModel 覆盖物配置，让 `/map?debugGltfModel=1` 后续可以直接选择 `giant_buddha` 进行正式模型的 scale / height / yaw 校准。
+
+### 源文件查找与整理
+
+按指定规则先执行查找命令：
+
+```bash
+find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_0605091202_texture*' -o -iname '*Golden_Standing_Buddh*' \) -print
+```
+
+该命令未返回结果。随后确认项目模型目录中已有未跟踪源 GLB：
+
+`public/models/lingshan/landmarks/Meshy_AI_Golden_Standing_Buddh_0605091202_texture.glb`
+
+该文件为 `.glb`，大小约 25MB。本阶段将其复制为规范项目路径：
+
+`public/models/lingshan/landmarks/lingshan_buddha_meshy_v1.glb`
+
+原始源文件不加入提交，提交规范化后的 `lingshan_buddha_meshy_v1.glb`。
+
+### 修改文件
+
+- `public/models/lingshan/landmarks/lingshan_buddha_meshy_v1.glb`
+- `src/data/lingshanMapModelOverlays.ts`
+- `docs/map-3d-development-log.md`
+
+### giant_buddha 配置更新
+
+`src/data/lingshanMapModelOverlays.ts` 中 `giant_buddha` 的 `modelUrl` 已从低模 blockout：
+
+`/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb`
+
+切换为 MeshyAI 正式模型：
+
+`/models/lingshan/landmarks/lingshan_buddha_meshy_v1.glb`
+
+`height`、`scale`、`rotation` 继续沿用当前配置，不凭空写入最终校准值。`note` 中记录源文件名、原 blockout 路径和仍需在 `/map?debugGltfModel=1` 中校准。
+
+### 对 /map 的影响
+
+普通 `/map` 不默认加载 GLB。模型仍只在 `debugGltfModel=1` 或 `debugGltfModel=true` 下由调试面板创建。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 对导航功能的影响
+
+本阶段没有修改 roadNetwork、routeGeometry、腾讯 walking route、定位、偏航或重规划逻辑。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+打开 `/map?debugGltfModel=1`，选择灵山大佛模型，使用视角预设检查 MeshyAI GLB 的贴地、比例和朝向；调好后使用“复制当前模型配置”回填 `lingshanMapModelOverlays.ts`。如果模型体积或加载性能影响明显，后续需要进行 GLB 压缩和贴图优化。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map` 逻辑。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改腾讯 walking route。
+- 本阶段没有修改定位、偏航或重规划逻辑。
+- 本阶段没有读取或修改 `.env`、API Key、token 或敏感配置。

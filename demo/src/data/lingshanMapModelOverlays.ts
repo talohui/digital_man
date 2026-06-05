@@ -30,14 +30,14 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'giant_buddha',
     name: '灵山大佛',
-    modelUrl: '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb',
+    modelUrl: '/models/lingshan/landmarks/lingshan_buddha_meshy_v1.glb',
     positionSource: 'navLocation',
     height: 50,
     scale: 1000,
     rotation: [0, 0, 0],
     status: 'debug_ready',
     enabledInDebug: true,
-    note: '当前用于腾讯地图 Web GLTFModel 调试的低模 blockout。'
+    note: 'MeshyAI 灵山大佛正式 GLB，源文件名 Meshy_AI_Golden_Standing_Buddh_0605091202_texture，原 blockout 路径为 /models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb，仍需在 /map?debugGltfModel=1 中校准 scale/height/yaw。'
   },
   {
     poiId: 'fan_gong',
