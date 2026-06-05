@@ -232,7 +232,10 @@ function GuideMapPage() {
   const [showGltfDebugModel, setShowGltfDebugModel] = useState(true)
   const [gltfModelScale, setGltfModelScale] = useState(1000)
   const [gltfModelHeight, setGltfModelHeight] = useState(50)
+  const [gltfModelRotationX, setGltfModelRotationX] = useState(0)
+  const [gltfModelRotationY, setGltfModelRotationY] = useState(0)
   const [gltfModelRotationZ, setGltfModelRotationZ] = useState(0)
+  const [showGltfAdvancedRotation, setShowGltfAdvancedRotation] = useState(false)
   const [gltfModelRebuildToken, setGltfModelRebuildToken] = useState(0)
   const [gltfModelDebugMessage, setGltfModelDebugMessage] = useState('')
   const [gltfModelLoadStatus, setGltfModelLoadStatus] = useState('未创建')
@@ -511,12 +514,12 @@ function GuideMapPage() {
         map: mapRef.current,
         url: DEBUG_GLTF_MODEL_URL,
         position: new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight),
-        rotation: [0, 0, gltfModelRotationZ],
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ],
         scale: gltfModelScale
       })
       gltfDebugModelRef.current = gltfModel
       setGltfModelDebugMessage(
-        `已尝试创建 GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotationZ=${gltfModelRotationZ}。`
+        `已尝试创建 GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotation=[${gltfModelRotationX}, ${gltfModelRotationY}, ${gltfModelRotationZ}]。`
       )
       setGltfModelLoadStatus('已创建，等待模型事件')
       setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfModel))
@@ -602,7 +605,7 @@ function GuideMapPage() {
 
     if (typeof gltfDebugModelRef.current.setRotation === 'function') {
       try {
-        gltfDebugModelRef.current.setRotation([0, 0, gltfModelRotationZ])
+        gltfDebugModelRef.current.setRotation([gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ])
         setGltfModelApplyMessage('rotation 已应用。')
         setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
         return
@@ -613,7 +616,7 @@ function GuideMapPage() {
 
     setGltfModelApplyMessage('setRotation 不可用，rotation 通过重建模型应用。')
     setGltfModelRebuildToken((current) => current + 1)
-  }, [gltfModelRotationZ, isGltfModelDebugMode])
+  }, [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ, isGltfModelDebugMode])
 
   useEffect(() => {
     if (!isGltfModelDebugMode || !gltfDebugModelRef.current || !window.TMap) {
@@ -2038,6 +2041,10 @@ function GuideMapPage() {
               <span>model loaded/error 状态：{gltfModelLoadStatus}</span>
               <span>参数应用：{gltfModelApplyMessage || '等待参数调整'}</span>
               <span>运行时读数：{gltfModelRuntimeReadout}</span>
+              <span>
+                当前旋转：rotationX={gltfModelRotationX}，rotationY / yaw={gltfModelRotationY}，rotationZ={gltfModelRotationZ}
+              </span>
+              <span>setRotation 数组：[{gltfModelRotationX}, {gltfModelRotationY}, {gltfModelRotationZ}]</span>
               {gltfModelErrorMessage ? <span style={{ color: '#9a3412' }}>model error：{gltfModelErrorMessage}</span> : null}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800 }}>
                 <input
@@ -2080,16 +2087,72 @@ function GuideMapPage() {
                 />
               </label>
               <label style={{ display: 'grid', gap: 4 }}>
-                <span>rotationZ / yaw：{gltfModelRotationZ}°</span>
+                <span>yaw / rotationY：{gltfModelRotationY}°</span>
                 <input
                   type="range"
-                  min="0"
+                  min="-180"
                   max="360"
                   step="5"
-                  value={gltfModelRotationZ}
-                  onChange={(event) => setGltfModelRotationZ(Number(event.target.value))}
+                  value={gltfModelRotationY}
+                  onChange={(event) => setGltfModelRotationY(Number(event.target.value))}
                 />
               </label>
+              <button
+                type="button"
+                onClick={() => setShowGltfAdvancedRotation((current) => !current)}
+                style={getGltfDebugButtonStyle(true)}
+              >
+                {showGltfAdvancedRotation ? '收起高级旋转调试' : '展开高级旋转调试'}
+              </button>
+              {showGltfAdvancedRotation ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    padding: 8,
+                    border: '1px solid rgba(154, 52, 18, 0.14)',
+                    borderRadius: 10,
+                    background: 'rgba(255, 247, 237, 0.58)'
+                  }}
+                >
+                  <span style={{ color: '#7c2d12', lineHeight: 1.5 }}>
+                    yaw 通常使用 rotationY。如果模型倾倒，说明正在调节 pitch/roll，不是朝向。不同 GLB 的本地坐标轴可能不同，需要逐个模型校准。
+                  </span>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationX：{gltfModelRotationX}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="5"
+                      value={gltfModelRotationX}
+                      onChange={(event) => setGltfModelRotationX(Number(event.target.value))}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationY / yaw：{gltfModelRotationY}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="360"
+                      step="5"
+                      value={gltfModelRotationY}
+                      onChange={(event) => setGltfModelRotationY(Number(event.target.value))}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationZ：{gltfModelRotationZ}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="5"
+                      value={gltfModelRotationZ}
+                      onChange={(event) => setGltfModelRotationZ(Number(event.target.value))}
+                    />
+                  </label>
+                </div>
+              ) : null}
               {gltfModelDebugMessage ? (
                 <span style={{ color: '#9a3412', fontWeight: 800 }}>{gltfModelDebugMessage}</span>
               ) : null}

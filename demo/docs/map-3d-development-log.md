@@ -6235,3 +6235,64 @@ scale 调试从连续滑块改为离散选项：`50`、`100`、`500`、`1000`、
 - 本阶段没有修改 routeGeometry。
 - 本阶段没有修改腾讯 walking route、定位、偏航或重规划逻辑。
 - 本阶段没有新增模型文件。
+
+## 阶段五十七补充 3：GLTF 模型 yaw 轴修正
+
+2026-06-05
+
+### 问题现象
+
+`/map?debugGltfModel=1` 中 GLTF 模型已经能显示，`scale` 和 `height` 调节也能生效，但原先的 `rotationZ / yaw` 控制并不是改变模型水平朝向，而是让模型倾倒。
+
+### 原因分析
+
+腾讯地图 Web `GLTFModel` 的模型本地旋转轴和 Three.js 场景语义不完全一致。当前灵山大佛 GLB 的水平朝向更适合使用 `rotationY` 调整；继续把 yaw 绑定到 `rotationZ` 会更像在调 pitch / roll，从而导致模型倾倒。
+
+### 修复方式
+
+`debugGltfModel` 默认 yaw 控制改为 `rotationY`：
+
+- 主 UI 文案从 `rotationZ / yaw` 改为 `yaw / rotationY`。
+- 默认 `rotationX=0`、`rotationY=0`、`rotationZ=0`。
+- 调整 yaw 时调用 `model.setRotation([0, yaw, 0])` 语义，即当前实现中的 `[rotationX, rotationY, rotationZ]`，默认 X/Z 均为 0。
+- 创建模型时也使用同一组 `[rotationX, rotationY, rotationZ]`，避免初始创建和运行时调参不一致。
+
+### 高级旋转调试
+
+`debugGltfModel` 面板新增可折叠“高级旋转调试”区域：
+
+- `rotationX`。
+- `rotationY / yaw`。
+- `rotationZ`。
+
+面板说明中明确：yaw 通常使用 `rotationY`；如果模型倾倒，说明正在调节 pitch / roll，不是朝向；不同 GLB 的本地坐标轴可能不同，需要逐个模型校准。
+
+### 模型调试状态
+
+面板现在显示：
+
+- 当前 `rotationX`。
+- 当前 `rotationY / yaw`。
+- 当前 `rotationZ`。
+- 当前 `setRotation([rotationX, rotationY, rotationZ])` 数组。
+
+### 对 /map 的影响
+
+普通 `/map` 不受影响。所有旋转轴调试能力只在 `debugGltfModel=1` 或 `debugGltfModel=true` 时显示。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map` 行为。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改路线规划、定位、偏航或重规划逻辑。
+- 本阶段没有新增模型文件。
