@@ -6388,3 +6388,87 @@ scale 调试从连续滑块改为离散选项：`50`、`100`、`500`、`1000`、
 - 本阶段没有修改 roadNetwork。
 - 本阶段没有修改腾讯 walking route。
 - 本阶段只是将 `/map` 的 GLB 覆盖物调试从硬编码升级为配置化。
+
+## 阶段五十九：腾讯地图 GLB 模型校准参数复制工具
+
+2026-06-05
+
+### 本次目标
+
+在 `/map?debugGltfModel=1` 的腾讯地图 GLTFModel 调试面板中增加校准参数复制能力，让开发者在浏览器中调好 `scale`、`height`、`yaw / rotationY`、`rotationX/Y/Z` 后，可以直接复制 TypeScript 配置片段或调试摘要，后续人工保存回 `src/data/lingshanMapModelOverlays.ts`。
+
+### 修改文件
+
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么复制配置而不是浏览器直接写源码
+
+GLTFModel 调试发生在浏览器运行时，浏览器不能也不应该直接写入项目源码。配置复制工具只生成可审阅的 TypeScript 片段，由开发者人工确认后再写回 `lingshanMapModelOverlays.ts`，避免运行时参数误写源码，也避免引入文件写入权限和安全风险。
+
+### 复制当前模型配置字段
+
+`debugGltfModel` 面板新增“复制当前模型配置”按钮，复制内容包含：
+
+- `poiId`
+- `name`
+- `modelUrl`（如果当前配置存在）
+- `positionSource`
+- 当前调试态 `height`
+- 当前调试态 `scale`
+- 当前 `rotation: [rotationX, rotationY, rotationZ]`
+- 当前 `status`
+- `enabledInDebug: true`
+- 校准说明 `note`
+
+如果当前 POI 仍为 `missing_model` 且没有 `modelUrl`，也可以复制配置片段，但不会伪造模型路径，`status` 保持当前配置状态。
+
+### 复制调试摘要字段
+
+新增“复制调试摘要”按钮，复制内容包含：
+
+- `poiId`
+- `name`
+- `modelUrl`
+- `positionSource`
+- 当前 position `lat/lng/height`
+- 当前 `scale`
+- 当前 `rotationX/Y/Z`
+- 当前 `setRotation` 数组
+- 当前视角 `zoom / pitch / rotation`
+- loaded / error 状态
+- error 信息
+
+### 复制兜底
+
+优先使用浏览器 Clipboard API。若 Clipboard API 不可用或复制失败，则输出到控制台，并尝试用 `prompt` 展示文本供人工复制，页面不会报错。
+
+### 对 /map 的影响
+
+普通 `/map` 不受影响。复制工具只在 `debugGltfModel=1` 或 `debugGltfModel=true` 下显示。模型选择、显示隐藏、`scale`、`height`、`yaw / rotationY`、高级 `rotationX/Y/Z` 和视角预设均保持可用。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 对导航功能的影响
+
+本阶段没有修改 roadNetwork、routeGeometry、腾讯 walking route、定位、偏航或重规划逻辑。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+接入 MeshyAI 灵山大佛正式 GLB 后，可继续使用 `/map?debugGltfModel=1` 调整模型位置高度、比例和朝向，再通过“复制当前模型配置”把校准参数保存回 `lingshanMapModelOverlays.ts`。同一流程可复用于梵宫、九龙灌浴和五印坛城。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map` 行为。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改腾讯 walking route。
+- 本阶段没有修改定位、偏航或重规划逻辑。
+- 本阶段没有新增大型模型文件。

@@ -246,6 +246,7 @@ function GuideMapPage() {
   const [gltfModelLoadStatus, setGltfModelLoadStatus] = useState('未创建')
   const [gltfModelErrorMessage, setGltfModelErrorMessage] = useState('')
   const [gltfModelApplyMessage, setGltfModelApplyMessage] = useState('')
+  const [gltfModelCopyMessage, setGltfModelCopyMessage] = useState('')
   const [gltfModelRuntimeReadout, setGltfModelRuntimeReadout] = useState('等待模型创建')
   const [gltfCameraTarget, setGltfCameraTarget] = useState({
     label: '默认近景',
@@ -426,6 +427,7 @@ function GuideMapPage() {
     setGltfModelLoadStatus('未创建')
     setGltfModelErrorMessage('')
     setGltfModelApplyMessage('')
+    setGltfModelCopyMessage('')
     setGltfModelRuntimeReadout('等待模型创建')
     setGltfModelDebugMessage(
       selectedGltfModelOverlay.modelUrl
@@ -1237,6 +1239,64 @@ function GuideMapPage() {
     }
 
     setGltfModelDebugMessage(messages.length ? messages.join(' ') : '当前地图实例未发现可恢复视角的方法。')
+  }
+
+  const copyGltfDebugText = async (text: string, successMessage: string, consoleLabel: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(text)
+      setGltfModelCopyMessage(successMessage)
+    } catch {
+      console.log(consoleLabel, text)
+
+      if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+        window.prompt('当前浏览器不支持直接复制，请手动复制以下内容：', text)
+      }
+
+      setGltfModelCopyMessage('复制失败，请查看控制台或弹窗内容。')
+    }
+  }
+
+  const handleCopyGltfModelOverlayConfig = async () => {
+    if (!selectedGltfModelOverlay) {
+      setGltfModelCopyMessage('未选择模型配置')
+      return
+    }
+
+    await copyGltfDebugText(
+      buildGltfModelOverlayConfigSnippet({
+        overlay: selectedGltfModelOverlay,
+        height: gltfModelHeight,
+        scale: gltfModelScale,
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ]
+      }),
+      '已复制当前模型配置',
+      '[GuideMapPage] GLTF model overlay config'
+    )
+  }
+
+  const handleCopyGltfDebugSummary = async () => {
+    if (!selectedGltfModelOverlay) {
+      setGltfModelCopyMessage('未选择模型配置')
+      return
+    }
+
+    await copyGltfDebugText(
+      buildGltfModelDebugSummary({
+        overlay: selectedGltfModelOverlay,
+        height: gltfModelHeight,
+        scale: gltfModelScale,
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ],
+        cameraTarget: gltfCameraTarget,
+        loadStatus: gltfModelLoadStatus,
+        errorMessage: gltfModelErrorMessage
+      }),
+      '已复制调试摘要',
+      '[GuideMapPage] GLTF model debug summary'
+    )
   }
 
   const [rateOpen, setRateOpen] = useState(false)
@@ -2054,7 +2114,7 @@ function GuideMapPage() {
               腾讯地图 GLTF 模型覆盖物
             </strong>
             <p style={{ margin: '0 0 10px', color: '#65423a', fontSize: 11, lineHeight: 1.55 }}>
-              仅在调试模式下尝试创建 <code>TMap.model.GLTFModel</code>，模型锚点为灵山大佛，不影响普通游客页面。
+              仅在调试模式下尝试创建 <code>TMap.model.GLTFModel</code>，模型锚点来自当前选中景点配置，不影响普通游客页面。
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
               {DEBUG_GLTF_VIEW_PRESETS.map((preset) => (
@@ -2072,6 +2132,14 @@ function GuideMapPage() {
               </button>
               <button type="button" onClick={handleRestoreGltfDebug2DView} style={getGltfDebugButtonStyle(true)}>
                 恢复 2D 视角
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+              <button type="button" onClick={handleCopyGltfModelOverlayConfig} style={getGltfDebugButtonStyle(true)}>
+                复制当前模型配置
+              </button>
+              <button type="button" onClick={handleCopyGltfDebugSummary} style={getGltfDebugButtonStyle(true)}>
+                复制调试摘要
               </button>
             </div>
             <div style={{ display: 'grid', gap: 8, color: '#43302c', fontSize: 11, lineHeight: 1.45 }}>
@@ -2108,6 +2176,7 @@ function GuideMapPage() {
               </span>
               <span>model loaded/error 状态：{gltfModelLoadStatus}</span>
               <span>参数应用：{gltfModelApplyMessage || '等待参数调整'}</span>
+              <span>复制状态：{gltfModelCopyMessage || '等待复制'}</span>
               <span>运行时读数：{gltfModelRuntimeReadout}</span>
               <span>
                 当前旋转：rotationX={gltfModelRotationX}，rotationY / yaw={gltfModelRotationY}，rotationZ={gltfModelRotationZ}
@@ -2504,6 +2573,85 @@ function getGltfDebugModelPositionLabel(overlay: LingshanMapModelOverlay | undef
   }
 
   return `${anchor.lat.toFixed(6)},${anchor.lng.toFixed(6)}, height=${height}`
+}
+
+function buildGltfModelOverlayConfigSnippet({
+  overlay,
+  height,
+  scale,
+  rotation
+}: {
+  overlay: LingshanMapModelOverlay
+  height: number
+  scale: number
+  rotation: [number, number, number]
+}) {
+  const lines = [
+    '{',
+    `  poiId: '${escapeTsString(overlay.poiId)}',`,
+    `  name: '${escapeTsString(overlay.name)}',`
+  ]
+
+  if (overlay.modelUrl) {
+    lines.push(`  modelUrl: '${escapeTsString(overlay.modelUrl)}',`)
+  }
+
+  lines.push(
+    `  positionSource: '${overlay.positionSource}',`,
+    `  height: ${formatNumberForTs(height)},`,
+    `  scale: ${formatNumberForTs(scale)},`,
+    `  rotation: [${rotation.map((value) => formatNumberForTs(value)).join(', ')}],`,
+    `  status: '${overlay.status}',`,
+    '  enabledInDebug: true,',
+    "  note: '由 debugGltfModel 调试面板校准。',",
+    '}'
+  )
+
+  return lines.join('\n')
+}
+
+function buildGltfModelDebugSummary({
+  overlay,
+  height,
+  scale,
+  rotation,
+  cameraTarget,
+  loadStatus,
+  errorMessage
+}: {
+  overlay: LingshanMapModelOverlay
+  height: number
+  scale: number
+  rotation: [number, number, number]
+  cameraTarget: { label: string; zoom: number; pitch: number; rotation: number }
+  loadStatus: string
+  errorMessage: string
+}) {
+  const anchor = getGltfDebugModelAnchor(overlay)
+
+  return [
+    `poiId: ${overlay.poiId}`,
+    `name: ${overlay.name}`,
+    `modelUrl: ${overlay.modelUrl ?? '未配置'}`,
+    `positionSource: ${overlay.positionSource}`,
+    `position: ${anchor ? `${anchor.lat.toFixed(6)},${anchor.lng.toFixed(6)}, height=${height}` : `锚点缺失，height=${height}`}`,
+    `scale: ${scale}`,
+    `rotationX: ${rotation[0]}`,
+    `rotationY / yaw: ${rotation[1]}`,
+    `rotationZ: ${rotation[2]}`,
+    `setRotation: [${rotation.join(', ')}]`,
+    `camera: ${cameraTarget.label}, zoom=${cameraTarget.zoom}, pitch=${cameraTarget.pitch}, rotation=${cameraTarget.rotation}`,
+    `loaded/error status: ${loadStatus}`,
+    `error: ${errorMessage || '无'}`
+  ].join('\n')
+}
+
+function escapeTsString(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+}
+
+function formatNumberForTs(value: number) {
+  return Number.isInteger(value) ? String(value) : Number(value.toFixed(4)).toString()
 }
 
 function readGltfModelRuntimeReadout(model: any) {
