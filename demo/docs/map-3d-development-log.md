@@ -6472,3 +6472,102 @@ GLTFModel 调试发生在浏览器运行时，浏览器不能也不应该直接�
 - 本阶段没有修改腾讯 walking route。
 - 本阶段没有修改定位、偏航或重规划逻辑。
 - 本阶段没有新增大型模型文件。
+
+## 阶段六十：真实 3D 地图增强模式架构收束文档
+
+2026-06-05
+
+### 本次目标
+
+在腾讯地图 Web GLTFModel 验证完成后，重新收束真实导航与沉浸式 3D 沙盘的职责边界，明确后续真实游客导航主线应放在 `/map`，而 `/scenic-3d-map` 保留为沉浸式文化沙盘和展示模式。
+
+### 本次约束
+
+- 只修改 Markdown 文档。
+- 不修改 `/map` 功能代码。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `routePlanning.ts`。
+- 不修改 roadNetwork。
+- 不修改 routeGeometry。
+- 不新增模型文件。
+- 不调用腾讯 API。
+- 不读取、不修改 `.env`、API Key、token 或敏感配置。
+
+### 修改文件
+
+- `docs/tencent-map-3d-overlay-navigation-architecture.md`
+- `docs/map-3d-development-log.md`
+
+### 新增架构文档
+
+新增 `docs/tencent-map-3d-overlay-navigation-architecture.md`，文档标题为《腾讯地图 3D 模型覆盖与真实导航架构方案》。文档记录：
+
+- 腾讯 Web JS API GL 已验证支持 `TMap.model.GLTFModel`。
+- `/map?debugGltfModel=1` 已能加载 GLB。
+- `scale`、`height`、`yaw / rotationY`、`rotationX/Y/Z` 可调。
+- 视角预设可切换。
+- `lingshanMapModelOverlays.ts` 已将模型覆盖物配置化。
+- 调试面板可复制当前模型配置和调试摘要。
+
+### /map 与 /scenic-3d-map 职责分工
+
+文档明确：
+
+- `/map` 应作为真实导航主模式。
+- `/scenic-3d-map` 应作为沉浸式文化沙盘模式。
+- 两者不是替代关系，而是互补关系。
+
+`/map` 负责腾讯真实底图、真实道路水体建筑环境、walking route、实时定位、路线进度、偏航判断、自动重规划到下一站、GLB 景点模型覆盖物、POI 信息和讲解入口。
+
+`/scenic-3d-map` 负责艺术化 3D 导览、路线故事、景点文化展示、展示和答辩视觉、低模场景表达，不作为真实导航权威。
+
+### roadNetwork 重新定位
+
+roadNetwork candidate 仍有价值，可用于 `/scenic-3d-map` 道路底网、后续吸附实验和路线质量审计。但真实游客导航应优先依赖腾讯地图 `/map`。roadNetwork candidate 不代表官方道路，也不代表 verified 精确步道。
+
+文档建议暂缓继续追求 `/scenic-3d-map` 完整道路真实化，把真实导航主线转向 `/map`。
+
+### GLB 模型资产流程
+
+文档梳理后续 GLB 流程：
+
+- MeshyAI / AI 3D 生成。
+- Blender / Blender MCP 清理。
+- 放入 `public/models/lingshan/landmarks/`。
+- 在 `lingshanMapModelOverlays.ts` 配置。
+- 通过 `/map?debugGltfModel=1` 校准。
+- 使用“复制当前模型配置”回填。
+- 后续再决定是否在普通 `/map` 真实 3D 模式启用。
+
+### 后续阶段建议
+
+文档建议：
+
+- 阶段六十一：接入 MeshyAI 灵山大佛正式 GLB。
+- 阶段六十二：配置梵宫、九龙灌浴、五印坛城模型覆盖物。
+- 阶段六十三：`/map` 真实 3D 模型增强模式 UI。
+- 阶段六十四：`/map` 3D 导航状态卡。
+- 阶段六十五：偏航后自动重规划到下一站并同步显示。
+
+### 对 /map 的影响
+
+本阶段没有修改 `/map` 功能代码，只通过文档明确后续 `/map` 是真实导航和 3D 模型覆盖物增强的主线。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。文档明确 `/scenic-3d-map` 保留为沉浸式文化沙盘和展示视觉，不承担真实导航权威。
+
+### npm run build 结果
+
+本阶段只修改 Markdown 文档，不需要运行 `npm run build`。
+
+### 明确记录
+
+- 本阶段没有修改功能代码。
+- 本阶段没有修改 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `routePlanning.ts`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有新增模型文件。
+- 本阶段没有调用腾讯 API。
