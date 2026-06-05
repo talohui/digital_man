@@ -30,6 +30,11 @@ import {
   type RoadSamplingPairSource
 } from '../data/lingshanRoadNetworkSamplingPlan'
 import {
+  getDebugMapModelOverlays,
+  getMapModelOverlayByPoiId,
+  type LingshanMapModelOverlay
+} from '../data/lingshanMapModelOverlays'
+import {
   clearUserLocationWatch,
   isGeolocationSupported,
   watchUserLocation,
@@ -100,9 +105,7 @@ type RoadNetworkExportProgress = {
 const QUERY_POI_FOCUS_ZOOM = 17
 const ROAD_NETWORK_EXPORT_FILENAME = 'lingshan-road-network-candidates.json'
 const ROAD_NETWORK_EXPORT_DELAY_MS = 650
-const DEBUG_GLTF_MODEL_ID = 'debug_lingshan_buddha_gltf_model'
-const DEBUG_GLTF_MODEL_URL = '/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb'
-const DEBUG_GLTF_MODEL_POI_ID = 'giant_buddha'
+const DEBUG_GLTF_MODEL_ID_PREFIX = 'debug_lingshan_map_gltf_model'
 const DEBUG_GLTF_TARGET_ZOOM = 19.5
 const DEBUG_GLTF_TARGET_PITCH = 65
 const DEBUG_GLTF_TARGET_ROTATION = 0
@@ -115,6 +118,7 @@ const DEBUG_GLTF_VIEW_PRESETS = [
   { label: '俯视检查', zoom: 18.5, pitch: 0, rotation: 0 },
   { label: '远景鸟瞰', zoom: 17.5, pitch: 55, rotation: -30 }
 ] as const
+const DEBUG_GLTF_DEFAULT_OVERLAY_ID = getDebugMapModelOverlays()[0]?.poiId ?? 'giant_buddha'
 const emptyRoadNetworkExportProgress: RoadNetworkExportProgress = {
   status: 'idle',
   currentIndex: 0,
@@ -229,6 +233,7 @@ function GuideMapPage() {
   const [roadNetworkExportMessage, setRoadNetworkExportMessage] = useState('')
   const [tencent3DCapabilityReport, setTencent3DCapabilityReport] = useState<Tencent3DCapabilityReport | null>(null)
   const [tencent3DDebugMessage, setTencent3DDebugMessage] = useState('')
+  const [selectedGltfOverlayPoiId, setSelectedGltfOverlayPoiId] = useState(DEBUG_GLTF_DEFAULT_OVERLAY_ID)
   const [showGltfDebugModel, setShowGltfDebugModel] = useState(true)
   const [gltfModelScale, setGltfModelScale] = useState(1000)
   const [gltfModelHeight, setGltfModelHeight] = useState(50)
@@ -268,6 +273,9 @@ function GuideMapPage() {
   const [showRoadNetworkExportDetails, setShowRoadNetworkExportDetails] = useState(true)
   const shouldShowSceneRouteDebugLine = isSceneRouteDebugEnabled && showSceneRouteDebugLine
   const roadNetworkDebugPanelTop = isMapDebugMode && showRouteDiagnosticsPanel ? 340 : 92
+  const debugMapModelOverlays = useMemo(() => getDebugMapModelOverlays(), [])
+  const selectedGltfModelOverlay =
+    getMapModelOverlayByPoiId(selectedGltfOverlayPoiId) ?? debugMapModelOverlays[0]
   const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
   const queryPoiRoute = queryPoiSpot
     ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
@@ -406,6 +414,28 @@ function GuideMapPage() {
   }, [route, selectedSpotId, setSelectedSpotId])
 
   useEffect(() => {
+    if (!selectedGltfModelOverlay) {
+      return
+    }
+
+    setGltfModelScale(selectedGltfModelOverlay.scale)
+    setGltfModelHeight(selectedGltfModelOverlay.height)
+    setGltfModelRotationX(selectedGltfModelOverlay.rotation[0])
+    setGltfModelRotationY(selectedGltfModelOverlay.rotation[1])
+    setGltfModelRotationZ(selectedGltfModelOverlay.rotation[2])
+    setGltfModelLoadStatus('未创建')
+    setGltfModelErrorMessage('')
+    setGltfModelApplyMessage('')
+    setGltfModelRuntimeReadout('等待模型创建')
+    setGltfModelDebugMessage(
+      selectedGltfModelOverlay.modelUrl
+        ? `已切换到 ${selectedGltfModelOverlay.name} 模型配置。`
+        : `${selectedGltfModelOverlay.name} 模型尚未配置，等待模型接入。`
+    )
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [selectedGltfModelOverlay])
+
+  useEffect(() => {
     let cancelled = false
 
     async function initMap() {
@@ -485,6 +515,20 @@ function GuideMapPage() {
       return
     }
 
+    if (!selectedGltfModelOverlay) {
+      setGltfModelDebugMessage('未找到可用的模型覆盖物配置。')
+      setGltfModelLoadStatus('配置缺失')
+      setGltfModelRuntimeReadout('配置缺失')
+      return
+    }
+
+    if (!selectedGltfModelOverlay.modelUrl || selectedGltfModelOverlay.status === 'missing_model') {
+      setGltfModelDebugMessage(`${selectedGltfModelOverlay.name} 模型尚未配置，等待模型接入。`)
+      setGltfModelLoadStatus('missing_model')
+      setGltfModelRuntimeReadout('未创建：缺少 modelUrl')
+      return
+    }
+
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
       setGltfModelDebugMessage('地图尚未就绪，暂不能创建 GLTFModel。')
       setGltfModelLoadStatus('等待地图就绪')
@@ -499,10 +543,10 @@ function GuideMapPage() {
       return
     }
 
-    const anchor = getGltfDebugModelAnchor()
+    const anchor = getGltfDebugModelAnchor(selectedGltfModelOverlay)
 
     if (!anchor) {
-      setGltfModelDebugMessage('未找到灵山大佛模型锚点，无法创建 GLTFModel。')
+      setGltfModelDebugMessage(`未找到 ${selectedGltfModelOverlay.name} 模型锚点，无法创建 GLTFModel。`)
       setGltfModelLoadStatus('锚点缺失')
       setGltfModelRuntimeReadout('锚点缺失')
       return
@@ -510,16 +554,16 @@ function GuideMapPage() {
 
     try {
       const gltfModel = new window.TMap.model.GLTFModel({
-        id: DEBUG_GLTF_MODEL_ID,
+        id: `${DEBUG_GLTF_MODEL_ID_PREFIX}_${selectedGltfModelOverlay.poiId}`,
         map: mapRef.current,
-        url: DEBUG_GLTF_MODEL_URL,
+        url: selectedGltfModelOverlay.modelUrl,
         position: new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight),
         rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ],
         scale: gltfModelScale
       })
       gltfDebugModelRef.current = gltfModel
       setGltfModelDebugMessage(
-        `已尝试创建 GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotation=[${gltfModelRotationX}, ${gltfModelRotationY}, ${gltfModelRotationZ}]。`
+        `已尝试创建 ${selectedGltfModelOverlay.name} GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotation=[${gltfModelRotationX}, ${gltfModelRotationY}, ${gltfModelRotationZ}]。`
       )
       setGltfModelLoadStatus('已创建，等待模型事件')
       setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfModel))
@@ -552,7 +596,7 @@ function GuideMapPage() {
       gltfDebugModelRef.current?.destroy?.()
       gltfDebugModelRef.current = null
     }
-  }, [gltfModelRebuildToken, isGltfModelDebugMode, mapStatus])
+  }, [gltfModelRebuildToken, isGltfModelDebugMode, mapStatus, selectedGltfModelOverlay])
 
   useEffect(() => {
     if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
@@ -623,7 +667,7 @@ function GuideMapPage() {
       return
     }
 
-    const anchor = getGltfDebugModelAnchor()
+    const anchor = selectedGltfModelOverlay ? getGltfDebugModelAnchor(selectedGltfModelOverlay) : null
 
     if (!anchor) {
       return
@@ -642,7 +686,7 @@ function GuideMapPage() {
 
     setGltfModelApplyMessage('setPosition 不可用，height 通过重建模型应用。')
     setGltfModelRebuildToken((current) => current + 1)
-  }, [gltfModelHeight, isGltfModelDebugMode])
+  }, [gltfModelHeight, isGltfModelDebugMode, selectedGltfModelOverlay])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -1068,10 +1112,10 @@ function GuideMapPage() {
 
   const applyGltfDebugCameraPreset = (preset: (typeof DEBUG_GLTF_VIEW_PRESETS)[number]) => {
     const map = mapRef.current
-    const anchor = getGltfDebugModelAnchor()
+    const anchor = selectedGltfModelOverlay ? getGltfDebugModelAnchor(selectedGltfModelOverlay) : null
 
     if (!map || !window.TMap || !anchor) {
-      setGltfModelDebugMessage('地图或灵山大佛锚点尚未就绪，无法切换视角。')
+      setGltfModelDebugMessage('地图或当前模型锚点尚未就绪，无法切换视角。')
       return
     }
 
@@ -2031,10 +2075,34 @@ function GuideMapPage() {
               </button>
             </div>
             <div style={{ display: 'grid', gap: 8, color: '#43302c', fontSize: 11, lineHeight: 1.45 }}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>选择模型配置</span>
+                <select
+                  value={selectedGltfOverlayPoiId}
+                  onChange={(event) => setSelectedGltfOverlayPoiId(event.target.value)}
+                  style={{
+                    minHeight: 30,
+                    border: '1px solid rgba(154, 52, 18, 0.2)',
+                    borderRadius: 8,
+                    background: 'rgba(255, 255, 255, 0.76)',
+                    color: '#7c2d12',
+                    fontWeight: 800
+                  }}
+                >
+                  {debugMapModelOverlays.map((overlay) => (
+                    <option key={overlay.poiId} value={overlay.poiId}>
+                      {overlay.name}（{overlay.status}）
+                    </option>
+                  ))}
+                </select>
+              </label>
               <span>GLTFModel：{getGltfModelAvailabilityLabel()}</span>
-              <span>模型 URL：{DEBUG_GLTF_MODEL_URL}</span>
-              <span>锚点 POI：{DEBUG_GLTF_MODEL_POI_ID}</span>
-              <span>position：{getGltfDebugModelPositionLabel(gltfModelHeight)}</span>
+              <span>当前模型：{selectedGltfModelOverlay?.name ?? '未选择'}</span>
+              <span>poiId：{selectedGltfModelOverlay?.poiId ?? '-'}</span>
+              <span>status：{selectedGltfModelOverlay?.status ?? '-'}</span>
+              <span>modelUrl：{selectedGltfModelOverlay?.modelUrl ?? '该景点模型尚未配置'}</span>
+              <span>positionSource：{selectedGltfModelOverlay?.positionSource ?? '-'}</span>
+              <span>position：{getGltfDebugModelPositionLabel(selectedGltfModelOverlay, gltfModelHeight)}</span>
               <span>
                 当前目标：{gltfCameraTarget.label}，zoom={gltfCameraTarget.zoom}，pitch={gltfCameraTarget.pitch}，rotation={gltfCameraTarget.rotation}
               </span>
@@ -2046,6 +2114,12 @@ function GuideMapPage() {
               </span>
               <span>setRotation 数组：[{gltfModelRotationX}, {gltfModelRotationY}, {gltfModelRotationZ}]</span>
               {gltfModelErrorMessage ? <span style={{ color: '#9a3412' }}>model error：{gltfModelErrorMessage}</span> : null}
+              {selectedGltfModelOverlay && !selectedGltfModelOverlay.modelUrl ? (
+                <span style={{ color: '#9a3412', fontWeight: 800 }}>等待模型接入：该景点模型尚未配置。</span>
+              ) : null}
+              {selectedGltfModelOverlay?.note ? (
+                <span style={{ color: '#7c2d12' }}>说明：{selectedGltfModelOverlay.note}</span>
+              ) : null}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800 }}>
                 <input
                   type="checkbox"
@@ -2389,14 +2463,18 @@ function getSceneRouteDebugPath(sceneRouteId: string): LatLngPoint[] {
     .filter((point): point is LatLngPoint => point !== null)
 }
 
-function getGltfDebugModelAnchor(): LatLngPoint | null {
-  const lingshanPoi = lingshanPois.find((poi) => poi.id === DEBUG_GLTF_MODEL_POI_ID)
+function getGltfDebugModelAnchor(overlay: LingshanMapModelOverlay): LatLngPoint | null {
+  const lingshanPoi = lingshanPois.find((poi) => poi.id === overlay.poiId)
 
   if (lingshanPoi) {
-    return lingshanPoi.navLocation ?? lingshanPoi.displayLocation
+    if (overlay.positionSource === 'navLocation') {
+      return lingshanPoi.navLocation ?? lingshanPoi.displayLocation
+    }
+
+    return lingshanPoi.displayLocation ?? lingshanPoi.navLocation
   }
 
-  const guideSpot = guideSpots.find((spot) => spot.id === DEBUG_GLTF_MODEL_POI_ID)
+  const guideSpot = guideSpots.find((spot) => spot.id === overlay.poiId)
 
   if (!guideSpot) {
     return null
@@ -2418,8 +2496,8 @@ function getGltfModelAvailabilityLabel() {
     : '不可用，请检查 libraries=model'
 }
 
-function getGltfDebugModelPositionLabel(height: number) {
-  const anchor = getGltfDebugModelAnchor()
+function getGltfDebugModelPositionLabel(overlay: LingshanMapModelOverlay | undefined, height: number) {
+  const anchor = overlay ? getGltfDebugModelAnchor(overlay) : null
 
   if (!anchor) {
     return `锚点缺失，height=${height}`

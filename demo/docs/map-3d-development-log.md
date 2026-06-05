@@ -6296,3 +6296,95 @@ scale 调试从连续滑块改为离散选项：`50`、`100`、`500`、`1000`、
 - 本阶段没有修改 routeGeometry。
 - 本阶段没有修改路线规划、定位、偏航或重规划逻辑。
 - 本阶段没有新增模型文件。
+
+## 阶段五十八：腾讯地图 GLB 景点覆盖物配置化
+
+2026-06-05
+
+### 本次目标
+
+将 `/map?debugGltfModel=1` 中的腾讯地图 Web GLTFModel 覆盖物从单个硬编码测试模型升级为配置驱动的景点模型覆盖物系统，为后续接入 MeshyAI / GLB 生成的灵山大佛、梵宫、九龙灌浴、五印坛城等模型做数据结构准备。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/pages/GuideMapPage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 新增 lingshanMapModelOverlays.ts
+
+新增 `src/data/lingshanMapModelOverlays.ts`，用于描述腾讯地图 Web `TMap.model.GLTFModel` 覆盖物配置。该文件只描述模型覆盖物，不改变 POI 真实坐标；模型 `status` 不等于景点数据状态；`missing_model` 表示等待后续 GLB 资产接入。当前配置仅供 `debugGltfModel` 模式使用，普通游客页面不会默认加载。
+
+### 为什么从硬编码改为配置化
+
+阶段五十七已验证 Web GLTFModel 可以显示灵山大佛低模模型，但模型 URL、锚点 POI、scale、height、rotation 等参数仍集中在 `GuideMapPage.tsx` 中。后续需要同时接入多个核心景点模型，因此必须将模型覆盖物配置抽离为数据文件，便于逐个景点接入、调试和校准。
+
+### 当前配置的 POI
+
+当前第一版配置包含：
+
+- `giant_buddha`：灵山大佛。
+- `fan_gong`：梵宫。
+- `jiulong_guanyu`：九龙灌浴。
+- `wuyin_tancheng`：五印坛城。
+
+### debug_ready / missing_model 状态
+
+- `giant_buddha`：`debug_ready`，modelUrl 为 `/models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb`。
+- `fan_gong`：`missing_model`，等待 MeshyAI / GLB 模型接入。
+- `jiulong_guanyu`：`missing_model`，等待 MeshyAI / GLB 模型接入。
+- `wuyin_tancheng`：`missing_model`，等待 MeshyAI / GLB 模型接入。
+
+本阶段没有把任何模型标记为普通生产可用的 verified 状态。
+
+### debugGltfModel 面板选择模型
+
+`/map?debugGltfModel=1` 面板新增“选择模型配置”下拉框，读取 `getDebugMapModelOverlays()`。切换配置后会：
+
+- 更新当前 `poiId`、`modelUrl`、`status`、`positionSource`。
+- 将 `scale`、`height`、`rotationX/Y/Z` 重置为配置默认值。
+- 清理旧 GLTFModel，并按当前配置重新创建模型。
+- 如果配置缺少 `modelUrl` 或状态为 `missing_model`，显示“等待模型接入”，不创建 GLTFModel，也不报错。
+
+### 调试能力保留
+
+`debugGltfModel` 仍保留：
+
+- 显示 / 隐藏模型。
+- `scale` 实时调试。
+- `height` 实时调试。
+- `yaw / rotationY` 实时调试。
+- 高级 `rotationX/Y/Z` 调试。
+- 多个 3D 视角预设。
+- loaded / error 状态和运行时 getter 读数。
+
+这些调试值只影响当前页面调试态，不会写回配置文件。
+
+### 对 /map 的影响
+
+普通 `/map` 不受影响。GLTFModel 覆盖物只在 `debugGltfModel=1` 或 `debugGltfModel=true` 时启用。`debugRoadNetwork`、`debugSceneRoute`、POI 聚焦、路线切换、定位、路线进度和偏航提示保持不变。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 对导航功能的影响
+
+本阶段没有修改腾讯 walking route、定位、偏航或重规划逻辑。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段五十九可接入 MeshyAI 生成的灵山大佛正式 GLB，或将当前调试后的 scale / height / rotation 校准参数保存回 `lingshanMapModelOverlays.ts`，再逐步接入梵宫、九龙灌浴和五印坛城。
+
+### 明确记录
+
+- 本阶段没有新增大型 GLB 文件。
+- 本阶段没有修改 POI 坐标。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改腾讯 walking route。
+- 本阶段只是将 `/map` 的 GLB 覆盖物调试从硬编码升级为配置化。
