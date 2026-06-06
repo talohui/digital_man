@@ -7484,3 +7484,86 @@ mapStyleId: 'style1'
 - 本阶段没有修改 routeGeometry / roadNetwork 数据。
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
+
+## 阶段六十六 E：简化 baseMap 配置验证 mapStyleId
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+继续排查 `/map-3d-guide` 中 `mapStyleId: 'style1'` 未生效的问题。上一阶段已显式传入普通矢量底图，但用户在 Network 中仍看到 `styleid=0` 和 `mapType=hybrid`，说明仍需进一步排除 `baseMap` 配置本身导致 SDK 回退或忽略的可能。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题背景
+
+只读检查没有发现 `/map-3d-guide` 中显式设置 `hybrid`、`satellite`、`mapType` 或 `mapTypeId`，也没有发现后续调用 `setBaseMap`。但当前 `baseMap` 使用了：
+
+```ts
+{
+  type: 'vector',
+  features: ['base', 'building3d', 'label']
+}
+```
+
+其中 `features` 的字段名和取值未在项目内类型定义中得到确认，可能不是腾讯 JS API GL 支持的合法配置，进而导致 `baseMap` 被忽略或回退。
+
+### 修复方式
+
+本阶段将 `/map-3d-guide` 的 `baseMap` 简化为最保守的普通矢量底图配置：
+
+```ts
+const MAP_3D_GUIDE_BASE_MAP = {
+  type: 'vector'
+} as const
+```
+
+同时继续保留：
+
+```ts
+mapStyleId: 'style1'
+```
+
+本阶段不再传 `features: ['base', 'building3d', 'label']`。如果本次验证后底图样式生效，后续再逐步按腾讯官方确认字段恢复 3D building / label 等能力。
+
+### 诊断提示
+
+“开发诊断”折叠区补充：
+
+- 当前已简化 `baseMap` 以验证 `mapStyleId`。
+- 如果 Network 仍显示 `styleid=0` 或 `mapType=hybrid`，说明问题可能不在 `baseMap` 配置。
+- 如果底图样式生效，再逐步尝试恢复 3D building / label 等能力。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map` 相关代码。
+
+### 保持不变
+
+- 保留 `/map-3d-guide` 的历史文化路线、金色主路线、模拟定位、模拟偏航和腾讯 walking 重规划。
+- 保留 GLB 模型 Beta。
+- 保留相机模式。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、输出或修改 API Key。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步人工验证
+
+打开 `/map-3d-guide`，在浏览器 Network 中过滤 tile / style 请求：
+
+- 检查是否仍出现 `mapType=hybrid`。
+- 检查 `styleid` 是否仍为 `0`。
+- 观察底图是否变成腾讯控制台自定义样式。
