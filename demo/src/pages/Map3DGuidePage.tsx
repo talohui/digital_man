@@ -62,6 +62,14 @@ type RenderedInkDecorOverlay = InkDecorOverlay & {
   active: boolean
 }
 
+type DecorSmokeReport = {
+  markerCount: number
+  fallbackCount: number
+  assetUrls: string[]
+}
+
+type AssetLoadState = Record<string, 'loaded' | 'error'>
+
 type Map3DGuideVisualVariantConfig = {
   id: Map3DGuideVariant
   className: string
@@ -229,6 +237,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [decorOverlays, setDecorOverlays] = useState<InkDecorOverlay[]>(() => loadStoredDecorOverlays(visualVariant.id))
   const [selectedDecorId, setSelectedDecorId] = useState(() => loadStoredDecorOverlays(visualVariant.id)[0]?.id ?? '')
   const [decorCopyStatus, setDecorCopyStatus] = useState('尚未导出')
+  const [decorSmokeReport, setDecorSmokeReport] = useState<DecorSmokeReport>({
+    markerCount: 0,
+    fallbackCount: 0,
+    assetUrls: []
+  })
+  const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -283,6 +297,19 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const distanceToNextStopText = nextStop.distanceToNextStopMeters
     ? formatDistanceMeters(nextStop.distanceToNextStopMeters)
     : '待估算'
+  const prototypeLabel =
+    visualVariant.id === 'prototype-a'
+      ? 'Prototype A 已启用'
+      : visualVariant.id === 'prototype-b'
+        ? 'Prototype B 已启用'
+        : ''
+  const prototypeName = visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : '默认'
+  const configuredAssetUrls = useMemo(
+    () => Array.from(new Set(decorOverlays.flatMap((decor) => (decor.assetUrl ? [decor.assetUrl] : [])))),
+    [decorOverlays]
+  )
+  const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
+  const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
 
   useEffect(() => {
     let cancelled = false
@@ -344,6 +371,29 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     window.localStorage.setItem(visualVariant.decorStorageKey, JSON.stringify(decorOverlays))
   }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
+
+  useEffect(() => {
+    if (visualVariant.id === 'default' || typeof window === 'undefined') {
+      return
+    }
+
+    const assetUrls = Array.from(new Set(decorOverlays.flatMap((decor) => (decor.assetUrl ? [decor.assetUrl] : []))))
+
+    assetUrls.forEach((assetUrl) => {
+      if (assetLoadState[assetUrl]) {
+        return
+      }
+
+      const image = new Image()
+      image.onload = () => {
+        setAssetLoadState((current) => ({ ...current, [assetUrl]: 'loaded' }))
+      }
+      image.onerror = () => {
+        setAssetLoadState((current) => ({ ...current, [assetUrl]: 'error' }))
+      }
+      image.src = assetUrl
+    })
+  }, [assetLoadState, decorOverlays, visualVariant.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -501,7 +551,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const awakenedDecor = buildVisibleDecorGeometries(decorOverlays, {
       routePathIndex,
       debugDecor,
-      rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+      rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route',
+      variant: visualVariant.id
     })
     const rerouteDecor = buildRerouteDecorGeometries(reroutePlan)
     const allDecor = [...awakenedDecor, ...rerouteDecor]
@@ -510,8 +561,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     if (!allDecor.length) {
       decorMarkerLayerRef.current = null
+      setDecorSmokeReport({
+        markerCount: 0,
+        fallbackCount: 0,
+        assetUrls: []
+      })
       return
     }
+
+    const assetUrls = Array.from(new Set(allDecor.flatMap((decor) => (decor.assetUrl ? [decor.assetUrl] : []))))
+    const fallbackCount = allDecor.filter((decor) => !decor.assetUrl || assetLoadState[decor.assetUrl] === 'error').length
 
     decorMarkerLayerRef.current = new window.TMap.MultiMarker({
       map: mapRef.current,
@@ -522,13 +581,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             width: decor.size,
             height: decor.size,
             anchor: { x: decor.size / 2, y: decor.size / 2 },
-            src: decor.assetUrl
-              ? createSvgDataUrl(assetDecorSvg(decor.assetUrl, {
-                  size: decor.size,
-                  opacity: decor.opacity,
-                  rotation: decor.rotation,
-                  active: decor.active
-                }))
+            src: decor.assetUrl && assetLoadState[decor.assetUrl] !== 'error'
+              ? decor.assetUrl
               : createSvgDataUrl(inkDecorSvg(decor.kind, {
                   size: decor.size,
                   opacity: decor.opacity,
@@ -549,11 +603,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }))
     })
 
+    setDecorSmokeReport({
+      markerCount: allDecor.length,
+      fallbackCount,
+      assetUrls
+    })
+
     return () => {
       decorMarkerLayerRef.current?.setMap?.(null)
       decorMarkerLayerRef.current = null
     }
-  }, [debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex])
+  }, [assetLoadState, debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -951,7 +1011,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       `visibleDecor=${buildVisibleDecorGeometries(decorOverlays, {
         routePathIndex,
         debugDecor,
-        rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+        rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route',
+        variant: visualVariant.id
       }).length}`,
       `rerouteDecor=${buildRerouteDecorGeometries(reroutePlan).length}`
     ].join('\n')
@@ -965,6 +1026,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
+      {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
 
       <section className="map-3d-guide-hero">
         <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
@@ -1189,6 +1251,30 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
         <details className="map-3d-guide-dev-diagnostics">
           <summary>开发诊断</summary>
+          {visualVariant.id !== 'default' ? (
+            <div className="map-3d-guide-style-audit">
+              <strong>视觉原型烟测</strong>
+              <span>当前原型类型：{prototypeName}</span>
+              <span>配置装饰点数量：{decorOverlays.length}</span>
+              <span>本次创建 marker 数量：{decorSmokeReport.markerCount}</span>
+              <span>内联 SVG fallback 数量：{decorSmokeReport.fallbackCount}</span>
+              <span>
+                素材访问：{loadedAssetCount}/{configuredAssetUrls.length} loaded
+                {failedAssetUrls.length ? `，404/失败 ${failedAssetUrls.length}` : '，未发现 404'}
+              </span>
+              <p>A/B 原型当前为装饰冒烟测试模式：装饰尺寸和透明度已临时提高，便于肉眼确认图层渲染。</p>
+              {decorSmokeReport.assetUrls.length ? (
+                <ul>
+                  {decorSmokeReport.assetUrls.map((assetUrl) => (
+                    <li key={assetUrl}>
+                      <code>{assetUrl}</code>
+                      <em>{assetLoadState[assetUrl] === 'error' ? 'error' : assetLoadState[assetUrl] === 'loaded' ? 'loaded' : 'checking'}</em>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
@@ -1795,24 +1881,31 @@ function buildVisibleDecorGeometries(
     routePathIndex: number
     debugDecor: boolean
     rerouteActive: boolean
+    variant: Map3DGuideVariant
   }
 ): RenderedInkDecorOverlay[] {
   const fadeRange = Math.max(10, Math.round(demoRoutePath.length / 8))
+  const smokeScale = options.variant === 'prototype-b' ? 2.5 : options.variant === 'prototype-a' ? 1.8 : 1
+  const smokeVisible = options.variant !== 'default'
 
   return decorOverlays
     .map((decor) => {
-      const progress = options.debugDecor
+      const rawProgress = options.debugDecor
         ? 1
         : Math.max(0, Math.min(1, (options.routePathIndex - decor.routeIndex + fadeRange) / fadeRange))
+      const progress = smokeVisible ? 1 : rawProgress
       const rerouteDimming = options.rerouteActive ? 0.58 : 1
-      const opacity = Number((decor.opacity * progress * rerouteDimming).toFixed(3))
-      const size = Math.max(20, Math.round(decor.size * (0.72 + progress * 0.28)))
+      const baseOpacity = smokeVisible ? Math.max(0.85, decor.opacity) : decor.opacity
+      const opacity = Number((baseOpacity * progress * rerouteDimming).toFixed(3))
+      const size = Math.max(20, Math.round(decor.size * (0.72 + progress * 0.28) * smokeScale))
+      const zIndex = smokeVisible ? Math.max(24, decor.zIndex) : decor.zIndex
 
       return {
         ...decor,
         opacity,
         size,
         styleId: `${decor.id}-${decor.kind}-${size}-${Math.round(opacity * 100)}-${decor.rotation}`,
+        zIndex,
         active: progress > 0.92
       }
     })
@@ -1874,32 +1967,6 @@ async function copyText(text: string) {
 
 function createSvgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
-}
-
-function assetDecorSvg(
-  assetUrl: string,
-  options: {
-    size: number
-    opacity: number
-    rotation: number
-    active: boolean
-  }
-) {
-  const opacity = Math.max(0, Math.min(1, options.opacity))
-  const glowOpacity = options.active ? 0.26 : 0.14
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${options.size}" height="${options.size}" viewBox="0 0 128 128">
-    <defs>
-      <filter id="assetShadow" x="-30%" y="-30%" width="160%" height="170%">
-        <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="rgba(20, 45, 36, .20)"/>
-      </filter>
-    </defs>
-    <g transform="rotate(${options.rotation} 64 64)" opacity="${opacity}" filter="url(#assetShadow)">
-      <ellipse cx="64" cy="82" rx="44" ry="18" fill="rgba(35, 68, 54, ${glowOpacity})"/>
-      <circle cx="64" cy="64" r="48" fill="rgba(255, 248, 223, ${glowOpacity * 0.72})"/>
-      <image href="${assetUrl}" x="10" y="8" width="108" height="108" preserveAspectRatio="xMidYMid meet"/>
-    </g>
-  </svg>`
 }
 
 function inkDecorSvg(
@@ -2118,6 +2185,24 @@ const map3DGuideCss = `
     radial-gradient(ellipse at center, transparent 58%, rgba(250, 246, 226, .15) 80%, rgba(52, 75, 61, .12) 100%),
     linear-gradient(90deg, rgba(250, 246, 226, .14), transparent 16%, transparent 84%, rgba(250, 246, 226, .14));
   box-shadow: inset 0 0 88px rgba(55, 70, 47, .13);
+}
+
+.map-3d-guide-prototype-badge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 7;
+  transform: translateX(-50%);
+  padding: 7px 13px;
+  border: 1px solid rgba(214, 168, 50, .62);
+  border-radius: 999px;
+  background: rgba(255, 247, 218, .94);
+  color: #7a4f0f;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 12px 32px rgba(22, 54, 43, .16), inset 0 0 0 1px rgba(255,255,255,.66);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
 }
 
 .map-3d-guide-shell--prototype-a .map-3d-guide-map {

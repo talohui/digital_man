@@ -5486,6 +5486,60 @@ transform: {
 
 浏览器对比 `/map-3d-guide-a` 和 `/map-3d-guide-b`，决定后续产品主线采用克制版、密集版，或按设备性能提供视觉密度切换。
 
+## 阶段七十补充：A/B 视觉装饰冒烟测试修复
+
+日期：2026-06-07
+
+### 本次目标
+
+修复用户打开 `/map-3d-guide-a` 和 `/map-3d-guide-b` 后几乎看不到视觉改进的问题，优先确认装饰层确实渲染，而不是继续做审美微调。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 修复方式
+
+- 确认 `/map-3d-guide-a` 和 `/map-3d-guide-b` 分别加载 `Map3DGuidePrototypeAPage` / `Map3DGuidePrototypeBPage`。
+- 确认 A/B 都通过 `Map3DGuideExperience` 传入 `prototype-a` / `prototype-b`。
+- 外部 PNG 不再包进 SVG data URL 的 `<image>` 中，而是直接作为 `TMap.MarkerStyle.src`，避免浏览器不加载嵌套外部图片。
+- A/B 原型临时进入装饰冒烟测试模式：
+  - A 版装饰尺寸放大 1.8 倍。
+  - B 版装饰尺寸放大 2.5 倍。
+  - A/B 原型装饰默认全部可见，透明度不低于 0.85。
+  - B 版装饰数量明显多于 A 版。
+- A/B 页面右上角增加 `Prototype A 已启用` / `Prototype B 已启用` 标签。
+- 开发诊断折叠区新增视觉原型烟测信息：
+  - 当前原型类型。
+  - 配置装饰点数量。
+  - 本次创建 marker 数量。
+  - fallback 数量。
+  - 素材 URL 和加载状态。
+
+### 明显测试装饰
+
+- 起点附近：树群 / 雾门。
+- 灵山大佛附近：莲花 / 佛光 / 青松。
+- 梵宫附近：院落 / 树影 / 云雾。
+
+这些测试装饰仍然通过腾讯地图经纬度 marker 锚定，随地图平移、缩放、旋转移动。
+
+### 验证结果
+
+- `npm run build` 通过。
+- `/map-3d-guide-a` dev server HTTP 返回 200。
+- `/map-3d-guide-b` dev server HTTP 返回 200。
+- 11 个 `/assets/map-3d-guide/shared/*.png` 素材 URL 均返回 200，没有发现 404。
+
+### 保持不变
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改腾讯 walking route 算法。
+- 不修改 routeGeometry / roadNetwork 原始数据。
+- 保留 `mapStyleId: 'style1'`。
+
 ## 阶段五十三：3D 道路网络生成与导航绑定方案
 
 ### 日期
