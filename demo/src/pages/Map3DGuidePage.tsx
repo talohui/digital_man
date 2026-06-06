@@ -23,8 +23,10 @@ type GuideCameraPreset = {
 }
 
 type MapStyleSupportReport = {
-  knownMethods: string[]
-  relatedMethods: string[]
+  mapMethods: Record<string, boolean>
+  mapRelatedMethods: string[]
+  tmapStyleKeys: string[]
+  tmapRelatedKeys: string[]
 }
 
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
@@ -110,8 +112,10 @@ function Map3DGuidePage() {
   const [modelStatus, setModelStatus] = useState('未开启')
   const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('guide')
   const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
-    knownMethods: [],
-    relatedMethods: []
+    mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
+    mapRelatedMethods: [],
+    tmapStyleKeys: [],
+    tmapRelatedKeys: []
   })
 
   const routeStops = demoGuideRoute.stops
@@ -194,7 +198,7 @@ function Map3DGuidePage() {
           rotation: -28
         })
         mapRef.current = map
-        setMapStyleSupport(inspectMapStyleSupport(map))
+        setMapStyleSupport(inspectMapStyleSupport(map, TMap))
         setMapStatus('ready')
         setPageMessage('真实 3D 地图导览模式已就绪')
       } catch (error) {
@@ -717,9 +721,33 @@ function Map3DGuidePage() {
           </div>
           <div>
             <dt>底图样式</dt>
-            <dd>{mapStyleSupport.knownMethods.length ? `可探测：${mapStyleSupport.knownMethods.join(', ')}` : '未确认运行时入口'}</dd>
+            <dd>{hasConfirmedMapStyleSupport(mapStyleSupport) ? '发现疑似入口' : '待接入'}</dd>
           </div>
         </dl>
+
+        <div className="map-3d-guide-style-audit">
+          <strong>个性化地图样式</strong>
+          <span>控制台 Key 绑定：用户已确认；当前页面未自动生效。</span>
+          <ul>
+            {tencentMapStyleMethodCandidates.map((method) => (
+              <li key={method}>
+                <code>{method}</code>
+                <em>{mapStyleSupport.mapMethods[method] ? 'true' : 'false'}</em>
+              </li>
+            ))}
+          </ul>
+          {mapStyleSupport.mapRelatedMethods.length || mapStyleSupport.tmapRelatedKeys.length ? (
+            <small>
+              相关探测：
+              {[...mapStyleSupport.mapRelatedMethods, ...mapStyleSupport.tmapRelatedKeys].slice(0, 6).join(', ')}
+            </small>
+          ) : null}
+          <p>
+            {hasConfirmedMapStyleSupport(mapStyleSupport)
+              ? '检测到可能的样式接入方法，需提供官方 styleId 或确认参数后再启用。'
+              : '当前未发现明确 JS API GL 运行时样式方法，暂以轻量滤镜和地图锚定元素实现风格化。'}
+          </p>
+        </div>
 
         <div className={`map-3d-guide-deviation map-3d-guide-deviation--${rerouteStatus}`}>
           <strong>{deviationLabel}</strong>
@@ -935,11 +963,13 @@ function toTMapLatLng(point: LatLngPoint) {
   return new window.TMap.LatLng(point.lat, point.lng)
 }
 
-function inspectMapStyleSupport(map: any): MapStyleSupportReport {
+function inspectMapStyleSupport(map: any, TMap?: any): MapStyleSupportReport {
   if (!map) {
     return {
-      knownMethods: [],
-      relatedMethods: []
+      mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
+      mapRelatedMethods: [],
+      tmapStyleKeys: [],
+      tmapRelatedKeys: []
     }
   }
 
@@ -955,15 +985,32 @@ function inspectMapStyleSupport(map: any): MapStyleSupportReport {
     target = Object.getPrototypeOf(target)
   }
 
-  const knownMethods = tencentMapStyleMethodCandidates.filter((name) => methodNames.has(name))
-  const relatedMethods = Array.from(methodNames)
+  const mapMethods = Object.fromEntries(
+    tencentMapStyleMethodCandidates.map((name) => [name, methodNames.has(name)])
+  )
+  const mapRelatedMethods = Array.from(methodNames)
     .filter((name) => /(style|basemap|baseMap|theme|skin)/i.test(name))
     .sort()
+  const tmapKeys = TMap ? Object.getOwnPropertyNames(TMap) : []
+  const tmapStyleKeys = tmapKeys
+    .filter((name) => /(style|mapStyle|basemap|baseMap|theme|skin)/i.test(name))
+    .sort()
+  const tmapRelatedKeys = tmapStyleKeys.filter((name) => typeof TMap?.[name] === 'function' || typeof TMap?.[name] === 'object')
 
   return {
-    knownMethods,
-    relatedMethods
+    mapMethods,
+    mapRelatedMethods,
+    tmapStyleKeys,
+    tmapRelatedKeys
   }
+}
+
+function hasConfirmedMapStyleSupport(report: MapStyleSupportReport) {
+  return (
+    Object.values(report.mapMethods).some(Boolean) ||
+    report.mapRelatedMethods.length > 0 ||
+    report.tmapRelatedKeys.length > 0
+  )
 }
 
 function clearGltfModel(model: any) {
@@ -1240,6 +1287,58 @@ const map3DGuideCss = `
   font-size: 13px;
   font-weight: 900;
   text-align: right;
+}
+
+.map-3d-guide-style-audit {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 10px 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .48);
+  border: 1px solid rgba(94, 112, 102, .12);
+  color: #5c665f;
+  font-size: 11px;
+}
+
+.map-3d-guide-style-audit strong {
+  color: #24483c;
+  font-size: 12px;
+}
+
+.map-3d-guide-style-audit ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-3d-guide-style-audit li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 10px;
+  background: rgba(246, 242, 224, .62);
+}
+
+.map-3d-guide-style-audit code {
+  color: #6f4a12;
+  font-size: 10px;
+}
+
+.map-3d-guide-style-audit em {
+  color: #1f5a4d;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.map-3d-guide-style-audit small,
+.map-3d-guide-style-audit p {
+  margin: 0;
+  line-height: 1.45;
 }
 
 .map-3d-guide-deviation {

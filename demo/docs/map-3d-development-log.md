@@ -6942,3 +6942,96 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有调用新的腾讯 API。
 - 本阶段没有读取或输出 API Key。
 - CSS 固定层只保留轻量氛围，不承担主视觉空间表达。
+
+## 阶段六十六：腾讯个性化地图样式接入方式专项核验
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+专项核验腾讯地图 Web JavaScript API GL 的个性化地图样式接入方式，避免误判“控制台绑定 Web Key 后自动生效”。本阶段只做运行时能力探测和诊断展示，不做大范围视觉改造。
+
+### 当前背景
+
+用户已在腾讯位置服务控制台创建并发布“我的自定义样式1”，且绑定当前项目使用的 Web Key。但强制刷新 `/map-3d-guide` 后底图样式没有自动变化，因此不能把控制台绑定视为 Web 页面已经接入个性化样式。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 代码核验范围
+
+本阶段检查了当前项目的腾讯地图加载和初始化方式：
+
+- `src/lib/loadTMap.ts` 负责加载 `https://map.qq.com/api/gljs?v=1.exp`，当前只附加 `libraries=model`。
+- `/map-3d-guide` 中的 `TMap.Map` 初始化设置了 `center`、`zoom`、`pitch`、`rotation`，未传入已确认的自定义样式参数。
+- 本阶段未修改普通 `/map` 的腾讯地图加载逻辑。
+
+### 运行时样式能力探测
+
+`/map-3d-guide` 新增小型只读诊断区域，展示：
+
+- 个性化地图样式：待接入。
+- 控制台 Key 绑定：用户已确认，但页面未自动生效。
+- `TMap.Map` 实例 / 原型链上的候选方法：
+  - `setMapStyleId`
+  - `setStyle`
+  - `setMapStyle`
+  - `setBaseMap`
+- `window.TMap` 上名称包含 `style` / `Style` / `baseMap` / `theme` / `skin` 的相关对象或方法。
+
+该探测只读取方法名，不调用未知接口，不硬编码未知 `styleId`，不读取或输出 API Key，也不访问腾讯控制台私有接口。
+
+### 探测结论
+
+当前不能确认“控制台 Key 绑定会自动让 Web 页面生效”。页面运行时会显示是否探测到候选 style API：
+
+- 如果探测到可能的样式接入方法，页面提示“需提供官方 styleId 或确认参数后再启用”。
+- 如果没有探测到明确方法，页面提示“暂以轻量滤镜和地图锚定元素实现风格化”。
+
+公开检索中可以看到第三方资料提到 `mapStyleId` 方向，但本阶段未找到可直接作为项目代码依据的腾讯官方 Web GL 样式接入页面，因此没有把 `mapStyleId` 写入运行时代码。
+
+### 架构边界
+
+腾讯个性化地图样式仍是更正确的底图风格化方向。固定 CSS 层只保留低透明宣纸纹理、边缘雾化和轻微滤镜，不承担主视觉空间表达。路线、POI、当前位置、重规划线、GLB 模型仍必须绑定腾讯地图经纬度或现有 TMap overlay。
+
+### 对 /map-3d-guide 的影响
+
+`/map-3d-guide` 增加一个很小的只读诊断区，不自动改变地图底图样式，不调用样式接口，不影响历史文化路线、模拟定位、模拟偏航、腾讯 walking route 重规划、重规划路线和 GLB 模型 Beta。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map-3d-guide`，检查诊断区显示候选样式方法 true / false。
+- 确认不再出现固定大莲花、大色块、大斜线。
+- 确认路线、POI、当前位置、重规划线仍随腾讯地图缩放、旋转、平移。
+- 检查 `/map`、`/map?debugGltfModel=1`、`/scenic-3d-map` 正常。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+需要用户提供腾讯控制台中发布样式对应的官方 Web GL 接入说明或 styleId 参数来源。确认官方参数后，再在 `/map-3d-guide` 中以可选常量或配置方式接入，避免硬编码未知 styleId 或误用其它平台的样式接口。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。
+- 本阶段没有硬编码未知 styleId。
+- 本阶段没有调用腾讯控制台私有接口。
