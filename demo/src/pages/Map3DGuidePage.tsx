@@ -752,10 +752,11 @@ function Map3DGuidePage() {
           <summary>开发诊断</summary>
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
-            <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
+            <span>当前 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
+            <span>状态：已生效 / 已绑定 JavaScript API GL key。</span>
             <span>当前底图：已恢复稳定底图配置，优先保证路线和导览元素可见。</span>
             <span>官方文档确认：mapStyleId 应在 new TMap.Map(...) 初始化参数中传入。</span>
-            <span>控制台样式绑定 Web Key：用户已确认；是否生效仍以浏览器实际效果为准。</span>
+            <span>根因：此前不生效是因为样式绑定到了地图 SDK，不是当前 JavaScript API GL key。</span>
             <ul>
               {tencentMapStyleMethodCandidates.map((method) => (
                 <li key={method}>
@@ -775,9 +776,9 @@ function Map3DGuidePage() {
               custom map 或 mapStyleId 相关提示。
             </p>
             <p>
-              当前 style1 未确认生效，不再阻塞正式 demo；导览主路线、当前位置、下一站和重规划路线可见性优先。
+              绑定到 JavaScript API GL / Web key 后，style1 已在 /map-3d-guide 生效。
             </p>
-            <p>后续如继续验证个性化底图，应在不影响导览主线显示的前提下单独实验。</p>
+            <p>腾讯个性化地图样式是当前底图风格化主方案，固定大面积艺术覆盖层不再作为主方案。</p>
             <p>当前需使用普通矢量底图验证 mapStyleId；hybrid / satellite 底图可能不支持自定义样式。</p>
             <p>离线样式包不适合直接接入 Web JS GL 页面，仅作为资源和配色参考。</p>
             <p>

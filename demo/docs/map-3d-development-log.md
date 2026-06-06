@@ -7645,3 +7645,62 @@ mapStyleId: 'style1'
 ### npm run build 结果
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+## 阶段六十六 G：确认腾讯个性化地图样式生效
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+记录腾讯个性化地图样式最终生效原因，并更新 `/map-3d-guide` 的开发诊断文案。用户已确认 `/map-3d-guide` 中 `mapStyleId: 'style1'` 生效，底图已经变成腾讯控制台自定义样式。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 结论
+
+- 腾讯官方要求 `mapStyleId` 在 `new TMap.Map(...)` 初始化参数中传入。
+- `/map-3d-guide` 使用 `mapStyleId: 'style1'` 的写法是正确的。
+- 此前不生效的根因不是代码写法，而是腾讯控制台样式绑定类型错误：样式绑定到了“地图 SDK”，不是当前项目使用的 JavaScript API GL / Web key。
+- 将样式绑定到 JavaScript API GL 对应 Web key 后，`/map-3d-guide` 的 `mapStyleId: 'style1'` 生效。
+
+### 诊断文案更新
+
+开发诊断区继续默认折叠，并更新为：
+
+- 当前 `mapStyleId: style1`。
+- 状态：已生效 / 已绑定 JavaScript API GL key。
+- 根因说明：此前样式绑定到了地图 SDK，不是当前 JavaScript API GL key。
+
+默认产品 UI 仍不展示开发字段。
+
+### 风格化方向
+
+这证明 `/map-3d-guide` 的底图风格化主方案应使用腾讯个性化地图样式。固定大面积艺术覆盖层不再作为主方案，后续仍保持：
+
+- 腾讯地图真实坐标底座。
+- 轻量宣纸 / 雾化 / 滤镜固定氛围层。
+- 地图坐标绑定的路线、POI、当前位置、重规划线和 GLB 模型。
+- 不恢复固定大莲花、大色块、大斜线等屏幕覆盖物。
+
+### 对 /map 的影响
+
+本阶段没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 保持不变
+
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、输出或修改 API Key。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
