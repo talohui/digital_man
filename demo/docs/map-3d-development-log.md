@@ -6645,3 +6645,101 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有修改腾讯 walking route。
 - 本阶段没有修改定位、偏航或重规划逻辑。
 - 本阶段没有读取或修改 `.env`、API Key、token 或敏感配置。
+
+## 阶段六十二：独立 /map-3d-guide 真实 3D 地图导览 Demo
+
+2026-06-06
+
+### 本次目标
+
+新增独立页面 `/map-3d-guide`，作为“灵山胜境真实 3D 地图导览模式”的第一版可运行 demo。页面使用腾讯地图 JavaScript API GL，默认进入倾斜 3D 视角，固定演示历史文化路线，展示风格化金色导览线、模拟定位、偏航重规划和 GLB 景点模型 Beta。
+
+### 本次约束
+
+- 不修改普通 `/map` 行为。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/three-preview`。
+- 不修改腾讯 walking route 算法。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不读取、不修改 `.env`、API Key、token 或敏感配置。
+- 不使用 `git add .`。
+- 不执行 push。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/App.tsx`
+- `docs/map-3d-guide-demo-plan.md`
+- `docs/map-3d-development-log.md`
+
+### 页面能力
+
+`/map-3d-guide` 第一版实现：
+
+- 使用腾讯地图 GL JS 初始化地图。
+- 默认 `pitch` / `rotation` / `zoom` 进入 3D 倾斜视角。
+- 固定演示历史文化路线 `historical_culture`。
+- 优先使用 `lingshanRouteGeometries` 中的历史文化候选路线作为主路线。
+- 主路线以金色风格化导览线显示。
+- 页面叠加水墨青绿、佛教金色和宣纸雾化风格 UI，不是裸腾讯地图。
+- 显示当前路线、当前位置、下一站、距离下一站、路线进度、终点和偏航状态。
+- 提供跳转 `/map` 与 `/scenic-3d-map` 的入口。
+
+### 模拟定位
+
+页面不接真实 GPS，仅提供模拟定位：
+
+- 上一站。
+- 下一站。
+- 模拟前进。
+- 模拟偏航。
+- 回到路线。
+
+模拟位置以风格化当前位置 Marker 显示在腾讯地图上。
+
+### 偏航与重规划
+
+点击“模拟偏航”后，页面会将模拟位置移动到主路线外，并调用现有 `buildWalkingRoute([偏航位置, 下一站位置])` 进行腾讯 walking route 重规划。页面加载时不会调用腾讯 walking route。
+
+重规划结果以青绿色临时路线显示，并在状态卡中展示距离、耗时和状态。如果请求失败或返回 fallback，页面显示兜底提示，不崩溃。
+
+### 3D 景点模型 Beta
+
+页面复用 `lingshanMapModelOverlays.ts`，提供“显示 3D 景点模型 Beta”开关，至少尝试加载 `giant_buddha` GLB。模型默认不加载，加载失败不会影响地图导览。模型调参仍保留在 `/map?debugGltfModel=1`。
+
+### 风格化地图皮肤
+
+本阶段未引入外部素材。页面使用 CSS 渐变、半透明覆盖层、SVG data URL Marker 和玻璃拟态面板实现高级东方、水墨青绿、佛教金色和宣纸雾化风格，因此不需要新增素材许可证文档。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`。普通 `/map`、`/map?debugGltfModel=1`、`/map?debugRoadNetwork=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 检查 `/map-3d-guide` 路由已在 `src/App.tsx` 注册。
+- 检查页面代码只在点击“模拟偏航”时调用 `buildWalkingRoute`。
+- 检查工作区未触碰 `.env`、API Key 或 token。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建；本阶段新增 `Map3DGuidePage` 独立 chunk。
+
+### 下一步建议
+
+后续可以在 `/map-3d-guide` 中继续完善普通游客可用的 3D 模型增强模式 UI、重规划状态卡，以及 MeshyAI 模型的正式校准参数。若要进入生产展示，应进一步实机验证腾讯 GLTFModel 性能和 Key 白名单配置。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map` 行为。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `/three-preview`。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有新增外部素材。

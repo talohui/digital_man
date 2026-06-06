@@ -11,6 +11,7 @@ import { useChatStore } from './store/useChatStore'
 
 const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
 const Scenic3DMapPage = lazy(() => import('./pages/Scenic3DMapPage'))
+const Map3DGuidePage = lazy(() => import('./pages/Map3DGuidePage'))
 
 function ThreePreviewRoute() {
   return (
@@ -24,6 +25,14 @@ function Scenic3DMapRoute() {
   return (
     <Suspense fallback={<div style={{ padding: 24 }}>正在加载 3D 景区地图...</div>}>
       <Scenic3DMapPage />
+    </Suspense>
+  )
+}
+
+function Map3DGuideRoute() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>正在加载真实 3D 地图导览...</div>}>
+      <Map3DGuidePage />
     </Suspense>
   )
 }
@@ -48,6 +57,7 @@ function App() {
       <Routes>
         <Route path="/three-preview" element={<ThreePreviewRoute />} />
         <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
+        <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
         <Route path="*" element={<MobileShell />} />
       </Routes>
     )
@@ -60,6 +70,7 @@ function App() {
       <Route path="/spot/:spotId" element={<SpotGuidePage />} />
       <Route path="/three-preview" element={<ThreePreviewRoute />} />
       <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
+      <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
       <Route path="/guide" element={<HomePage />} />
       <Route path="/me" element={<HomePage />} />
       <Route path="/admin" element={<AdminDashboard />} />
