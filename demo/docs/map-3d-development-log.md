@@ -7766,3 +7766,103 @@ mapStyleId: 'style1'
 ### npm run build 结果
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+## 阶段六十九 B：路线唤醒水墨园林装饰层
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+将 `/map-3d-guide` 从“腾讯地图底图 + 路线 UI”进一步推进为“水墨杭州式的路线唤醒艺术导览地图”。本阶段只覆盖历史文化路线沿线核心区域，不覆盖全园区。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+- `docs/map-3d-guide-demo-plan.md`
+- `docs/map-3d-guide-asset-licenses.md`
+
+### 地图锚定装饰层
+
+新增水墨园林装饰层，使用 `TMap.MultiMarker` 渲染内联 SVG 装饰图形。装饰点全部保存经纬度，随腾讯地图平移、缩放和旋转改变屏幕位置，不使用固定屏幕大贴图。
+
+第一版装饰类型包括：
+
+- 松树 / 树影。
+- 柳树。
+- 水体墨痕。
+- 院落。
+- 小桥。
+- 山石。
+- 云雾。
+- 莲花。
+- 佛光 / 光点。
+- 石阶。
+
+### 路线唤醒机制
+
+每个装饰点带有 `routeIndex`。模拟定位沿历史文化路线前进时，根据当前 `routePathIndex` 逐步提升装饰透明度和尺寸，形成“导览路径唤醒地图”的效果。
+
+未到达区域的装饰保持隐藏或低透明，已到达区域显现。偏航或重规划时，主线装饰会略微降低透明度，临时重规划路线附近会出现青蓝水墨雾气提示。
+
+### debugDecor 调试能力
+
+新增 `/map-3d-guide?debugDecor=1`：
+
+- 可选择任一装饰点。
+- 可调整类型、纬度、经度、缩放、旋转、透明度、显现索引和层级。
+- 调整结果自动保存到 `localStorage`。
+- 下次打开 debug 模式自动恢复。
+- 支持复制 TS 配置片段，方便后续整理为 `lingshanMapDecorOverlays.ts`。
+- 支持复制调试摘要。
+
+### 素材与许可证
+
+本阶段没有引入外部图片、外部 SVG 或第三方素材包。水墨装饰全部由项目内联 SVG / CSS 生成。
+
+新增 `docs/map-3d-guide-asset-licenses.md`，记录：
+
+- 本阶段素材来源为项目自绘。
+- 参考页面只作为视觉方向，不复用其素材。
+- 后续外部素材必须记录来源、许可证、商用和署名要求。
+
+### 保持地图坐标绑定原则
+
+本阶段没有恢复固定大莲花、大色块、大斜线或屏幕贴纸式主视觉。路线、POI、当前位置、重规划线、GLB 模型和新增水墨装饰均通过腾讯地图 overlay 或经纬度锚点绑定地图。
+
+### 保留能力
+
+- `/map-3d-guide` 可打开。
+- 历史文化路线固定演示。
+- 金色主路线。
+- 当前站点 / 下一站 / 终点 marker。
+- 模拟定位。
+- 模拟前进。
+- 模拟偏航。
+- 点击模拟偏航后仍调用腾讯 walking route 到下一站。
+- 重规划路线显示。
+- 回到路线。
+- GLB 模型 Beta 开关。
+- 相机模式。
+- `mapStyleId: 'style1'` 保留。
+
+### 对 /map 的影响
+
+本阶段没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 保持不变
+
+- 不修改 routeGeometry / roadNetwork 原始数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、输出或修改 API Key。
+- 不新增未确认许可证素材。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。

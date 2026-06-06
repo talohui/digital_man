@@ -29,6 +29,36 @@ type MapStyleSupportReport = {
   tmapRelatedKeys: string[]
 }
 
+type InkDecorKind =
+  | 'pine'
+  | 'willow'
+  | 'water'
+  | 'courtyard'
+  | 'bridge'
+  | 'stone'
+  | 'mist'
+  | 'lotus'
+  | 'glow'
+  | 'stair'
+
+type InkDecorOverlay = {
+  id: string
+  kind: InkDecorKind
+  name: string
+  position: LatLngPoint
+  routeIndex: number
+  size: number
+  rotation: number
+  opacity: number
+  zIndex: number
+  note?: string
+}
+
+type RenderedInkDecorOverlay = InkDecorOverlay & {
+  styleId: string
+  active: boolean
+}
+
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
 const demoRouteGeometry = getLingshanRouteGeometryByGuideRouteId('historical_culture')
 const demoRoutePath = demoRouteGeometry?.path.length ? demoRouteGeometry.path : getRouteStopLocations(demoGuideRoute)
@@ -48,6 +78,19 @@ const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
   features: ['base', 'building3d', 'label']
 } as const
+const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
+const inkDecorKinds: InkDecorKind[] = [
+  'pine',
+  'willow',
+  'water',
+  'courtyard',
+  'bridge',
+  'stone',
+  'mist',
+  'lotus',
+  'glow',
+  'stair'
+]
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -108,7 +151,9 @@ function Map3DGuidePage() {
   const poiMarkerLayerRef = useRef<any>(null)
   const userMarkerLayerRef = useRef<any>(null)
   const rerouteLayerRef = useRef<any>(null)
+  const decorMarkerLayerRef = useRef<any>(null)
   const gltfModelRef = useRef<any>(null)
+  const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
@@ -126,6 +171,9 @@ function Map3DGuidePage() {
     tmapStyleKeys: [],
     tmapRelatedKeys: []
   })
+  const [decorOverlays, setDecorOverlays] = useState<InkDecorOverlay[]>(() => loadStoredDecorOverlays())
+  const [selectedDecorId, setSelectedDecorId] = useState(() => loadStoredDecorOverlays()[0]?.id ?? '')
+  const [decorCopyStatus, setDecorCopyStatus] = useState('尚未导出')
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -226,12 +274,21 @@ function Map3DGuidePage() {
       poiMarkerLayerRef.current?.setMap?.(null)
       userMarkerLayerRef.current?.setMap?.(null)
       rerouteLayerRef.current?.setMap?.(null)
+      decorMarkerLayerRef.current?.setMap?.(null)
       clearGltfModel(gltfModelRef.current)
       gltfModelRef.current = null
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!debugDecor) {
+      return
+    }
+
+    window.localStorage.setItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY, JSON.stringify(decorOverlays))
+  }, [debugDecor, decorOverlays])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -380,6 +437,61 @@ function Map3DGuidePage() {
 
     return geometries
   }
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    const awakenedDecor = buildVisibleDecorGeometries(decorOverlays, {
+      routePathIndex,
+      debugDecor,
+      rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+    })
+    const rerouteDecor = buildRerouteDecorGeometries(reroutePlan)
+    const allDecor = [...awakenedDecor, ...rerouteDecor]
+
+    decorMarkerLayerRef.current?.setMap?.(null)
+
+    if (!allDecor.length) {
+      decorMarkerLayerRef.current = null
+      return
+    }
+
+    decorMarkerLayerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      styles: Object.fromEntries(
+        allDecor.map((decor) => [
+          decor.styleId,
+          new window.TMap.MarkerStyle({
+            width: decor.size,
+            height: decor.size,
+            anchor: { x: decor.size / 2, y: decor.size / 2 },
+            src: createSvgDataUrl(inkDecorSvg(decor.kind, {
+              size: decor.size,
+              opacity: decor.opacity,
+              rotation: decor.rotation,
+              active: decor.active
+            }))
+          })
+        ])
+      ),
+      geometries: allDecor.map((decor) => ({
+        id: decor.id,
+        styleId: decor.styleId,
+        position: toTMapLatLng(decor.position),
+        rank: decor.zIndex,
+        properties: {
+          title: decor.name
+        }
+      }))
+    })
+
+    return () => {
+      decorMarkerLayerRef.current?.setMap?.(null)
+      decorMarkerLayerRef.current = null
+    }
+  }, [debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -734,6 +846,57 @@ function Map3DGuidePage() {
     map.setRotation?.(preset.rotation)
   }
 
+  const selectedDecor = decorOverlays.find((decor) => decor.id === selectedDecorId) ?? decorOverlays[0]
+
+  const updateSelectedDecor = (patch: Partial<InkDecorOverlay>) => {
+    if (!selectedDecor) {
+      return
+    }
+
+    setDecorOverlays((items) =>
+      items.map((decor) =>
+        decor.id === selectedDecor.id
+          ? {
+              ...decor,
+              ...patch,
+              position: patch.position ?? decor.position
+            }
+          : decor
+      )
+    )
+  }
+
+  const resetDecorConfig = () => {
+    const defaults = buildDefaultDecorOverlays()
+    setDecorOverlays(defaults)
+    setSelectedDecorId(defaults[0]?.id ?? '')
+    window.localStorage.removeItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY)
+    setDecorCopyStatus('已恢复默认装饰配置')
+  }
+
+  const copyDecorConfig = async () => {
+    const snippet = `export const lingshanMapDecorOverlays = ${JSON.stringify(decorOverlays, null, 2)} as const\n`
+    const ok = await copyText(snippet)
+    setDecorCopyStatus(ok ? '已复制 TS 配置片段' : '复制失败，请查看浏览器权限')
+  }
+
+  const copyDecorSummary = async () => {
+    const summary = [
+      `debugDecor=${debugDecor ? '1' : '0'}`,
+      `decorCount=${decorOverlays.length}`,
+      `routePathIndex=${routePathIndex}/${Math.max(0, demoRoutePath.length - 1)}`,
+      `selectedDecor=${selectedDecor?.id ?? 'none'}`,
+      `visibleDecor=${buildVisibleDecorGeometries(decorOverlays, {
+        routePathIndex,
+        debugDecor,
+        rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+      }).length}`,
+      `rerouteDecor=${buildRerouteDecorGeometries(reroutePlan).length}`
+    ].join('\n')
+    const ok = await copyText(summary)
+    setDecorCopyStatus(ok ? '已复制调试摘要' : '复制失败，请查看浏览器权限')
+  }
+
   return (
     <main className="map-3d-guide-shell">
       <div ref={mapElementRef} className="map-3d-guide-map" />
@@ -773,6 +936,148 @@ function Map3DGuidePage() {
           ))}
         </div>
       </section>
+
+      {debugDecor ? (
+        <section className="map-3d-guide-decor-debug">
+          <div className="map-3d-guide-decor-debug__header">
+            <div>
+              <strong>水墨装饰调试</strong>
+              <span>路线唤醒进度：{routeProgressPercent}%</span>
+            </div>
+            <button type="button" onClick={copyDecorConfig}>
+              复制 TS 配置
+            </button>
+          </div>
+
+          <label>
+            装饰点
+            <select
+              value={selectedDecor?.id ?? ''}
+              onChange={(event) => setSelectedDecorId(event.target.value)}
+            >
+              {decorOverlays.map((decor) => (
+                <option key={decor.id} value={decor.id}>
+                  {decor.name} · {decor.kind}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {selectedDecor ? (
+            <div className="map-3d-guide-decor-debug__grid">
+              <label>
+                类型
+                <select
+                  value={selectedDecor.kind}
+                  onChange={(event) => updateSelectedDecor({ kind: event.target.value as InkDecorKind })}
+                >
+                  {inkDecorKinds.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {kind}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                纬度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedDecor.position.lat}
+                  onChange={(event) =>
+                    updateSelectedDecor({
+                      position: {
+                        ...selectedDecor.position,
+                        lat: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                经度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedDecor.position.lng}
+                  onChange={(event) =>
+                    updateSelectedDecor({
+                      position: {
+                        ...selectedDecor.position,
+                        lng: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                缩放
+                <input
+                  type="number"
+                  min="20"
+                  max="180"
+                  value={selectedDecor.size}
+                  onChange={(event) => updateSelectedDecor({ size: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                旋转
+                <input
+                  type="number"
+                  min="-180"
+                  max="180"
+                  value={selectedDecor.rotation}
+                  onChange={(event) => updateSelectedDecor({ rotation: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                透明度
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={selectedDecor.opacity}
+                  onChange={(event) => updateSelectedDecor({ opacity: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                显现索引
+                <input
+                  type="number"
+                  min="0"
+                  max={Math.max(0, demoRoutePath.length - 1)}
+                  value={selectedDecor.routeIndex}
+                  onChange={(event) => updateSelectedDecor({ routeIndex: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                层级
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={selectedDecor.zIndex}
+                  onChange={(event) => updateSelectedDecor({ zIndex: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <div className="map-3d-guide-decor-debug__actions">
+            <button type="button" onClick={copyDecorSummary}>
+              复制调试摘要
+            </button>
+            <button type="button" onClick={resetDecorConfig}>
+              恢复默认
+            </button>
+          </div>
+          <p>
+            调整会自动保存到 localStorage。装饰点使用 TMap Marker，经纬度锚定，随地图平移、缩放、旋转移动。
+          </p>
+          <small>{decorCopyStatus}</small>
+        </section>
+      ) : null}
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
@@ -1121,8 +1426,283 @@ function clearGltfModel(model: any) {
   model?.destroy?.()
 }
 
+function isQueryEnabled(name: string) {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const value = new URLSearchParams(window.location.search).get(name)
+  return value === '1' || value === 'true'
+}
+
+function loadStoredDecorOverlays() {
+  if (typeof window === 'undefined') {
+    return buildDefaultDecorOverlays()
+  }
+
+  try {
+    const stored = window.localStorage.getItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY)
+
+    if (!stored) {
+      return buildDefaultDecorOverlays()
+    }
+
+    const parsed = JSON.parse(stored) as InkDecorOverlay[]
+
+    if (!Array.isArray(parsed) || !parsed.length) {
+      return buildDefaultDecorOverlays()
+    }
+
+    return parsed
+  } catch {
+    return buildDefaultDecorOverlays()
+  }
+}
+
+function buildDefaultDecorOverlays(): InkDecorOverlay[] {
+  const specs: Array<{
+    id: string
+    kind: InkDecorKind
+    name: string
+    fraction: number
+    latOffset: number
+    lngOffset: number
+    size: number
+    rotation: number
+    opacity: number
+    zIndex: number
+    note?: string
+  }> = [
+    { id: 'ink-south-gate-mist', kind: 'mist', name: '南门晨雾', fraction: 0.03, latOffset: -0.00018, lngOffset: 0.00008, size: 116, rotation: -12, opacity: 0.62, zIndex: 10 },
+    { id: 'ink-wall-pine', kind: 'pine', name: '照壁松影', fraction: 0.09, latOffset: 0.00016, lngOffset: -0.00012, size: 86, rotation: -8, opacity: 0.8, zIndex: 18 },
+    { id: 'ink-square-courtyard', kind: 'courtyard', name: '胜境院落', fraction: 0.15, latOffset: -0.0001, lngOffset: 0.00018, size: 102, rotation: 10, opacity: 0.72, zIndex: 16 },
+    { id: 'ink-square-glow', kind: 'glow', name: '广场金光', fraction: 0.19, latOffset: 0.00012, lngOffset: 0.00004, size: 92, rotation: 0, opacity: 0.66, zIndex: 15 },
+    { id: 'ink-bridge-water', kind: 'water', name: '桥畔水墨', fraction: 0.25, latOffset: -0.00022, lngOffset: 0.00018, size: 132, rotation: -18, opacity: 0.58, zIndex: 8 },
+    { id: 'ink-bridge', kind: 'bridge', name: '游线小桥', fraction: 0.29, latOffset: -0.00005, lngOffset: 0.00022, size: 74, rotation: -18, opacity: 0.82, zIndex: 20 },
+    { id: 'ink-nine-lotus', kind: 'lotus', name: '九龙莲光', fraction: 0.35, latOffset: 0.00012, lngOffset: -0.00012, size: 88, rotation: 0, opacity: 0.8, zIndex: 22 },
+    { id: 'ink-nine-willow', kind: 'willow', name: '九龙柳影', fraction: 0.39, latOffset: -0.00017, lngOffset: 0.00008, size: 92, rotation: 16, opacity: 0.72, zIndex: 18 },
+    { id: 'ink-step-approach', kind: 'stair', name: '登佛石阶', fraction: 0.47, latOffset: 0.00006, lngOffset: -0.00016, size: 82, rotation: 26, opacity: 0.76, zIndex: 19 },
+    { id: 'ink-buddha-halo', kind: 'glow', name: '大佛佛光', fraction: 0.55, latOffset: 0.00006, lngOffset: 0.00002, size: 136, rotation: 0, opacity: 0.72, zIndex: 12 },
+    { id: 'ink-buddha-stone', kind: 'stone', name: '佛前山石', fraction: 0.58, latOffset: -0.00012, lngOffset: -0.00018, size: 74, rotation: -22, opacity: 0.78, zIndex: 18 },
+    { id: 'ink-fan-gong-courtyard', kind: 'courtyard', name: '梵宫院影', fraction: 0.68, latOffset: 0.00018, lngOffset: 0.00012, size: 118, rotation: -9, opacity: 0.7, zIndex: 16 },
+    { id: 'ink-fan-gong-mist', kind: 'mist', name: '梵宫薄雾', fraction: 0.72, latOffset: -0.00016, lngOffset: 0.00005, size: 124, rotation: 8, opacity: 0.54, zIndex: 9 },
+    { id: 'ink-tancheng-water', kind: 'water', name: '坛城水意', fraction: 0.81, latOffset: 0.00014, lngOffset: -0.0002, size: 124, rotation: 12, opacity: 0.56, zIndex: 8 },
+    { id: 'ink-tancheng-lotus', kind: 'lotus', name: '坛城莲印', fraction: 0.86, latOffset: -0.00008, lngOffset: 0.00014, size: 82, rotation: 0, opacity: 0.76, zIndex: 22 },
+    { id: 'ink-exit-pine', kind: 'pine', name: '出口松影', fraction: 0.94, latOffset: 0.00012, lngOffset: -0.0001, size: 84, rotation: 12, opacity: 0.68, zIndex: 18 }
+  ]
+
+  return specs.map((spec) => {
+    const routeIndex = Math.max(0, Math.min(demoRoutePath.length - 1, Math.round(spec.fraction * (demoRoutePath.length - 1))))
+    const anchor = demoRoutePath[routeIndex] ?? routeCenter
+
+    return {
+      id: spec.id,
+      kind: spec.kind,
+      name: spec.name,
+      position: {
+        lat: Number((anchor.lat + spec.latOffset).toFixed(6)),
+        lng: Number((anchor.lng + spec.lngOffset).toFixed(6))
+      },
+      routeIndex,
+      size: spec.size,
+      rotation: spec.rotation,
+      opacity: spec.opacity,
+      zIndex: spec.zIndex,
+      note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
+    }
+  })
+}
+
+function buildVisibleDecorGeometries(
+  decorOverlays: InkDecorOverlay[],
+  options: {
+    routePathIndex: number
+    debugDecor: boolean
+    rerouteActive: boolean
+  }
+): RenderedInkDecorOverlay[] {
+  const fadeRange = Math.max(10, Math.round(demoRoutePath.length / 8))
+
+  return decorOverlays
+    .map((decor) => {
+      const progress = options.debugDecor
+        ? 1
+        : Math.max(0, Math.min(1, (options.routePathIndex - decor.routeIndex + fadeRange) / fadeRange))
+      const rerouteDimming = options.rerouteActive ? 0.58 : 1
+      const opacity = Number((decor.opacity * progress * rerouteDimming).toFixed(3))
+      const size = Math.max(20, Math.round(decor.size * (0.72 + progress * 0.28)))
+
+      return {
+        ...decor,
+        opacity,
+        size,
+        styleId: `${decor.id}-${decor.kind}-${size}-${Math.round(opacity * 100)}-${decor.rotation}`,
+        active: progress > 0.92
+      }
+    })
+    .filter((decor) => decor.opacity > 0.04)
+}
+
+function buildRerouteDecorGeometries(reroutePlan: PlannedRoute | null): RenderedInkDecorOverlay[] {
+  if (!reroutePlan || reroutePlan.path.length < 2) {
+    return []
+  }
+
+  return [0.28, 0.55, 0.78].map((fraction, index) => {
+    const routeIndex = Math.max(0, Math.min(reroutePlan.path.length - 1, Math.round(fraction * (reroutePlan.path.length - 1))))
+    const anchor = reroutePlan.path[routeIndex]
+    const size = index === 1 ? 118 : 92
+    const opacity = index === 1 ? 0.72 : 0.52
+
+    return {
+      id: `reroute-ink-mist-${index + 1}`,
+      kind: 'mist',
+      name: `重规划水雾 ${index + 1}`,
+      position: anchor,
+      routeIndex,
+      size,
+      rotation: index === 0 ? -16 : index === 1 ? 10 : 24,
+      opacity,
+      zIndex: 12,
+      styleId: `reroute-ink-mist-${index + 1}-${size}`,
+      active: true,
+      note: '偏航重规划路线附近的青蓝水墨提示。'
+    }
+  })
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to textarea fallback.
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    return document.execCommand('copy')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
 function createSvgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function inkDecorSvg(
+  kind: InkDecorKind,
+  options: {
+    size: number
+    opacity: number
+    rotation: number
+    active: boolean
+  }
+) {
+  const pulse = options.active ? 1 : 0.72
+  const ink = '#173e35'
+  const jade = '#2d6b5b'
+  const paleJade = '#8fb7a2'
+  const water = '#72aeb5'
+  const gold = '#d6a832'
+  const paper = '#fff8df'
+  const opacity = Math.max(0, Math.min(1, options.opacity))
+  const transform = `rotate(${options.rotation} 64 64)`
+
+  const shape = {
+    pine: `
+      <g transform="${transform}">
+        <path d="M62 105c6-24 6-46 2-76" stroke="${ink}" stroke-width="6" stroke-linecap="round" opacity=".62"/>
+        <path d="M66 22c-25 15-33 33-38 48 18-10 31-13 52-9-8-10-10-23-14-39Z" fill="${jade}" opacity=".78"/>
+        <path d="M65 38c-24 7-39 20-48 39 24-11 45-11 71-4-10-9-16-20-23-35Z" fill="${paleJade}" opacity=".66"/>
+        <path d="M70 56c-19 8-31 19-40 37 23-9 41-8 62-.4-8-9-14-21-22-36.6Z" fill="${ink}" opacity=".34"/>
+      </g>`,
+    willow: `
+      <g transform="${transform}">
+        <path d="M48 22c18 10 26 27 24 72" fill="none" stroke="${ink}" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+        ${[34, 44, 54, 64, 74, 84].map((x, index) => `<path d="M${x} 30c${index % 2 ? 14 : 10} 18 ${index % 2 ? 9 : 4} 42-4 68" fill="none" stroke="${jade}" stroke-width="3" stroke-linecap="round" opacity="${0.38 + index * 0.04}"/>`).join('')}
+        <ellipse cx="70" cy="92" rx="33" ry="10" fill="${paleJade}" opacity=".16"/>
+      </g>`,
+    water: `
+      <g transform="${transform}">
+        <path d="M16 65c17-24 39-28 66-20 17 5 25 2 34-7-5 23-23 42-51 45-22 2-39-5-49-18Z" fill="${water}" opacity=".34"/>
+        <path d="M20 67c22 7 40 7 61-3 12-6 23-10 35-7" fill="none" stroke="${paper}" stroke-width="3" stroke-linecap="round" opacity=".58"/>
+        <path d="M33 79c20 5 37 4 56-5" fill="none" stroke="${jade}" stroke-width="2" stroke-linecap="round" opacity=".36"/>
+      </g>`,
+    courtyard: `
+      <g transform="${transform}">
+        <path d="M27 82h76l-8 18H35l-8-18Z" fill="${ink}" opacity=".20"/>
+        <path d="M26 58l38-24 39 24H26Z" fill="${gold}" opacity=".60"/>
+        <path d="M35 58h58v28H35z" fill="${paper}" opacity=".82" stroke="${ink}" stroke-width="3"/>
+        <path d="M42 65h12v20M61 65h12v20M80 65h8v20" stroke="${jade}" stroke-width="3" stroke-linecap="round" opacity=".70"/>
+        <path d="M25 58h80" stroke="${ink}" stroke-width="4" stroke-linecap="round" opacity=".46"/>
+      </g>`,
+    bridge: `
+      <g transform="${transform}">
+        <path d="M24 74c18-32 62-32 80 0" fill="none" stroke="${gold}" stroke-width="8" stroke-linecap="round" opacity=".70"/>
+        <path d="M31 75c16-20 50-20 66 0" fill="none" stroke="${paper}" stroke-width="5" stroke-linecap="round" opacity=".78"/>
+        <path d="M32 83h64" stroke="${ink}" stroke-width="4" stroke-linecap="round" opacity=".38"/>
+        <path d="M40 70v16M55 60v25M73 60v25M88 70v16" stroke="${ink}" stroke-width="3" stroke-linecap="round" opacity=".34"/>
+      </g>`,
+    stone: `
+      <g transform="${transform}">
+        <path d="M37 91c-13-20-5-47 23-60 24 13 34 38 21 62-17 8-31 8-44-2Z" fill="${ink}" opacity=".30"/>
+        <path d="M54 31c20 13 27 35 19 55" fill="none" stroke="${paper}" stroke-width="3" stroke-linecap="round" opacity=".46"/>
+        <path d="M34 95c19 10 48 9 69-1" stroke="${jade}" stroke-width="4" stroke-linecap="round" opacity=".20"/>
+      </g>`,
+    mist: `
+      <g transform="${transform}">
+        <path d="M16 62c16-12 31-12 45 0 13 11 29 11 51-2" fill="none" stroke="${water}" stroke-width="8" stroke-linecap="round" opacity=".30"/>
+        <path d="M14 79c24-11 42-11 61 0 12 7 24 6 38-3" fill="none" stroke="${paper}" stroke-width="7" stroke-linecap="round" opacity=".52"/>
+        <path d="M31 95c20-8 38-7 59 1" fill="none" stroke="${jade}" stroke-width="5" stroke-linecap="round" opacity=".20"/>
+      </g>`,
+    lotus: `
+      <g transform="${transform}">
+        <ellipse cx="64" cy="75" rx="33" ry="10" fill="${water}" opacity=".18"/>
+        <path d="M64 35c11 13 14 28 0 45-14-17-11-32 0-45Z" fill="${paper}" stroke="${gold}" stroke-width="3" opacity=".84"/>
+        <path d="M42 47c17 4 27 14 30 33-20-4-30-15-30-33Z" fill="${paleJade}" stroke="${gold}" stroke-width="2" opacity=".72"/>
+        <path d="M86 47c0 18-10 29-30 33 3-19 13-29 30-33Z" fill="${paleJade}" stroke="${gold}" stroke-width="2" opacity=".72"/>
+        <circle cx="64" cy="72" r="7" fill="${gold}" opacity=".88"/>
+      </g>`,
+    glow: `
+      <g transform="${transform}">
+        <circle cx="64" cy="64" r="40" fill="${gold}" opacity=".16"/>
+        <circle cx="64" cy="64" r="23" fill="${gold}" opacity=".18"/>
+        <path d="M64 22v18M64 88v18M22 64h18M88 64h18M35 35l12 12M81 81l12 12M93 35 81 47M47 81 35 93" stroke="${gold}" stroke-width="4" stroke-linecap="round" opacity=".42"/>
+        <circle cx="64" cy="64" r="8" fill="${paper}" stroke="${gold}" stroke-width="3" opacity=".86"/>
+      </g>`,
+    stair: `
+      <g transform="${transform}">
+        <path d="M32 88h64M38 76h52M44 64h40M50 52h28M56 40h16" stroke="${ink}" stroke-width="6" stroke-linecap="round" opacity=".36"/>
+        <path d="M31 90c22 9 45 8 66-1" stroke="${gold}" stroke-width="3" stroke-linecap="round" opacity=".50"/>
+        <path d="M52 33c8 4 16 4 24 0" stroke="${jade}" stroke-width="4" stroke-linecap="round" opacity=".36"/>
+      </g>`
+  }[kind]
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${options.size}" height="${options.size}" viewBox="0 0 128 128">
+    <defs>
+      <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.4"/>
+      </filter>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+        <feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="rgba(21, 49, 42, .18)"/>
+      </filter>
+    </defs>
+    <g opacity="${opacity}" filter="url(#shadow)">
+      <circle cx="64" cy="68" r="${42 * pulse}" fill="rgba(255,248,223,.18)" filter="url(#soft)"/>
+      ${shape}
+    </g>
+  </svg>`
 }
 
 function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', index: number) {
@@ -1367,6 +1947,93 @@ const map3DGuideCss = `
   padding: 16px;
   border-radius: 10px;
   border-right: 5px solid rgba(33, 91, 75, .58);
+}
+
+.map-3d-guide-decor-debug {
+  position: absolute;
+  z-index: 6;
+  top: 320px;
+  left: 18px;
+  width: 340px;
+  max-width: calc(100vw - 36px);
+  max-height: calc(100vh - 360px);
+  overflow: auto;
+  padding: 13px;
+  border: 1px solid rgba(28, 82, 72, .20);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(250, 252, 238, .95), rgba(226, 244, 237, .90));
+  box-shadow: 0 24px 60px rgba(20, 45, 36, .18), inset 0 0 0 1px rgba(255,255,255,.55);
+  backdrop-filter: blur(18px);
+}
+
+.map-3d-guide-decor-debug__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.map-3d-guide-decor-debug__header div,
+.map-3d-guide-decor-debug label {
+  display: grid;
+  gap: 5px;
+}
+
+.map-3d-guide-decor-debug strong {
+  color: #24483c;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 15px;
+}
+
+.map-3d-guide-decor-debug span,
+.map-3d-guide-decor-debug label,
+.map-3d-guide-decor-debug p,
+.map-3d-guide-decor-debug small {
+  color: #68746c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.map-3d-guide-decor-debug select,
+.map-3d-guide-decor-debug input {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid rgba(50, 88, 75, .18);
+  border-radius: 8px;
+  background: rgba(255, 252, 238, .88);
+  color: #24483c;
+  padding: 0 8px;
+}
+
+.map-3d-guide-decor-debug__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.map-3d-guide-decor-debug button {
+  border: 1px solid rgba(143, 101, 28, .24);
+  border-radius: 9px;
+  background: rgba(255, 249, 229, .90);
+  color: #6f4a12;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.map-3d-guide-decor-debug__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.map-3d-guide-decor-debug p {
+  margin: 10px 0 4px;
 }
 
 .map-3d-guide-status h2 {
