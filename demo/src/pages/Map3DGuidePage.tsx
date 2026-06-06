@@ -37,9 +37,9 @@ const guideCameraPresets: GuideCameraPreset[] = [
     id: 'overview',
     label: '路线总览',
     description: '俯瞰历史文化主线',
-    zoom: 16.7,
-    pitch: 58,
-    rotation: -30
+    zoom: 17.1,
+    pitch: 54,
+    rotation: -25
   },
   {
     id: 'current',
@@ -77,8 +77,8 @@ const guideCameraPresets: GuideCameraPreset[] = [
     id: 'guide',
     label: '导览视角',
     description: '回到跟随导览视角',
-    zoom: 18.4,
-    pitch: 64,
+    zoom: 18.7,
+    pitch: 65,
     rotation: -28
   }
 ]
@@ -139,12 +139,25 @@ function Map3DGuidePage() {
   const distanceToRoute = nearestRoutePoint?.distanceMeters ?? 0
   const deviationLabel =
     rerouteStatus === 'ready'
-      ? '已重规划到下一站'
+      ? '已规划至下一站'
       : rerouteStatus === 'planning'
         ? '正在重规划'
         : distanceToRoute > 80
-          ? '可能偏航'
-          : '路线附近'
+          ? '已偏航'
+          : '沿主路线'
+  const guideStateText =
+    rerouteStatus === 'ready'
+      ? '已规划至下一站'
+      : rerouteStatus === 'planning'
+        ? '正在重规划'
+        : rerouteStatus === 'failed'
+          ? '重规划待确认'
+          : distanceToRoute > 80
+            ? '已偏航'
+            : '沿主路线'
+  const distanceToNextStopText = nextStop.distanceToNextStopMeters
+    ? formatDistanceMeters(nextStop.distanceToNextStopMeters)
+    : '待估算'
 
   useEffect(() => {
     let cancelled = false
@@ -203,27 +216,44 @@ function Map3DGuidePage() {
     routeLayerRef.current = new window.TMap.MultiPolyline({
       map: mapRef.current,
       styles: {
+        routeShadow: new window.TMap.PolylineStyle({
+          color: 'rgba(74, 54, 18, 0.24)',
+          width: 32,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
         routeAura: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 238, 164, 0.30)',
-          width: 24,
+          color: 'rgba(255, 228, 118, 0.42)',
+          width: 26,
           borderWidth: 0,
           lineCap: 'round'
         }),
         routeGlow: new window.TMap.PolylineStyle({
-          color: 'rgba(213, 166, 45, 0.46)',
-          width: 15,
+          color: 'rgba(247, 178, 47, 0.74)',
+          width: 17,
           borderWidth: 0,
           lineCap: 'round'
         }),
         mainRoute: new window.TMap.PolylineStyle({
-          color: '#F2C14E',
-          width: 9,
-          borderWidth: 4,
-          borderColor: 'rgba(255, 254, 238, 0.96)',
+          color: '#FFD45A',
+          width: 10,
+          borderWidth: 5,
+          borderColor: 'rgba(255, 250, 222, 0.98)',
+          lineCap: 'round'
+        }),
+        routeCore: new window.TMap.PolylineStyle({
+          color: 'rgba(117, 75, 11, 0.86)',
+          width: 3,
+          borderWidth: 0,
           lineCap: 'round'
         })
       },
       geometries: [
+        {
+          id: 'historical-culture-route-shadow',
+          styleId: 'routeShadow',
+          paths: demoRoutePath.map(toTMapLatLng)
+        },
         {
           id: 'historical-culture-route-aura',
           styleId: 'routeAura',
@@ -237,6 +267,11 @@ function Map3DGuidePage() {
         {
           id: 'historical-culture-main-route',
           styleId: 'mainRoute',
+          paths: demoRoutePath.map(toTMapLatLng)
+        },
+        {
+          id: 'historical-culture-route-core',
+          styleId: 'routeCore',
           paths: demoRoutePath.map(toTMapLatLng)
         }
       ]
@@ -359,15 +394,37 @@ function Map3DGuidePage() {
     rerouteLayerRef.current = new window.TMap.MultiPolyline({
       map: mapRef.current,
       styles: {
+        rerouteHalo: new window.TMap.PolylineStyle({
+          color: 'rgba(20, 184, 166, 0.24)',
+          width: 24,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        rerouteGlow: new window.TMap.PolylineStyle({
+          color: 'rgba(45, 212, 191, 0.58)',
+          width: 14,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
         reroute: new window.TMap.PolylineStyle({
-          color: '#23B8B0',
-          width: 7,
-          borderWidth: 2,
-          borderColor: 'rgba(230, 255, 250, 0.92)',
+          color: '#0EAEA4',
+          width: 8,
+          borderWidth: 4,
+          borderColor: 'rgba(255, 255, 232, 0.94)',
           lineCap: 'round'
         })
       },
       geometries: [
+        {
+          id: 'temporary-reroute-halo',
+          styleId: 'rerouteHalo',
+          paths: reroutePlan.path.map(toTMapLatLng)
+        },
+        {
+          id: 'temporary-reroute-glow',
+          styleId: 'rerouteGlow',
+          paths: reroutePlan.path.map(toTMapLatLng)
+        },
         {
           id: 'temporary-reroute-to-next-stop',
           styleId: 'reroute',
@@ -494,7 +551,7 @@ function Map3DGuidePage() {
     setSimulatedPosition(offRoutePosition)
     setRerouteStatus('planning')
     setReroutePlan(null)
-    setRerouteMessage(`正在重规划：偏航位置 -> ${targetName}`)
+    setRerouteMessage(`正在为你规划临时路线至下一站：${targetName}`)
     focusMap(offRoutePosition, 18)
 
     if (!target) {
@@ -510,7 +567,7 @@ function Map3DGuidePage() {
       setRerouteMessage(
         plannedRoute.usedFallback
           ? `重规划失败，已显示兜底线：${plannedRoute.fallbackReason ?? '未知原因'}`
-          : `已重规划到 ${targetName}，约 ${formatDistanceMeters(plannedRoute.distanceMeters)} / ${plannedRoute.durationMinutes} 分钟`
+          : `临时重规划至下一站：${targetName}，约 ${formatDistanceMeters(plannedRoute.distanceMeters)} / ${plannedRoute.durationMinutes} 分钟`
       )
     } catch (error) {
       setRerouteStatus('failed')
@@ -586,6 +643,7 @@ function Map3DGuidePage() {
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-waterwash" aria-hidden="true" />
       <div className="map-3d-guide-mountainveil" aria-hidden="true" />
+      <div className="map-3d-guide-focuswash" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
 
       <section className="map-3d-guide-hero">
@@ -710,10 +768,29 @@ function Map3DGuidePage() {
           <span style={{ width: `${routeProgressPercent}%` }} />
         </div>
         <div className="map-3d-guide-controlbar__meta">
-          <strong>{pageMessage}</strong>
-          <span>
-            地图状态：{mapStatus} · 距主路线 {formatDistanceMeters(distanceToRoute)}
-          </span>
+          <strong>导览控制台</strong>
+          <div className="map-3d-guide-console-grid">
+            <span>
+              <em>当前路线</em>
+              {demoGuideRoute.name}
+            </span>
+            <span>
+              <em>当前站点</em>
+              {currentStop?.name ?? '路线中段'}
+            </span>
+            <span>
+              <em>下一站</em>
+              {nextStopPoi?.name ?? '路线终点'}
+            </span>
+            <span>
+              <em>距下一站</em>
+              约 {distanceToNextStopText}
+            </span>
+            <span>
+              <em>当前状态</em>
+              {guideStateText}
+            </span>
+          </div>
         </div>
         <div className="map-3d-guide-controlbar__actions">
           <button type="button" onClick={() => moveToStop(selectedStopIndex - 1)}>
@@ -934,6 +1011,7 @@ const map3DGuideCss = `
 .map-3d-guide-mist,
 .map-3d-guide-waterwash,
 .map-3d-guide-mountainveil,
+.map-3d-guide-focuswash,
 .map-3d-guide-paperedge {
   position: absolute;
   inset: 0;
@@ -953,9 +1031,9 @@ const map3DGuideCss = `
 
 .map-3d-guide-mist {
   background:
-    linear-gradient(135deg, rgba(255,255,255,.38), transparent 36%),
-    repeating-linear-gradient(100deg, rgba(255,255,255,.10) 0 2px, transparent 2px 22px);
-  opacity: .86;
+    linear-gradient(135deg, rgba(255,255,255,.26), transparent 30%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.08) 0 2px, transparent 2px 22px);
+  opacity: .64;
 }
 
 .map-3d-guide-waterwash {
@@ -972,6 +1050,13 @@ const map3DGuideCss = `
     radial-gradient(ellipse at 86% 12%, rgba(43, 92, 75, .20), transparent 34%),
     linear-gradient(180deg, rgba(63, 112, 82, .18), transparent 44%);
   filter: blur(1px);
+}
+
+.map-3d-guide-focuswash {
+  background:
+    radial-gradient(ellipse at 48% 56%, transparent 0 30%, rgba(244, 238, 216, .18) 48%, rgba(42, 67, 55, .22) 100%),
+    linear-gradient(90deg, rgba(244, 238, 216, .34), transparent 24%, transparent 72%, rgba(34, 63, 54, .18));
+  mix-blend-mode: multiply;
 }
 
 .map-3d-guide-paperedge {
@@ -1145,11 +1230,12 @@ const map3DGuideCss = `
   display: grid;
   gap: 4px;
   margin-top: 12px;
-  padding: 10px;
+  padding: 12px;
   border-radius: 14px;
   background: rgba(233, 244, 237, .75);
   color: #1e5749;
   font-size: 12px;
+  border: 1px solid rgba(31, 90, 77, .12);
 }
 
 .map-3d-guide-deviation--planning,
@@ -1159,8 +1245,11 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-deviation--ready {
-  background: rgba(220, 252, 241, .82);
+  background:
+    linear-gradient(135deg, rgba(220, 252, 241, .92), rgba(255, 250, 219, .78));
   color: #0f766e;
+  border-color: rgba(20, 184, 166, .38);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.64), 0 10px 24px rgba(15, 118, 110, .12);
 }
 
 .map-3d-guide-deviation--failed {
@@ -1228,19 +1317,37 @@ const map3DGuideCss = `
 
 .map-3d-guide-pois button.is-active {
   color: #7b4f0f;
-  background: rgba(255, 240, 196, .98);
-  border-color: rgba(213, 166, 45, .6);
+  background: linear-gradient(135deg, rgba(255, 238, 168, .98), rgba(255, 250, 226, .96));
+  border-color: rgba(213, 166, 45, .72);
+  box-shadow: 0 0 0 3px rgba(246, 203, 86, .18), 0 8px 22px rgba(154, 106, 22, .12);
+}
+
+.map-3d-guide-pois button.is-active span {
+  background: #d6a832;
+  color: #fff9db;
 }
 
 .map-3d-guide-pois button.is-next {
   color: #0f5f56;
   border-color: rgba(20, 148, 134, .40);
   background: rgba(224, 249, 243, .92);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, .12);
+}
+
+.map-3d-guide-pois button.is-next span {
+  background: #0f766e;
+  color: #e9fffa;
 }
 
 .map-3d-guide-pois button.is-terminal {
   color: #8a3512;
   border-color: rgba(182, 83, 24, .40);
+  background: rgba(255, 238, 214, .94);
+}
+
+.map-3d-guide-pois button.is-terminal span {
+  background: #8b2f17;
+  color: #fff3d8;
 }
 
 .map-3d-guide-pois button small {
@@ -1259,28 +1366,33 @@ const map3DGuideCss = `
   grid-template-columns: 1fr auto;
   gap: 12px;
   align-items: center;
-  padding: 14px;
+  padding: 14px 16px;
   border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(255, 249, 228, .94), rgba(231, 247, 239, .90));
+  border-color: rgba(213, 166, 45, .28);
 }
 
 .map-3d-guide-progress {
   grid-column: 1 / -1;
-  height: 8px;
+  height: 10px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(32, 79, 70, .14);
+  background: rgba(32, 79, 70, .12);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.72);
 }
 
 .map-3d-guide-progress span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2c6f5d, #d6a832);
+  background: linear-gradient(90deg, #2c6f5d, #e4af2f, #ffe08a);
+  box-shadow: 0 0 18px rgba(228, 175, 47, .48);
 }
 
 .map-3d-guide-controlbar__meta {
   display: grid;
-  gap: 3px;
+  gap: 8px;
   color: #6a756d;
   font-size: 12px;
 }
@@ -1288,6 +1400,32 @@ const map3DGuideCss = `
 .map-3d-guide-controlbar__meta strong {
   color: #24483c;
   font-size: 14px;
+}
+
+.map-3d-guide-console-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.map-3d-guide-console-grid span {
+  display: grid;
+  gap: 3px;
+  min-height: 48px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .50);
+  color: #24483c;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.60);
+}
+
+.map-3d-guide-console-grid em {
+  color: #8a6a28;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .map-3d-guide-controlbar__actions {
@@ -1347,6 +1485,10 @@ const map3DGuideCss = `
     grid-template-columns: 1fr;
     max-height: 42vh;
     overflow: auto;
+  }
+
+  .map-3d-guide-console-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .map-3d-guide-controlbar__actions {
