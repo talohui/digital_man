@@ -5426,6 +5426,66 @@ transform: {
 
 阶段七十 B 接入 `/map-3d-guide-b`，在同一套业务逻辑上提高路线沿线资产密度，验证数字沙盘冲击力版本。
 
+## 阶段七十 B：3D 导览视觉原型 B
+
+日期：2026-06-07
+
+### 本次目标
+
+新增 `/map-3d-guide-b`，用于验证“更多素材密集铺陈”的数字沙盘视觉策略。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/pages/Map3DGuidePrototypeBPage.tsx`
+- `src/App.tsx`
+- `public/assets/map-3d-guide/shared/*.png`
+- `docs/map-3d-guide-ab-visual-prototypes.md`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-development-log.md`
+
+### 实现说明
+
+- 新增 `/map-3d-guide-b` 路由。
+- B 版复用 `Map3DGuideExperience`，只切换视觉变体为 `prototype-b`。
+- B 版沿历史文化路线布置 32 个地图锚定装饰点。
+- 关键节点周边增加树群、山石、莲花、佛光、院落、水意和云雾。
+- 所有装饰仍通过 `TMap.MultiMarker` 经纬度锚定，随地图平移、缩放、旋转。
+- 模拟偏航后，主线装饰仍按既有逻辑降透明，重规划路线附近显示青蓝水墨提示。
+
+### 使用素材
+
+- Kenney Foliage Pack (100x)，CC0，用于更密集树群、山石、叶片。
+- OpenGameArt Lotus Flowers，CC0，用于密集莲花节点。
+- 许可证记录见 `docs/map-3d-guide-asset-licenses.md`。
+
+### 保持能力
+
+- 腾讯地图 3D 底座。
+- `mapStyleId: 'style1'`。
+- 历史文化路线。
+- 当前站点 / 下一站 / 终点 marker。
+- 模拟定位、模拟前进、模拟偏航。
+- 腾讯 walking route 重规划到下一站。
+- 重规划路线显示。
+- GLB 模型 Beta。
+
+### 对 /map 的影响
+
+没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+浏览器对比 `/map-3d-guide-a` 和 `/map-3d-guide-b`，决定后续产品主线采用克制版、密集版，或按设备性能提供视觉密度切换。
+
 ## 阶段五十三：3D 道路网络生成与导航绑定方案
 
 ### 日期

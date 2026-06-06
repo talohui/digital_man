@@ -80,7 +80,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `public/assets/map-3d-guide/shared/foliagePack_004.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否；OpenGameArt 页面说明署名 Kenney.nl 非强制 | 树木 / 松影 marker | A / B 共用 |
 | `public/assets/map-3d-guide/shared/foliagePack_007.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 树木 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_011.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | B 版树群 marker | B |
 | `public/assets/map-3d-guide/shared/foliagePack_027.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 树木 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_041.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | B 版树群 marker | B |
 | `public/assets/map-3d-guide/shared/foliagePack_049.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 山石 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_058.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | B 版小型自然物 marker | B |
+| `public/assets/map-3d-guide/shared/foliagePack_leaves_001.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | B 版叶片 / 林影 marker | B |
 | `public/assets/map-3d-guide/shared/lotus_0282.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否；页面说明不需要署名 | 莲花节点 marker | A / B 共用 |
 | `public/assets/map-3d-guide/shared/lotus_3996.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否 | 莲花节点 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/lotus_7692.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否 | B 版密集莲花 marker | B |
