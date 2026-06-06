@@ -7401,3 +7401,86 @@ enableBloom: true
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
 - 本阶段没有新增外部素材。
+
+## 阶段六十六 D：修正 hybrid 底图导致 mapStyleId 不生效的问题
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+修正 `/map-3d-guide` 中自定义地图样式验证可能被 hybrid 混合底图干扰的问题。用户在浏览器 Network 中看到 style / tile 请求包含 `styleid=0` 和 `mapType=hybrid`，说明当前实际请求可能落在 hybrid 底图链路，`mapStyleId: 'style1'` 没有生效或被默认样式覆盖。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+Network 请求显示：
+
+- `mapType=hybrid`
+- `styleid=0`
+
+这不适合作为腾讯个性化地图 `style1` 是否生效的判断基础。自定义样式应优先在普通矢量地图底图上验证，而不是在 hybrid / satellite 底图上验证。
+
+### 修复方式
+
+本阶段在 `/map-3d-guide` 的 `TMap.Map` 初始化参数中显式加入普通矢量底图：
+
+```ts
+baseMap: {
+  type: 'vector',
+  features: ['base', 'building3d', 'label']
+}
+```
+
+同时保留：
+
+```ts
+mapStyleId: 'style1'
+```
+
+`features` 保留基础底图、3D 建筑和道路 / 地名标签，不启用普通 POI 点图层，以降低普通商业 POI 对导览主线的干扰。
+
+### 开发诊断补充
+
+“开发诊断”折叠区新增提示：
+
+- 当前底图为普通矢量底图 `vector`。
+- 当前需使用普通矢量底图验证 `mapStyleId`。
+- hybrid / satellite 底图可能不支持自定义样式。
+
+### 保留能力
+
+- 保留 3D pitch / rotation / zoom。
+- 保留 `mapStyleId: 'style1'`。
+- 保留金色主路线、POI、模拟定位、模拟偏航、腾讯 walking 重规划路线。
+- 保留 GLB 模型 Beta。
+- 不恢复固定大莲花、大色块、大斜线等固定屏幕覆盖物。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 后续验证
+
+需要在浏览器 Network 中重新打开 `/map-3d-guide`，检查 tile / style 请求是否不再包含 `mapType=hybrid`，并观察 `styleid` 是否仍为 `0`。如果仍为 `0`，下一步应继续核对腾讯控制台 styleId、发布状态、Web Key 绑定和域名白名单。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。

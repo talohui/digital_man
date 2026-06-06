@@ -44,6 +44,10 @@ const MAP_3D_GUIDE_RENDER_OPTIONS = {
   enableBloom: true
   // fogOptions / skyOptions need confirmed Tencent JS API GL field shapes before enabling.
 } as const
+const MAP_3D_GUIDE_BASE_MAP = {
+  type: 'vector',
+  features: ['base', 'building3d', 'label']
+} as const
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -201,6 +205,7 @@ function Map3DGuidePage() {
           pitch: 64,
           rotation: -28,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
+          baseMap: MAP_3D_GUIDE_BASE_MAP,
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
         })
         mapRef.current = map
@@ -748,6 +753,7 @@ function Map3DGuidePage() {
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
+            <span>当前底图：普通矢量底图 vector，保留 base / building3d / label。</span>
             <span>官方文档确认：mapStyleId 应在 new TMap.Map(...) 初始化参数中传入。</span>
             <span>控制台样式绑定 Web Key：用户已确认；是否生效仍以浏览器实际效果为准。</span>
             <ul>
@@ -768,6 +774,7 @@ function Map3DGuidePage() {
               如果样式未生效，请检查浏览器 Console 是否出现样式未绑定、无效 ID、默认样式显示、
               custom map 或 mapStyleId 相关提示。
             </p>
+            <p>当前需使用普通矢量底图验证 mapStyleId；hybrid / satellite 底图可能不支持自定义样式。</p>
             <p>离线样式包不适合直接接入 Web JS GL 页面，仅作为资源和配色参考。</p>
             <p>
               {hasConfirmedMapStyleSupport(mapStyleSupport)
