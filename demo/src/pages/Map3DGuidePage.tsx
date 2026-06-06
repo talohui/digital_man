@@ -243,38 +243,91 @@ function Map3DGuidePage() {
       map: mapRef.current,
       styles: {
         routeShadow: new window.TMap.PolylineStyle({
-          color: 'rgba(74, 54, 18, 0.24)',
-          width: 32,
+          color: 'rgba(74, 54, 18, 0.18)',
+          width: 30,
           borderWidth: 0,
           lineCap: 'round'
         }),
         routeAura: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 228, 118, 0.42)',
-          width: 26,
+          color: 'rgba(255, 226, 132, 0.30)',
+          width: 23,
           borderWidth: 0,
           lineCap: 'round'
         }),
         routeGlow: new window.TMap.PolylineStyle({
-          color: 'rgba(247, 178, 47, 0.74)',
-          width: 17,
+          color: 'rgba(236, 176, 56, 0.66)',
+          width: 15,
           borderWidth: 0,
           lineCap: 'round'
         }),
         mainRoute: new window.TMap.PolylineStyle({
-          color: '#FFD45A',
-          width: 10,
-          borderWidth: 5,
-          borderColor: 'rgba(255, 250, 222, 0.98)',
+          color: '#f1bd3e',
+          width: 9,
+          borderWidth: 4,
+          borderColor: 'rgba(255, 250, 226, 0.96)',
           lineCap: 'round'
         }),
         routeCore: new window.TMap.PolylineStyle({
-          color: 'rgba(117, 75, 11, 0.86)',
-          width: 3,
+          color: 'rgba(110, 68, 7, 0.82)',
+          width: 2,
           borderWidth: 0,
+          lineCap: 'round'
+        }),
+        completedRoute: new window.TMap.PolylineStyle({
+          color: 'rgba(49, 90, 74, 0.42)',
+          width: 7,
+          borderWidth: 2,
+          borderColor: 'rgba(244, 241, 224, 0.74)',
+          lineCap: 'round'
+        }),
+        activeRouteHalo: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 220, 105, 0.58)',
+          width: 22,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        activeRoute: new window.TMap.PolylineStyle({
+          color: '#ffe38c',
+          width: 11,
+          borderWidth: 5,
+          borderColor: 'rgba(121, 79, 12, 0.40)',
           lineCap: 'round'
         })
       },
-      geometries: [
+      geometries: buildGuideRouteGeometries()
+    })
+
+    return () => {
+      routeLayerRef.current?.setMap?.(null)
+      routeLayerRef.current = null
+    }
+  }, [mapStatus, nextStop.nextStopId, routePathIndex, selectedStopId])
+
+  function getActiveRoutePath(currentStopId?: string | null, nextStopId?: string | null) {
+    const currentLocation = getRouteStopLocation(currentStopId)
+    const nextLocation = getRouteStopLocation(nextStopId)
+
+    if (!currentLocation || !nextLocation) {
+      return []
+    }
+
+    const startIndex = findNearestRoutePoint(currentLocation, demoRoutePath)?.nearestIndex ?? 0
+    const endIndex = findNearestRoutePoint(nextLocation, demoRoutePath)?.nearestIndex ?? startIndex
+    const fromIndex = Math.min(startIndex, endIndex)
+    const toIndex = Math.max(startIndex, endIndex)
+    const segment = demoRoutePath.slice(fromIndex, toIndex + 1)
+
+    if (segment.length > 1) {
+      return segment
+    }
+
+    return [currentLocation, nextLocation]
+  }
+
+  function buildGuideRouteGeometries() {
+    const completedPath = demoRoutePath.slice(0, Math.min(demoRoutePath.length, routePathIndex + 1))
+    const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
+    const geometries = [
         {
           id: 'historical-culture-route-shadow',
           styleId: 'routeShadow',
@@ -301,13 +354,32 @@ function Map3DGuidePage() {
           paths: demoRoutePath.map(toTMapLatLng)
         }
       ]
-    })
 
-    return () => {
-      routeLayerRef.current?.setMap?.(null)
-      routeLayerRef.current = null
+    if (completedPath.length > 1) {
+      geometries.push({
+        id: 'historical-culture-completed-route',
+        styleId: 'completedRoute',
+        paths: completedPath.map(toTMapLatLng)
+      })
     }
-  }, [mapStatus])
+
+    if (activePath.length > 1) {
+      geometries.push(
+        {
+          id: 'historical-culture-active-route-halo',
+          styleId: 'activeRouteHalo',
+          paths: activePath.map(toTMapLatLng)
+        },
+        {
+          id: 'historical-culture-active-route',
+          styleId: 'activeRoute',
+          paths: activePath.map(toTMapLatLng)
+        }
+      )
+    }
+
+    return geometries
+  }
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -670,9 +742,9 @@ function Map3DGuidePage() {
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
 
       <section className="map-3d-guide-hero">
-        <div className="map-3d-guide-kicker">灵山胜境定制导览 Beta</div>
-        <h1>灵山胜境 · 真实 3D 导览</h1>
-        <p>{demoGuideRoute.name} · 金色游线 · 景点模型 · 偏航重规划演示</p>
+        <div className="map-3d-guide-kicker">灵山胜境导览</div>
+        <h1>真实 3D 游线</h1>
+        <p>{demoGuideRoute.name} · 金色丝带路线 · 下一站引导</p>
         <div className="map-3d-guide-top-actions">
           <button type="button" onClick={() => navigate('/map')}>
             进入真实地图
@@ -704,7 +776,7 @@ function Map3DGuidePage() {
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
-        <h2>灵山导览牌</h2>
+        <h2>导览玉牌</h2>
         <dl>
           <div>
             <dt>当前路线</dt>
@@ -1061,23 +1133,23 @@ function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', ind
       paper: '#fff8df',
       glow: 'rgba(240, 207, 114, .28)',
       text: '#20483f',
-      label: String(index)
+      badge: ''
     },
     current: {
       jade: '#7a4f0f',
       gold: '#ffd96a',
       paper: '#fff4c7',
-      glow: 'rgba(255, 217, 106, .46)',
+      glow: 'rgba(255, 217, 106, .58)',
       text: '#6c3f08',
-      label: '今'
+      badge: '当前'
     },
     next: {
       jade: '#0f766e',
       gold: '#b7f3df',
       paper: '#e8fff7',
-      glow: 'rgba(45, 212, 191, .34)',
+      glow: 'rgba(45, 212, 191, .42)',
       text: '#0f5f56',
-      label: '次'
+      badge: '下一'
     },
     terminal: {
       jade: '#8b2f17',
@@ -1085,7 +1157,7 @@ function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', ind
       paper: '#fff0d5',
       glow: 'rgba(251, 146, 60, .38)',
       text: '#7c2d12',
-      label: '终'
+      badge: '终点'
     }
   }[state]
 
@@ -1095,14 +1167,20 @@ function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', ind
         <feDropShadow dx="0" dy="8" stdDeviation="5" flood-color="rgba(32,44,35,.30)"/>
       </filter>
     </defs>
-    <ellipse cx="24" cy="28" rx="21" ry="22" fill="${palette.glow}"/>
+    <ellipse cx="24" cy="28" rx="22" ry="23" fill="${palette.glow}"/>
     <g filter="url(#shadow)">
       <path d="M24 54s17-14.4 17-31A17 17 0 0 0 7 23c0 16.6 17 31 17 31Z" fill="${palette.jade}" stroke="rgba(255,255,255,.92)" stroke-width="2.4"/>
       <path d="M24 9c5.2 3.6 8.2 8 8.2 12.8 0 6.3-4.8 11.4-8.2 13.4-3.4-2-8.2-7.1-8.2-13.4C15.8 17 18.8 12.6 24 9Z" fill="${palette.paper}" opacity=".96"/>
       <path d="M13.2 23.4c5.2.5 8.1 2.8 10.8 9.2-6.5-.8-10.1-3.6-10.8-9.2Z" fill="${palette.gold}" opacity=".92"/>
       <path d="M35.8 23.4c-.7 5.6-4.3 8.4-10.8 9.2 2.7-6.4 5.6-8.7 10.8-9.2Z" fill="${palette.gold}" opacity=".92"/>
       <circle cx="24" cy="23" r="10.4" fill="${palette.paper}" stroke="${palette.gold}" stroke-width="2"/>
-      <text x="24" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="900" fill="${palette.text}">${palette.label}</text>
+      <text x="24" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="900" fill="${palette.text}">${index}</text>
+      ${
+        palette.badge
+          ? `<rect x="11" y="3" width="26" height="12" rx="6" fill="${palette.gold}" stroke="rgba(255,255,255,.92)" stroke-width="1"/>
+             <text x="24" y="12" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" font-weight="900" fill="${palette.text}">${palette.badge}</text>`
+          : ''
+      }
     </g>
   </svg>`
 }
@@ -1124,8 +1202,8 @@ const map3DGuideCss = `
 .map-3d-guide-map {
   position: absolute;
   inset: 0;
-  opacity: .96;
-  filter: saturate(.74) sepia(.12) contrast(.92) brightness(1.06);
+  opacity: .98;
+  filter: saturate(.84) sepia(.08) contrast(.96) brightness(1.04);
 }
 
 .map-3d-guide-skin,
@@ -1139,25 +1217,25 @@ const map3DGuideCss = `
 
 .map-3d-guide-skin {
   background:
-    linear-gradient(90deg, rgba(249, 246, 229, .24), transparent 24%, transparent 76%, rgba(33, 71, 62, .12)),
-    linear-gradient(180deg, rgba(245, 241, 221, .16), transparent 42%, rgba(22, 61, 52, .10));
+    linear-gradient(90deg, rgba(250, 247, 231, .18), transparent 22%, transparent 78%, rgba(24, 70, 58, .10)),
+    linear-gradient(180deg, rgba(248, 242, 219, .10), transparent 45%, rgba(25, 72, 61, .08));
   mix-blend-mode: multiply;
-  opacity: .78;
+  opacity: .66;
 }
 
 .map-3d-guide-mist {
   background:
-    radial-gradient(circle at 56% 42%, rgba(255, 252, 235, .08), transparent 34%),
-    linear-gradient(135deg, rgba(255,255,255,.13), transparent 30%),
-    repeating-linear-gradient(100deg, rgba(255,255,255,.04) 0 1px, transparent 1px 22px);
-  opacity: .52;
+    radial-gradient(circle at 55% 40%, rgba(255, 252, 235, .07), transparent 34%),
+    linear-gradient(135deg, rgba(255,255,255,.10), transparent 30%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.028) 0 1px, transparent 1px 24px);
+  opacity: .44;
 }
 
 .map-3d-guide-paperedge {
   background:
-    radial-gradient(ellipse at center, transparent 56%, rgba(250, 246, 226, .19) 78%, rgba(83, 68, 35, .12) 100%),
-    linear-gradient(90deg, rgba(250, 246, 226, .18), transparent 16%, transparent 84%, rgba(250, 246, 226, .18));
-  box-shadow: inset 0 0 92px rgba(81, 65, 34, .14);
+    radial-gradient(ellipse at center, transparent 58%, rgba(250, 246, 226, .15) 80%, rgba(52, 75, 61, .12) 100%),
+    linear-gradient(90deg, rgba(250, 246, 226, .14), transparent 16%, transparent 84%, rgba(250, 246, 226, .14));
+  box-shadow: inset 0 0 88px rgba(55, 70, 47, .13);
 }
 
 .map-3d-guide-hero,
@@ -1167,34 +1245,36 @@ const map3DGuideCss = `
 .map-3d-guide-controlbar {
   position: absolute;
   z-index: 5;
-  border: 1px solid rgba(255, 255, 255, .62);
-  background: rgba(255, 252, 239, .88);
-  box-shadow: 0 24px 70px rgba(23, 44, 38, .16);
-  backdrop-filter: blur(18px);
+  border: 1px solid rgba(216, 185, 111, .42);
+  background:
+    linear-gradient(135deg, rgba(255, 252, 238, .93), rgba(236, 248, 239, .86));
+  box-shadow: 0 24px 70px rgba(20, 45, 36, .18), inset 0 0 0 1px rgba(255,255,255,.54);
+  backdrop-filter: blur(20px);
 }
 
 .map-3d-guide-hero {
   top: 18px;
   left: 18px;
-  width: 380px;
+  width: 330px;
   max-width: calc(100vw - 36px);
-  padding: 18px 20px;
-  border-radius: 18px;
+  padding: 15px 18px 16px;
+  border-radius: 10px;
+  border-left: 5px solid rgba(205, 157, 48, .82);
 }
 
 .map-3d-guide-kicker,
 .map-3d-guide-beta {
   color: #9a6a16;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
-  letter-spacing: .08em;
+  letter-spacing: .06em;
 }
 
 .map-3d-guide-hero h1 {
   margin: 7px 0 8px;
   color: #203f36;
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
-  font-size: 28px;
+  font-size: 25px;
   line-height: 1.18;
   letter-spacing: 0;
 }
@@ -1202,8 +1282,8 @@ const map3DGuideCss = `
 .map-3d-guide-hero p {
   margin: 0;
   color: #5f6e65;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .map-3d-guide-top-actions {
@@ -1219,11 +1299,12 @@ const map3DGuideCss = `
   border: 1px solid rgba(143, 101, 28, .24);
   background: rgba(255, 249, 229, .86);
   color: #6f4a12;
-  border-radius: 999px;
+  border-radius: 10px;
   min-height: 34px;
   padding: 0 12px;
   font-weight: 850;
   cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.42);
 }
 
 .map-3d-guide-top-actions button:last-child {
@@ -1235,10 +1316,10 @@ const map3DGuideCss = `
 .map-3d-guide-camera {
   top: 178px;
   left: 18px;
-  width: 380px;
+  width: 330px;
   max-width: calc(100vw - 36px);
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
 .map-3d-guide-camera > div:first-child {
@@ -1284,13 +1365,15 @@ const map3DGuideCss = `
   width: 330px;
   max-width: calc(100vw - 36px);
   padding: 16px;
-  border-radius: 18px;
+  border-radius: 10px;
+  border-right: 5px solid rgba(33, 91, 75, .58);
 }
 
 .map-3d-guide-status h2 {
   margin: 4px 0 12px;
-  font-size: 20px;
-  color: #25463b;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 21px;
+  color: #21473b;
 }
 
 .map-3d-guide-status dl {
@@ -1303,8 +1386,10 @@ const map3DGuideCss = `
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(94, 112, 102, .10);
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .38);
+  border: 1px solid rgba(213, 166, 45, .10);
 }
 
 .map-3d-guide-status dt {
@@ -1318,6 +1403,7 @@ const map3DGuideCss = `
   font-size: 13px;
   font-weight: 900;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .map-3d-guide-style-audit,
@@ -1380,11 +1466,12 @@ const map3DGuideCss = `
   gap: 4px;
   margin-top: 12px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(233, 244, 237, .75);
   color: #1e5749;
   font-size: 12px;
   border: 1px solid rgba(31, 90, 77, .12);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.42);
 }
 
 .map-3d-guide-deviation--planning,
@@ -1414,6 +1501,10 @@ const map3DGuideCss = `
   color: #5f4212;
   font-size: 13px;
   font-weight: 900;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255, 247, 218, .54);
+  border: 1px solid rgba(213, 166, 45, .16);
 }
 
 .map-3d-guide-model-state {
@@ -1462,13 +1553,14 @@ const map3DGuideCss = `
   width: 430px;
   max-width: calc(100vw - 36px);
   padding: 12px;
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
 .map-3d-guide-pois strong {
   display: block;
   margin-bottom: 8px;
   color: #24483c;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
 }
 
 .map-3d-guide-pois div {
@@ -1485,6 +1577,7 @@ const map3DGuideCss = `
   min-height: 30px;
   padding: 0 9px;
   font-size: 12px;
+  border-radius: 9px;
 }
 
 .map-3d-guide-pois button span {
@@ -1493,16 +1586,18 @@ const map3DGuideCss = `
   width: 18px;
   height: 18px;
   margin-right: 4px;
-  border-radius: 50%;
+  border-radius: 6px;
   background: rgba(32, 79, 70, .14);
   color: #1d5b4c;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .map-3d-guide-pois button.is-active {
   color: #7b4f0f;
   background: linear-gradient(135deg, rgba(255, 238, 168, .98), rgba(255, 250, 226, .96));
   border-color: rgba(213, 166, 45, .72);
-  box-shadow: 0 0 0 3px rgba(246, 203, 86, .18), 0 8px 22px rgba(154, 106, 22, .12);
+  box-shadow: 0 0 0 3px rgba(246, 203, 86, .18), 0 8px 22px rgba(154, 106, 22, .14);
 }
 
 .map-3d-guide-pois button.is-active span {
@@ -1550,15 +1645,16 @@ const map3DGuideCss = `
   gap: 12px;
   align-items: center;
   padding: 14px 16px;
-  border-radius: 20px;
+  border-radius: 12px;
   background:
-    linear-gradient(135deg, rgba(255, 249, 228, .94), rgba(231, 247, 239, .90));
+    linear-gradient(135deg, rgba(255, 249, 228, .94), rgba(231, 247, 239, .92));
   border-color: rgba(213, 166, 45, .28);
+  border-top: 3px solid rgba(214, 168, 50, .72);
 }
 
 .map-3d-guide-progress {
   grid-column: 1 / -1;
-  height: 10px;
+  height: 9px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(32, 79, 70, .12);
@@ -1569,8 +1665,8 @@ const map3DGuideCss = `
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2c6f5d, #e4af2f, #ffe08a);
-  box-shadow: 0 0 18px rgba(228, 175, 47, .48);
+  background: linear-gradient(90deg, #2b6c5c, #d6a832, #ffe38c);
+  box-shadow: 0 0 16px rgba(228, 175, 47, .42);
 }
 
 .map-3d-guide-controlbar__meta {
@@ -1582,7 +1678,8 @@ const map3DGuideCss = `
 
 .map-3d-guide-controlbar__meta strong {
   color: #24483c;
-  font-size: 14px;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 15px;
 }
 
 .map-3d-guide-console-grid {
@@ -1596,12 +1693,12 @@ const map3DGuideCss = `
   gap: 3px;
   min-height: 48px;
   padding: 9px 10px;
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, .50);
   color: #24483c;
   font-size: 13px;
   font-weight: 900;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.60);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.60), 0 6px 18px rgba(39, 70, 58, .06);
 }
 
 .map-3d-guide-console-grid em {
@@ -1616,6 +1713,18 @@ const map3DGuideCss = `
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.map-3d-guide-controlbar__actions button:nth-child(4) {
+  border-color: rgba(182, 83, 24, .38);
+  color: #8a3512;
+  background: rgba(255, 239, 219, .92);
+}
+
+.map-3d-guide-controlbar__actions button:nth-child(5) {
+  border-color: rgba(20, 148, 134, .34);
+  color: #0f5f56;
+  background: rgba(224, 249, 243, .92);
 }
 
 .map-3d-guide-controlbar button:disabled {
