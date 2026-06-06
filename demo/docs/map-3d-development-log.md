@@ -7035,3 +7035,79 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有读取、输出或修改 API Key。
 - 本阶段没有硬编码未知 styleId。
 - 本阶段没有调用腾讯控制台私有接口。
+
+## 阶段六十六 B：腾讯 mapStyleId 初始化接入验证
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+根据用户提供的腾讯 JS API GL 个性化地图示例，在 `/map-3d-guide` 的 `TMap.Map` 初始化参数中显式传入 `mapStyleId`，验证 Web 页面是否需要代码侧指定样式 ID 才能使用控制台发布的个性化地图样式。
+
+### 当前发现
+
+用户提供的示例显示 `TMap.Map` 初始化支持：
+
+```ts
+mapStyleId: 'style2'
+```
+
+这说明此前控制台 Key 绑定未自动生效，可能是因为 Web JS API GL 需要在 `new TMap.Map(...)` 初始化时显式传入 `mapStyleId`。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 修改内容
+
+- 在 `/map-3d-guide` 中新增 `MAP_3D_GUIDE_STYLE_ID = 'style2'`。
+- 初始化 `TMap.Map` 时传入 `mapStyleId: MAP_3D_GUIDE_STYLE_ID`。
+- 在页面个性化地图样式诊断区域展示当前尝试使用的 `mapStyleId`。
+- 保留既有 `TMap.Map` / `window.TMap` 样式能力探测信息。
+
+### 边界说明
+
+- 本阶段只在 `/map-3d-guide` 接入 `mapStyleId`。
+- 未修改普通 `/map`。
+- 未修改 `/scenic-3d-map`。
+- 未修改 `loadTMap`、Web Key、`.env` 或任何敏感配置。
+- 未恢复固定大面积艺术覆盖层。
+- 路线、POI、当前位置、重规划线和 GLB 模型仍绑定腾讯地图经纬度 / TMap overlay。
+
+### 对 /map-3d-guide 的影响
+
+`/map-3d-guide` 会在创建腾讯地图实例时尝试使用 `style2`。如果 `style2` 与用户控制台发布样式匹配且当前 Key 有权限，底图应呈现对应个性化样式；如果不匹配或未生效，页面不应崩溃，仍保留轻量宣纸 / 雾化层和地图锚定导览元素。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map-3d-guide`，人工确认底图是否应用控制台自定义样式。
+- 检查 `/map`、`/map?debugGltfModel=1`、`/scenic-3d-map` 正常。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+需要浏览器人工确认 `style2` 是否对应控制台“我的自定义样式1”并实际生效。如果不生效，应回到腾讯控制台核对该样式在 Web JS API GL 中对应的真实 styleId / 序号 / 发布状态 / Key 绑定关系。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。
+- 本阶段没有写入示例代码中的腾讯 Key。

@@ -39,6 +39,7 @@ const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
+const MAP_3D_GUIDE_STYLE_ID = 'style2'
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -195,7 +196,8 @@ function Map3DGuidePage() {
           center: new TMap.LatLng(initialPosition.lat, initialPosition.lng),
           zoom: 17.8,
           pitch: 64,
-          rotation: -28
+          rotation: -28,
+          mapStyleId: MAP_3D_GUIDE_STYLE_ID
         })
         mapRef.current = map
         setMapStyleSupport(inspectMapStyleSupport(map, TMap))
@@ -727,6 +729,7 @@ function Map3DGuidePage() {
 
         <div className="map-3d-guide-style-audit">
           <strong>个性化地图样式</strong>
+          <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
           <span>控制台 Key 绑定：用户已确认；当前页面未自动生效。</span>
           <ul>
             {tencentMapStyleMethodCandidates.map((method) => (
