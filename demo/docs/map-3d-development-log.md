@@ -6743,3 +6743,107 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有修改 routeGeometry。
 - 本阶段没有修改 roadNetwork。
 - 本阶段没有新增外部素材。
+
+## 阶段六十三：/map-3d-guide 艺术化主视觉层
+
+2026-06-06
+
+### 本次目标
+
+将 `/map-3d-guide` 从“腾讯地图加滤镜”的视觉表达，升级为“腾讯地图坐标底座 + 灵山胜境艺术化主视觉层”的定制 3D 导览地图。腾讯地图继续负责真实坐标、3D 相机、路线重规划和 GLB 锚定，自绘层负责用户看到的山水、建筑、佛光、金色游线和核心 POI 立牌。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide` 相关代码。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token 或敏感配置。
+- 不引入未确认许可证素材。
+- 不使用 `git add .`。
+- 不执行 push。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-demo-plan.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么从滤镜皮肤转向艺术化主视觉层
+
+前一版已经有水墨青绿、佛教金色和宣纸雾化风格，但视觉基础仍主要依赖腾讯底图，容易看起来像“真实地图加滤镜”。本阶段改为在腾讯地图上叠加内联 SVG / HTML / CSS 的艺术地图层，让灵山定制视觉成为主表达，同时保留腾讯地图作为真实导航底座。
+
+### 艺术化主视觉层
+
+新增艺术层包含：
+
+- 青绿山体块面。
+- 墨蓝水体块面。
+- 宣纸纹理噪声。
+- 核心游线区域柔光。
+- 金色主路线丝带。
+- 简化建筑 / 广场块面。
+- 灵山大佛区域佛光强调。
+- 核心 POI 立牌式标签。
+
+这些元素均为内联 SVG / CSS 自绘，不使用外部素材。
+
+### 腾讯地图底座
+
+腾讯地图仍然初始化和保留在底层，负责：
+
+- 真实经纬度和地图相机。
+- 主路线和临时重规划路线的真实坐标绘制。
+- 点击“模拟偏航”后调用现有腾讯 walking route。
+- GLB 模型覆盖物 Beta 的真实锚点。
+
+本阶段降低腾讯底图视觉权重，使普通地名、停车场等信息退到背景，但路线、当前位置、下一站和核心 POI 仍通过自绘层和导览 UI 保持清楚。
+
+### POI 立牌增强
+
+新增一组核心 POI 立牌：
+
+- 当前站点使用金色高亮。
+- 下一站使用青金色高亮。
+- 终点 / 出口使用红金边。
+- 普通路线站点使用低调玉牌编号。
+
+立牌可点击并复用原有 `moveToStop` 逻辑，不改变路线数据。
+
+### 路线视觉
+
+主历史文化路线继续保留腾讯 MultiPolyline 的真实坐标线，同时新增 SVG 艺术金色丝带作为第一视觉重点。偏航后的临时重规划路线仍由腾讯 walking route 返回路径绘制，保留蓝绿色发光路线，与主路线区分。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 浏览器打开 `/map-3d-guide`，检查自绘山体、水体、建筑块面、佛光、金色游线和 POI 立牌。
+- 检查“模拟偏航”仍可触发腾讯 walking route 重规划到下一站。
+- 检查 `/map`、`/map?debugGltfModel=1`、`/scenic-3d-map` 均可打开。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建；本阶段新增的艺术化主视觉层进入 `Map3DGuidePage` 独立 chunk。
+
+### 下一步建议
+
+后续可以进一步把艺术层的关键节点与腾讯地图投影坐标绑定，使立牌和 SVG 游线在不同相机角度下更贴合真实地图；也可以为不同路线建立独立艺术层。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有调用新的腾讯 API。
+- 本阶段没有新增外部素材。
