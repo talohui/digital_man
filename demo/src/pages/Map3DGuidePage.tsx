@@ -45,7 +45,8 @@ const MAP_3D_GUIDE_RENDER_OPTIONS = {
   // fogOptions / skyOptions need confirmed Tencent JS API GL field shapes before enabling.
 } as const
 const MAP_3D_GUIDE_BASE_MAP = {
-  type: 'vector'
+  type: 'vector',
+  features: ['base', 'building3d', 'label']
 } as const
 
 const guideCameraPresets: GuideCameraPreset[] = [
@@ -752,7 +753,7 @@ function Map3DGuidePage() {
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
-            <span>当前底图：已简化为普通矢量底图 vector。</span>
+            <span>当前底图：已恢复稳定底图配置，优先保证路线和导览元素可见。</span>
             <span>官方文档确认：mapStyleId 应在 new TMap.Map(...) 初始化参数中传入。</span>
             <span>控制台样式绑定 Web Key：用户已确认；是否生效仍以浏览器实际效果为准。</span>
             <ul>
@@ -774,10 +775,9 @@ function Map3DGuidePage() {
               custom map 或 mapStyleId 相关提示。
             </p>
             <p>
-              当前已简化 baseMap 以验证 mapStyleId；如果 Network 仍显示 styleid=0 或 mapType=hybrid，
-              说明问题可能不在 baseMap 配置。
+              当前 style1 未确认生效，不再阻塞正式 demo；导览主路线、当前位置、下一站和重规划路线可见性优先。
             </p>
-            <p>如果底图样式生效，再逐步尝试恢复 3D building / label 等能力。</p>
+            <p>后续如继续验证个性化底图，应在不影响导览主线显示的前提下单独实验。</p>
             <p>当前需使用普通矢量底图验证 mapStyleId；hybrid / satellite 底图可能不支持自定义样式。</p>
             <p>离线样式包不适合直接接入 Web JS GL 页面，仅作为资源和配色参考。</p>
             <p>

@@ -7567,3 +7567,81 @@ mapStyleId: 'style1'
 - 检查是否仍出现 `mapType=hybrid`。
 - 检查 `styleid` 是否仍为 `0`。
 - 观察底图是否变成腾讯控制台自定义样式。
+
+## 阶段六十六 F：回滚 baseMap 简化以恢复路线显示
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+恢复 `/map-3d-guide` 的主历史文化路线显示稳定性。阶段六十六 E 将 `baseMap` 简化为 `{ type: 'vector' }` 后，用户在浏览器中发现主历史文化路线不可见。当前 `/map-3d-guide` 的第一优先级是路线、当前位置、下一站、偏航重规划和核心 POI 可见，`mapStyleId` 验证不应优先于导览主功能。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 问题现象
+
+- 阶段六十六 E 简化 `baseMap` 后，主历史文化路线不可见。
+- `mapStyleId: 'style1'` 仍未确认成功生效。
+- 继续用 `baseMap` 简化排查样式会牺牲正式 demo 的核心可用性。
+
+### 修复方式
+
+本阶段恢复到六十六 E 前路线可见的稳定底图配置：
+
+```ts
+const MAP_3D_GUIDE_BASE_MAP = {
+  type: 'vector',
+  features: ['base', 'building3d', 'label']
+} as const
+```
+
+同时继续保留：
+
+```ts
+mapStyleId: 'style1'
+```
+
+但页面诊断中明确：当前 `style1` 未确认生效，不再阻塞正式 demo。后续如继续验证腾讯个性化底图，应在不影响导览主线显示的前提下单独实验。
+
+### 保留能力
+
+- 历史文化路线。
+- 金色主路线。
+- 当前站点 / 下一站 / 终点 marker。
+- 模拟定位。
+- 模拟偏航。
+- 腾讯 walking route 重规划。
+- 重规划路线。
+- GLB 模型 Beta。
+- 相机模式。
+
+### 后续风格化方向
+
+当前阶段不继续把 `mapStyleId` 作为主风格化方案。后续 `/map-3d-guide` 风格化继续依靠：
+
+- 轻量宣纸 / 雾化 / 滤镜固定氛围层。
+- 地图坐标绑定的路线、POI、当前位置、重规划线和 GLB 模型。
+- 不恢复固定大莲花、大色块、大斜线等屏幕覆盖物。
+
+### 对 /map 的影响
+
+本阶段没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### 保持不变
+
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、输出或修改 API Key。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
