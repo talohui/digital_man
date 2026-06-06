@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
+import {
+  getDefaultMap3DGardenAssets,
+  type LingshanMap3DGardenAsset
+} from '../data/lingshanMap3DGardenAssets'
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
 import { getMapModelOverlayByPoiId, type LingshanMapModelOverlay } from '../data/lingshanMapModelOverlays'
 import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
@@ -12,7 +16,7 @@ import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDis
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = 'overview' | 'current' | 'next' | 'focus' | 'topdown' | 'guide'
-type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b'
+type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
 
 type GuideCameraPreset = {
   id: GuideCameraMode
@@ -70,6 +74,15 @@ type DecorSmokeReport = {
 
 type AssetLoadState = Record<string, 'loaded' | 'error'>
 
+type GardenModelReport = {
+  createdCount: number
+  visibleCount: number
+  unavailable: boolean
+  assetUrls: string[]
+  loadedIds: string[]
+  errorIds: string[]
+}
+
 type Map3DGuideVisualVariantConfig = {
   id: Map3DGuideVariant
   className: string
@@ -103,6 +116,7 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v1'
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
@@ -139,6 +153,18 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     controlTitle: '沙盘导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-b`,
     decorStrategy: '更多 CC0 园林素材沿线铺陈，当前段和关键节点密度更高。'
+  },
+  'prototype-c': {
+    id: 'prototype-c',
+    className: 'map-3d-guide-shell--prototype-c',
+    kicker: '视觉原型 C · 沉稳 3D 园林资产',
+    title: '低模园林路线沙盘',
+    subtitle: `${demoGuideRoute.name} · GLB 园林资产 · 地图坐标锚定`,
+    statusTitle: '3D 园林导览牌',
+    stationPanelTitle: '园林化历史文化节点',
+    controlTitle: '3D 园林导览控制',
+    decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-c`,
+    decorStrategy: '禁用 PNG 贴片，改用项目自制低模 GLB 园林资产沿路线锚定。'
   }
 }
 const inkDecorKinds: InkDecorKind[] = [
@@ -216,7 +242,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const rerouteLayerRef = useRef<any>(null)
   const decorMarkerLayerRef = useRef<any>(null)
   const gltfModelRef = useRef<any>(null)
+  const gardenModelRefs = useRef<Map<string, any>>(new Map())
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
+  const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
@@ -243,6 +271,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     assetUrls: []
   })
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
+  const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
+  const [selectedGardenId, setSelectedGardenId] = useState(() => loadStoredGardenAssets(visualVariant.id)[0]?.id ?? '')
+  const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
+  const [gardenModelReport, setGardenModelReport] = useState<GardenModelReport>({
+    createdCount: 0,
+    visibleCount: 0,
+    unavailable: false,
+    assetUrls: [],
+    loadedIds: [],
+    errorIds: []
+  })
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -275,6 +314,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const routeProgressPercent = nearestRoutePoint
     ? Math.max(0, Math.min(100, Math.round(nearestRoutePoint.progressRatio * 100)))
     : 0
+  const routeProgressRatio = routeProgressPercent / 100
   const distanceToRoute = nearestRoutePoint?.distanceMeters ?? 0
   const deviationLabel =
     rerouteStatus === 'ready'
@@ -302,14 +342,18 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       ? 'Prototype A 已启用'
       : visualVariant.id === 'prototype-b'
         ? 'Prototype B 已启用'
+        : visualVariant.id === 'prototype-c'
+          ? 'Prototype C 已启用'
         : ''
-  const prototypeName = visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : '默认'
+  const prototypeName =
+    visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : visualVariant.id === 'prototype-c' ? 'C' : '默认'
   const configuredAssetUrls = useMemo(
     () => Array.from(new Set(decorOverlays.flatMap((decor) => (decor.assetUrl ? [decor.assetUrl] : [])))),
     [decorOverlays]
   )
   const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
+  const selectedGardenAsset = gardenAssets.find((asset) => asset.id === selectedGardenId) ?? gardenAssets[0]
 
   useEffect(() => {
     let cancelled = false
@@ -359,6 +403,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       decorMarkerLayerRef.current?.setMap?.(null)
       clearGltfModel(gltfModelRef.current)
       gltfModelRef.current = null
+      clearGardenModels(gardenModelRefs.current)
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
@@ -371,6 +416,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     window.localStorage.setItem(visualVariant.decorStorageKey, JSON.stringify(decorOverlays))
   }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
+
+  useEffect(() => {
+    if (!debugGarden || visualVariant.id !== 'prototype-c') {
+      return
+    }
+
+    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
+  }, [debugGarden, gardenAssets, visualVariant.id])
 
   useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
@@ -614,6 +667,101 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       decorMarkerLayerRef.current = null
     }
   }, [assetLoadState, debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
+
+  useEffect(() => {
+    clearGardenModels(gardenModelRefs.current)
+    gardenModelRefs.current = new Map()
+
+    if (visualVariant.id !== 'prototype-c') {
+      setGardenModelReport({
+        createdCount: 0,
+        visibleCount: 0,
+        unavailable: false,
+        assetUrls: [],
+        loadedIds: [],
+        errorIds: []
+      })
+      return
+    }
+
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      setGardenModelReport((current) => ({
+        ...current,
+        createdCount: 0,
+        visibleCount: 0,
+        unavailable: false
+      }))
+      return
+    }
+
+    const visibleAssets = getVisibleGardenAssets(gardenAssets, {
+      debugGarden,
+      routeProgressRatio,
+      rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+    })
+    const assetUrls = Array.from(new Set(visibleAssets.map((asset) => asset.assetUrl)))
+
+    if (!window.TMap.model?.GLTFModel) {
+      setGardenModelReport({
+        createdCount: 0,
+        visibleCount: visibleAssets.length,
+        unavailable: true,
+        assetUrls,
+        loadedIds: [],
+        errorIds: []
+      })
+      return
+    }
+
+    const models = new Map<string, any>()
+    const immediateErrors: string[] = []
+
+    visibleAssets.forEach((asset) => {
+      try {
+        const model = new window.TMap.model.GLTFModel({
+          id: `map-3d-guide-garden-${asset.id}`,
+          map: mapRef.current,
+          url: asset.assetUrl,
+          position: new window.TMap.LatLng(asset.location.lat, asset.location.lng, asset.height),
+          rotation: [0, asset.yaw, 0],
+          scale: asset.scale
+        })
+        models.set(asset.id, model)
+
+        if (typeof model.on === 'function') {
+          model.on('loaded', () => {
+            setGardenModelReport((current) => ({
+              ...current,
+              loadedIds: uniqueStrings([...current.loadedIds, asset.id])
+            }))
+          })
+          model.on('error', () => {
+            setGardenModelReport((current) => ({
+              ...current,
+              errorIds: uniqueStrings([...current.errorIds, asset.id])
+            }))
+          })
+        }
+      } catch {
+        immediateErrors.push(asset.id)
+      }
+    })
+
+    gardenModelRefs.current = models
+    setGardenModelReport({
+      createdCount: models.size,
+      visibleCount: visibleAssets.length,
+      unavailable: false,
+      assetUrls,
+      loadedIds: [],
+      errorIds: immediateErrors
+    })
+
+    return () => {
+      clearGardenModels(gardenModelRefs.current)
+      gardenModelRefs.current = new Map()
+    }
+  }, [debugGarden, gardenAssets, mapStatus, rerouteStatus, routeProgressRatio, visualVariant.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -1020,6 +1168,55 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setDecorCopyStatus(ok ? '已复制调试摘要' : '复制失败，请查看浏览器权限')
   }
 
+  const updateSelectedGardenAsset = (patch: Partial<LingshanMap3DGardenAsset>) => {
+    if (!selectedGardenAsset) {
+      return
+    }
+
+    setGardenAssets((items) =>
+      items.map((asset) =>
+        asset.id === selectedGardenAsset.id
+          ? {
+              ...asset,
+              ...patch,
+              location: patch.location ?? asset.location
+            }
+          : asset
+      )
+    )
+  }
+
+  const resetGardenConfig = () => {
+    const defaults = getDefaultMap3DGardenAssets()
+    setGardenAssets(defaults)
+    setSelectedGardenId(defaults[0]?.id ?? '')
+    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
+    setGardenCopyStatus('已恢复默认 3D 园林资产配置')
+  }
+
+  const copyGardenConfig = async () => {
+    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const\n`
+    const ok = await copyText(snippet)
+    setGardenCopyStatus(ok ? '已复制 3D 园林 TS 配置片段' : '复制失败，请查看浏览器权限')
+  }
+
+  const copyGardenSummary = async () => {
+    const summary = [
+      `debugGarden=${debugGarden ? '1' : '0'}`,
+      `variant=${visualVariant.id}`,
+      `gardenAssetCount=${gardenAssets.length}`,
+      `visibleAssets=${gardenModelReport.visibleCount}`,
+      `createdModels=${gardenModelReport.createdCount}`,
+      `selectedGarden=${selectedGardenAsset?.id ?? 'none'}`,
+      `selectedScale=${selectedGardenAsset?.scale ?? 'none'}`,
+      `selectedHeight=${selectedGardenAsset?.height ?? 'none'}`,
+      `selectedYaw=${selectedGardenAsset?.yaw ?? 'none'}`,
+      `GLTFModelUnavailable=${gardenModelReport.unavailable ? 'true' : 'false'}`
+    ].join('\n')
+    const ok = await copyText(summary)
+    setGardenCopyStatus(ok ? '已复制 3D 园林调试摘要' : '复制失败，请查看浏览器权限')
+  }
+
   return (
     <main className={`map-3d-guide-shell ${visualVariant.className}`}>
       <div ref={mapElementRef} className="map-3d-guide-map" />
@@ -1203,6 +1400,153 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </section>
       ) : null}
 
+      {debugGarden ? (
+        <section className="map-3d-guide-garden-debug">
+          <div className="map-3d-guide-decor-debug__header">
+            <div>
+              <strong>3D 园林资产调试</strong>
+              <span>
+                prototype-c · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
+              </span>
+            </div>
+            <button type="button" onClick={copyGardenConfig}>
+              复制 TS 配置
+            </button>
+          </div>
+
+          <label>
+            3D 资产
+            <select
+              value={selectedGardenAsset?.id ?? ''}
+              onChange={(event) => setSelectedGardenId(event.target.value)}
+            >
+              {gardenAssets.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name} · {asset.kind}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {selectedGardenAsset ? (
+            <div className="map-3d-guide-decor-debug__grid">
+              <label>
+                纬度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedGardenAsset.location.lat}
+                  onChange={(event) =>
+                    updateSelectedGardenAsset({
+                      location: {
+                        ...selectedGardenAsset.location,
+                        lat: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                经度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedGardenAsset.location.lng}
+                  onChange={(event) =>
+                    updateSelectedGardenAsset({
+                      location: {
+                        ...selectedGardenAsset.location,
+                        lng: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                scale
+                <input
+                  type="number"
+                  min="1"
+                  max="2000"
+                  value={selectedGardenAsset.scale}
+                  onChange={(event) => updateSelectedGardenAsset({ scale: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                height
+                <input
+                  type="number"
+                  min="-50"
+                  max="300"
+                  value={selectedGardenAsset.height}
+                  onChange={(event) => updateSelectedGardenAsset({ height: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                yaw
+                <input
+                  type="number"
+                  min="-180"
+                  max="180"
+                  value={selectedGardenAsset.yaw}
+                  onChange={(event) => updateSelectedGardenAsset({ yaw: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                显现进度
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={selectedGardenAsset.routeFraction}
+                  onChange={(event) => updateSelectedGardenAsset({ routeFraction: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                可见
+                <select
+                  value={selectedGardenAsset.visible ? 'true' : 'false'}
+                  onChange={(event) => updateSelectedGardenAsset({ visible: event.target.value === 'true' })}
+                >
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+              <label>
+                优先级
+                <select
+                  value={selectedGardenAsset.priority}
+                  onChange={(event) => updateSelectedGardenAsset({ priority: event.target.value as LingshanMap3DGardenAsset['priority'] })}
+                >
+                  <option value="high">high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+            </div>
+          ) : null}
+
+          <div className="map-3d-guide-decor-debug__actions">
+            <button type="button" onClick={copyGardenSummary}>
+              复制调试摘要
+            </button>
+            <button type="button" onClick={resetGardenConfig}>
+              恢复默认
+            </button>
+          </div>
+          <p>
+            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到 localStorage。
+          </p>
+          <p>
+            {gardenModelReport.unavailable
+              ? '当前 TMap.model.GLTFModel 不可用，模型不会创建。'
+              : `素材：${gardenModelReport.assetUrls.length} 个 URL，loaded ${gardenModelReport.loadedIds.length}，error ${gardenModelReport.errorIds.length}`}
+          </p>
+          <small>{gardenCopyStatus}</small>
+        </section>
+      ) : null}
+
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
         <h2>{visualVariant.statusTitle}</h2>
@@ -1251,7 +1595,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
         <details className="map-3d-guide-dev-diagnostics">
           <summary>开发诊断</summary>
-          {visualVariant.id !== 'default' ? (
+          {visualVariant.id === 'prototype-a' || visualVariant.id === 'prototype-b' ? (
             <div className="map-3d-guide-style-audit">
               <strong>视觉原型烟测</strong>
               <span>当前原型类型：{prototypeName}</span>
@@ -1269,6 +1613,35 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
                     <li key={assetUrl}>
                       <code>{assetUrl}</code>
                       <em>{assetLoadState[assetUrl] === 'error' ? 'error' : assetLoadState[assetUrl] === 'loaded' ? 'loaded' : 'checking'}</em>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {visualVariant.id === 'prototype-c' ? (
+            <div className="map-3d-guide-style-audit">
+              <strong>3D 园林资产烟测</strong>
+              <span>当前原型类型：C</span>
+              <span>配置 3D 资产数量：{gardenAssets.length}</span>
+              <span>已唤醒资产数量：{gardenModelReport.visibleCount}</span>
+              <span>成功创建 GLTFModel：{gardenModelReport.createdCount}</span>
+              <span>GLTFModel 可用：{gardenModelReport.unavailable ? 'false' : 'true'}</span>
+              <span>loaded 事件：{gardenModelReport.loadedIds.length}</span>
+              <span>error 事件：{gardenModelReport.errorIds.length}</span>
+              <p>C 版禁用 PNG/SVG 贴片装饰，使用项目自制低模 GLB 园林资产作为地图坐标锚定层。</p>
+              {gardenModelReport.assetUrls.length ? (
+                <ul>
+                  {gardenModelReport.assetUrls.map((assetUrl) => (
+                    <li key={assetUrl}>
+                      <code>{assetUrl}</code>
+                      <em>
+                        {gardenModelReport.errorIds.some((id) => gardenAssets.find((asset) => asset.id === id)?.assetUrl === assetUrl)
+                          ? 'error'
+                          : gardenModelReport.loadedIds.some((id) => gardenAssets.find((asset) => asset.id === id)?.assetUrl === assetUrl)
+                            ? 'loaded'
+                            : 'created'}
+                      </em>
                     </li>
                   ))}
                 </ul>
@@ -1574,6 +1947,11 @@ function clearGltfModel(model: any) {
   model?.destroy?.()
 }
 
+function clearGardenModels(models: Map<string, any>) {
+  models.forEach((model) => clearGltfModel(model))
+  models.clear()
+}
+
 function isQueryEnabled(name: string) {
   if (typeof window === 'undefined') {
     return false
@@ -1581,6 +1959,35 @@ function isQueryEnabled(name: string) {
 
   const value = new URLSearchParams(window.location.search).get(name)
   return value === '1' || value === 'true'
+}
+
+function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
+  const defaults = getDefaultMap3DGardenAssets()
+
+  if (variant !== 'prototype-c' || typeof window === 'undefined') {
+    return defaults
+  }
+
+  try {
+    const stored = window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
+
+    if (!stored) {
+      return defaults
+    }
+
+    const parsed = JSON.parse(stored) as LingshanMap3DGardenAsset[]
+
+    if (!Array.isArray(parsed) || !parsed.length) {
+      return defaults
+    }
+
+    return parsed.map((asset) => ({
+      ...asset,
+      location: { ...asset.location }
+    }))
+  } catch {
+    return defaults
+  }
 }
 
 function loadStoredDecorOverlays(variant: Map3DGuideVariant = 'default') {
@@ -1614,6 +2021,10 @@ function buildDefaultDecorOverlays(variant: Map3DGuideVariant = 'default'): InkD
 
   if (variant === 'prototype-b') {
     return buildPrototypeBDecorOverlays()
+  }
+
+  if (variant === 'prototype-c') {
+    return []
   }
 
   const specs: Array<{
@@ -1873,6 +2284,38 @@ function materializeDecorSpec(spec: DecorSpec): InkDecorOverlay {
     assetSource: spec.assetSource,
     note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
   }
+}
+
+function getVisibleGardenAssets(
+  assets: LingshanMap3DGardenAsset[],
+  options: {
+    debugGarden: boolean
+    routeProgressRatio: number
+    rerouteActive: boolean
+  }
+) {
+  const revealAhead = options.debugGarden ? 1 : 0.14
+  const progress = options.debugGarden ? 1 : Math.max(0, Math.min(1, options.routeProgressRatio + revealAhead))
+
+  return assets.filter((asset) => {
+    if (!asset.visible) {
+      return false
+    }
+
+    if (options.debugGarden) {
+      return true
+    }
+
+    if (options.rerouteActive && asset.priority === 'low') {
+      return false
+    }
+
+    return asset.routeFraction <= progress
+  })
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values))
 }
 
 function buildVisibleDecorGeometries(
@@ -2305,6 +2748,50 @@ const map3DGuideCss = `
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.64), 0 12px 30px rgba(20, 184, 166, .18);
 }
 
+.map-3d-guide-shell--prototype-c .map-3d-guide-map {
+  filter: saturate(.70) sepia(.10) contrast(.98) brightness(1.02);
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-skin {
+  background:
+    linear-gradient(90deg, rgba(250, 247, 228, .18), transparent 25%, transparent 75%, rgba(20, 54, 46, .12)),
+    linear-gradient(180deg, rgba(246, 241, 220, .08), transparent 46%, rgba(24, 58, 49, .10));
+  opacity: .62;
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-mist {
+  background:
+    radial-gradient(circle at 52% 38%, rgba(255, 249, 220, .07), transparent 30%),
+    radial-gradient(circle at 62% 61%, rgba(80, 120, 101, .06), transparent 28%),
+    linear-gradient(135deg, rgba(255,255,255,.10), transparent 32%),
+    repeating-linear-gradient(104deg, rgba(255,255,255,.022) 0 1px, transparent 1px 32px);
+  opacity: .36;
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-hero,
+.map-3d-guide-shell--prototype-c .map-3d-guide-camera,
+.map-3d-guide-shell--prototype-c .map-3d-guide-status,
+.map-3d-guide-shell--prototype-c .map-3d-guide-pois,
+.map-3d-guide-shell--prototype-c .map-3d-guide-controlbar {
+  background:
+    linear-gradient(135deg, rgba(252, 248, 230, .94), rgba(226, 238, 226, .88));
+  border-color: rgba(126, 112, 71, .34);
+  box-shadow: 0 28px 72px rgba(21, 41, 35, .18), inset 0 0 0 1px rgba(255,255,255,.56);
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-hero {
+  border-left-color: rgba(116, 99, 52, .78);
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-status {
+  border-right-color: rgba(48, 83, 67, .70);
+}
+
+.map-3d-guide-shell--prototype-c .map-3d-guide-progress span {
+  background: linear-gradient(90deg, #264f43, #9f8535, #d5bd70);
+  box-shadow: 0 0 18px rgba(122, 102, 45, .32);
+}
+
 .map-3d-guide-hero,
 .map-3d-guide-camera,
 .map-3d-guide-status,
@@ -2436,7 +2923,8 @@ const map3DGuideCss = `
   border-right: 5px solid rgba(33, 91, 75, .58);
 }
 
-.map-3d-guide-decor-debug {
+.map-3d-guide-decor-debug,
+.map-3d-guide-garden-debug {
   position: absolute;
   z-index: 6;
   top: 320px;
@@ -2454,6 +2942,12 @@ const map3DGuideCss = `
   backdrop-filter: blur(18px);
 }
 
+.map-3d-guide-garden-debug {
+  border-color: rgba(83, 89, 67, .24);
+  background:
+    linear-gradient(135deg, rgba(250, 247, 232, .96), rgba(229, 238, 224, .92));
+}
+
 .map-3d-guide-decor-debug__header {
   display: flex;
   align-items: flex-start;
@@ -2463,12 +2957,14 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-decor-debug__header div,
-.map-3d-guide-decor-debug label {
+.map-3d-guide-decor-debug label,
+.map-3d-guide-garden-debug label {
   display: grid;
   gap: 5px;
 }
 
-.map-3d-guide-decor-debug strong {
+.map-3d-guide-decor-debug strong,
+.map-3d-guide-garden-debug strong {
   color: #24483c;
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
   font-size: 15px;
@@ -2477,14 +2973,20 @@ const map3DGuideCss = `
 .map-3d-guide-decor-debug span,
 .map-3d-guide-decor-debug label,
 .map-3d-guide-decor-debug p,
-.map-3d-guide-decor-debug small {
+.map-3d-guide-decor-debug small,
+.map-3d-guide-garden-debug span,
+.map-3d-guide-garden-debug label,
+.map-3d-guide-garden-debug p,
+.map-3d-guide-garden-debug small {
   color: #68746c;
   font-size: 12px;
   line-height: 1.45;
 }
 
 .map-3d-guide-decor-debug select,
-.map-3d-guide-decor-debug input {
+.map-3d-guide-decor-debug input,
+.map-3d-guide-garden-debug select,
+.map-3d-guide-garden-debug input {
   width: 100%;
   min-height: 30px;
   border: 1px solid rgba(50, 88, 75, .18);
@@ -2501,7 +3003,8 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug button {
+.map-3d-guide-decor-debug button,
+.map-3d-guide-garden-debug button {
   border: 1px solid rgba(143, 101, 28, .24);
   border-radius: 9px;
   background: rgba(255, 249, 229, .90);
@@ -2519,7 +3022,8 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug p {
+.map-3d-guide-decor-debug p,
+.map-3d-guide-garden-debug p {
   margin: 10px 0 4px;
 }
 

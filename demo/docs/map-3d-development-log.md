@@ -5359,6 +5359,131 @@ transform: {
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
 
+## 阶段七十一：3D 园林资产导览原型 C
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+新增 `/map-3d-guide-c`，作为“沉稳 3D 园林资产版”视觉原型。C 版不继续堆 PNG / SVG 贴片，而是使用腾讯地图 `TMap.model.GLTFModel` 加载低模 GLB 园林资产，形成更像园林沙盘的路线导览效果。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 的既有行为。
+- 不修改 routeGeometry / roadNetwork 原始数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不执行 `git push`。
+
+### 修改文件
+
+- `src/App.tsx`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/pages/Map3DGuidePrototypeCPage.tsx`
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `public/assets/map-3d-guide/glb-garden/*.glb`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-guide-demo-plan.md`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么从 A/B 贴片转向 GLB 低模资产
+
+A/B 已证明地图坐标锚定 marker 可行，但 PNG / SVG 贴片容易显得幼态、平面和拼贴。灵山胜境真实 3D 导览更需要空间体积、低饱和材质、园林沙盘感和克制的文化符号。因此 C 版禁用原 PNG / SVG 装饰贴片，改用小体积低模 GLB。
+
+### 子 agent 搜索与审核结论
+
+本阶段按用户要求分工调研：
+
+- 子 agent A 调研自然园林资产，推荐 Quaternius / Poly Pizza 自然包、Kenney Nature Kit、flo-bit low poly nature pack、Poly Haven 少量 CC0 灌木和山石、明确 CC BY 且轻量的竹子 / 石阶资产。
+- 子 agent B 调研东方建筑与佛教符号资产，推荐 CC0 低模桥、石桥、寺庙屋顶、院墙、香炉、莲台、法轮等候选。
+- 子 agent C 做许可证审核，建议只允许 CC0 / Public Domain / MIT / Apache-2.0 / 可商用 CC BY；拒绝 NC、SA、ND、Editorial、自定义 Royalty-Free 和许可证不明资产。
+- 子 agent D 做性能和风格审核，建议首屏大型 GLB 控制在 0-1 个，装饰 GLB 应小体积、低面数、低饱和，拒绝 25MB 级 AI 直出模型默认加载。
+
+### 本阶段使用资产
+
+本阶段没有直接下载外部 GLB。为了先打通 C 版运行链路，新增项目自制低模 fallback GLB：
+
+- `garden_pine_cluster.glb`
+- `garden_rock_cluster.glb`
+- `garden_stone_steps.glb`
+- `garden_courtyard_wall.glb`
+- `garden_arch_bridge.glb`
+- `garden_temple_roof.glb`
+- `garden_lotus_pedestal.glb`
+- `garden_dharma_wheel.glb`
+- `garden_incense_burner.glb`
+
+这些资产放在 `public/assets/map-3d-guide/glb-garden/`，单个约 9KB 到 55KB，总体约 300KB，属于项目自制低模 fallback。许可证记录见 `docs/map-3d-guide-asset-licenses.md`。
+
+### 路线铺陈方式
+
+新增 `src/data/lingshanMap3DGardenAssets.ts`。每个资产记录 `id`、`kind`、`assetUrl`、经纬度、`scale`、`height`、`yaw`、`visible`、`priority`、`routeFraction` 和说明。
+
+资产沿历史文化路线布置：
+
+- 南门：院墙、石阶。
+- 照壁 / 胜境广场：松群、山石。
+- 水边路段：小桥。
+- 九龙灌浴：树群。
+- 灵山大佛：石阶、莲台、山石。
+- 祥符禅寺：香炉、寺庙屋顶。
+- 梵宫：庭墙、庭树。
+- 五印坛城：法轮、莲台。
+- 出口：山石低调收束。
+
+### 显现机制
+
+C 版使用 `routeFraction` 和当前 `routeProgressRatio` 控制资产显现。普通模式只创建已到达或即将到达的 GLB 资产；`debugGarden=1` 显示全部资产。偏航 / 重规划时低优先级资产会暂时隐藏，避免干扰青蓝重规划路线。
+
+由于腾讯 GLTFModel 运行时透明度能力未确认，第一版采用“创建 / 不创建模型”的方式实现路线唤醒，而不是材质级淡入。
+
+### debugGarden 调试能力
+
+新增 `/map-3d-guide-c?debugGarden=1`：
+
+- 选择任一 3D 园林资产。
+- 调整纬度、经度、scale、height、yaw、routeFraction、visible、priority。
+- 自动保存到 `localStorage.lingshan-map-3d-guide-garden-assets-v1`。
+- 支持复制 TS 配置片段。
+- 支持复制调试摘要。
+- 支持恢复默认配置。
+
+### 保留能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 金色主路线保留。
+- 当前站点 / 下一站 / 终点 marker 保留。
+- 模拟定位、模拟前进、模拟偏航保留。
+- 点击模拟偏航后仍调用腾讯 walking route 重规划到下一站。
+- 重规划路线仍清楚。
+- GLB 模型 Beta 开关保留。
+- 相机模式保留。
+
+### 对 /map 的影响
+
+本阶段没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+- 选择 2-3 个外部 CC0 / CC BY 高质量 GLB 资产替换项目 fallback。
+- 为外部资产保存许可证证据和署名记录。
+- 继续压缩 MeshyAI 大佛模型，避免 25MB 级模型默认加载。
+- 如果腾讯 GLTFModel 对多实例性能不足，可将重复树群 / 山石合并为组合 GLB。
+
 ## 阶段七十 A：3D 导览视觉原型 A
 
 日期：2026-06-07

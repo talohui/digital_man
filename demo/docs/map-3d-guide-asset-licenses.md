@@ -89,3 +89,50 @@
 | `public/assets/map-3d-guide/shared/lotus_0282.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否；页面说明不需要署名 | 莲花节点 marker | A / B 共用 |
 | `public/assets/map-3d-guide/shared/lotus_3996.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否 | 莲花节点 marker | A / B 共用 |
 | `public/assets/map-3d-guide/shared/lotus_7692.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否 | B 版密集莲花 marker | B |
+
+## 8. C 版 3D 园林资产
+
+阶段 C 没有直接下载第三方 GLB 资产。当前使用的是项目自制低模 fallback GLB，目标是先验证腾讯地图 `TMap.model.GLTFModel` 多实例、经纬度锚定和 debugGarden 调参流程。
+
+这些资产不来自外部素材站，不需要第三方署名。后续如果替换为 Kenney / Quaternius / Poly Haven / Sketchfab / OpenGameArt 等外部资产，必须先新增逐项许可证记录。
+
+| 文件 | 来源 URL | 作者 / 项目 | 许可证 | 允许商用 | 需要署名 | 用途 | 使用范围 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `public/assets/map-3d-guide/glb-garden/garden_pine_cluster.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 树群 / 松阵 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_rock_cluster.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 山石 / 出口收束 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_stone_steps.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 南门和登佛石阶 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_courtyard_wall.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 南门院墙 / 梵宫庭墙 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_arch_bridge.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 游线小桥 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_temple_roof.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 祥符禅寺屋顶符号 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_lotus_pedestal.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 佛前莲台 / 坛城石台 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_dharma_wheel.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 五印坛城法轮符号 | C |
+| `public/assets/map-3d-guide/glb-garden/garden_incense_burner.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 祥符禅寺香炉 | C |
+
+## 9. 外部 3D 资产候选与拒绝规则
+
+子 agent 调研后建议优先考虑：
+
+- Kenney / Nature Kit：CC0，适合轻量自然占位。
+- Quaternius / Poly Pizza 低模自然包：CC0 / Public Domain，适合树、灌木、山石。
+- Poly Haven：CC0，质量高，但很多模型体积和面数偏大，需要压缩或降面。
+- OpenGameArt：逐项判断；CC0 可用，CC BY 需署名。
+- Sketchfab：只使用明确 CC0 或纯 CC BY 且权利链可信的单模型；CC BY 需要记录作者、来源和修改情况。
+
+本阶段拒绝或暂不使用：
+
+- CC BY-NC / NC-SA / Personal use only。
+- CC BY-SA / CC BY-ND。
+- Editorial / Royalty-Free 自定义 EULA。
+- 许可证不明或权利链不清的 AI 生成资产。
+- 过大的扫描模型，例如数百 MB 或百万级三角面的树木、山石、莲花。
+- 过卡通、过现代、过西式、过幼态的园林模型。
+- 需要大量透明贴图或复杂 shader 的资产。
+
+后续接入外部资产前，必须补充：
+
+- 原始 URL。
+- 作者 / 机构。
+- 许可证 URL。
+- 下载日期。
+- 是否改材质 / 压缩 / 降面。
+- 是否需要公开署名。
