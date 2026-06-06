@@ -22,6 +22,11 @@ type GuideCameraPreset = {
   rotation: number
 }
 
+type MapStyleSupportReport = {
+  knownMethods: string[]
+  relatedMethods: string[]
+}
+
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
 const demoRouteGeometry = getLingshanRouteGeometryByGuideRouteId('historical_culture')
 const demoRoutePath = demoRouteGeometry?.path.length ? demoRouteGeometry.path : getRouteStopLocations(demoGuideRoute)
@@ -31,6 +36,7 @@ const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
 const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
+const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -103,6 +109,10 @@ function Map3DGuidePage() {
   const [showModelBeta, setShowModelBeta] = useState(false)
   const [modelStatus, setModelStatus] = useState('未开启')
   const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('guide')
+  const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
+    knownMethods: [],
+    relatedMethods: []
+  })
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -184,6 +194,7 @@ function Map3DGuidePage() {
           rotation: -28
         })
         mapRef.current = map
+        setMapStyleSupport(inspectMapStyleSupport(map))
         setMapStatus('ready')
         setPageMessage('真实 3D 地图导览模式已就绪')
       } catch (error) {
@@ -704,6 +715,10 @@ function Map3DGuidePage() {
             <dt>终点</dt>
             <dd>{terminalPoi?.name ?? '景区出口'}</dd>
           </div>
+          <div>
+            <dt>底图样式</dt>
+            <dd>{mapStyleSupport.knownMethods.length ? `可探测：${mapStyleSupport.knownMethods.join(', ')}` : '未确认运行时入口'}</dd>
+          </div>
         </dl>
 
         <div className={`map-3d-guide-deviation map-3d-guide-deviation--${rerouteStatus}`}>
@@ -918,6 +933,37 @@ function getNearestStopIndex(position: LatLngPoint, routeStops: GuideRoute['stop
 
 function toTMapLatLng(point: LatLngPoint) {
   return new window.TMap.LatLng(point.lat, point.lng)
+}
+
+function inspectMapStyleSupport(map: any): MapStyleSupportReport {
+  if (!map) {
+    return {
+      knownMethods: [],
+      relatedMethods: []
+    }
+  }
+
+  const methodNames = new Set<string>()
+  let target = map
+
+  while (target && target !== Object.prototype) {
+    Object.getOwnPropertyNames(target).forEach((name) => {
+      if (typeof map[name] === 'function') {
+        methodNames.add(name)
+      }
+    })
+    target = Object.getPrototypeOf(target)
+  }
+
+  const knownMethods = tencentMapStyleMethodCandidates.filter((name) => methodNames.has(name))
+  const relatedMethods = Array.from(methodNames)
+    .filter((name) => /(style|basemap|baseMap|theme|skin)/i.test(name))
+    .sort()
+
+  return {
+    knownMethods,
+    relatedMethods
+  }
 }
 
 function clearGltfModel(model: any) {

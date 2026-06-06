@@ -6847,3 +6847,98 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有调用新的腾讯 API。
 - 本阶段没有新增外部素材。
+
+## 阶段六十四：/map-3d-guide 固定艺术覆盖层移除与腾讯底图样式能力核验
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+修正 `/map-3d-guide` 中固定屏幕艺术覆盖层导致的空间错位问题，并核验腾讯地图 Web JS API GL 在当前运行时是否暴露自定义底图样式相关方法。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 规划算法。
+- 不读取、不输出、不修改 `.env`、API Key、token。
+- 不新增外部素材。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 固定覆盖层问题
+
+前一版 `/map-3d-guide` 使用了固定在屏幕上的 SVG 艺术主视觉，包括大面积水体、山体色块、佛像 / 莲花符号、建筑块面、金色斜线路线和百分比定位 POI 立牌。这些元素不随腾讯地图缩放、旋转、平移变化，容易遮挡真实道路、白模、POI 和路线，不符合真实 3D 导览地图的空间一致性要求。
+
+### 修复方式
+
+本阶段移除固定 SVG 艺术主视觉、固定 POI 立牌、大面积水体 / 山体 / 聚焦色块，仅保留低透明宣纸纹理、边缘雾化和轻微青绿滤镜。主路线、重规划路线、当前位置、核心 POI 和 GLB 模型继续使用腾讯地图经纬度覆盖物：
+
+- 主路线：`TMap.MultiPolyline`
+- 临时重规划路线：`TMap.MultiPolyline`
+- POI / 当前站 / 下一站 / 终点：`TMap.MultiMarker`
+- 模拟当前位置：`TMap.MultiMarker`
+- GLB 模型 Beta：`TMap.model.GLTFModel`
+
+### 腾讯自定义地图样式核验
+
+用户已在腾讯位置服务控制台创建并发布“我的自定义样式1”，并绑定当前项目使用的 Web Key。但强制刷新 `/map-3d-guide` 后底图样式没有变化，因此不能假设“控制台绑定 Key 后 Web 页面自动生效”。
+
+本阶段在 `/map-3d-guide` 中增加了只读运行时探测，检查 `TMap.Map` 实例及原型链是否存在以下样式相关方法：
+
+- `setMapStyleId`
+- `setStyle`
+- `setMapStyle`
+- `setBaseMap`
+- 其它明显包含 `style` / `baseMap` / `theme` / `skin` 的方法名
+
+该探测只读取方法名，不调用未知接口，不硬编码未知 `styleId`，不读取或输出 API Key。
+
+### 当前结论
+
+腾讯自定义地图样式是更正确的底图风格化方向，但当前项目尚未确认 JS API GL 自定义样式的运行时接入方式。控制台 Key 绑定目前没有在 Web 页面中自动生效。后续如果确认官方 Web GL 样式接入 API，应通过明确的 styleId / style 方法接入，而不是继续使用固定大面积 CSS / SVG 覆盖层承担主视觉空间表达。
+
+### 对 /map-3d-guide 的影响
+
+`/map-3d-guide` 继续保留腾讯 3D 地图底座、历史文化路线、模拟定位、模拟偏航、腾讯 walking route 重规划、重规划路线和 GLB 模型 Beta。页面视觉从“静态海报覆盖地图”收敛为“腾讯真实地图被低透明灵山风格包装”。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map-3d-guide`，确认不再出现固定大莲花、大色块、大斜线覆盖地图主体。
+- 缩放、旋转、平移地图时，路线和 POI 仍跟随腾讯地图。
+- 点击“模拟偏航”，确认仍调用腾讯 walking route 并显示临时重规划路线。
+- 检查 `/map`、`/map?debugGltfModel=1`、`/scenic-3d-map` 正常。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+优先查证腾讯地图 JS API GL 自定义样式的官方 Web 接入方式。如果确认有可用 style API，再将控制台发布的自定义 styleId 接入 `/map-3d-guide` 的地图初始化或运行时样式设置；水体、山体等艺术化空间元素后续应使用经纬度 polygon / overlay 方式实现，而不是固定屏幕覆盖。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry。
+- 本阶段没有修改 roadNetwork。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有调用新的腾讯 API。
+- 本阶段没有读取或输出 API Key。
+- CSS 固定层只保留轻量氛围，不承担主视觉空间表达。
