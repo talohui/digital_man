@@ -11,6 +11,16 @@ import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDis
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
+type GuideCameraMode = 'overview' | 'current' | 'next' | 'focus' | 'topdown' | 'guide'
+
+type GuideCameraPreset = {
+  id: GuideCameraMode
+  label: string
+  description: string
+  zoom: number
+  pitch: number
+  rotation: number
+}
 
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
 const demoRouteGeometry = getLingshanRouteGeometryByGuideRouteId('historical_culture')
@@ -20,6 +30,58 @@ const initialPosition = getRouteStopLocation(demoGuideRoute.stops[0]?.spotId) ??
 const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
 const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
+const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
+
+const guideCameraPresets: GuideCameraPreset[] = [
+  {
+    id: 'overview',
+    label: '路线总览',
+    description: '俯瞰历史文化主线',
+    zoom: 16.7,
+    pitch: 58,
+    rotation: -30
+  },
+  {
+    id: 'current',
+    label: '当前站点',
+    description: '靠近模拟当前位置',
+    zoom: 19,
+    pitch: 65,
+    rotation: -18
+  },
+  {
+    id: 'next',
+    label: '下一站',
+    description: '提前看下一处景点',
+    zoom: 19.2,
+    pitch: 64,
+    rotation: 12
+  },
+  {
+    id: 'focus',
+    label: '景点聚焦',
+    description: '聚焦当前文化节点',
+    zoom: 20,
+    pitch: 67,
+    rotation: 28
+  },
+  {
+    id: 'topdown',
+    label: '俯视检查',
+    description: '检查路线和站点关系',
+    zoom: 18.1,
+    pitch: 0,
+    rotation: 0
+  },
+  {
+    id: 'guide',
+    label: '导览视角',
+    description: '回到跟随导览视角',
+    zoom: 18.4,
+    pitch: 64,
+    rotation: -28
+  }
+]
 
 function Map3DGuidePage() {
   const navigate = useNavigate()
@@ -40,6 +102,7 @@ function Map3DGuidePage() {
   const [reroutePlan, setReroutePlan] = useState<PlannedRoute | null>(null)
   const [showModelBeta, setShowModelBeta] = useState(false)
   const [modelStatus, setModelStatus] = useState('未开启')
+  const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('guide')
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -68,6 +131,8 @@ function Map3DGuidePage() {
   )
   const nextStopPoi = getPoiDisplay(nextStop.nextStopId)
   const currentStop = getPoiDisplay(routeStops[selectedStopIndex]?.spotId)
+  const selectedStopId = routeStops[selectedStopIndex]?.spotId
+  const activeCameraPreset = guideCameraPresets.find((preset) => preset.id === activeCameraMode) ?? guideCameraPresets[0]
   const routeProgressPercent = nearestRoutePoint
     ? Math.max(0, Math.min(100, Math.round(nearestRoutePoint.progressRatio * 100)))
     : 0
@@ -138,15 +203,37 @@ function Map3DGuidePage() {
     routeLayerRef.current = new window.TMap.MultiPolyline({
       map: mapRef.current,
       styles: {
+        routeAura: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 238, 164, 0.30)',
+          width: 24,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        routeGlow: new window.TMap.PolylineStyle({
+          color: 'rgba(213, 166, 45, 0.46)',
+          width: 15,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
         mainRoute: new window.TMap.PolylineStyle({
-          color: '#D5A62D',
-          width: 8,
-          borderWidth: 3,
-          borderColor: 'rgba(255, 252, 231, 0.92)',
+          color: '#F2C14E',
+          width: 9,
+          borderWidth: 4,
+          borderColor: 'rgba(255, 254, 238, 0.96)',
           lineCap: 'round'
         })
       },
       geometries: [
+        {
+          id: 'historical-culture-route-aura',
+          styleId: 'routeAura',
+          paths: demoRoutePath.map(toTMapLatLng)
+        },
+        {
+          id: 'historical-culture-route-glow',
+          styleId: 'routeGlow',
+          paths: demoRoutePath.map(toTMapLatLng)
+        },
         {
           id: 'historical-culture-main-route',
           styleId: 'mainRoute',
@@ -167,34 +254,56 @@ function Map3DGuidePage() {
     }
 
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
+    const currentStopId = routeStops[selectedStopIndex]?.spotId
+    const nextStopId = nextStop.nextStopId
+    const markerStyles = routeStops.reduce<Record<string, any>>((styles, stop, index) => {
+      const state =
+        stop.spotId === terminalStopId
+          ? 'terminal'
+          : stop.spotId === currentStopId
+            ? 'current'
+            : stop.spotId === nextStopId
+              ? 'next'
+              : 'route'
+      const styleId = `poi-${index}-${state}`
+      const size = state === 'current' ? 44 : state === 'next' ? 40 : state === 'terminal' ? 42 : 34
+
+      styles[styleId] = new window.TMap.MarkerStyle({
+        width: size,
+        height: size + 8,
+        anchor: { x: size / 2, y: size + 6 },
+        src: createSvgDataUrl(routePoiMarkerSvg(state, index + 1))
+      })
+
+      return styles
+    }, {})
     const poiGeometries = lingshanPois
       .filter((poi) => routeStopIds.has(poi.id))
-      .map((poi, index) => ({
-        id: poi.id,
-        styleId: poi.id === terminalStopId ? 'terminalPoi' : 'routePoi',
-        position: toTMapLatLng(getBestPoiLocation(poi)),
-        properties: {
-          title: `${index + 1}. ${poi.name}`
+      .map((poi) => {
+        const stopIndex = routeStops.findIndex((stop) => stop.spotId === poi.id)
+        const state =
+          poi.id === terminalStopId
+            ? 'terminal'
+            : poi.id === currentStopId
+              ? 'current'
+              : poi.id === nextStopId
+                ? 'next'
+                : 'route'
+
+        return {
+          id: poi.id,
+          styleId: `poi-${stopIndex}-${state}`,
+          position: toTMapLatLng(getBestPoiLocation(poi)),
+          properties: {
+            title: `${stopIndex + 1}. ${poi.name}`
+          }
         }
-      }))
+      })
 
     poiMarkerLayerRef.current?.setMap?.(null)
     poiMarkerLayerRef.current = new window.TMap.MultiMarker({
       map: mapRef.current,
-      styles: {
-        routePoi: new window.TMap.MarkerStyle({
-          width: 30,
-          height: 34,
-          anchor: { x: 15, y: 34 },
-          src: createSvgDataUrl(routePoiMarkerSvg('#204f46', '#f4d77b'))
-        }),
-        terminalPoi: new window.TMap.MarkerStyle({
-          width: 34,
-          height: 38,
-          anchor: { x: 17, y: 38 },
-          src: createSvgDataUrl(routePoiMarkerSvg('#7c2d12', '#f7c948'))
-        })
-      },
+      styles: markerStyles,
       geometries: poiGeometries
     })
 
@@ -202,7 +311,7 @@ function Map3DGuidePage() {
       poiMarkerLayerRef.current?.setMap?.(null)
       poiMarkerLayerRef.current = null
     }
-  }, [mapStatus, routeStops, terminalStopId])
+  }, [mapStatus, nextStop.nextStopId, routeStops, selectedStopIndex, terminalStopId])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -409,7 +518,38 @@ function Map3DGuidePage() {
     }
   }
 
+  const applyGuideCamera = (mode: GuideCameraMode) => {
+    const preset = guideCameraPresets.find((item) => item.id === mode) ?? guideCameraPresets[0]
+    const target =
+      mode === 'overview'
+        ? routeCenter
+        : mode === 'current'
+          ? getRouteStopLocation(selectedStopId) ?? simulatedPosition
+          : mode === 'next'
+            ? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
+            : mode === 'focus'
+              ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
+              : mode === 'topdown'
+                ? routeCenter
+                : simulatedPosition
+
+    setActiveCameraMode(mode)
+    moveMapCamera(target, preset)
+  }
+
   const focusMap = (position: LatLngPoint, zoom?: number) => {
+    setActiveCameraMode('guide')
+    moveMapCamera(position, {
+      id: 'guide',
+      label: '导览视角',
+      description: '跟随模拟位置',
+      zoom: zoom ?? 18,
+      pitch: 64,
+      rotation: -28
+    })
+  }
+
+  const moveMapCamera = (position: LatLngPoint, preset: GuideCameraPreset) => {
     const map = mapRef.current
 
     if (!map || !window.TMap) {
@@ -422,9 +562,9 @@ function Map3DGuidePage() {
       map.easeTo(
         {
           center,
-          zoom: zoom ?? 18,
-          pitch: 64,
-          rotation: -28
+          zoom: preset.zoom,
+          pitch: preset.pitch,
+          rotation: preset.rotation
         },
         { duration: 420 }
       )
@@ -432,11 +572,11 @@ function Map3DGuidePage() {
     }
 
     map.setCenter?.(center)
-    if (zoom && typeof map.setZoom === 'function') {
-      map.setZoom(zoom)
+    if (typeof map.setZoom === 'function') {
+      map.setZoom(preset.zoom)
     }
-    map.setPitch?.(64)
-    map.setRotation?.(-28)
+    map.setPitch?.(preset.pitch)
+    map.setRotation?.(preset.rotation)
   }
 
   return (
@@ -444,11 +584,14 @@ function Map3DGuidePage() {
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
+      <div className="map-3d-guide-waterwash" aria-hidden="true" />
+      <div className="map-3d-guide-mountainveil" aria-hidden="true" />
+      <div className="map-3d-guide-paperedge" aria-hidden="true" />
 
       <section className="map-3d-guide-hero">
-        <div className="map-3d-guide-kicker">真实 3D 地图导览 Beta</div>
-        <h1>灵山胜境真实 3D 地图导览</h1>
-        <p>{demoGuideRoute.name} · 腾讯真实底图 + 金色导览线 + GLB 景点模型</p>
+        <div className="map-3d-guide-kicker">灵山胜境定制导览 Beta</div>
+        <h1>灵山胜境 · 真实 3D 导览</h1>
+        <p>{demoGuideRoute.name} · 金色游线 · 景点模型 · 偏航重规划演示</p>
         <div className="map-3d-guide-top-actions">
           <button type="button" onClick={() => navigate('/map')}>
             进入真实地图
@@ -459,9 +602,28 @@ function Map3DGuidePage() {
         </div>
       </section>
 
+      <section className="map-3d-guide-camera">
+        <div>
+          <strong>导览相机</strong>
+          <span>{activeCameraPreset.description}</span>
+        </div>
+        <div className="map-3d-guide-camera__buttons">
+          {guideCameraPresets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={preset.id === activeCameraMode ? 'is-active' : ''}
+              onClick={() => applyGuideCamera(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
-        <h2>导览状态</h2>
+        <h2>灵山导览牌</h2>
         <dl>
           <div>
             <dt>当前路线</dt>
@@ -511,21 +673,32 @@ function Map3DGuidePage() {
       </aside>
 
       <section className="map-3d-guide-pois">
-        <strong>核心 POI</strong>
+        <strong>历史文化核心站点</strong>
         <div>
           {routeStops.map((stop, index) => {
             const poi = getPoiDisplay(stop.spotId)
             const active = index === selectedStopIndex
+            const isNext = stop.spotId === nextStop.nextStopId
+            const isTerminal = stop.spotId === terminalStopId
 
             return (
               <button
                 key={stop.spotId}
                 type="button"
-                className={active ? 'is-active' : ''}
+                className={[
+                  active ? 'is-active' : '',
+                  isNext ? 'is-next' : '',
+                  isTerminal ? 'is-terminal' : ''
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onClick={() => moveToStop(index)}
               >
                 <span>{index + 1}</span>
                 {poi?.name ?? stop.spotId}
+                {active ? <small>当前</small> : null}
+                {isNext ? <small>下一站</small> : null}
+                {isTerminal ? <small>终点</small> : null}
               </button>
             )
           })}
@@ -570,6 +743,25 @@ function getRouteStopLocations(route: GuideRoute) {
   return route.stops
     .map((stop) => getRouteStopLocation(stop.spotId))
     .filter((location): location is LatLngPoint => Boolean(location))
+}
+
+function getPathCenter(path: LatLngPoint[]) {
+  if (!path.length) {
+    return null
+  }
+
+  const center = path.reduce(
+    (acc, point) => ({
+      lat: acc.lat + point.lat,
+      lng: acc.lng + point.lng
+    }),
+    { lat: 0, lng: 0 }
+  )
+
+  return {
+    lat: center.lat / path.length,
+    lng: center.lng / path.length
+  }
 }
 
 function getRouteStopLocation(spotId?: string | null): LatLngPoint | null {
@@ -664,8 +856,58 @@ function createSvgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
-function routePoiMarkerSvg(fill: string, accent: string) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="40" viewBox="0 0 34 40"><path d="M17 39s13-12.2 13-24A13 13 0 0 0 4 15c0 11.8 13 24 13 24Z" fill="${fill}" stroke="rgba(255,255,255,.92)" stroke-width="2"/><circle cx="17" cy="15" r="6" fill="${accent}"/></svg>`
+function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', index: number) {
+  const palette = {
+    route: {
+      jade: '#1f5a4d',
+      gold: '#f0cf72',
+      paper: '#fff8df',
+      glow: 'rgba(240, 207, 114, .28)',
+      text: '#20483f',
+      label: String(index)
+    },
+    current: {
+      jade: '#7a4f0f',
+      gold: '#ffd96a',
+      paper: '#fff4c7',
+      glow: 'rgba(255, 217, 106, .46)',
+      text: '#6c3f08',
+      label: '今'
+    },
+    next: {
+      jade: '#0f766e',
+      gold: '#b7f3df',
+      paper: '#e8fff7',
+      glow: 'rgba(45, 212, 191, .34)',
+      text: '#0f5f56',
+      label: '次'
+    },
+    terminal: {
+      jade: '#8b2f17',
+      gold: '#ffc261',
+      paper: '#fff0d5',
+      glow: 'rgba(251, 146, 60, .38)',
+      text: '#7c2d12',
+      label: '终'
+    }
+  }[state]
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
+    <defs>
+      <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+        <feDropShadow dx="0" dy="8" stdDeviation="5" flood-color="rgba(32,44,35,.30)"/>
+      </filter>
+    </defs>
+    <ellipse cx="24" cy="28" rx="21" ry="22" fill="${palette.glow}"/>
+    <g filter="url(#shadow)">
+      <path d="M24 54s17-14.4 17-31A17 17 0 0 0 7 23c0 16.6 17 31 17 31Z" fill="${palette.jade}" stroke="rgba(255,255,255,.92)" stroke-width="2.4"/>
+      <path d="M24 9c5.2 3.6 8.2 8 8.2 12.8 0 6.3-4.8 11.4-8.2 13.4-3.4-2-8.2-7.1-8.2-13.4C15.8 17 18.8 12.6 24 9Z" fill="${palette.paper}" opacity=".96"/>
+      <path d="M13.2 23.4c5.2.5 8.1 2.8 10.8 9.2-6.5-.8-10.1-3.6-10.8-9.2Z" fill="${palette.gold}" opacity=".92"/>
+      <path d="M35.8 23.4c-.7 5.6-4.3 8.4-10.8 9.2 2.7-6.4 5.6-8.7 10.8-9.2Z" fill="${palette.gold}" opacity=".92"/>
+      <circle cx="24" cy="23" r="10.4" fill="${palette.paper}" stroke="${palette.gold}" stroke-width="2"/>
+      <text x="24" y="27" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="900" fill="${palette.text}">${palette.label}</text>
+    </g>
+  </svg>`
 }
 
 function userLocationSvg() {
@@ -685,11 +927,14 @@ const map3DGuideCss = `
 .map-3d-guide-map {
   position: absolute;
   inset: 0;
-  filter: saturate(.72) sepia(.18) contrast(.92) brightness(1.05);
+  filter: saturate(.62) sepia(.24) contrast(.90) brightness(1.08);
 }
 
 .map-3d-guide-skin,
-.map-3d-guide-mist {
+.map-3d-guide-mist,
+.map-3d-guide-waterwash,
+.map-3d-guide-mountainveil,
+.map-3d-guide-paperedge {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -698,20 +943,46 @@ const map3DGuideCss = `
 
 .map-3d-guide-skin {
   background:
-    radial-gradient(circle at 22% 18%, rgba(247, 231, 172, .34), transparent 28%),
-    radial-gradient(circle at 77% 26%, rgba(83, 131, 113, .22), transparent 30%),
-    linear-gradient(90deg, rgba(249, 246, 229, .55), transparent 24%, transparent 72%, rgba(33, 71, 62, .20)),
-    linear-gradient(180deg, rgba(245, 241, 221, .42), transparent 38%, rgba(22, 61, 52, .20));
+    radial-gradient(ellipse at 44% 54%, rgba(255, 236, 155, .16), transparent 18%),
+    radial-gradient(circle at 22% 18%, rgba(247, 231, 172, .42), transparent 28%),
+    radial-gradient(circle at 77% 26%, rgba(83, 131, 113, .30), transparent 30%),
+    linear-gradient(90deg, rgba(249, 246, 229, .62), transparent 24%, transparent 72%, rgba(33, 71, 62, .30)),
+    linear-gradient(180deg, rgba(245, 241, 221, .50), transparent 38%, rgba(22, 61, 52, .28));
   mix-blend-mode: multiply;
 }
 
 .map-3d-guide-mist {
   background:
-    linear-gradient(135deg, rgba(255,255,255,.32), transparent 36%),
-    repeating-linear-gradient(100deg, rgba(255,255,255,.08) 0 2px, transparent 2px 22px);
+    linear-gradient(135deg, rgba(255,255,255,.38), transparent 36%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.10) 0 2px, transparent 2px 22px);
+  opacity: .86;
+}
+
+.map-3d-guide-waterwash {
+  background:
+    radial-gradient(ellipse at 70% 74%, rgba(85, 164, 181, .36), transparent 36%),
+    radial-gradient(ellipse at 82% 58%, rgba(123, 199, 207, .20), transparent 28%),
+    linear-gradient(135deg, transparent 46%, rgba(89, 150, 159, .18));
+  mix-blend-mode: color;
+}
+
+.map-3d-guide-mountainveil {
+  background:
+    radial-gradient(ellipse at 18% 8%, rgba(59, 105, 81, .24), transparent 32%),
+    radial-gradient(ellipse at 86% 12%, rgba(43, 92, 75, .20), transparent 34%),
+    linear-gradient(180deg, rgba(63, 112, 82, .18), transparent 44%);
+  filter: blur(1px);
+}
+
+.map-3d-guide-paperedge {
+  background:
+    radial-gradient(ellipse at center, transparent 48%, rgba(250, 246, 226, .30) 70%, rgba(83, 68, 35, .18) 100%),
+    linear-gradient(90deg, rgba(250, 246, 226, .40), transparent 18%, transparent 82%, rgba(250, 246, 226, .40));
+  box-shadow: inset 0 0 96px rgba(81, 65, 34, .18);
 }
 
 .map-3d-guide-hero,
+.map-3d-guide-camera,
 .map-3d-guide-status,
 .map-3d-guide-pois,
 .map-3d-guide-controlbar {
@@ -763,6 +1034,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-top-actions button,
+.map-3d-guide-camera button,
 .map-3d-guide-controlbar button,
 .map-3d-guide-pois button {
   border: 1px solid rgba(143, 101, 28, .24);
@@ -779,6 +1051,52 @@ const map3DGuideCss = `
   border-color: rgba(30, 91, 76, .22);
   color: #1d5b4c;
   background: rgba(234, 246, 239, .84);
+}
+
+.map-3d-guide-camera {
+  top: 178px;
+  left: 18px;
+  width: 380px;
+  max-width: calc(100vw - 36px);
+  padding: 14px;
+  border-radius: 18px;
+}
+
+.map-3d-guide-camera > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.map-3d-guide-camera strong {
+  color: #25463b;
+}
+
+.map-3d-guide-camera span {
+  color: #798276;
+  font-size: 12px;
+  text-align: right;
+}
+
+.map-3d-guide-camera__buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.map-3d-guide-camera button {
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.map-3d-guide-camera button.is-active {
+  border-color: rgba(213, 166, 45, .70);
+  background: linear-gradient(135deg, rgba(255, 244, 202, .98), rgba(230, 246, 238, .94));
+  color: #7a4f0f;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
 }
 
 .map-3d-guide-status {
@@ -888,6 +1206,10 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-pois button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   min-height: 30px;
   padding: 0 9px;
   font-size: 12px;
@@ -908,6 +1230,25 @@ const map3DGuideCss = `
   color: #7b4f0f;
   background: rgba(255, 240, 196, .98);
   border-color: rgba(213, 166, 45, .6);
+}
+
+.map-3d-guide-pois button.is-next {
+  color: #0f5f56;
+  border-color: rgba(20, 148, 134, .40);
+  background: rgba(224, 249, 243, .92);
+}
+
+.map-3d-guide-pois button.is-terminal {
+  color: #8a3512;
+  border-color: rgba(182, 83, 24, .40);
+}
+
+.map-3d-guide-pois button small {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.68);
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .map-3d-guide-controlbar {
@@ -963,6 +1304,7 @@ const map3DGuideCss = `
 
 @media (max-width: 880px) {
   .map-3d-guide-hero,
+  .map-3d-guide-camera,
   .map-3d-guide-status,
   .map-3d-guide-pois,
   .map-3d-guide-controlbar {
@@ -973,11 +1315,32 @@ const map3DGuideCss = `
   }
 
   .map-3d-guide-status {
-    top: 188px;
+    top: 266px;
+  }
+
+  .map-3d-guide-camera {
+    top: 172px;
+  }
+
+  .map-3d-guide-camera__buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .map-3d-guide-pois {
-    display: none;
+    display: block;
+    bottom: 206px;
+    max-height: 124px;
+    overflow: auto;
+  }
+
+  .map-3d-guide-pois div {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .map-3d-guide-pois button {
+    flex: 0 0 auto;
   }
 
   .map-3d-guide-controlbar {
