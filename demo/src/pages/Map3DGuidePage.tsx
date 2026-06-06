@@ -125,7 +125,6 @@ function Map3DGuidePage() {
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
-  const terminalPoi = getPoiDisplay(terminalStopId)
   const nearestRoutePoint = useMemo(
     () => findNearestRoutePoint(simulatedPosition, demoRoutePath),
     [simulatedPosition]
@@ -707,7 +706,7 @@ function Map3DGuidePage() {
             <dd>{demoGuideRoute.name}</dd>
           </div>
           <div>
-            <dt>当前位置</dt>
+            <dt>当前站点</dt>
             <dd>{currentStop?.name ?? '路线中段'}</dd>
           </div>
           <div>
@@ -719,53 +718,10 @@ function Map3DGuidePage() {
             <dd>{nextStop.distanceToNextStopMeters ? formatDistanceMeters(nextStop.distanceToNextStopMeters) : '待估算'}</dd>
           </div>
           <div>
-            <dt>路线进度</dt>
-            <dd>{routeProgressPercent}%</dd>
-          </div>
-          <div>
-            <dt>终点</dt>
-            <dd>{terminalPoi?.name ?? '景区出口'}</dd>
-          </div>
-          <div>
-            <dt>底图样式</dt>
-            <dd>{hasConfirmedMapStyleSupport(mapStyleSupport) ? '发现疑似入口' : '待接入'}</dd>
+            <dt>当前状态</dt>
+            <dd>{guideStateText}</dd>
           </div>
         </dl>
-
-        <div className="map-3d-guide-style-audit">
-          <strong>个性化地图样式</strong>
-          <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
-          <span>控制台 Key 绑定：用户已确认；当前页面未自动生效。</span>
-          <ul>
-            {tencentMapStyleMethodCandidates.map((method) => (
-              <li key={method}>
-                <code>{method}</code>
-                <em>{mapStyleSupport.mapMethods[method] ? 'true' : 'false'}</em>
-              </li>
-            ))}
-          </ul>
-          {mapStyleSupport.mapRelatedMethods.length || mapStyleSupport.tmapRelatedKeys.length ? (
-            <small>
-              相关探测：
-              {[...mapStyleSupport.mapRelatedMethods, ...mapStyleSupport.tmapRelatedKeys].slice(0, 6).join(', ')}
-            </small>
-          ) : null}
-          <p>
-            {hasConfirmedMapStyleSupport(mapStyleSupport)
-              ? '检测到可能的样式接入方法，需提供官方 styleId 或确认参数后再启用。'
-              : '当前未发现明确 JS API GL 运行时样式方法，暂以轻量滤镜和地图锚定元素实现风格化。'}
-          </p>
-        </div>
-
-        <div className="map-3d-guide-render-audit">
-          <strong>3D 氛围实验</strong>
-          <span>
-            enableBloom：{MAP_3D_GUIDE_RENDER_OPTIONS.enableBloom ? '开启，泛光实验中' : '关闭'}
-          </span>
-          <span>fogOptions：未配置，等待确认 Tencent JS API GL 字段</span>
-          <span>skyOptions：未配置，等待确认 Tencent JS API GL 字段</span>
-          <p>本阶段仅实验腾讯地图原生 3D 渲染氛围，不使用固定大图层覆盖地图。</p>
-        </div>
 
         <div className={`map-3d-guide-deviation map-3d-guide-deviation--${rerouteStatus}`}>
           <strong>{deviationLabel}</strong>
@@ -786,6 +742,44 @@ function Map3DGuidePage() {
           <span>显示 3D 景点模型 Beta</span>
         </label>
         <p className="map-3d-guide-model-state">{modelStatus}</p>
+
+        <details className="map-3d-guide-dev-diagnostics">
+          <summary>开发诊断</summary>
+          <div className="map-3d-guide-style-audit">
+            <strong>个性化地图样式</strong>
+            <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
+            <span>控制台 Key 绑定：用户已确认；当前页面未自动生效。</span>
+            <ul>
+              {tencentMapStyleMethodCandidates.map((method) => (
+                <li key={method}>
+                  <code>{method}</code>
+                  <em>{mapStyleSupport.mapMethods[method] ? 'true' : 'false'}</em>
+                </li>
+              ))}
+            </ul>
+            {mapStyleSupport.mapRelatedMethods.length || mapStyleSupport.tmapRelatedKeys.length ? (
+              <small>
+                相关探测：
+                {[...mapStyleSupport.mapRelatedMethods, ...mapStyleSupport.tmapRelatedKeys].slice(0, 6).join(', ')}
+              </small>
+            ) : null}
+            <p>
+              {hasConfirmedMapStyleSupport(mapStyleSupport)
+                ? '检测到可能的样式接入方法，需提供官方 styleId 或确认参数后再启用。'
+                : '当前未发现明确 JS API GL 运行时样式方法，暂以轻量滤镜和地图锚定元素实现风格化。'}
+            </p>
+          </div>
+
+          <div className="map-3d-guide-render-audit">
+            <strong>3D 氛围实验</strong>
+            <span>
+              enableBloom：{MAP_3D_GUIDE_RENDER_OPTIONS.enableBloom ? '开启，泛光实验中' : '关闭'}
+            </span>
+            <span>fogOptions：未配置，等待确认 Tencent JS API GL 字段</span>
+            <span>skyOptions：未配置，等待确认 Tencent JS API GL 字段</span>
+            <p>本阶段仅实验腾讯地图原生 3D 渲染氛围，不使用固定大图层覆盖地图。</p>
+          </div>
+        </details>
       </aside>
 
       <section className="map-3d-guide-pois">
@@ -1113,7 +1107,7 @@ const map3DGuideCss = `
   position: absolute;
   inset: 0;
   opacity: .96;
-  filter: saturate(.82) sepia(.10) contrast(.96) brightness(1.02);
+  filter: saturate(.74) sepia(.12) contrast(.92) brightness(1.06);
 }
 
 .map-3d-guide-skin,
@@ -1127,24 +1121,25 @@ const map3DGuideCss = `
 
 .map-3d-guide-skin {
   background:
-    linear-gradient(90deg, rgba(249, 246, 229, .18), transparent 20%, transparent 80%, rgba(33, 71, 62, .10)),
-    linear-gradient(180deg, rgba(245, 241, 221, .12), transparent 42%, rgba(22, 61, 52, .08));
+    linear-gradient(90deg, rgba(249, 246, 229, .24), transparent 24%, transparent 76%, rgba(33, 71, 62, .12)),
+    linear-gradient(180deg, rgba(245, 241, 221, .16), transparent 42%, rgba(22, 61, 52, .10));
   mix-blend-mode: multiply;
-  opacity: .72;
+  opacity: .78;
 }
 
 .map-3d-guide-mist {
   background:
-    linear-gradient(135deg, rgba(255,255,255,.10), transparent 28%),
-    repeating-linear-gradient(100deg, rgba(255,255,255,.035) 0 1px, transparent 1px 22px);
-  opacity: .46;
+    radial-gradient(circle at 56% 42%, rgba(255, 252, 235, .08), transparent 34%),
+    linear-gradient(135deg, rgba(255,255,255,.13), transparent 30%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.04) 0 1px, transparent 1px 22px);
+  opacity: .52;
 }
 
 .map-3d-guide-paperedge {
   background:
-    radial-gradient(ellipse at center, transparent 60%, rgba(250, 246, 226, .16) 78%, rgba(83, 68, 35, .10) 100%),
-    linear-gradient(90deg, rgba(250, 246, 226, .16), transparent 16%, transparent 84%, rgba(250, 246, 226, .16));
-  box-shadow: inset 0 0 76px rgba(81, 65, 34, .12);
+    radial-gradient(ellipse at center, transparent 56%, rgba(250, 246, 226, .19) 78%, rgba(83, 68, 35, .12) 100%),
+    linear-gradient(90deg, rgba(250, 246, 226, .18), transparent 16%, transparent 84%, rgba(250, 246, 226, .18));
+  box-shadow: inset 0 0 92px rgba(81, 65, 34, .14);
 }
 
 .map-3d-guide-hero,
@@ -1407,6 +1402,40 @@ const map3DGuideCss = `
   margin: 7px 0 0;
   color: #7a6d5c;
   font-size: 12px;
+}
+
+.map-3d-guide-dev-diagnostics {
+  margin-top: 12px;
+  border-top: 1px solid rgba(94, 112, 102, .12);
+}
+
+.map-3d-guide-dev-diagnostics summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  color: #6d756e;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  list-style: none;
+}
+
+.map-3d-guide-dev-diagnostics summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-3d-guide-dev-diagnostics summary::after {
+  content: "展开";
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 249, 229, .72);
+  color: #8a6a28;
+  font-size: 11px;
+}
+
+.map-3d-guide-dev-diagnostics[open] summary::after {
+  content: "收起";
 }
 
 .map-3d-guide-pois {
