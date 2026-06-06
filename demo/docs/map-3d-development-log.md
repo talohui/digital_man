@@ -7033,8 +7033,6 @@ find .. ~/Downloads -maxdepth 5 \( -iname 'Meshy_AI_Golden_Standing_Buddh_060509
 - 本阶段没有修改 routeGeometry / roadNetwork 数据。
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
-- 本阶段没有硬编码未知 styleId。
-- 本阶段没有调用腾讯控制台私有接口。
 
 ## 阶段六十六 B：腾讯 mapStyleId 初始化接入验证
 
@@ -7171,3 +7169,82 @@ mapStyleId: 'style2'
 - 本阶段没有修改 routeGeometry / roadNetwork 数据。
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
+
+## 阶段六十七：腾讯地图 3D 渲染氛围参数实验
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+在不恢复固定大面积艺术覆盖层的前提下，尝试使用腾讯地图 JS API GL 的原生 3D 渲染参数增强 `/map-3d-guide` 的导览氛围，让真实腾讯地图底座、地图锚定路线、POI、当前位置、重规划线和 GLB 模型继续保持空间一致。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 为什么使用 renderOptions
+
+上一阶段已经确认固定大莲花、大色块、大斜线等屏幕覆盖层会破坏地图空间一致性，也会遮挡腾讯真实道路、水体、白模、路线和 POI。本阶段改为在 `new TMap.Map(...)` 初始化中传入 `renderOptions`，优先探索腾讯地图原生 3D 渲染能力，而不是用静态大图层盖住地图主体。
+
+### enableBloom
+
+本阶段新增 `MAP_3D_GUIDE_RENDER_OPTIONS`，并启用：
+
+```ts
+enableBloom: true
+```
+
+页面右侧诊断区显示 `enableBloom：开启，泛光实验中`。该效果用于验证腾讯地图原生泛光是否能增强 3D 氛围，但不应让金色路线、POI 标签和导览信息变糊。
+
+### fogOptions
+
+本阶段未配置 `fogOptions`。本地项目没有腾讯 JS API GL 的字段类型定义，当前只确认文档中存在该方向，但未确认内部字段名和取值结构。为了避免传入未知对象导致运行时异常，本阶段仅保留注释和诊断说明，等待后续按官方字段补充。
+
+### skyOptions
+
+本阶段未配置 `skyOptions`。原因同上：淡青灰 / 米白 / 晨雾感天空是后续方向，但需要确认腾讯 JS API GL 的具体字段结构后再启用。
+
+### 页面诊断区
+
+`/map-3d-guide` 右侧导览牌新增“3D 氛围实验”只读信息：
+
+- `enableBloom` 当前是否开启。
+- `fogOptions` 是否配置。
+- `skyOptions` 是否配置。
+- 明确说明本阶段只实验腾讯地图原生 3D 渲染氛围，不使用固定大图层覆盖地图。
+
+### 对 /map-3d-guide 的影响
+
+`/map-3d-guide` 初始化腾讯地图时会传入 `renderOptions`。历史文化路线、金色主路线、模拟定位、模拟前进、模拟偏航、腾讯 walking 重规划、重规划路线、GLB 模型 Beta 和相机模式保持原有逻辑。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 当前限制
+
+`renderOptions.enableBloom` 已接入；`fogOptions` 和 `skyOptions` 的字段仍需以腾讯 JS API GL 实际支持为准。后续如果拿到官方字段示例，再补轻微远景雾化和晨雾天空，避免影响路线、文字和核心 POI 清晰度。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+在浏览器中人工打开 `/map-3d-guide`，观察 `enableBloom` 是否实际影响 3D 视觉。如果效果过强或无效，可在后续阶段加入 debug 开关或关闭；如果腾讯官方字段确认，再小范围启用 `fogOptions` / `skyOptions`。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。
+- 本阶段没有新增任何未确认许可证素材。

@@ -40,6 +40,10 @@ const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 const MAP_3D_GUIDE_STYLE_ID = 'style1'
+const MAP_3D_GUIDE_RENDER_OPTIONS = {
+  enableBloom: true
+  // fogOptions / skyOptions need confirmed Tencent JS API GL field shapes before enabling.
+} as const
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -197,7 +201,8 @@ function Map3DGuidePage() {
           zoom: 17.8,
           pitch: 64,
           rotation: -28,
-          mapStyleId: MAP_3D_GUIDE_STYLE_ID
+          mapStyleId: MAP_3D_GUIDE_STYLE_ID,
+          renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
         })
         mapRef.current = map
         setMapStyleSupport(inspectMapStyleSupport(map, TMap))
@@ -752,6 +757,16 @@ function Map3DGuidePage() {
           </p>
         </div>
 
+        <div className="map-3d-guide-render-audit">
+          <strong>3D 氛围实验</strong>
+          <span>
+            enableBloom：{MAP_3D_GUIDE_RENDER_OPTIONS.enableBloom ? '开启，泛光实验中' : '关闭'}
+          </span>
+          <span>fogOptions：未配置，等待确认 Tencent JS API GL 字段</span>
+          <span>skyOptions：未配置，等待确认 Tencent JS API GL 字段</span>
+          <p>本阶段仅实验腾讯地图原生 3D 渲染氛围，不使用固定大图层覆盖地图。</p>
+        </div>
+
         <div className={`map-3d-guide-deviation map-3d-guide-deviation--${rerouteStatus}`}>
           <strong>{deviationLabel}</strong>
           <span>{rerouteMessage}</span>
@@ -1292,7 +1307,8 @@ const map3DGuideCss = `
   text-align: right;
 }
 
-.map-3d-guide-style-audit {
+.map-3d-guide-style-audit,
+.map-3d-guide-render-audit {
   display: grid;
   gap: 7px;
   margin-top: 12px;
@@ -1304,7 +1320,8 @@ const map3DGuideCss = `
   font-size: 11px;
 }
 
-.map-3d-guide-style-audit strong {
+.map-3d-guide-style-audit strong,
+.map-3d-guide-render-audit strong {
   color: #24483c;
   font-size: 12px;
 }
@@ -1339,7 +1356,8 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-style-audit small,
-.map-3d-guide-style-audit p {
+.map-3d-guide-style-audit p,
+.map-3d-guide-render-audit p {
   margin: 0;
   line-height: 1.45;
 }
