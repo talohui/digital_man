@@ -71,3 +71,16 @@
 ## 6. 当前结论
 
 阶段六十九的 `/map-3d-guide` 水墨路线唤醒装饰层不依赖第三方素材文件，暂不需要额外署名。后续如引入外部图片、SVG、纹理或字体，必须先更新本文档再进入代码。
+
+## 7. A/B 视觉原型外部素材
+
+阶段 A/B 视觉原型开始引入可商用开源素材。所有素材只作为腾讯地图坐标锚定 marker 使用，不作为固定屏幕大面积覆盖层。
+
+| 文件 | 来源 URL | 作者 / 项目 | 许可证 | 允许商用 | 需要署名 | 用途 | 使用范围 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `public/assets/map-3d-guide/shared/foliagePack_004.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否；OpenGameArt 页面说明署名 Kenney.nl 非强制 | 树木 / 松影 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_007.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 树木 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_027.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 树木 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/foliagePack_049.png` | https://opengameart.org/content/foliage-pack-100x | Kenney / Foliage Pack (100x) | CC0 | 是 | 否 | 山石 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/lotus_0282.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否；页面说明不需要署名 | 莲花节点 marker | A / B 共用 |
+| `public/assets/map-3d-guide/shared/lotus_3996.png` | https://opengameart.org/content/lotus-flowers | gostay / Lotus Flowers | CC0 | 是 | 否 | 莲花节点 marker | A / B 共用 |

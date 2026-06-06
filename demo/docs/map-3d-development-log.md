@@ -5359,6 +5359,73 @@ transform: {
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
 
+## 阶段七十 A：3D 导览视觉原型 A
+
+日期：2026-06-07
+
+### 本次目标
+
+新增 `/map-3d-guide-a`，用于验证“少量高质量素材反复组合”的青绿佛境导览视觉策略。
+
+### 子 agent 辩论结论
+
+- A 版主张高级克制：少量树木、山石、莲花、佛光、院落资产即可，路线、当前位置和下一站必须第一优先。
+- B 版主张高密度冲击：更多素材沿路线铺陈，但需要安全区和层级控制。
+- 风险审查结论：A/B 应复用同一套腾讯地图实例、路线、模拟定位、偏航重规划和 GLB Beta，不新增第二个地图实例，不默认加载大模型。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/pages/Map3DGuidePrototypeAPage.tsx`
+- `src/App.tsx`
+- `public/assets/map-3d-guide/shared/*.png`
+- `docs/map-3d-guide-ab-visual-prototypes.md`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-development-log.md`
+
+### 实现说明
+
+- 将 `/map-3d-guide` 页面抽成可传入视觉变体的 `Map3DGuideExperience`。
+- 默认 `/map-3d-guide` 仍使用原行为和原装饰配置。
+- 新增 `/map-3d-guide-a`，传入 `prototype-a`。
+- A 版装饰共 8 个地图锚点，沿历史文化路线铺陈。
+- 外部 PNG 素材通过 `TMap.MultiMarker` 的经纬度 marker 使用，不作为固定屏幕覆盖层。
+- 装饰仍随模拟定位进度逐步显现。
+
+### 使用素材
+
+- Kenney Foliage Pack (100x)，CC0，用于树木和山石。
+- OpenGameArt Lotus Flowers，CC0，用于莲花节点。
+- 佛光和院落仍使用项目内联 SVG。
+- 许可证记录见 `docs/map-3d-guide-asset-licenses.md`。
+
+### 保持能力
+
+- 腾讯地图 3D 底座。
+- `mapStyleId: 'style1'`。
+- 历史文化路线。
+- 当前站点 / 下一站 / 终点 marker。
+- 模拟定位、模拟前进、模拟偏航。
+- 腾讯 walking route 重规划到下一站。
+- 重规划路线显示。
+- GLB 模型 Beta。
+
+### 对 /map 的影响
+
+没有修改普通 `/map` 或 `/map?debugGltfModel=1`。
+
+### 对 /scenic-3d-map 的影响
+
+没有修改 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+阶段七十 B 接入 `/map-3d-guide-b`，在同一套业务逻辑上提高路线沿线资产密度，验证数字沙盘冲击力版本。
+
 ## 阶段五十三：3D 道路网络生成与导航绑定方案
 
 ### 日期

@@ -12,6 +12,7 @@ import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDis
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = 'overview' | 'current' | 'next' | 'focus' | 'topdown' | 'guide'
+type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b'
 
 type GuideCameraPreset = {
   id: GuideCameraMode
@@ -51,12 +52,27 @@ type InkDecorOverlay = {
   rotation: number
   opacity: number
   zIndex: number
+  assetUrl?: string
+  assetSource?: 'kenney_foliage_pack' | 'opengameart_lotus_flowers'
   note?: string
 }
 
 type RenderedInkDecorOverlay = InkDecorOverlay & {
   styleId: string
   active: boolean
+}
+
+type Map3DGuideVisualVariantConfig = {
+  id: Map3DGuideVariant
+  className: string
+  kicker: string
+  title: string
+  subtitle: string
+  statusTitle: string
+  stationPanelTitle: string
+  controlTitle: string
+  decorStorageKey: string
+  decorStrategy: string
 }
 
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
@@ -79,6 +95,44 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
+const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
+  default: {
+    id: 'default',
+    className: 'map-3d-guide-shell--default',
+    kicker: '灵山胜境导览',
+    title: '真实 3D 游线',
+    subtitle: `${demoGuideRoute.name} · 金色丝带路线 · 下一站引导`,
+    statusTitle: '导览玉牌',
+    stationPanelTitle: '历史文化核心站点',
+    controlTitle: '导览控制台',
+    decorStorageKey: MAP_3D_GUIDE_DECOR_STORAGE_KEY,
+    decorStrategy: '标准路线唤醒水墨层'
+  },
+  'prototype-a': {
+    id: 'prototype-a',
+    className: 'map-3d-guide-shell--prototype-a',
+    kicker: '视觉原型 A · 少量高质素材',
+    title: '青绿佛境精品导览',
+    subtitle: `${demoGuideRoute.name} · 稀疏园林资产 · 路线优先`,
+    statusTitle: '游线导览牌',
+    stationPanelTitle: '核心文化节点',
+    controlTitle: '精品导览控制',
+    decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-a`,
+    decorStrategy: '少量 CC0 透明 PNG 与内联水墨符号反复组合，画面克制、路线清晰。'
+  },
+  'prototype-b': {
+    id: 'prototype-b',
+    className: 'map-3d-guide-shell--prototype-b',
+    kicker: '视觉原型 B · 高密度数字沙盘',
+    title: '路线唤醒灵山画卷',
+    subtitle: `${demoGuideRoute.name} · 密集园林铺陈 · 节点爆点`,
+    statusTitle: '沉浸导览牌',
+    stationPanelTitle: '路线唤醒节点',
+    controlTitle: '沙盘导览控制',
+    decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-b`,
+    decorStrategy: '更多 CC0 园林素材沿线铺陈，当前段和关键节点密度更高。'
+  }
+}
 const inkDecorKinds: InkDecorKind[] = [
   'pine',
   'willow',
@@ -143,8 +197,9 @@ const guideCameraPresets: GuideCameraPreset[] = [
   }
 ]
 
-function Map3DGuidePage() {
+export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DGuideVariant }) {
   const navigate = useNavigate()
+  const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
@@ -171,8 +226,8 @@ function Map3DGuidePage() {
     tmapStyleKeys: [],
     tmapRelatedKeys: []
   })
-  const [decorOverlays, setDecorOverlays] = useState<InkDecorOverlay[]>(() => loadStoredDecorOverlays())
-  const [selectedDecorId, setSelectedDecorId] = useState(() => loadStoredDecorOverlays()[0]?.id ?? '')
+  const [decorOverlays, setDecorOverlays] = useState<InkDecorOverlay[]>(() => loadStoredDecorOverlays(visualVariant.id))
+  const [selectedDecorId, setSelectedDecorId] = useState(() => loadStoredDecorOverlays(visualVariant.id)[0]?.id ?? '')
   const [decorCopyStatus, setDecorCopyStatus] = useState('尚未导出')
 
   const routeStops = demoGuideRoute.stops
@@ -287,8 +342,8 @@ function Map3DGuidePage() {
       return
     }
 
-    window.localStorage.setItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY, JSON.stringify(decorOverlays))
-  }, [debugDecor, decorOverlays])
+    window.localStorage.setItem(visualVariant.decorStorageKey, JSON.stringify(decorOverlays))
+  }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -467,12 +522,19 @@ function Map3DGuidePage() {
             width: decor.size,
             height: decor.size,
             anchor: { x: decor.size / 2, y: decor.size / 2 },
-            src: createSvgDataUrl(inkDecorSvg(decor.kind, {
-              size: decor.size,
-              opacity: decor.opacity,
-              rotation: decor.rotation,
-              active: decor.active
-            }))
+            src: decor.assetUrl
+              ? createSvgDataUrl(assetDecorSvg(decor.assetUrl, {
+                  size: decor.size,
+                  opacity: decor.opacity,
+                  rotation: decor.rotation,
+                  active: decor.active
+                }))
+              : createSvgDataUrl(inkDecorSvg(decor.kind, {
+                  size: decor.size,
+                  opacity: decor.opacity,
+                  rotation: decor.rotation,
+                  active: decor.active
+                }))
           })
         ])
       ),
@@ -867,10 +929,10 @@ function Map3DGuidePage() {
   }
 
   const resetDecorConfig = () => {
-    const defaults = buildDefaultDecorOverlays()
+    const defaults = buildDefaultDecorOverlays(visualVariant.id)
     setDecorOverlays(defaults)
     setSelectedDecorId(defaults[0]?.id ?? '')
-    window.localStorage.removeItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY)
+    window.localStorage.removeItem(visualVariant.decorStorageKey)
     setDecorCopyStatus('已恢复默认装饰配置')
   }
 
@@ -898,16 +960,16 @@ function Map3DGuidePage() {
   }
 
   return (
-    <main className="map-3d-guide-shell">
+    <main className={`map-3d-guide-shell ${visualVariant.className}`}>
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
 
       <section className="map-3d-guide-hero">
-        <div className="map-3d-guide-kicker">灵山胜境导览</div>
-        <h1>真实 3D 游线</h1>
-        <p>{demoGuideRoute.name} · 金色丝带路线 · 下一站引导</p>
+        <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
+        <h1>{visualVariant.title}</h1>
+        <p>{visualVariant.subtitle}</p>
         <div className="map-3d-guide-top-actions">
           <button type="button" onClick={() => navigate('/map')}>
             进入真实地图
@@ -942,7 +1004,7 @@ function Map3DGuidePage() {
           <div className="map-3d-guide-decor-debug__header">
             <div>
               <strong>水墨装饰调试</strong>
-              <span>路线唤醒进度：{routeProgressPercent}%</span>
+              <span>{visualVariant.decorStrategy} · 路线唤醒进度：{routeProgressPercent}%</span>
             </div>
             <button type="button" onClick={copyDecorConfig}>
               复制 TS 配置
@@ -1081,7 +1143,7 @@ function Map3DGuidePage() {
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
-        <h2>导览玉牌</h2>
+        <h2>{visualVariant.statusTitle}</h2>
         <dl>
           <div>
             <dt>当前路线</dt>
@@ -1178,7 +1240,7 @@ function Map3DGuidePage() {
       </aside>
 
       <section className="map-3d-guide-pois">
-        <strong>历史文化核心站点</strong>
+        <strong>{visualVariant.stationPanelTitle}</strong>
         <div>
           {routeStops.map((stop, index) => {
             const poi = getPoiDisplay(stop.spotId)
@@ -1215,7 +1277,7 @@ function Map3DGuidePage() {
           <span style={{ width: `${routeProgressPercent}%` }} />
         </div>
         <div className="map-3d-guide-controlbar__meta">
-          <strong>导览控制台</strong>
+          <strong>{visualVariant.controlTitle}</strong>
           <div className="map-3d-guide-console-grid">
             <span>
               <em>当前路线</em>
@@ -1435,31 +1497,39 @@ function isQueryEnabled(name: string) {
   return value === '1' || value === 'true'
 }
 
-function loadStoredDecorOverlays() {
+function loadStoredDecorOverlays(variant: Map3DGuideVariant = 'default') {
   if (typeof window === 'undefined') {
-    return buildDefaultDecorOverlays()
+    return buildDefaultDecorOverlays(variant)
   }
 
   try {
-    const stored = window.localStorage.getItem(MAP_3D_GUIDE_DECOR_STORAGE_KEY)
+    const stored = window.localStorage.getItem(map3DGuideVisualVariants[variant].decorStorageKey)
 
     if (!stored) {
-      return buildDefaultDecorOverlays()
+      return buildDefaultDecorOverlays(variant)
     }
 
     const parsed = JSON.parse(stored) as InkDecorOverlay[]
 
     if (!Array.isArray(parsed) || !parsed.length) {
-      return buildDefaultDecorOverlays()
+      return buildDefaultDecorOverlays(variant)
     }
 
     return parsed
   } catch {
-    return buildDefaultDecorOverlays()
+    return buildDefaultDecorOverlays(variant)
   }
 }
 
-function buildDefaultDecorOverlays(): InkDecorOverlay[] {
+function buildDefaultDecorOverlays(variant: Map3DGuideVariant = 'default'): InkDecorOverlay[] {
+  if (variant === 'prototype-a') {
+    return buildPrototypeADecorOverlays()
+  }
+
+  if (variant === 'prototype-b') {
+    return buildPrototypeBDecorOverlays()
+  }
+
   const specs: Array<{
     id: string
     kind: InkDecorKind
@@ -1511,6 +1581,172 @@ function buildDefaultDecorOverlays(): InkDecorOverlay[] {
       note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
     }
   })
+}
+
+function buildPrototypeADecorOverlays(): InkDecorOverlay[] {
+  const specs: DecorSpec[] = [
+    {
+      id: 'a-south-gate-pine-screen',
+      kind: 'pine',
+      name: '南门松影屏',
+      fraction: 0.05,
+      latOffset: -0.00016,
+      lngOffset: 0.00014,
+      size: 76,
+      rotation: -8,
+      opacity: 0.82,
+      zIndex: 18,
+      assetUrl: '/assets/map-3d-guide/shared/foliagePack_004.png',
+      assetSource: 'kenney_foliage_pack',
+      note: 'A 版少量高质量 CC0 树木素材，作为入园导览边界。'
+    },
+    {
+      id: 'a-lingshan-wall-rock',
+      kind: 'stone',
+      name: '照壁山石',
+      fraction: 0.12,
+      latOffset: 0.00014,
+      lngOffset: -0.00012,
+      size: 74,
+      rotation: 12,
+      opacity: 0.74,
+      zIndex: 17,
+      assetUrl: '/assets/map-3d-guide/shared/foliagePack_049.png',
+      assetSource: 'kenney_foliage_pack',
+      note: 'A 版以小型山石锚定照壁节点，不遮挡主路线。'
+    },
+    {
+      id: 'a-shengjing-lotus',
+      kind: 'lotus',
+      name: '胜境莲印',
+      fraction: 0.2,
+      latOffset: -0.0001,
+      lngOffset: 0.00018,
+      size: 82,
+      rotation: 0,
+      opacity: 0.78,
+      zIndex: 22,
+      assetUrl: '/assets/map-3d-guide/shared/lotus_0282.png',
+      assetSource: 'opengameart_lotus_flowers',
+      note: 'A 版用单枚 CC0 莲花强化广场节点。'
+    },
+    {
+      id: 'a-jiulong-tree',
+      kind: 'willow',
+      name: '九龙树影',
+      fraction: 0.35,
+      latOffset: 0.00014,
+      lngOffset: -0.00016,
+      size: 78,
+      rotation: -10,
+      opacity: 0.8,
+      zIndex: 18,
+      assetUrl: '/assets/map-3d-guide/shared/foliagePack_027.png',
+      assetSource: 'kenney_foliage_pack',
+      note: 'A 版在九龙灌浴附近使用一处树影，不堆叠素材。'
+    },
+    {
+      id: 'a-buddha-halo',
+      kind: 'glow',
+      name: '大佛暖光',
+      fraction: 0.55,
+      latOffset: 0.00004,
+      lngOffset: 0.00002,
+      size: 132,
+      rotation: 0,
+      opacity: 0.7,
+      zIndex: 12,
+      note: 'A 版保留内联 SVG 佛光，GLB Beta 开启时仍不遮挡模型主体。'
+    },
+    {
+      id: 'a-buddha-pine',
+      kind: 'pine',
+      name: '佛前青松',
+      fraction: 0.59,
+      latOffset: -0.00012,
+      lngOffset: -0.00015,
+      size: 82,
+      rotation: 9,
+      opacity: 0.78,
+      zIndex: 18,
+      assetUrl: '/assets/map-3d-guide/shared/foliagePack_007.png',
+      assetSource: 'kenney_foliage_pack',
+      note: 'A 版将树木素材作为大佛前景框景。'
+    },
+    {
+      id: 'a-fan-gong-courtyard',
+      kind: 'courtyard',
+      name: '梵宫院影',
+      fraction: 0.69,
+      latOffset: 0.00016,
+      lngOffset: 0.0001,
+      size: 108,
+      rotation: -9,
+      opacity: 0.7,
+      zIndex: 16,
+      note: 'A 版用自绘院落符号补充建筑气质。'
+    },
+    {
+      id: 'a-tancheng-lotus',
+      kind: 'lotus',
+      name: '坛城莲影',
+      fraction: 0.84,
+      latOffset: -0.0001,
+      lngOffset: 0.00014,
+      size: 76,
+      rotation: 8,
+      opacity: 0.76,
+      zIndex: 22,
+      assetUrl: '/assets/map-3d-guide/shared/lotus_3996.png',
+      assetSource: 'opengameart_lotus_flowers',
+      note: 'A 版在终段用莲花形成收束，不增加画面噪声。'
+    }
+  ]
+
+  return specs.map(materializeDecorSpec)
+}
+
+function buildPrototypeBDecorOverlays(): InkDecorOverlay[] {
+  return buildPrototypeADecorOverlays()
+}
+
+type DecorSpec = {
+  id: string
+  kind: InkDecorKind
+  name: string
+  fraction: number
+  latOffset: number
+  lngOffset: number
+  size: number
+  rotation: number
+  opacity: number
+  zIndex: number
+  assetUrl?: string
+  assetSource?: InkDecorOverlay['assetSource']
+  note?: string
+}
+
+function materializeDecorSpec(spec: DecorSpec): InkDecorOverlay {
+  const routeIndex = Math.max(0, Math.min(demoRoutePath.length - 1, Math.round(spec.fraction * (demoRoutePath.length - 1))))
+  const anchor = demoRoutePath[routeIndex] ?? routeCenter
+
+  return {
+    id: spec.id,
+    kind: spec.kind,
+    name: spec.name,
+    position: {
+      lat: Number((anchor.lat + spec.latOffset).toFixed(6)),
+      lng: Number((anchor.lng + spec.lngOffset).toFixed(6))
+    },
+    routeIndex,
+    size: spec.size,
+    rotation: spec.rotation,
+    opacity: spec.opacity,
+    zIndex: spec.zIndex,
+    assetUrl: spec.assetUrl,
+    assetSource: spec.assetSource,
+    note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
+  }
 }
 
 function buildVisibleDecorGeometries(
@@ -1598,6 +1834,32 @@ async function copyText(text: string) {
 
 function createSvgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function assetDecorSvg(
+  assetUrl: string,
+  options: {
+    size: number
+    opacity: number
+    rotation: number
+    active: boolean
+  }
+) {
+  const opacity = Math.max(0, Math.min(1, options.opacity))
+  const glowOpacity = options.active ? 0.26 : 0.14
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${options.size}" height="${options.size}" viewBox="0 0 128 128">
+    <defs>
+      <filter id="assetShadow" x="-30%" y="-30%" width="160%" height="170%">
+        <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="rgba(20, 45, 36, .20)"/>
+      </filter>
+    </defs>
+    <g transform="rotate(${options.rotation} 64 64)" opacity="${opacity}" filter="url(#assetShadow)">
+      <ellipse cx="64" cy="82" rx="44" ry="18" fill="rgba(35, 68, 54, ${glowOpacity})"/>
+      <circle cx="64" cy="64" r="48" fill="rgba(255, 248, 223, ${glowOpacity * 0.72})"/>
+      <image href="${assetUrl}" x="10" y="8" width="108" height="108" preserveAspectRatio="xMidYMid meet"/>
+    </g>
+  </svg>`
 }
 
 function inkDecorSvg(
@@ -1816,6 +2078,57 @@ const map3DGuideCss = `
     radial-gradient(ellipse at center, transparent 58%, rgba(250, 246, 226, .15) 80%, rgba(52, 75, 61, .12) 100%),
     linear-gradient(90deg, rgba(250, 246, 226, .14), transparent 16%, transparent 84%, rgba(250, 246, 226, .14));
   box-shadow: inset 0 0 88px rgba(55, 70, 47, .13);
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-map {
+  filter: saturate(.72) sepia(.14) contrast(.98) brightness(1.06);
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-skin {
+  background:
+    linear-gradient(90deg, rgba(252, 247, 226, .24), transparent 24%, transparent 76%, rgba(26, 67, 57, .12)),
+    linear-gradient(180deg, rgba(251, 246, 225, .12), transparent 42%, rgba(29, 66, 55, .10));
+  opacity: .72;
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-mist {
+  background:
+    radial-gradient(circle at 54% 39%, rgba(255, 251, 228, .10), transparent 31%),
+    linear-gradient(135deg, rgba(255,255,255,.12), transparent 28%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.022) 0 1px, transparent 1px 28px);
+  opacity: .38;
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-hero,
+.map-3d-guide-shell--prototype-a .map-3d-guide-camera,
+.map-3d-guide-shell--prototype-a .map-3d-guide-status,
+.map-3d-guide-shell--prototype-a .map-3d-guide-pois,
+.map-3d-guide-shell--prototype-a .map-3d-guide-controlbar {
+  background:
+    linear-gradient(135deg, rgba(255, 252, 237, .94), rgba(235, 246, 236, .86));
+  border-color: rgba(182, 150, 78, .34);
+  box-shadow: 0 24px 68px rgba(19, 42, 34, .16), inset 0 0 0 1px rgba(255,255,255,.58);
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-hero {
+  width: 314px;
+  border-left-color: rgba(178, 132, 38, .74);
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-camera {
+  width: 314px;
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-status {
+  width: 312px;
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-pois {
+  width: 390px;
+}
+
+.map-3d-guide-shell--prototype-a .map-3d-guide-console-grid {
+  grid-template-columns: repeat(5, minmax(102px, 1fr));
 }
 
 .map-3d-guide-hero,
@@ -2455,5 +2768,9 @@ const map3DGuideCss = `
   }
 }
 `
+
+function Map3DGuidePage() {
+  return <Map3DGuideExperience />
+}
 
 export default Map3DGuidePage
