@@ -22,13 +22,6 @@ type GuideCameraPreset = {
   rotation: number
 }
 
-type IllustratedPoiPlacard = {
-  poiId: string
-  x: number
-  y: number
-  tone?: 'jade' | 'gold' | 'temple' | 'terminal'
-}
-
 const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
 const demoRouteGeometry = getLingshanRouteGeometryByGuideRouteId('historical_culture')
 const demoRoutePath = demoRouteGeometry?.path.length ? demoRouteGeometry.path : getRouteStopLocations(demoGuideRoute)
@@ -38,21 +31,6 @@ const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
 const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
-
-const illustratedPoiPlacards: IllustratedPoiPlacard[] = [
-  { poiId: 'south_gate', x: 16, y: 78, tone: 'jade' },
-  { poiId: 'lingshan_wall', x: 24, y: 70, tone: 'jade' },
-  { poiId: 'shengjing_square', x: 33, y: 62, tone: 'gold' },
-  { poiId: 'foshou_square', x: 42, y: 55, tone: 'jade' },
-  { poiId: 'xiangfu_temple', x: 52, y: 48, tone: 'temple' },
-  { poiId: 'xingtan_square', x: 60, y: 42, tone: 'jade' },
-  { poiId: 'foqian_square', x: 67, y: 36, tone: 'gold' },
-  { poiId: 'giant_buddha', x: 73, y: 28, tone: 'gold' },
-  { poiId: 'fan_gong', x: 79, y: 43, tone: 'temple' },
-  { poiId: 'wuyin_tancheng', x: 70, y: 55, tone: 'temple' },
-  { poiId: 'sansheng_hall', x: 61, y: 64, tone: 'jade' },
-  { poiId: 'exit', x: 52, y: 76, tone: 'terminal' }
-]
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {
@@ -663,113 +641,7 @@ function Map3DGuidePage() {
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
-      <div className="map-3d-guide-waterwash" aria-hidden="true" />
-      <div className="map-3d-guide-mountainveil" aria-hidden="true" />
-      <div className="map-3d-guide-focuswash" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
-      <div className="map-3d-guide-illustration" aria-hidden="true">
-        <svg viewBox="0 0 1000 700" role="img" aria-label="灵山胜境艺术化导览地图">
-          <defs>
-            <linearGradient id="mountainInk" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stopColor="#d8e9cf" stopOpacity=".86" />
-              <stop offset=".55" stopColor="#6d9a79" stopOpacity=".62" />
-              <stop offset="1" stopColor="#234f42" stopOpacity=".42" />
-            </linearGradient>
-            <linearGradient id="waterInk" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stopColor="#d7f3ef" stopOpacity=".86" />
-              <stop offset=".54" stopColor="#4f9ab0" stopOpacity=".64" />
-              <stop offset="1" stopColor="#1c4b60" stopOpacity=".58" />
-            </linearGradient>
-            <linearGradient id="routeRibbon" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0" stopColor="#8c5b14" />
-              <stop offset=".18" stopColor="#ffe9a2" />
-              <stop offset=".5" stopColor="#d6a832" />
-              <stop offset=".78" stopColor="#fff1b5" />
-              <stop offset="1" stopColor="#9b6818" />
-            </linearGradient>
-            <filter id="softRouteGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="12" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <filter id="paperNoise">
-              <feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" seed="9" />
-              <feColorMatrix type="saturate" values="0" />
-              <feComponentTransfer>
-                <feFuncA type="table" tableValues="0 .16" />
-              </feComponentTransfer>
-            </filter>
-          </defs>
-
-          <rect width="1000" height="700" fill="#f4efdc" opacity=".18" />
-          <rect width="1000" height="700" filter="url(#paperNoise)" opacity=".65" />
-
-          <path className="map-3d-guide-ink-water" d="M670 90c128 34 214 106 246 210 30 100-10 214-108 282-92 64-225 58-314 8-87-50-122-141-86-226 32-76 28-154 100-210 42-32 96-54 162-64Z" fill="url(#waterInk)" />
-          <path className="map-3d-guide-ink-waterline" d="M690 142c80 22 154 64 190 132M623 508c96 42 199 38 285-22M514 250c-58 64-70 135-28 202" fill="none" />
-
-          <path className="map-3d-guide-ink-mountain" d="M-20 130c84-74 177-94 279-62 57 18 107 16 160-2 66-22 138-9 206 44-96 52-155 102-207 161-75-58-141-70-226-38-74 28-137 5-212-103Z" fill="url(#mountainInk)" />
-          <path className="map-3d-guide-ink-mountain" d="M-12 628c91-84 195-116 312-88 80 19 152 0 231-44 58-32 122-40 205-12-96 69-159 121-218 178H-12Z" fill="url(#mountainInk)" opacity=".72" />
-          <path className="map-3d-guide-ink-ridge" d="M84 134c86 38 150 43 218 16M146 612c88-44 162-50 247-26M480 584c66-54 132-76 220-72" fill="none" />
-
-          <ellipse className="map-3d-guide-core-light" cx="555" cy="392" rx="300" ry="220" />
-          <ellipse className="map-3d-guide-buddha-light" cx="735" cy="204" rx="116" ry="92" />
-
-          <g className="map-3d-guide-art-buildings">
-            <path d="M196 505h110l24 38-22 40H184l-25-40Z" />
-            <path d="M304 438h132l32 48-32 45H282l-30-45Z" />
-            <path d="M482 333h116l30 42-27 47H460l-28-46Z" />
-            <path d="M642 238h126l35 50-30 48H611l-31-50Z" />
-            <path d="M746 368h116l28 44-27 43H723l-27-43Z" />
-            <path d="M636 500h126l30 44-30 46H610l-28-44Z" />
-          </g>
-
-          <path className="map-3d-guide-art-route-halo" d="M165 546 C236 505 302 464 370 424 S506 337 596 283 S716 214 760 164" />
-          <path className="map-3d-guide-art-route-glow" d="M165 546 C236 505 302 464 370 424 S506 337 596 283 S716 214 760 164" />
-          <path className="map-3d-guide-art-route" d="M165 546 C236 505 302 464 370 424 S506 337 596 283 S716 214 760 164" />
-          <path className="map-3d-guide-art-route-core" d="M165 546 C236 505 302 464 370 424 S506 337 596 283 S716 214 760 164" />
-
-          <g className="map-3d-guide-buddha-symbol">
-            <circle cx="760" cy="164" r="45" />
-            <path d="M760 101c18 27 28 52 28 78 0 35-15 63-28 82-13-19-28-47-28-82 0-26 10-51 28-78Z" />
-            <path d="M712 188c26 3 42 17 51 44-33-6-52-19-51-44Z" />
-            <path d="M809 188c-1 25-18 38-51 44 9-27 25-41 51-44Z" />
-          </g>
-        </svg>
-      </div>
-
-      <div className="map-3d-guide-placards" aria-label="灵山胜境核心景点标签">
-        {illustratedPoiPlacards.map((placard) => {
-          const stopIndex = routeStops.findIndex((stop) => stop.spotId === placard.poiId)
-          const poi = getPoiDisplay(placard.poiId)
-          const state =
-            placard.poiId === terminalStopId
-              ? 'terminal'
-              : placard.poiId === selectedStopId
-                ? 'current'
-                : placard.poiId === nextStop.nextStopId
-                  ? 'next'
-                  : placard.tone ?? 'jade'
-
-          if (!poi || stopIndex < 0) {
-            return null
-          }
-
-          return (
-            <button
-              key={placard.poiId}
-              type="button"
-              className={`map-3d-guide-placard map-3d-guide-placard--${state}`}
-              style={{ left: `${placard.x}%`, top: `${placard.y}%` }}
-              onClick={() => moveToStop(stopIndex)}
-            >
-              <span>{state === 'current' ? '今' : state === 'next' ? '次' : state === 'terminal' ? '终' : stopIndex + 1}</span>
-              <strong>{poi.name}</strong>
-            </button>
-          )
-        })}
-      </div>
 
       <section className="map-3d-guide-hero">
         <div className="map-3d-guide-kicker">灵山胜境定制导览 Beta</div>
@@ -1129,15 +1001,12 @@ const map3DGuideCss = `
 .map-3d-guide-map {
   position: absolute;
   inset: 0;
-  opacity: .68;
-  filter: saturate(.62) sepia(.24) contrast(.90) brightness(1.08);
+  opacity: .96;
+  filter: saturate(.82) sepia(.10) contrast(.96) brightness(1.02);
 }
 
 .map-3d-guide-skin,
 .map-3d-guide-mist,
-.map-3d-guide-waterwash,
-.map-3d-guide-mountainveil,
-.map-3d-guide-focuswash,
 .map-3d-guide-paperedge {
   position: absolute;
   inset: 0;
@@ -1147,239 +1016,24 @@ const map3DGuideCss = `
 
 .map-3d-guide-skin {
   background:
-    radial-gradient(ellipse at 44% 54%, rgba(255, 236, 155, .16), transparent 18%),
-    radial-gradient(circle at 22% 18%, rgba(247, 231, 172, .42), transparent 28%),
-    radial-gradient(circle at 77% 26%, rgba(83, 131, 113, .30), transparent 30%),
-    linear-gradient(90deg, rgba(249, 246, 229, .62), transparent 24%, transparent 72%, rgba(33, 71, 62, .30)),
-    linear-gradient(180deg, rgba(245, 241, 221, .50), transparent 38%, rgba(22, 61, 52, .28));
+    linear-gradient(90deg, rgba(249, 246, 229, .18), transparent 20%, transparent 80%, rgba(33, 71, 62, .10)),
+    linear-gradient(180deg, rgba(245, 241, 221, .12), transparent 42%, rgba(22, 61, 52, .08));
   mix-blend-mode: multiply;
+  opacity: .72;
 }
 
 .map-3d-guide-mist {
   background:
-    linear-gradient(135deg, rgba(255,255,255,.26), transparent 30%),
-    repeating-linear-gradient(100deg, rgba(255,255,255,.08) 0 2px, transparent 2px 22px);
-  opacity: .64;
-}
-
-.map-3d-guide-waterwash {
-  background:
-    radial-gradient(ellipse at 70% 74%, rgba(85, 164, 181, .36), transparent 36%),
-    radial-gradient(ellipse at 82% 58%, rgba(123, 199, 207, .20), transparent 28%),
-    linear-gradient(135deg, transparent 46%, rgba(89, 150, 159, .18));
-  mix-blend-mode: color;
-}
-
-.map-3d-guide-mountainveil {
-  background:
-    radial-gradient(ellipse at 18% 8%, rgba(59, 105, 81, .24), transparent 32%),
-    radial-gradient(ellipse at 86% 12%, rgba(43, 92, 75, .20), transparent 34%),
-    linear-gradient(180deg, rgba(63, 112, 82, .18), transparent 44%);
-  filter: blur(1px);
-}
-
-.map-3d-guide-focuswash {
-  background:
-    radial-gradient(ellipse at 48% 56%, transparent 0 30%, rgba(244, 238, 216, .18) 48%, rgba(42, 67, 55, .22) 100%),
-    linear-gradient(90deg, rgba(244, 238, 216, .34), transparent 24%, transparent 72%, rgba(34, 63, 54, .18));
-  mix-blend-mode: multiply;
+    linear-gradient(135deg, rgba(255,255,255,.10), transparent 28%),
+    repeating-linear-gradient(100deg, rgba(255,255,255,.035) 0 1px, transparent 1px 22px);
+  opacity: .46;
 }
 
 .map-3d-guide-paperedge {
   background:
-    radial-gradient(ellipse at center, transparent 48%, rgba(250, 246, 226, .30) 70%, rgba(83, 68, 35, .18) 100%),
-    linear-gradient(90deg, rgba(250, 246, 226, .40), transparent 18%, transparent 82%, rgba(250, 246, 226, .40));
-  box-shadow: inset 0 0 96px rgba(81, 65, 34, .18);
-}
-
-.map-3d-guide-illustration {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  pointer-events: none;
-  opacity: .94;
-}
-
-.map-3d-guide-illustration svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.map-3d-guide-ink-water {
-  filter: drop-shadow(0 22px 34px rgba(19, 73, 89, .16));
-}
-
-.map-3d-guide-ink-waterline {
-  stroke: rgba(237, 253, 250, .46);
-  stroke-width: 8;
-  stroke-linecap: round;
-}
-
-.map-3d-guide-ink-mountain {
-  filter: drop-shadow(0 18px 30px rgba(25, 67, 50, .14));
-}
-
-.map-3d-guide-ink-ridge {
-  stroke: rgba(31, 78, 60, .22);
-  stroke-width: 9;
-  stroke-linecap: round;
-}
-
-.map-3d-guide-core-light {
-  fill: rgba(255, 243, 186, .30);
-  filter: blur(12px);
-}
-
-.map-3d-guide-buddha-light {
-  fill: rgba(252, 210, 94, .36);
-  filter: blur(10px);
-}
-
-.map-3d-guide-art-buildings path {
-  fill: rgba(241, 239, 224, .76);
-  stroke: rgba(121, 98, 52, .28);
-  stroke-width: 4;
-  filter: drop-shadow(0 12px 18px rgba(34, 48, 38, .12));
-}
-
-.map-3d-guide-art-route-halo,
-.map-3d-guide-art-route-glow,
-.map-3d-guide-art-route,
-.map-3d-guide-art-route-core {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.map-3d-guide-art-route-halo {
-  stroke: rgba(255, 231, 128, .25);
-  stroke-width: 78;
-  filter: url(#softRouteGlow);
-}
-
-.map-3d-guide-art-route-glow {
-  stroke: rgba(218, 159, 36, .54);
-  stroke-width: 42;
-}
-
-.map-3d-guide-art-route {
-  stroke: url(#routeRibbon);
-  stroke-width: 22;
-  filter: drop-shadow(0 8px 14px rgba(117, 75, 11, .22));
-}
-
-.map-3d-guide-art-route-core {
-  stroke: rgba(255, 249, 218, .86);
-  stroke-width: 6;
-}
-
-.map-3d-guide-buddha-symbol circle {
-  fill: rgba(255, 237, 164, .76);
-  stroke: rgba(142, 91, 18, .34);
-  stroke-width: 5;
-  filter: drop-shadow(0 12px 20px rgba(117, 75, 11, .25));
-}
-
-.map-3d-guide-buddha-symbol path {
-  fill: rgba(180, 119, 28, .72);
-  stroke: rgba(255, 248, 217, .75);
-  stroke-width: 3;
-}
-
-.map-3d-guide-placards {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.map-3d-guide-placard {
-  position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  transform: translate(-50%, -50%);
-  min-height: 32px;
-  max-width: 132px;
-  padding: 5px 9px 5px 6px;
-  border: 1px solid rgba(255,255,255,.70);
-  border-radius: 10px 10px 12px 12px;
-  background: linear-gradient(135deg, rgba(253, 248, 224, .94), rgba(222, 239, 226, .88));
-  box-shadow: 0 12px 24px rgba(29, 55, 47, .18), inset 0 0 0 1px rgba(255,255,255,.62);
-  color: #24483c;
-  font-size: 12px;
-  font-weight: 900;
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-.map-3d-guide-placard::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -13px;
-  width: 2px;
-  height: 13px;
-  background: rgba(125, 95, 38, .42);
-  transform: translateX(-50%);
-}
-
-.map-3d-guide-placard span {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #1f5a4d;
-  color: #fff9dc;
-  font-size: 11px;
-}
-
-.map-3d-guide-placard strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-guide-placard--current {
-  background: linear-gradient(135deg, rgba(255, 230, 148, .98), rgba(255, 247, 214, .94));
-  color: #75470c;
-  border-color: rgba(255, 235, 166, .94);
-  box-shadow: 0 0 0 5px rgba(246, 203, 86, .22), 0 16px 30px rgba(132, 87, 18, .24);
-}
-
-.map-3d-guide-placard--current span {
-  background: #d6a832;
-  color: #fffbe6;
-}
-
-.map-3d-guide-placard--next {
-  background: linear-gradient(135deg, rgba(216, 252, 244, .96), rgba(255, 248, 217, .90));
-  color: #0f5f56;
-  border-color: rgba(104, 220, 196, .78);
-  box-shadow: 0 0 0 5px rgba(45, 212, 191, .15), 0 14px 28px rgba(15, 118, 110, .18);
-}
-
-.map-3d-guide-placard--next span {
-  background: #0f766e;
-}
-
-.map-3d-guide-placard--terminal {
-  background: linear-gradient(135deg, rgba(255, 222, 181, .98), rgba(255, 245, 219, .94));
-  color: #7c2d12;
-  border-color: rgba(251, 146, 60, .70);
-  box-shadow: 0 0 0 5px rgba(251, 146, 60, .16), 0 14px 28px rgba(124, 45, 18, .18);
-}
-
-.map-3d-guide-placard--terminal span {
-  background: #8b2f17;
-}
-
-.map-3d-guide-placard--temple {
-  background: linear-gradient(135deg, rgba(245, 239, 222, .96), rgba(220, 236, 224, .88));
-  color: #415142;
+    radial-gradient(ellipse at center, transparent 60%, rgba(250, 246, 226, .16) 78%, rgba(83, 68, 35, .10) 100%),
+    linear-gradient(90deg, rgba(250, 246, 226, .16), transparent 16%, transparent 84%, rgba(250, 246, 226, .16));
+  box-shadow: inset 0 0 76px rgba(81, 65, 34, .12);
 }
 
 .map-3d-guide-hero,
