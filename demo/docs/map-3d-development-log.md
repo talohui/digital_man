@@ -7336,3 +7336,68 @@ enableBloom: true
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
 - 本阶段没有新增任何未确认许可证素材。
+
+## 阶段六十八 B：补充 mapStyleId 官方说明与诊断折叠
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+补充腾讯 JS API GL 个性化地图官方接入说明，不做视觉大改。当前 `/map-3d-guide` 已保留 `mapStyleId: 'style1'`，本阶段只把官方说明和排查建议放入默认折叠的“开发诊断”区域。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 本次说明补充
+
+- 保留 `MAP_3D_GUIDE_STYLE_ID = 'style1'`。
+- 保留 `new TMap.Map(...)` 初始化时传入 `mapStyleId: MAP_3D_GUIDE_STYLE_ID`。
+- 在开发诊断中补充：官方文档确认 `mapStyleId` 应在 `new TMap.Map(...)` 初始化参数中传入。
+- 说明控制台样式已由用户确认绑定 Web Key，但页面是否生效仍需以浏览器实际效果为准。
+
+### Console 排查建议
+
+如果 `style1` 未生效，建议打开浏览器 Console 检查是否出现：
+
+- 样式未绑定。
+- 无效 ID。
+- 默认样式显示。
+- `custom map` 相关提示。
+- `mapStyleId` 相关提示。
+
+### 离线资源包边界
+
+本阶段明确记录：腾讯控制台下载的离线样式资源包不适合直接接入 Web JS GL 页面，当前只作为资源和配色参考，不进入 `/map-3d-guide` 运行链路。
+
+### 默认产品 UI
+
+右侧默认产品 UI 不显示 `mapStyleId`、`renderOptions`、style API 探测等开发字段。相关内容继续放在“开发诊断”折叠区，默认收起。
+
+### 不恢复错误方向
+
+本阶段没有恢复固定大莲花、大色块、大斜线等固定屏幕覆盖物。固定层仍只保留低透明宣纸、雾化和滤镜；路线、POI、当前位置、重规划线、GLB 模型继续绑定腾讯地图坐标。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 和 `/map?debugGltfModel=1` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。
+- 本阶段没有新增外部素材。

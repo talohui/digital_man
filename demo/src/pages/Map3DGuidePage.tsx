@@ -748,7 +748,8 @@ function Map3DGuidePage() {
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前尝试 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
-            <span>控制台 Key 绑定：用户已确认；当前页面未自动生效。</span>
+            <span>官方文档确认：mapStyleId 应在 new TMap.Map(...) 初始化参数中传入。</span>
+            <span>控制台样式绑定 Web Key：用户已确认；是否生效仍以浏览器实际效果为准。</span>
             <ul>
               {tencentMapStyleMethodCandidates.map((method) => (
                 <li key={method}>
@@ -763,6 +764,11 @@ function Map3DGuidePage() {
                 {[...mapStyleSupport.mapRelatedMethods, ...mapStyleSupport.tmapRelatedKeys].slice(0, 6).join(', ')}
               </small>
             ) : null}
+            <p>
+              如果样式未生效，请检查浏览器 Console 是否出现样式未绑定、无效 ID、默认样式显示、
+              custom map 或 mapStyleId 相关提示。
+            </p>
+            <p>离线样式包不适合直接接入 Web JS GL 页面，仅作为资源和配色参考。</p>
             <p>
               {hasConfirmedMapStyleSupport(mapStyleSupport)
                 ? '检测到可能的样式接入方法，需提供官方 styleId 或确认参数后再启用。'
