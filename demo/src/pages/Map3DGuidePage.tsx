@@ -39,7 +39,7 @@ const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
-const MAP_3D_GUIDE_STYLE_ID = 'style2'
+const MAP_3D_GUIDE_STYLE_ID = 'style1'
 
 const guideCameraPresets: GuideCameraPreset[] = [
   {

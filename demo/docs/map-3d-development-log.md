@@ -7111,3 +7111,63 @@ mapStyleId: 'style2'
 - 本阶段没有修改腾讯 walking route 算法。
 - 本阶段没有读取、输出或修改 API Key。
 - 本阶段没有写入示例代码中的腾讯 Key。
+
+## 阶段六十六 C：腾讯 mapStyleId 改为 style1 验证
+
+### 日期
+
+2026-06-06
+
+### 本次目标
+
+根据用户在腾讯控制台截图中确认的样式信息，将 `/map-3d-guide` 当前尝试使用的腾讯个性化地图样式从 `style2` 调整为 `style1`，用于验证控制台“Style 1 我的自定义样式1”是否能在 Web JS API GL 中生效。
+
+### 当前发现
+
+控制台显示绑定样式为 `Style 1 我的自定义样式1`。上一阶段使用 `mapStyleId: 'style2'` 很可能与控制台样式序号不匹配，因此本阶段改为 `mapStyleId: 'style1'`。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 修改内容
+
+- 将 `MAP_3D_GUIDE_STYLE_ID` 从 `style2` 改为 `style1`。
+- 页面个性化地图样式诊断区继续显示当前尝试使用的 `mapStyleId`。
+- 保留既有 TMap style API 探测信息。
+
+### 对 /map-3d-guide 的影响
+
+`/map-3d-guide` 创建腾讯地图实例时现在传入 `mapStyleId: 'style1'`。如果 `style1` 与控制台“我的自定义样式1”匹配且当前 Web Key 权限正确，底图应呈现对应个性化样式；如果不生效，页面仍应正常显示腾讯地图和导览覆盖物。
+
+### 对 /map 的影响
+
+本阶段没有修改 `GuideMapPage.tsx`，普通 `/map` 不受影响。
+
+### 对 /scenic-3d-map 的影响
+
+本阶段没有修改 `Scenic3DMapPage.tsx` 或 `Scenic3DMapScene.tsx`，`/scenic-3d-map` 不受影响。
+
+### 验证方式
+
+- 运行 `npm run build`。
+- 打开 `/map-3d-guide`，人工确认底图是否应用控制台自定义样式。
+- 检查 `/map` 正常。
+- 检查 `/scenic-3d-map` 正常。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+需要浏览器人工确认 `style1` 是否实际生效。如果仍不生效，应核对腾讯控制台中样式是否已发布、是否绑定当前 Web Key、样式 ID 是否确实为 Web JS API GL 使用的 `style1`，以及当前页面请求是否使用了该 Key。
+
+### 明确记录
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有读取、输出或修改 API Key。
