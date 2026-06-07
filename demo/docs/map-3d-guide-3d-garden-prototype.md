@@ -412,3 +412,46 @@ localStorage key 升级为：
 ### 固化策略
 
 本阶段没有依赖用户浏览器 localStorage 才能看到正确效果。默认树群配置已经固化在 `src/data/lingshanMap3DGardenAssets.ts` 的 zone 参数中，刷新页面后仍会得到稳定、可复现的 199 个实例。
+
+## 14. 林带连续性与林地 patch
+
+阶段七十七解决 C 版“树像独立棋子”的问题。树群数量保持在性能可控范围内，不继续无限增加模型数量，而是在主要 vegetation zones 下方增加地图坐标锚定的林地底色 patch。
+
+### 林地 patch
+
+`src/data/lingshanMap3DGardenAssets.ts` 新增 `lingshanMap3DForestPatches`，当前包含 9 个 patch：
+
+- 大佛背后山林底色。
+- 大佛西侧山坡底色。
+- 大佛东侧山坡底色。
+- 中轴西侧林带底色。
+- 中轴东侧林带底色。
+- 九龙西侧林地底色。
+- 祥符禅寺边缘底色。
+- 梵宫边缘庭林底色。
+- 五印坛城水岸底色。
+
+这些 patch 不是固定屏幕贴图。运行时优先使用腾讯地图 `TMap.MultiPolygon` 生成经纬度椭圆面，随地图平移、缩放和旋转。若运行时不支持 `MultiPolygon` / `PolygonStyle`，则降级为经纬度锚定的半透明 `MultiMarker` SVG patch，仍随地图移动。
+
+### 视觉层级
+
+- 林地 patch：低透明青绿 / 墨绿，作为连续林面底色。
+- 3D 树群 GLB：保持 199 个实例，用高度、scale、opacity 差异建立层次。
+- 主路线 / 当前站 / 下一站 / 重规划路线：继续作为最高可读层，不被 patch 遮挡。
+
+patch 透明度克制：大佛背后最明显，中轴两侧中等，建筑和水体边缘更淡。偏航 / 重规划时，非核心 patch 会略微降透明，避免抢重规划路线。
+
+### debugGarden
+
+`/map-3d-guide-c?debugGarden=1` 会显示：
+
+- 林地 patch 数量。
+- 当前是 polygon 还是 marker fallback。
+- 可一键显示 / 隐藏林地 patch。
+- 复制 TS 配置时同时输出树群资产和 forest patch 配置。
+
+localStorage key 升级为：
+
+`lingshan-map-3d-guide-garden-assets-v7-forest-patches`
+
+旧的树群 localStorage 不会覆盖本阶段的 patch 诊断与默认树群布局。

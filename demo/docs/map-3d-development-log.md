@@ -8786,3 +8786,97 @@ localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v6-calibrated-ae
 1. 在浏览器中用 `debugGarden=1` 做小范围人工点位校准。
 2. 如果某些树仍遮挡路线或站点，可先用 zone 筛选批量微移，再复制 TS 配置固化。
 3. 后续如需继续增强，可按 zone 做距离相机的加载策略，降低 199 个 GLTFModel 的运行压力。
+
+## 阶段七十七：C 版林带连续性与林地底色增强
+
+日期：2026-06-08
+
+### 本次目标
+
+继续优化 `/map-3d-guide-c` 的树群效果。上一阶段的密度和色调方向已经正确，但总览下仍容易看到一棵棵独立树，缺少真实航拍中的连续山林面。本阶段不改变 C 版方向，而是用地图坐标锚定的林地 patch 连接树群，增强大佛背后、中轴两侧和建筑边缘的林带连续性。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关代码、树群配置和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork`。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不恢复固定屏幕大贴图。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 林地 patch
+
+新增 `lingshanMap3DForestPatches`，当前 9 个：
+
+- 大佛背后山林底色。
+- 大佛西侧山坡底色。
+- 大佛东侧山坡底色。
+- 中轴西侧林带底色。
+- 中轴东侧林带底色。
+- 九龙西侧林地底色。
+- 祥符禅寺边缘底色。
+- 梵宫边缘庭林底色。
+- 五印坛城水岸底色。
+
+这些 patch 不是固定 CSS 或固定屏幕覆盖层。运行时优先使用 `TMap.MultiPolygon` 以经纬度椭圆面渲染，随腾讯地图平移、缩放、旋转。如果运行时没有 `MultiPolygon` / `PolygonStyle`，则降级到经纬度锚定的 `MultiMarker` SVG patch。
+
+### 林带连续性
+
+树群总量保持 199 个，不继续无限增加 GLTFModel 数量。连续性主要由 patch 承担：
+
+- 大佛背后 patch 最明显，连接最高密度山林。
+- 中轴两侧 patch 中等透明，形成连续林带底色。
+- 祥符禅寺、梵宫、五印坛城边缘 patch 更淡，只作为绿化衔接。
+- 九龙西侧 patch 用于连接水景边缘林地。
+
+### 留白与可读性
+
+- patch 透明度克制，避免遮挡腾讯底图结构。
+- 主金线、当前位置、下一站、终点、重规划路线继续保持最高可读层。
+- 广场中心、主路线 corridor、建筑主体仍由 keepout 和低透明 patch 控制。
+- 偏航 / 重规划时非核心 patch 会略降透明，避免抢临时重规划线。
+
+### debugGarden
+
+`/map-3d-guide-c?debugGarden=1` 增强：
+
+- 显示林地 patch 数量。
+- 显示 patch 是否使用 marker fallback。
+- 支持一键显示 / 隐藏林地 patch。
+- 复制 TS 配置时同时输出树群资产和 forest patch 配置。
+
+localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v7-forest-patches`，避免旧配置覆盖本阶段 patch 诊断和默认效果。
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 当前站点 / 下一站保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 在浏览器中确认 `MultiPolygon` 是否可用；如果 fallback 为 marker 但视觉足够稳定，可继续保留。
+2. 人工检查 patch 是否压住路线局部，如有需要可在 patch 配置中微调半径和透明度。
+3. 继续把 C 版作为主线，后续再考虑 zone 级懒加载或更细的材质优化。

@@ -4,7 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
 import {
   getDefaultMap3DGardenAssets,
+  lingshanMap3DForestPatches,
   lingshanMap3DGardenVegetationZones,
+  type LingshanMap3DForestPatch,
   type LingshanMap3DGardenAsset
 } from '../data/lingshanMap3DGardenAssets'
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
@@ -78,6 +80,8 @@ type AssetLoadState = Record<string, 'loaded' | 'error'>
 type GardenModelReport = {
   createdCount: number
   visibleCount: number
+  patchCount: number
+  patchFallback: boolean
   unavailable: boolean
   assetUrls: string[]
   loadedIds: string[]
@@ -132,7 +136,7 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v6-calibrated-aerial-zones'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v7-forest-patches'
 const defaultGardenFilters: GardenAssetFilterState = {
   zoneId: 'all',
   kind: 'all',
@@ -270,6 +274,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const userMarkerLayerRef = useRef<any>(null)
   const rerouteLayerRef = useRef<any>(null)
   const decorMarkerLayerRef = useRef<any>(null)
+  const forestPatchLayerRef = useRef<any>(null)
   const gltfModelRef = useRef<any>(null)
   const gardenModelRefs = useRef<Map<string, any>>(new Map())
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
@@ -304,10 +309,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [selectedGardenId, setSelectedGardenId] = useState(() => loadStoredGardenAssets(visualVariant.id)[0]?.id ?? '')
   const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
   const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
+  const [forestPatchesVisible, setForestPatchesVisible] = useState(true)
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
   const [gardenModelReport, setGardenModelReport] = useState<GardenModelReport>({
     createdCount: 0,
     visibleCount: 0,
+    patchCount: 0,
+    patchFallback: false,
     unavailable: false,
     assetUrls: [],
     loadedIds: [],
@@ -437,6 +445,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       userMarkerLayerRef.current?.setMap?.(null)
       rerouteLayerRef.current?.setMap?.(null)
       decorMarkerLayerRef.current?.setMap?.(null)
+      forestPatchLayerRef.current?.setMap?.(null)
       clearGltfModel(gltfModelRef.current)
       gltfModelRef.current = null
       clearGardenModels(gardenModelRefs.current)
@@ -705,6 +714,117 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [assetLoadState, debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
 
   useEffect(() => {
+    forestPatchLayerRef.current?.setMap?.(null)
+    forestPatchLayerRef.current = null
+
+    if (visualVariant.id !== 'prototype-c' || !forestPatchesVisible) {
+      setGardenModelReport((current) => ({
+        ...current,
+        patchCount: 0,
+        patchFallback: false
+      }))
+      return
+    }
+
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    const visiblePatches = lingshanMap3DForestPatches.filter((patch) => patch.visible)
+
+    try {
+      if (window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
+        forestPatchLayerRef.current = new window.TMap.MultiPolygon({
+          map: mapRef.current,
+          styles: Object.fromEntries(
+            visiblePatches.map((patch) => [
+              patch.id,
+              new window.TMap.PolygonStyle({
+                color: colorWithOpacity(patch.color, getForestPatchOpacity(patch, {
+                  debugGarden,
+                  routeProgressRatio,
+                  rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+                })),
+                showBorder: false
+              })
+            ])
+          ),
+          geometries: visiblePatches.map((patch) => ({
+            id: patch.id,
+            styleId: patch.id,
+            paths: buildForestPatchPath(patch),
+            rank: 1
+          }))
+        })
+        setGardenModelReport((current) => ({
+          ...current,
+          patchCount: visiblePatches.length,
+          patchFallback: false
+        }))
+        return () => {
+          forestPatchLayerRef.current?.setMap?.(null)
+          forestPatchLayerRef.current = null
+        }
+      }
+
+      forestPatchLayerRef.current = new window.TMap.MultiMarker({
+        map: mapRef.current,
+        styles: Object.fromEntries(
+          visiblePatches.map((patch) => {
+            const opacity = getForestPatchOpacity(patch, {
+              debugGarden,
+              routeProgressRatio,
+              rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
+            })
+            const width = Math.max(80, Math.round(patch.radiusX * 1.15))
+            const height = Math.max(50, Math.round(patch.radiusY * 1.15))
+            return [
+              patch.id,
+              new window.TMap.MarkerStyle({
+                width,
+                height,
+                anchor: { x: width / 2, y: height / 2 },
+                src: createSvgDataUrl(forestPatchSvg({
+                  color: patch.color,
+                  opacity,
+                  rotation: patch.rotation,
+                  width,
+                  height
+                }))
+              })
+            ]
+          })
+        ),
+        geometries: visiblePatches.map((patch) => ({
+          id: patch.id,
+          styleId: patch.id,
+          position: toTMapLatLng(patch.center),
+          rank: patch.priority === 'high' ? 3 : patch.priority === 'medium' ? 2 : 1,
+          properties: {
+            title: patch.name
+          }
+        }))
+      })
+      setGardenModelReport((current) => ({
+        ...current,
+        patchCount: visiblePatches.length,
+        patchFallback: true
+      }))
+    } catch {
+      setGardenModelReport((current) => ({
+        ...current,
+        patchCount: 0,
+        patchFallback: true
+      }))
+    }
+
+    return () => {
+      forestPatchLayerRef.current?.setMap?.(null)
+      forestPatchLayerRef.current = null
+    }
+  }, [debugGarden, forestPatchesVisible, mapStatus, rerouteStatus, routeProgressRatio, visualVariant.id])
+
+  useEffect(() => {
     clearGardenModels(gardenModelRefs.current)
     gardenModelRefs.current = new Map()
 
@@ -712,6 +832,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       setGardenModelReport({
         createdCount: 0,
         visibleCount: 0,
+        patchCount: 0,
+        patchFallback: false,
         unavailable: false,
         assetUrls: [],
         loadedIds: [],
@@ -738,14 +860,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const assetUrls = Array.from(new Set(visibleAssets.map((asset) => asset.assetUrl)))
 
     if (!window.TMap.model?.GLTFModel) {
-      setGardenModelReport({
+      setGardenModelReport((current) => ({
+        ...current,
         createdCount: 0,
         visibleCount: visibleAssets.length,
         unavailable: true,
         assetUrls,
         loadedIds: [],
         errorIds: []
-      })
+      }))
       return
     }
 
@@ -788,14 +911,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     })
 
     gardenModelRefs.current = models
-    setGardenModelReport({
+    setGardenModelReport((current) => ({
+      ...current,
       createdCount: models.size,
       visibleCount: visibleAssets.length,
       unavailable: false,
       assetUrls,
       loadedIds: [],
       errorIds: immediateErrors
-    })
+    }))
 
     return () => {
       clearGardenModels(gardenModelRefs.current)
@@ -1305,7 +1429,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const copyGardenConfig = async () => {
-    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const\n`
+    const snippet = [
+      `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const`,
+      `export const lingshanMap3DForestPatches = ${JSON.stringify(lingshanMap3DForestPatches, null, 2)} as const`
+    ].join('\n\n')
     const ok = await copyText(snippet)
     setGardenCopyStatus(ok ? '已复制 3D 园林 TS 配置片段' : '复制失败，请查看浏览器权限')
   }
@@ -1315,6 +1442,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       `debugGarden=${debugGarden ? '1' : '0'}`,
       `variant=${visualVariant.id}`,
       `gardenAssetCount=${gardenAssets.length}`,
+      `forestPatchCount=${gardenModelReport.patchCount}/${lingshanMap3DForestPatches.length}`,
+      `forestPatchFallback=${gardenModelReport.patchFallback ? 'true' : 'false'}`,
+      `forestPatchesVisible=${forestPatchesVisible ? 'true' : 'false'}`,
       `visibleAssets=${gardenModelReport.visibleCount}`,
       `createdModels=${gardenModelReport.createdCount}`,
       `selectedGarden=${selectedGardenAsset?.id ?? 'none'}`,
@@ -1516,7 +1646,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <div>
               <strong>3D 园林资产调试</strong>
               <span>
-                prototype-c · {gardenZoneCountText} · 筛选 {filteredGardenAssets.length}/{gardenAssets.length} · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
+                prototype-c · {gardenZoneCountText} · 林地 patch {gardenModelReport.patchCount}/{lingshanMap3DForestPatches.length}
+                {gardenModelReport.patchFallback ? ' marker fallback' : ' polygon'} · 筛选 {filteredGardenAssets.length}/{gardenAssets.length} · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
               </span>
             </div>
             <button type="button" onClick={copyGardenConfig}>
@@ -1593,6 +1724,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               </button>
               <button type="button" onClick={() => applyFilteredGardenVisibility(false)}>
                 隐藏筛选资产
+              </button>
+              <button type="button" onClick={() => setForestPatchesVisible((visible) => !visible)}>
+                {forestPatchesVisible ? '隐藏林地 patch' : '显示林地 patch'}
               </button>
             </div>
           </div>
@@ -1805,7 +1939,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             </button>
           </div>
           <p>
-            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到新版 localStorage；如果仍看到旧点状树群，请点击“恢复默认”切回航拍参考树群布局。
+            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动；林地 patch 优先使用 TMap.MultiPolygon，经纬度面锚定，运行时不支持时退回锚定 Marker。调参会自动保存到新版 localStorage；如果仍看到旧点状树群，请点击“恢复默认”切回航拍参考树群布局。
           </p>
           <p>
             {gardenModelReport.unavailable
@@ -1893,6 +2027,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               <strong>3D 园林资产烟测</strong>
               <span>当前原型类型：C</span>
               <span>配置 3D 资产数量：{gardenAssets.length}</span>
+              <span>林地 patch 数量：{gardenModelReport.patchCount}/{lingshanMap3DForestPatches.length}</span>
+              <span>林地 patch fallback：{gardenModelReport.patchFallback ? 'true' : 'false'}</span>
               <span>已唤醒资产数量：{gardenModelReport.visibleCount}</span>
               <span>成功创建 GLTFModel：{gardenModelReport.createdCount}</span>
               <span>GLTFModel 可用：{gardenModelReport.unavailable ? 'false' : 'true'}</span>
@@ -2591,6 +2727,89 @@ function materializeDecorSpec(spec: DecorSpec): InkDecorOverlay {
     assetSource: spec.assetSource,
     note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
   }
+}
+
+function buildForestPatchPath(patch: LingshanMap3DForestPatch) {
+  const steps = 28
+  const rotation = (patch.rotation * Math.PI) / 180
+  const points: any[] = []
+
+  for (let index = 0; index < steps; index += 1) {
+    const angle = (index / steps) * Math.PI * 2
+    const x = Math.cos(angle) * patch.radiusX
+    const y = Math.sin(angle) * patch.radiusY
+    const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation)
+    const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation)
+    const point = offsetLatLngMeters(patch.center, rotatedX, rotatedY)
+    points.push(toTMapLatLng(point))
+  }
+
+  return points
+}
+
+function getForestPatchOpacity(
+  patch: LingshanMap3DForestPatch,
+  options: {
+    debugGarden: boolean
+    routeProgressRatio: number
+    rerouteActive: boolean
+  }
+) {
+  if (options.debugGarden) {
+    return Math.min(0.42, Math.max(patch.opacity, 0.22))
+  }
+
+  const distanceFromProgress = patch.routeFraction - Math.max(0, Math.min(1, options.routeProgressRatio))
+  const currentBoost = Math.abs(distanceFromProgress) <= 0.14 ? 1.18 : distanceFromProgress < -0.14 ? 1.04 : 0.9
+  const rerouteDimming = options.rerouteActive && patch.priority !== 'high' ? 0.82 : 1
+  return Number(Math.max(0.08, Math.min(0.38, patch.opacity * currentBoost * rerouteDimming)).toFixed(3))
+}
+
+function offsetLatLngMeters(origin: LatLngPoint, eastMeters: number, northMeters: number): LatLngPoint {
+  const metersPerDegreeLat = 111_320
+  const metersPerDegreeLng = 111_320 * Math.cos(origin.lat * (Math.PI / 180))
+
+  return {
+    lat: origin.lat + northMeters / metersPerDegreeLat,
+    lng: origin.lng + eastMeters / metersPerDegreeLng
+  }
+}
+
+function colorWithOpacity(color: string, opacity: number) {
+  const normalized = color.replace('#', '')
+  if (normalized.length !== 6) {
+    return `rgba(42, 86, 62, ${opacity})`
+  }
+
+  const red = parseInt(normalized.slice(0, 2), 16)
+  const green = parseInt(normalized.slice(2, 4), 16)
+  const blue = parseInt(normalized.slice(4, 6), 16)
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`
+}
+
+function forestPatchSvg(options: {
+  color: string
+  opacity: number
+  rotation: number
+  width: number
+  height: number
+}) {
+  const width = Math.max(80, options.width)
+  const height = Math.max(50, options.height)
+  const cx = width / 2
+  const cy = height / 2
+  const rx = width * 0.44
+  const ry = height * 0.38
+  const wash = colorWithOpacity(options.color, options.opacity)
+  const inner = colorWithOpacity(options.color, Math.min(0.42, options.opacity * 1.2))
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <g transform="rotate(${options.rotation} ${cx} ${cy})">
+      <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${wash}"/>
+      <ellipse cx="${cx - width * 0.08}" cy="${cy - height * 0.06}" rx="${rx * 0.54}" ry="${ry * 0.48}" fill="${inner}" opacity=".42"/>
+      <ellipse cx="${cx + width * 0.14}" cy="${cy + height * 0.05}" rx="${rx * 0.42}" ry="${ry * 0.38}" fill="${inner}" opacity=".30"/>
+    </g>
+  </svg>`
 }
 
 function getVisibleGardenAssets(

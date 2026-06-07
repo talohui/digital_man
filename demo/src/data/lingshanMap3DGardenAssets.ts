@@ -29,6 +29,21 @@ export type LingshanMap3DGardenAsset = {
   note?: string
 }
 
+export type LingshanMap3DForestPatch = {
+  id: string
+  name: string
+  center: LatLngPoint
+  radiusX: number
+  radiusY: number
+  rotation: number
+  color: string
+  opacity: number
+  visible: boolean
+  priority: Map3DGardenAssetPriority
+  routeFraction: number
+  note?: string
+}
+
 type VegetationZone = {
   id: string
   name: string
@@ -324,6 +339,135 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     priority: 'low',
     assetPool: lowEdgePool,
     note: '路线末端边缘收束树群，不遮挡终点。'
+  }
+]
+
+export const lingshanMap3DForestPatches: LingshanMap3DForestPatch[] = [
+  {
+    id: 'forest-patch-buddha-north-mountain',
+    name: '大佛背后山林底色',
+    center: { lat: 31.43112, lng: 120.09612 },
+    radiusX: 285,
+    radiusY: 178,
+    rotation: -9,
+    color: '#244f3c',
+    opacity: 0.34,
+    visible: true,
+    priority: 'high',
+    routeFraction: 0.69,
+    note: '最明显的山林面底色，用于连接大佛背后密集树群。'
+  },
+  {
+    id: 'forest-patch-buddha-west-slope',
+    name: '大佛西侧山坡底色',
+    center: { lat: 31.4299, lng: 120.09515 },
+    radiusX: 210,
+    radiusY: 118,
+    rotation: -22,
+    color: '#2e5d42',
+    opacity: 0.26,
+    visible: true,
+    priority: 'high',
+    routeFraction: 0.64,
+    note: '大佛西侧山坡连续底色，弱于北侧山体。'
+  },
+  {
+    id: 'forest-patch-buddha-east-slope',
+    name: '大佛东侧山坡底色',
+    center: { lat: 31.42992, lng: 120.09768 },
+    radiusX: 205,
+    radiusY: 116,
+    rotation: 18,
+    color: '#315f45',
+    opacity: 0.25,
+    visible: true,
+    priority: 'high',
+    routeFraction: 0.65,
+    note: '大佛东侧山坡与祥符禅寺方向衔接。'
+  },
+  {
+    id: 'forest-patch-central-axis-west',
+    name: '中轴西侧林带底色',
+    center: { lat: 31.42625, lng: 120.09834 },
+    radiusX: 410,
+    radiusY: 72,
+    rotation: -28,
+    color: '#3e6d4e',
+    opacity: 0.2,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.49,
+    note: '中轴西侧连续林带底色，保持主路留白。'
+  },
+  {
+    id: 'forest-patch-central-axis-east',
+    name: '中轴东侧林带底色',
+    center: { lat: 31.42632, lng: 120.09948 },
+    radiusX: 380,
+    radiusY: 68,
+    rotation: -28,
+    color: '#426f51',
+    opacity: 0.18,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.5,
+    note: '中轴东侧较淡林带底色，不抢主路线。'
+  },
+  {
+    id: 'forest-patch-jiulong-west',
+    name: '九龙西侧林地底色',
+    center: { lat: 31.42492, lng: 120.09948 },
+    radiusX: 174,
+    radiusY: 104,
+    rotation: -20,
+    color: '#496f52',
+    opacity: 0.18,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.38,
+    note: '九龙灌浴西侧林地底色，水景核心继续留白。'
+  },
+  {
+    id: 'forest-patch-xiangfu-edge',
+    name: '祥符禅寺边缘底色',
+    center: { lat: 31.42788, lng: 120.09795 },
+    radiusX: 190,
+    radiusY: 96,
+    rotation: 8,
+    color: '#3b6549',
+    opacity: 0.17,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.74,
+    note: '寺院建筑边缘底色，建筑主体由 keepout 留白。'
+  },
+  {
+    id: 'forest-patch-fan-gong-edge',
+    name: '梵宫边缘庭林底色',
+    center: { lat: 31.42712, lng: 120.10258 },
+    radiusX: 220,
+    radiusY: 116,
+    rotation: -12,
+    color: '#4a7253',
+    opacity: 0.16,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.84,
+    note: '梵宫周边中低透明林地底色。'
+  },
+  {
+    id: 'forest-patch-wuyin-waterfront',
+    name: '五印坛城水岸底色',
+    center: { lat: 31.42508, lng: 120.10396 },
+    radiusX: 188,
+    radiusY: 102,
+    rotation: 20,
+    color: '#4e7357',
+    opacity: 0.14,
+    visible: true,
+    priority: 'medium',
+    routeFraction: 0.9,
+    note: '水岸边缘淡色底色，不遮挡坛城圆形主体。'
   }
 ]
 
