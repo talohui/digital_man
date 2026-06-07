@@ -172,3 +172,59 @@ C 版通过 `routeFraction` 控制显现顺序：
 3. 将 GLB 压缩到移动端可接受体积。
 4. 为腾讯 `GLTFModel` 增加距离级别或按需加载。
 5. 如果腾讯 GLTFModel 对多实例性能不足，再考虑将重复资产合并为少量组合 GLB。
+
+## 10. 阶段七十四更新：Kenney CC0 自然资产接入
+
+阶段七十四已将 C 版从项目自制树群 fallback 切换为 Kenney 官方 `Nature Kit` 中的少量 CC0 GLB：
+
+- 2-3 种树：松树、针叶树、深色阔叶树。
+- 1-2 种灌木：细节灌木和大灌木候选。
+- 1-2 种山石：低矮山石和竖向山石。
+
+正式文件位于：
+
+`public/assets/map-3d-guide/glb-garden/vendor/`
+
+原始 ZIP 仅保留在：
+
+`tmp/map-3d-guide-assets/vendor-source/kenney-nature-kit/`
+
+不提交原始大包。
+
+### 配置变化
+
+`src/data/lingshanMap3DGardenAssets.ts` 仍保留原有 19 个沿线实例和布局思想，但 `assetUrl` 已从：
+
+`/assets/map-3d-guide/glb-garden/trees/ink_*.glb`
+
+切换为：
+
+`/assets/map-3d-guide/glb-garden/vendor/kenney_*.glb`
+
+`licenseId` 统一更新为 `kenney-nature-kit-cc0`。
+
+### 布局保持
+
+仍然保留：
+
+- 中轴两侧林带。
+- 大佛周边和背后树群。
+- 祥符禅寺、梵宫、五印坛城边缘树群。
+- 广场和主路线留白。
+
+少量原灌木点改为山石点，用来增加边界层次，但不恢复桥、院墙、香炉、法轮、莲台、亭台、寺庙屋顶等复杂非树模型。
+
+### debugGarden
+
+`debugGarden` 继续可用。localStorage key 已升级为：
+
+`lingshan-map-3d-guide-garden-assets-v3-vendor-nature`
+
+如果浏览器仍显示旧 fallback 配置，应在 `/map-3d-guide-c?debugGarden=1` 中点击“恢复默认”，重新加载 vendor 树群配置。
+
+### 当前限制
+
+- Kenney Nature Kit 风格仍偏通用低模自然资产，不是专门中式园林模型。
+- 本阶段没有进行材质重调、模型合并、降面或自定义压缩。
+- Quaternius Stylized Nature MegaKit 仍是后续候选，但本阶段未接入，原因是没有取得可稳定下载并逐项验证的正式 GLB 包。
+- 非树复杂资产仍禁用，避免再次出现占位模型破坏页面气质。

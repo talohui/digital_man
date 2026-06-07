@@ -116,7 +116,7 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v2'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v3-vendor-nature'
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
@@ -164,7 +164,7 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     stationPanelTitle: '园林化历史文化节点',
     controlTitle: '3D 园林导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-c`,
-    decorStrategy: '禁用 PNG 贴片，改用项目自制低模 GLB 园林资产沿路线锚定。'
+    decorStrategy: '禁用 PNG 贴片，改用 Kenney CC0 低模自然 GLB 资产沿路线锚定。'
   }
 }
 const inkDecorKinds: InkDecorKind[] = [
@@ -1191,7 +1191,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setGardenAssets(defaults)
     setSelectedGardenId(defaults[0]?.id ?? '')
     window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-    setGardenCopyStatus('已恢复默认 3D 园林资产配置')
+    setGardenCopyStatus('已恢复默认 Kenney vendor 树群配置')
   }
 
   const copyGardenConfig = async () => {
@@ -1536,7 +1536,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             </button>
           </div>
           <p>
-            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到 localStorage。
+            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到新版 localStorage；如果仍看到旧 fallback 树群，请点击“恢复默认”切回 vendor 树群配置。
           </p>
           <p>
             {gardenModelReport.unavailable

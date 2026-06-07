@@ -6,6 +6,8 @@ export type Map3DGardenAssetKind =
   | 'bamboo_grove'
   | 'shrub_mass'
   | 'forest_edge'
+  | 'rock_cluster'
+  | 'stone_mass'
 
 export type Map3DGardenAssetPriority = 'low' | 'medium' | 'high'
 
@@ -26,15 +28,17 @@ export type LingshanMap3DGardenAsset = {
   note?: string
 }
 
-const treeAssetBaseUrl = '/assets/map-3d-guide/glb-garden/trees'
-const projectOwnedTreeFallbackLicense = 'project-owned-ink-tree-grove-fallback'
+const vendorAssetBaseUrl = '/assets/map-3d-guide/glb-garden/vendor'
+const kenneyNatureKitLicenseId = 'kenney-nature-kit-cc0'
 
 const treeAssetUrls: Record<Map3DGardenAssetKind, string> = {
-  pine_cluster: `${treeAssetBaseUrl}/ink_pine_cluster_v2.glb`,
-  mixed_grove: `${treeAssetBaseUrl}/ink_mixed_grove_v2.glb`,
-  bamboo_grove: `${treeAssetBaseUrl}/ink_bamboo_grove_v2.glb`,
-  shrub_mass: `${treeAssetBaseUrl}/ink_shrub_mass_v2.glb`,
-  forest_edge: `${treeAssetBaseUrl}/ink_forest_edge_v2.glb`
+  pine_cluster: `${vendorAssetBaseUrl}/kenney_tree_pine_tall_a.glb`,
+  mixed_grove: `${vendorAssetBaseUrl}/kenney_tree_default_dark.glb`,
+  bamboo_grove: `${vendorAssetBaseUrl}/kenney_tree_pine_round_c.glb`,
+  shrub_mass: `${vendorAssetBaseUrl}/kenney_bush_detailed.glb`,
+  forest_edge: `${vendorAssetBaseUrl}/kenney_tree_pine_round_c.glb`,
+  rock_cluster: `${vendorAssetBaseUrl}/kenney_rock_large_c.glb`,
+  stone_mass: `${vendorAssetBaseUrl}/kenney_rock_tall_h.glb`
 }
 
 export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
@@ -51,8 +55,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'high',
     routeFraction: 0.05,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '中轴入口西侧林带，避开南门道路中心和主路线。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 松林资产，中轴入口西侧林带，避开南门道路中心和主路线。'
   },
   {
     id: 'c-south-gate-east-pine',
@@ -67,24 +71,24 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.08,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '南门东侧留出中轴路面，只在边缘形成低饱和树影。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 松树资产，南门东侧留出中轴路面，只在边缘形成低饱和树影。'
   },
   {
     id: 'c-lingshan-wall-west-shrubs',
-    kind: 'shrub_mass',
-    name: '照壁西侧灌木',
-    assetUrl: treeAssetUrls.shrub_mass,
+    kind: 'rock_cluster',
+    name: '照壁西侧山石',
+    assetUrl: treeAssetUrls.rock_cluster,
     location: { lat: 31.42178, lng: 120.10196 },
-    scale: 96,
+    scale: 72,
     height: 2,
     yaw: -8,
     opacity: 1,
     visible: true,
     priority: 'medium',
     routeFraction: 0.13,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '照壁与胜境广场之间的低矮绿量，不压住广场中心。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 山石资产，作为照壁与胜境广场之间的低矮自然边界，不压住广场中心。'
   },
   {
     id: 'c-axis-west-forest-belt-01',
@@ -99,8 +103,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'high',
     routeFraction: 0.2,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '胜境广场前西侧连续山林边界，保持路线与广场留白。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 林缘资产，胜境广场前西侧连续山林边界，保持路线与广场留白。'
   },
   {
     id: 'c-axis-east-bamboo-belt-01',
@@ -115,8 +119,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.23,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '中轴东侧竹影，给胜境广场边缘降噪，不遮挡节点。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 针叶树资产，替代旧竹影 fallback，给胜境广场边缘降噪，不遮挡节点。'
   },
   {
     id: 'c-shengjing-square-north-pine',
@@ -131,8 +135,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.31,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '胜境广场北侧边缘树群，广场中心仍保持开阔。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 松树资产，胜境广场北侧边缘树群，广场中心仍保持开阔。'
   },
   {
     id: 'c-jiulong-west-grove',
@@ -147,24 +151,24 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.38,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '九龙灌浴西侧背景林，避开表演核心和路线。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 阔叶树资产，九龙灌浴西侧背景林，避开表演核心和路线。'
   },
   {
     id: 'c-jiulong-east-shrub',
-    kind: 'shrub_mass',
-    name: '九龙东侧灌木',
-    assetUrl: treeAssetUrls.shrub_mass,
+    kind: 'stone_mass',
+    name: '九龙东侧山石',
+    assetUrl: treeAssetUrls.stone_mass,
     location: { lat: 31.42442, lng: 120.1008 },
-    scale: 92,
+    scale: 64,
     height: 2,
     yaw: 18,
     opacity: 1,
     visible: true,
     priority: 'low',
     routeFraction: 0.41,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '九龙灌浴东侧低矮灌木，避免遮挡水景和站点标识。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 石块资产，作为九龙灌浴东侧低矮自然物，避免遮挡水景和站点标识。'
   },
   {
     id: 'c-buddha-approach-west-forest',
@@ -179,8 +183,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'high',
     routeFraction: 0.52,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '佛手广场至佛前广场西侧山林带，避开中轴阶道。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 林缘资产，佛手广场至佛前广场西侧山林带，避开中轴阶道。'
   },
   {
     id: 'c-buddha-approach-east-bamboo',
@@ -195,8 +199,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.56,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '登佛动线东侧竹林，给建筑与山体之间做柔性过渡。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 针叶树资产，替代旧竹林 fallback，给建筑与山体之间做柔性过渡。'
   },
   {
     id: 'c-foqian-square-west-pine',
@@ -211,8 +215,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'high',
     routeFraction: 0.66,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '佛前广场西侧高密度松阵，主广场和路线保留留白。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 松树资产，佛前广场西侧高密度松阵，主广场和路线保留留白。'
   },
   {
     id: 'c-buddha-north-forest-backdrop',
@@ -227,8 +231,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'high',
     routeFraction: 0.7,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '大佛背后形成山林背景，不覆盖大佛 marker 和 GLB 模型。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 阔叶树资产，大佛背后形成山林背景，不覆盖大佛 marker 和 GLB 模型。'
   },
   {
     id: 'c-buddha-east-forest-backdrop',
@@ -243,8 +247,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.72,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '大佛东侧林缘，增强俯拍中山体包围感。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 林缘资产，大佛东侧林缘，增强俯拍中山体包围感。'
   },
   {
     id: 'c-xiangfu-temple-south-grove',
@@ -259,8 +263,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.76,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '祥符禅寺南侧树群，只做建筑边缘背景，不放香炉/屋顶符号。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 阔叶树资产，祥符禅寺南侧树群，只做建筑边缘背景，不放香炉/屋顶符号。'
   },
   {
     id: 'c-xiangfu-temple-east-bamboo',
@@ -275,8 +279,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'low',
     routeFraction: 0.78,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '寺院东侧竹林，低密度增强沉静感。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 针叶树资产，寺院东侧低密度增强沉静感。'
   },
   {
     id: 'c-fan-gong-west-grove',
@@ -291,8 +295,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.83,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '梵宫西侧建筑边缘树群，不覆盖梵宫主体。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 阔叶树资产，梵宫西侧建筑边缘树群，不覆盖梵宫主体。'
   },
   {
     id: 'c-fan-gong-square-east-shrub',
@@ -307,7 +311,7 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'low',
     routeFraction: 0.86,
-    licenseId: projectOwnedTreeFallbackLicense,
+    licenseId: kenneyNatureKitLicenseId,
     note: '梵宫广场边缘低矮灌木，广场中心留白。'
   },
   {
@@ -323,8 +327,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'medium',
     routeFraction: 0.9,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '五印坛城水岸侧林缘，不放法轮/莲台，保持树群主视觉。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 林缘资产，五印坛城水岸侧林缘，不放法轮/莲台，保持树群主视觉。'
   },
   {
     id: 'c-exit-south-grove',
@@ -339,8 +343,8 @@ export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = [
     visible: true,
     priority: 'low',
     routeFraction: 0.96,
-    licenseId: projectOwnedTreeFallbackLicense,
-    note: '出口前低调收束树群，不遮挡终点和重规划线。'
+    licenseId: kenneyNatureKitLicenseId,
+    note: 'Kenney CC0 松树资产，出口前低调收束树群，不遮挡终点和重规划线。'
   }
 ]
 

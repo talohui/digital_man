@@ -159,3 +159,36 @@
 - Eclair Assets 的 Kenney Nature Kit GLB convenience pack：`https://eclair-assets.itch.io/nature-kit-glb-pack-329-free-cc0-3d-models`，页面说明基于 Kenney CC0 Nature Kit，包含 329 个 GLB，并保留原始 Kenney license text。适合后续快速试接，但仍需下载后逐个筛选。
 - Quaternius / Poly Pizza Stylized Nature MegaKit：`https://poly.pizza/bundle/Stylized-Nature-MegaKit-T34GZFA0fm`，页面标注 Public Domain (CC0)，含树、松、草、灌木、石块等。适合后续替换树群 fallback。
 - Quaternius Stylized Nature MegaKit 官方页：`https://quaternius.com/packs/stylizednaturemegakit.html`，页面标注 CC0，并说明可用于个人、教育和商业项目。
+
+## 10. 阶段七十四 Kenney Nature Kit 正式接入资产
+
+阶段七十四开始将 `/map-3d-guide-c` 的项目自制树群 fallback 替换为 Kenney 官方 CC0 自然资产。原始包下载到本地 `tmp/map-3d-guide-assets/vendor-source/kenney-nature-kit/` 供核验，不提交原始 ZIP。
+
+来源：
+
+- 官方页面：`https://kenney.nl/assets/nature-kit`
+- 作者 / 项目：Kenney / Nature Kit
+- 包内许可证文件：`License.txt`
+- 许可证：Creative Commons Zero (CC0)
+- 是否允许商用：是
+- 是否需要署名：否；包内说明署名 Kenney 或 `www.kenney.nl` 可支持作者，但不是强制要求
+- 接入范围：仅 `/map-3d-guide-c`
+
+正式提交的 vendor GLB：
+
+| 文件 | 来源 URL | 作者 / 项目 | 原许可证 | 允许商用 | 需要署名 | 是否做过格式转换 / 材质调整 / 压缩 | 用途 | 使用范围 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `public/assets/map-3d-guide/glb-garden/vendor/KENNEY_NATURE_KIT_LICENSE.txt` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 原样复制包内 `License.txt` | 许可证存档 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_tall_a.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/tree_pineTallA.glb` 原样抽取，未转格式，未调材质 | 松树 / 中轴林带 / 佛前松阵 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_round_c.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/tree_pineRoundC.glb` 原样抽取，未转格式，未调材质 | 林缘 / 针叶树群 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_default_dark.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/tree_default_dark.glb` 原样抽取，未转格式，未调材质 | 深色阔叶树 / 大佛背后山林 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_detailed.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/plant_bushDetailed.glb` 原样抽取，未转格式，未调材质 | 灌木 / 广场边缘低矮绿量 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_large.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/plant_bushLarge.glb` 原样抽取，未转格式，未调材质 | 大灌木候选，当前配置中暂未重点使用 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_large_c.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/rock_largeC.glb` 原样抽取，未转格式，未调材质 | 照壁侧山石 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_tall_h.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 从包内 `Models/GLTF format/rock_tallH.glb` 原样抽取，未转格式，未调材质 | 九龙灌浴侧山石 | C |
+
+说明：
+
+- 本阶段没有提交 Quaternius 资产。Quaternius Stylized Nature MegaKit 仍是后续优先候选，但本阶段没有取得可稳定自动下载并逐项检查的正式 GLB 包，因此不强行接入。
+- 本阶段没有接入桥、院墙、香炉、法轮、莲台、亭子、寺庙屋顶等复杂非树资产。
+- 如果后续对 Kenney GLB 做材质重调、压缩或组合成树群 GLB，需要在本文件中追加派生文件记录。

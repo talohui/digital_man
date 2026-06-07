@@ -8321,3 +8321,119 @@ C 版现在更偏“树群 / 山林氛围”而不是“符号模型集合”。
 1. 从 Kenney / Quaternius CC0 资源中挑选 2-3 个正式树模型进行替换验证。
 2. 用浏览器截图和俯拍图逐点校准树群经纬度。
 3. 后续只在位置、比例、文化语境都确认后，再恢复桥、院墙、香炉、法轮、莲台等非树类资产。
+
+## 阶段七十四：接入 Kenney CC0 开源自然资产替换 C 版 fallback 树群
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+将 `/map-3d-guide-c` 从项目自制 fallback 树群升级为真正可商用的开源低模自然资产，让 C 版更接近沉稳 3D 园林沙盘，而不是 debug 占位模型。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关资产、配置和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork` 原始数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不恢复桥、院墙、香炉、法轮、莲台、亭子、寺庙屋顶等复杂非树资产。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `public/assets/map-3d-guide/glb-garden/vendor/KENNEY_NATURE_KIT_LICENSE.txt`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_tall_a.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_round_c.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_default_dark.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_detailed.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_large.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_large_c.glb`
+- `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_tall_h.glb`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 资产来源
+
+本阶段接入 Kenney 官方 `Nature Kit`，来源为 `https://kenney.nl/assets/nature-kit`。页面和包内 `License.txt` 均标注 Creative Commons Zero / CC0，可用于个人、教育和商业项目，署名 Kenney 非强制。
+
+调研中 Quaternius / Stylized Nature MegaKit 仍是后续优先候选，官方页面标注 CC0，并提供 glTF 格式。但本阶段没有稳定取得可自动下载、可逐项检查并落地的 Quaternius GLB 包，因此没有强行接入，避免把未验证文件放进项目。
+
+### 新资产说明
+
+本阶段从 Kenney Nature Kit 中抽取少量已存在的 GLB：
+
+- `kenney_tree_pine_tall_a.glb`：松树。
+- `kenney_tree_pine_round_c.glb`：针叶树 / 林缘。
+- `kenney_tree_default_dark.glb`：深色阔叶树。
+- `kenney_bush_detailed.glb`：灌木。
+- `kenney_bush_large.glb`：大灌木，当前作为候选文件保留。
+- `kenney_rock_large_c.glb`：低矮山石。
+- `kenney_rock_tall_h.glb`：竖向山石。
+
+单个文件均远小于 300KB。没有提交原始下载 ZIP，原始包仅保留在 `tmp/map-3d-guide-assets/vendor-source/` 供本地核验。
+
+### C 版配置调整
+
+`src/data/lingshanMap3DGardenAssets.ts` 中的 `assetUrl` 已从项目自制 `glb-garden/trees/ink_*.glb` 切换到 `glb-garden/vendor/kenney_*.glb`。
+
+保留的布局思想：
+
+- 南门到大佛中轴两侧林带。
+- 大佛周边和背后树群。
+- 祥符禅寺、梵宫、五印坛城边缘树群。
+- 广场和主路线留白。
+
+本阶段将少量旧灌木点替换为山石点，用于增加自然边界，但仍禁用桥、院墙、香炉、法轮、莲台、亭台等复杂非树资产。
+
+### debugGarden 更新
+
+`/map-3d-guide-c?debugGarden=1` 保持可用：
+
+- 可以继续调整位置、scale、height、yaw、显现进度、visible 和 priority。
+- 支持复制 TS 配置和调试摘要。
+- localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v3-vendor-nature`，避免浏览器继续恢复旧 fallback 树群配置。
+- 面板提示如果仍看到旧 fallback 树群，可点击“恢复默认”切回 vendor 树群配置。
+
+### 对 /map-3d-guide-c 的影响
+
+C 版继续以腾讯地图真实坐标为底座，所有自然 GLB 仍通过 `TMap.model.GLTFModel` 绑定经纬度，跟随地图缩放、旋转和平移。
+
+### 对其它页面的影响
+
+本阶段不修改：
+
+- `/map`
+- `/map?debugGltfModel=1`
+- `/map-3d-guide`
+- `/map-3d-guide-a`
+- `/map-3d-guide-b`
+- `/scenic-3d-map`
+
+### 保持能力
+
+- 历史文化路线保留。
+- 当前站点 / 下一站保留。
+- 模拟定位保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+- `mapStyleId: 'style1'` 保留。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 用浏览器实际观察 Kenney GLB 在腾讯地图倾斜视角下的比例和朝向。
+2. 用 `debugGarden=1` 微调个别点的 scale / height / yaw。
+3. 如果仍需更东方、更沉稳的树种，可继续下载并核验 Quaternius CC0 glTF 包。
+4. 只有在位置、比例和文化语境明确后，再恢复桥、院墙、香炉、法轮、莲台等复杂非树资产。
