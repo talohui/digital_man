@@ -8537,3 +8537,152 @@ C 版默认 3D 园林实例从 19 个增加到 67 个。
 1. 用浏览器实际检查 67 个模型在腾讯地图倾斜视角下的性能和遮挡。
 2. 如有性能压力，按距离或 progress 分组做加载节流。
 3. 用 `debugGarden=1` 微调大佛背后、梵宫和水岸附近的树群高度与比例。
+
+## 阶段七十六：航拍参考 vegetation zones 重做 C 版树群
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+继续重做 `/map-3d-guide-c` 的树群布局与材质。上一版虽然从 19 个点增加到 67 个点，但仍偏“路线撒点”，总览下不形成山林面，且树木偏黑。目标是参考用户提供的腾讯卫星俯视图，将 C 版改为区域化林带布局。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关配置、资产和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork`。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不恢复桥、院墙、香炉、法轮、莲台、亭子、寺庙屋顶等复杂非树资产。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `public/assets/map-3d-guide/glb-garden/vendor/*_sage.glb`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 为什么从路线撒点改成 vegetation zones
+
+路线撒点适合验证 GLTFModel 和 debugGarden，但不适合形成真实航拍里的山林空间。灵山胜境的视觉结构更像：
+
+- 大佛背后是连续山体林面。
+- 中轴路线两侧是线性林带。
+- 核心广场和水景保持开阔。
+- 建筑边缘和水体边缘有中低密度绿化。
+
+因此本阶段在 `lingshanMap3DGardenAssets.ts` 中新增 deterministic vegetation zones，用椭圆区域生成树群，而不是手工沿 routeFraction 撒点。
+
+### vegetation zones
+
+当前定义 15 个区域：
+
+- 大佛背后北侧山体。
+- 大佛西侧山坡。
+- 大佛东侧山坡。
+- 佛前广场边缘低树。
+- 中轴西侧连续林带。
+- 中轴东侧连续林带。
+- 九龙灌浴西侧林地。
+- 九龙灌浴东侧边缘绿化。
+- 胜境广场西侧林带。
+- 胜境广场东侧林带。
+- 祥符禅寺边缘林带。
+- 梵宫边缘庭林。
+- 五印坛城水岸林缘。
+- 南门外侧低密缓冲。
+- 出口边缘收束林带。
+
+每个 zone 定义中心、半径、旋转、数量、资产池、scale / height / opacity 范围和 routeFraction 范围。生成使用固定 hash 与黄金角采样，不使用 `Math.random()`，刷新不会改变布局。
+
+### keepout 留白规则
+
+新增 8 个 keepout circle，并叠加主路线 corridor：
+
+- 南门中轴入口。
+- 胜境广场中心。
+- 九龙灌浴水景核心。
+- 佛前广场和大佛 marker 周边。
+- 祥符禅寺建筑主体。
+- 梵宫主体。
+- 五印坛城主体。
+- 南侧停车场主区域。
+
+这些规则避免树群压住主路线、当前位置、站点 marker、核心广场、建筑主体和停车场主区域。
+
+### 树群数量
+
+C 版默认 3D 园林实例从 67 个增加到 187 个。
+
+类型分布：
+
+- 松树 `pine_cluster`：35。
+- 针叶树 `bamboo_grove`：30。
+- 阔叶树 `mixed_grove`：42。
+- 林缘 `forest_edge`：34。
+- 灌木 `shrub_mass`：31。
+- 低矮山石 `rock_cluster`：10。
+- 竖向山石 `stone_mass`：5。
+
+### 材质和色调处理
+
+本阶段复制 Kenney Nature Kit GLB 并生成 `_sage.glb` 派生版本，仅修改 GLB JSON 材质：
+
+- 叶子 / 草：深青绿、灰绿、墨绿。
+- 树干：低饱和灰褐色。
+- 山石 / 土色：灰米色、青灰色。
+
+默认 C 版 assetUrl 已切换到这些 `_sage.glb`，目标是减少黑色占位感和过亮卡通感。
+
+### 显现逻辑
+
+继续保留“整体常显 + 当前唤醒”：
+
+- 所有 `visible=true` 树群始终创建。
+- 未到区域低透明、略小 scale。
+- 当前进度附近提高透明度并略微放大。
+- 已经过区域保持可见。
+- 偏航 / 重规划时只轻微降低低优先级树群，不隐藏主林带。
+
+如果腾讯 `GLTFModel` 支持 `opacity` 或 `setOpacity`，会应用透明度；不支持时仍能通过区域密度和 scale 表现山林结构。
+
+### debugGarden
+
+`/map-3d-guide-c?debugGarden=1` 继续可用：
+
+- 支持 lat/lng、scale、height、yaw、opacity、visible、priority、routeFraction 调整。
+- localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v5-aerial-zones`，避免旧点状配置覆盖新布局。
+- “恢复默认”会回到航拍参考树群布局。
+- 复制 TS 配置仍可用。
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 相机模式保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 浏览器实测 187 个 GLTFModel 在目标机器上的性能。
+2. 如果帧率下降，按 camera distance 或 route progress 做 zone 级加载。
+3. 用 `debugGarden=1` 继续校准大佛背后、中轴林带、梵宫和坛城边缘的高度与密度。
+4. 后续仍只在树群足够稳定后，再考虑恢复桥、院墙、香炉、法轮、莲台等复杂资产。

@@ -270,3 +270,89 @@ C 版通过 `routeFraction` 控制显现顺序：
 `lingshan-map-3d-guide-garden-assets-v4-dense-grove`
 
 如果浏览器仍显示旧 19 点配置，应在 `/map-3d-guide-c?debugGarden=1` 中点击“恢复默认”，切回高密度树群配置。调试面板新增 `opacity` 字段，复制 TS 配置和调试摘要仍可用。
+
+## 12. 航拍参考 vegetation zones 重构
+
+本轮进一步将 C 版从“沿路线撒点”重构为“区域化林带布局”。
+
+### 区域生成
+
+`src/data/lingshanMap3DGardenAssets.ts` 新增 deterministic vegetation zones。每个 zone 使用椭圆区域描述：
+
+- 中心经纬度。
+- 长短轴半径。
+- 旋转角。
+- 目标实例数量。
+- 资产池。
+- scale / height / opacity 范围。
+- routeFraction 范围。
+
+生成逻辑使用固定 hash 和黄金角采样，不使用 `Math.random()`，因此刷新页面不会改变树群位置。
+
+### 区域清单
+
+当前定义 15 个 vegetation zones：
+
+- 大佛背后北侧山体。
+- 大佛西侧山坡。
+- 大佛东侧山坡。
+- 佛前广场边缘低树。
+- 中轴西侧连续林带。
+- 中轴东侧连续林带。
+- 九龙灌浴西侧林地。
+- 九龙灌浴东侧边缘绿化。
+- 胜境广场西侧林带。
+- 胜境广场东侧林带。
+- 祥符禅寺边缘林带。
+- 梵宫边缘庭林。
+- 五印坛城水岸林缘。
+- 南门外侧低密缓冲。
+- 出口边缘收束林带。
+
+默认实例数量为 187 个，仍在移动端需要继续观察性能。
+
+### 留白规则
+
+新增 keepout 规则：
+
+- 主路线近距离 corridor。
+- 南门中轴入口。
+- 胜境广场中心。
+- 九龙灌浴水景核心。
+- 佛前广场和大佛 marker 周边。
+- 祥符禅寺建筑主体。
+- 梵宫主体。
+- 五印坛城主体。
+- 南侧停车场主区域。
+
+这些 keepout 不追求厘米级精度，目标是避免树群压住路线、POI、广场、建筑和停车场主体。
+
+### 色调处理
+
+本轮新增 Kenney Nature Kit 的 `_sage.glb` 派生文件，仅修改 GLB 材质 `baseColorFactor`：
+
+- 叶子 / 草：深青绿、灰绿、墨绿。
+- 树干：低饱和灰褐色。
+- 山石 / 土色：灰米色、青灰色。
+
+C 版默认 assetUrl 已切换到 `_sage.glb` 文件，降低黑色占位感和过亮卡通感。
+
+### 显现逻辑
+
+显现逻辑继续使用“整体常显 + 当前唤醒”：
+
+- 所有树群默认常显。
+- 未到区域低透明和略小 scale。
+- 当前区域提高透明度并放大。
+- 已经过区域保持可见。
+- 偏航 / 重规划时低优先级树群略降透明，但主林带不消失。
+
+如果腾讯 `GLTFModel` 支持 `opacity` 或 `setOpacity`，会应用透明度；如果运行时不支持，则至少保留位置、scale 和高密度区域布局。
+
+### debugGarden
+
+localStorage key 升级为：
+
+`lingshan-map-3d-guide-garden-assets-v5-aerial-zones`
+
+如果仍显示旧点状树群，应点击“恢复默认”回到航拍参考树群布局。复制 TS 配置仍可用。

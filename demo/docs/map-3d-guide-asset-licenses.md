@@ -192,3 +192,28 @@
 - 本阶段没有提交 Quaternius 资产。Quaternius Stylized Nature MegaKit 仍是后续优先候选，但本阶段没有取得可稳定自动下载并逐项检查的正式 GLB 包，因此不强行接入。
 - 本阶段没有接入桥、院墙、香炉、法轮、莲台、亭子、寺庙屋顶等复杂非树资产。
 - 如果后续对 Kenney GLB 做材质重调、压缩或组合成树群 GLB，需要在本文件中追加派生文件记录。
+
+## 11. 阶段七十六 Kenney Nature Kit 派生青绿材质资产
+
+阶段七十六为 `/map-3d-guide-c` 复制并改色 Kenney Nature Kit GLB，生成 `_sage.glb` 派生版本，用于替换原始偏亮 / 偏黑的通用材质。原始许可证仍为 CC0。
+
+材质处理：
+
+- 叶子 / 草：改为深青绿、灰绿、墨绿。
+- 树干：改为低饱和灰褐色。
+- 山石 / 土色：改为灰米色、青灰色。
+- 未改模型几何、动画、UV 或贴图；仅修改 GLB JSON 材质 `baseColorFactor`。
+
+派生文件：
+
+| 文件 | 原文件 | 来源 URL | 作者 / 项目 | 原许可证 | 允许商用 | 需要署名 | 修改内容 | 用途 | 使用范围 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_tall_a_sage.glb` | `kenney_tree_pine_tall_a.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 叶子改深青绿，树干改灰褐 | 松树 / 中轴林带 / 大佛周边 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_pine_round_c_sage.glb` | `kenney_tree_pine_round_c.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 叶子改深青绿，树干改灰褐 | 针叶树 / 林缘 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_tree_default_dark_sage.glb` | `kenney_tree_default_dark.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 叶子改墨绿，树干改灰褐 | 阔叶树 / 山林背景 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_detailed_sage.glb` | `kenney_bush_detailed.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 灌木改灰绿 | 低灌木 / 广场边缘 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_bush_large_sage.glb` | `kenney_bush_large.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 灌木改灰绿 | 大灌木候选 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_large_c_sage.glb` | `kenney_rock_large_c.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 山石改灰米 / 青灰，草面改灰绿 | 低矮山石 | C |
+| `public/assets/map-3d-guide/glb-garden/vendor/kenney_rock_tall_h_sage.glb` | `kenney_rock_tall_h.glb` | https://kenney.nl/assets/nature-kit | Kenney / Nature Kit | CC0 | 是 | 否 | 竖石改灰米 / 青灰，草面改灰绿 | 竖向山石 | C |
+
+说明：这些派生文件仍来自 Kenney CC0 资产，可商用且不强制署名。后续如果进一步压缩、合并或重新导出，需要继续追加记录。
