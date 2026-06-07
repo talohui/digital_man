@@ -59,31 +59,37 @@ C 版改用 GLB / 低模 3D 园林资产，目标是更接近沉稳园林沙盘�
 - 重复树群、山石、石阶等优先实例化或复用轻量模型。
 - 25MB 级 AI 直出模型不应默认首屏加载。
 
-## 4. 本阶段资产选择
+## 4. 资产选择更新：树群 / 山林版
 
-本阶段没有直接下载第三方 GLB。原因：
+第一版 C 原型曾使用项目自制的桥、院墙、香炉、法轮、莲台、石阶等低模 fallback。人工观察后确认这些非树类资产一旦摆放不准确，会比树群更容易显假，且黑色 / 粗糙占位感会破坏“沉稳 3D 园林沙盘”的目标。
+
+因此当前 C 版先收敛为“树群 / 山林氛围”版本：
+
+- 暂停显示桥、院墙、香炉、法轮、莲台、石阶等非树资产。
+- 不再把非树符号作为主视觉。
+- 少量山林 / 灌木 / 竹影 / 松群负责建立空间边界。
+- 后续只有在拿到更准确位置、尺寸和风格统一的正式模型后，再恢复桥、院墙、香炉等复杂资产。
+
+本阶段仍没有直接下载第三方 GLB。原因：
 
 - 需要避免把许可证、署名、体积和风格不稳定的素材直接放入 demo。
-- 第一版目标是先打通腾讯地图 GLTFModel 多实例、地图坐标锚定、debugGarden 和配置导出。
-- 项目自制低模 fallback 资产更可控、体积小、风格统一。
+- 公开调研确认 Quaternius / Poly Pizza、Kenney / Eclair GLB 包等 CC0 资源可作为后续候选，但真实接入前仍需要挑选具体模型、确认大小、压缩和视觉统一。
+- 当前目标是先修复 C 版视觉方向，让页面不再出现黑色 debug 感桥、墙、香炉和法轮。
+- 项目自制树群 fallback 资产更可控、体积小、风格统一，可作为正式外部资产接入前的安全版本。
 
-当前使用的 9 个项目自制低模 GLB：
+当前使用 5 个项目自制树群 / 山林低模 GLB：
 
-- `garden_pine_cluster.glb`
-- `garden_rock_cluster.glb`
-- `garden_stone_steps.glb`
-- `garden_courtyard_wall.glb`
-- `garden_arch_bridge.glb`
-- `garden_temple_roof.glb`
-- `garden_lotus_pedestal.glb`
-- `garden_dharma_wheel.glb`
-- `garden_incense_burner.glb`
+- `ink_pine_cluster_v2.glb`
+- `ink_mixed_grove_v2.glb`
+- `ink_bamboo_grove_v2.glb`
+- `ink_shrub_mass_v2.glb`
+- `ink_forest_edge_v2.glb`
 
 文件放在：
 
-`public/assets/map-3d-guide/glb-garden/`
+`public/assets/map-3d-guide/glb-garden/trees/`
 
-它们是项目自制低模 fallback，不是第三方素材。后续如果替换为外部资产，必须先更新许可证记录。
+它们是项目自制低模 fallback，不是第三方素材。后续如果替换为 Kenney、Quaternius、Poly Haven 等外部资产，必须先更新许可证记录。
 
 ## 5. 路线铺陈方式
 
@@ -103,17 +109,13 @@ C 版改用 GLB / 低模 3D 园林资产，目标是更接近沉稳园林沙盘�
 - `licenseId`
 - `note`
 
-资产沿历史文化路线布置：
+资产不再简单沿路线均匀撒点，而是参考灵山胜境俯拍结构布置：
 
-- 南门：院墙、石阶。
-- 照壁 / 胜境广场：松群、山石。
-- 水边路段：小桥。
-- 九龙灌浴：树群。
-- 灵山大佛：石阶、莲台、山石。
-- 祥符禅寺：香炉、寺庙屋顶。
-- 梵宫：庭墙、庭树。
-- 五印坛城：法轮、莲台。
-- 出口：低调山石。
+- 南门到大佛形成中轴线，两侧以林缘和松群包裹。
+- 胜境广场、九龙灌浴、佛前广场等开阔节点保留留白，不把树堆到广场中心。
+- 灵山大佛周边和背后布置高密度山林背景，但不覆盖大佛 marker 和 GLB 模型。
+- 祥符禅寺、梵宫、五印坛城周边只在建筑边缘放适量树群，不压建筑主体。
+- 道路中心、路线主线、当前站点、下一站和重规划线保持无遮挡。
 
 所有资产都使用真实经纬度，运行时通过 `TMap.model.GLTFModel` 绑定到腾讯地图。
 
@@ -146,7 +148,7 @@ C 版通过 `routeFraction` 控制显现顺序：
 
 调试结果会保存到：
 
-`localStorage.lingshan-map-3d-guide-garden-assets-v1`
+`localStorage.lingshan-map-3d-guide-garden-assets-v2`
 
 面板支持：
 
@@ -156,10 +158,11 @@ C 版通过 `routeFraction` 控制显现顺序：
 
 ## 8. 当前限制
 
-- 当前 GLB 是项目自制低模 fallback，重点是验证空间组织，不是最终美术品质。
+- 当前 GLB 是项目自制树群低模 fallback，重点是验证空间组织，不是最终美术品质。
 - 透明度 / 墨迹淡入尚未做材质级控制。
-- 资产数量为克制版，后续可按性能逐步增加。
+- 资产数量为树群版，后续可按性能逐步增加或替换为正式开源树木资产。
 - 外部 GLB 资产接入前必须完成许可证、署名、体积和风格审核。
+- 桥、院墙、香炉、法轮、莲台、石阶等复杂非树资产暂不显示。
 - `/map-3d-guide-c` 不改变普通 `/map-3d-guide`、A/B 原型、`/map` 或 `/scenic-3d-map`。
 
 ## 9. 后续建议

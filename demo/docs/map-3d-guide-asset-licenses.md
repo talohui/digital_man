@@ -94,7 +94,11 @@
 
 阶段 C 没有直接下载第三方 GLB 资产。当前使用的是项目自制低模 fallback GLB，目标是先验证腾讯地图 `TMap.model.GLTFModel` 多实例、经纬度锚定和 debugGarden 调参流程。
 
+### 8.1 第一版非树 fallback 资产
+
 这些资产不来自外部素材站，不需要第三方署名。后续如果替换为 Kenney / Quaternius / Poly Haven / Sketchfab / OpenGameArt 等外部资产，必须先新增逐项许可证记录。
+
+注意：这些第一版非树资产在当前 `/map-3d-guide-c` 中已经暂停显示。原因是桥、院墙、香炉、法轮、莲台、石阶等符号如果位置不准确，会比树群更像 debug 占位。文件可以暂留仓库，但不再进入 C 版默认资产配置。
 
 | 文件 | 来源 URL | 作者 / 项目 | 许可证 | 允许商用 | 需要署名 | 用途 | 使用范围 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -107,6 +111,18 @@
 | `public/assets/map-3d-guide/glb-garden/garden_lotus_pedestal.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 佛前莲台 / 坛城石台 | C |
 | `public/assets/map-3d-guide/glb-garden/garden_dharma_wheel.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 五印坛城法轮符号 | C |
 | `public/assets/map-3d-guide/glb-garden/garden_incense_burner.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 祥符禅寺香炉 | C |
+
+### 8.2 当前树群 / 山林 fallback 资产
+
+当前 `/map-3d-guide-c` 使用以下树群、竹林、灌木和林缘资产。它们仍为项目自制低模 fallback，不来自外部素材站，不需要署名。
+
+| 文件 | 来源 URL | 作者 / 项目 | 许可证 | 允许商用 | 需要署名 | 用途 | 使用范围 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `public/assets/map-3d-guide/glb-garden/trees/ink_pine_cluster_v2.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 松群 / 中轴两侧林带 | C |
+| `public/assets/map-3d-guide/glb-garden/trees/ink_mixed_grove_v2.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 混合树群 / 大佛背后山林 | C |
+| `public/assets/map-3d-guide/glb-garden/trees/ink_bamboo_grove_v2.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 竹林 / 寺院和中轴边缘 | C |
+| `public/assets/map-3d-guide/glb-garden/trees/ink_shrub_mass_v2.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 低矮灌木 / 广场边缘留白 | C |
+| `public/assets/map-3d-guide/glb-garden/trees/ink_forest_edge_v2.glb` | 项目自制 | 灵山 demo 项目 | 项目自有低模 fallback | 是 | 否 | 林缘 / 山体包围感 | C |
 
 ## 9. 外部 3D 资产候选与拒绝规则
 
@@ -136,3 +152,10 @@
 - 下载日期。
 - 是否改材质 / 压缩 / 降面。
 - 是否需要公开署名。
+
+本阶段具体核验到的可用候选：
+
+- Kenney Nature Kit：`https://kenney.nl/assets/nature-kit`，页面标注 Creative Commons CC0，330 个 3D nature/tree/rock/foliage 文件。适合后续挑选低模树、灌木和石块。
+- Eclair Assets 的 Kenney Nature Kit GLB convenience pack：`https://eclair-assets.itch.io/nature-kit-glb-pack-329-free-cc0-3d-models`，页面说明基于 Kenney CC0 Nature Kit，包含 329 个 GLB，并保留原始 Kenney license text。适合后续快速试接，但仍需下载后逐个筛选。
+- Quaternius / Poly Pizza Stylized Nature MegaKit：`https://poly.pizza/bundle/Stylized-Nature-MegaKit-T34GZFA0fm`，页面标注 Public Domain (CC0)，含树、松、草、灌木、石块等。适合后续替换树群 fallback。
+- Quaternius Stylized Nature MegaKit 官方页：`https://quaternius.com/packs/stylizednaturemegakit.html`，页面标注 CC0，并说明可用于个人、教育和商业项目。

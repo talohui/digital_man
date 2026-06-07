@@ -8172,3 +8172,152 @@ mapStyleId: 'style1'
 ### npm run build 结果
 
 `npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+## 阶段七十二：C 版 3D 园林资产树群重做
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+重做 `/map-3d-guide-c` 的 3D 园林资产层，将上一版桥、院墙、香炉、法轮、莲台、石阶等粗糙 fallback 暂时退出默认展示，先做更稳的“树群 / 山林氛围”版本。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关代码和文档。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b`。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 routeGeometry / roadNetwork 原始数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不执行 push。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `public/assets/map-3d-guide/glb-garden/trees/ink_pine_cluster_v2.glb`
+- `public/assets/map-3d-guide/glb-garden/trees/ink_mixed_grove_v2.glb`
+- `public/assets/map-3d-guide/glb-garden/trees/ink_bamboo_grove_v2.glb`
+- `public/assets/map-3d-guide/glb-garden/trees/ink_shrub_mass_v2.glb`
+- `public/assets/map-3d-guide/glb-garden/trees/ink_forest_edge_v2.glb`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-guide-asset-licenses.md`
+- `docs/map-3d-development-log.md`
+
+### 资产搜索结论
+
+联网调研确认以下方向可作为后续正式树群资产候选：
+
+- Kenney Nature Kit：CC0，含树、山石、灌木等 3D nature assets。
+- Eclair Assets 的 Kenney Nature Kit GLB convenience pack：基于 Kenney CC0 Nature Kit，提供 GLB 包装，适合后续快速试接。
+- Quaternius / Poly Pizza Stylized Nature MegaKit：Public Domain / CC0，含树、松、草、灌木和石块。
+- Quaternius 官方 Stylized Nature MegaKit：页面说明 CC0，可用于个人、教育和商业项目。
+
+本阶段没有直接下载外部 GLB，因为仍需要逐项挑选、检查大小、确认风格和压缩策略。为避免把不稳定素材直接放入 demo，当前采用项目自制树群 fallback GLB。
+
+### 许可证审核结论
+
+本阶段实际新增的 5 个树群 GLB 均为项目自制低模 fallback，许可证记为项目自有，可商用，无需署名。
+
+后续外部资产只允许：
+
+- CC0 / Public Domain。
+- MIT / Apache-2.0。
+- 明确允许商用和改编的 CC BY。
+
+继续拒绝：
+
+- NC / ND / SA。
+- Personal use only。
+- 许可证不明。
+- 权利链不清的 AI 生成资产。
+- 过大、过卡、过卡通、过现代或过西式的模型。
+
+### 俯拍布局原则
+
+根据用户提供的灵山胜境俯拍结构，本阶段不再沿路线均匀撒点，而是按真实空间关系布置树群：
+
+- 南门到大佛中轴两侧形成林带。
+- 胜境广场、九龙灌浴、佛前广场等开阔空间保留留白。
+- 灵山大佛周边和背后形成高密度山林背景。
+- 祥符禅寺、梵宫、五印坛城只在建筑边缘和水岸边缘布置适量树群。
+- 道路中心、路线主线、建筑主体、当前站点、下一站和重规划线不被树遮挡。
+
+### 性能审核结论
+
+新增 5 个树群 GLB 总体积约 189KB，采用少量模型多实例复用：
+
+- 松群。
+- 混合树群。
+- 竹林。
+- 灌木团。
+- 林缘。
+
+`src/data/lingshanMap3DGardenAssets.ts` 当前配置 19 个实例。普通模式仍按路线进度逐步显现；`debugGarden=1` 才显示全部，避免首屏一次性堆满模型。
+
+### 禁用的旧资产
+
+以下第一版非树资产不再进入 C 版默认配置：
+
+- 桥。
+- 院墙。
+- 香炉。
+- 法轮。
+- 莲台。
+- 石阶。
+- 粗糙山石作为主视觉。
+
+文件可以暂留仓库作为历史 fallback，但不再被 `/map-3d-guide-c` 的默认资产数据引用。
+
+### debugGarden 更新
+
+`/map-3d-guide-c?debugGarden=1` 保持可用：
+
+- 调整 lat / lng。
+- 调整 scale。
+- 调整 height。
+- 调整 yaw。
+- 设置 visible。
+- 设置 priority。
+- 设置 routeFraction。
+- 复制 TS 配置片段。
+
+localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v2`，避免用户浏览器继续恢复上一版桥、院墙、香炉等旧配置。
+
+### 对 /map-3d-guide-c 的影响
+
+C 版现在更偏“树群 / 山林氛围”而不是“符号模型集合”。模型仍绑定腾讯地图经纬度，跟随地图缩放、旋转和平移。
+
+### 对其它页面的影响
+
+本阶段不修改：
+
+- `/map-3d-guide`
+- `/map-3d-guide-a`
+- `/map-3d-guide-b`
+- `/map`
+- `/map?debugGltfModel=1`
+- `/scenic-3d-map`
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 从 Kenney / Quaternius CC0 资源中挑选 2-3 个正式树模型进行替换验证。
+2. 用浏览器截图和俯拍图逐点校准树群经纬度。
+3. 后续只在位置、比例、文化语境都确认后，再恢复桥、院墙、香炉、法轮、莲台等非树类资产。
