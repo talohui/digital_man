@@ -8686,3 +8686,103 @@ C 版默认 3D 园林实例从 67 个增加到 187 个。
 2. 如果帧率下降，按 camera distance 或 route progress 做 zone 级加载。
 3. 用 `debugGarden=1` 继续校准大佛背后、中轴林带、梵宫和坛城边缘的高度与密度。
 4. 后续仍只在树群足够稳定后，再考虑恢复桥、院墙、香炉、法轮、莲台等复杂资产。
+
+## 阶段七十六：C 版树群人工校准与配置固化
+
+日期：2026-06-07
+
+### 本次目标
+
+继续推进 `/map-3d-guide-c` 作为 3D 园林沙盘主线，对上一阶段的 vegetation zones 做人工校准和调试工具增强。目标是让树群更贴近用户提供的航拍结构：大佛背后形成山林面，中轴两侧形成连续林带，建筑边缘有绿化，广场、路线和建筑主体保持留白。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关代码、树群配置和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork` 原始数据。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+- 不恢复桥、院墙、香炉、法轮、莲台等复杂非树资产。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### C 版成为主线
+
+用户确认 C 版方向明显变好，因此本阶段继续在 C 版上做校准。A / B 贴片原型暂不继续作为主线，仍保留可打开和回归验证，但不再投入新的视觉配置。
+
+### 默认树群配置调整
+
+默认配置仍采用 deterministic vegetation zones，不依赖浏览器 localStorage。主要调整：
+
+- 大佛背后北侧山体实例从 25 增加到 31，并提高 scale / height，强化山林背景面。
+- 大佛西侧、东侧山坡分别增加到 16，补齐大佛两翼密林。
+- 中轴西侧林带增加到 20，中轴东侧林带增加到 17，让主轴两侧更连续。
+- 祥符禅寺、梵宫、五印坛城边缘小幅加密，仍通过 keepout 避开建筑主体。
+- 南门和出口缓冲区减少到 4 + 4，避免停车场、入口道路和出口区域过密。
+
+树群实例数量从 187 个固化为 199 个。
+
+### 留白规则调整
+
+本阶段扩大 keepout，并将主路线 corridor 从 23m 加宽到 29m：
+
+- 胜境广场中心留白更大。
+- 九龙灌浴水景核心留白更大。
+- 佛前广场和大佛 marker 周边留白更大。
+- 祥符禅寺、梵宫、五印坛城建筑主体留白更大。
+- 南门、停车场、主路线、站点 marker 周边继续避免树群压住导览主体。
+
+### debugGarden 增强能力
+
+`/map-3d-guide-c?debugGarden=1` 新增：
+
+- 按 zone 筛选。
+- 按 kind 筛选。
+- 按 priority 筛选。
+- 按 visible 筛选。
+- 选中当前筛选首项。
+- 批量显示 / 隐藏当前筛选资产。
+- 批量缩放当前筛选资产。
+- 批量调整 height。
+- 批量调整 opacity。
+- 批量微调 lat / lng 偏移。
+- 保留单点 lat / lng、scale、height、yaw、opacity、visible、priority、routeFraction 调参。
+- 保留复制 TS 配置片段和复制调试摘要。
+
+localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v6-calibrated-aerial-zones`，避免旧配置污染新的 199 点默认布局。调试面板仍保留“恢复默认”，可回到当前航拍参考树群布局。
+
+### 配置固化
+
+本阶段没有把正确布局放在浏览器 localStorage 中，而是固化在 `src/data/lingshanMap3DGardenAssets.ts` 的 zone 参数里。默认打开 `/map-3d-guide-c` 即可得到稳定可复现的 199 个实例。
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 相机模式保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 在浏览器中用 `debugGarden=1` 做小范围人工点位校准。
+2. 如果某些树仍遮挡路线或站点，可先用 zone 筛选批量微移，再复制 TS 配置固化。
+3. 后续如需继续增强，可按 zone 做距离相机的加载策略，降低 199 个 GLTFModel 的运行压力。

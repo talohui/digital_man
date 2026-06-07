@@ -356,3 +356,59 @@ localStorage key 升级为：
 `lingshan-map-3d-guide-garden-assets-v5-aerial-zones`
 
 如果仍显示旧点状树群，应点击“恢复默认”回到航拍参考树群布局。复制 TS 配置仍可用。
+
+## 13. 人工校准与配置固化
+
+阶段七十六继续把 C 版作为主线推进，A / B 贴片原型暂不继续。目标不是增加新功能，而是让默认树群配置更接近航拍结构，并让调试工具能支持人工批量校准。
+
+### 默认配置校准
+
+默认配置仍使用 deterministic vegetation zones，但参数已进一步校准：
+
+- 大佛背后北侧山体从 25 个实例增加到 31 个实例，并提高 scale / height，使北侧山林形成稳定背景面。
+- 大佛东西两侧山坡各增加到 16 个实例，补足大佛两翼林面。
+- 中轴西侧林带增加到 20 个实例，中轴东侧林带增加到 17 个实例，让大佛到九龙灌浴之间更连续。
+- 祥符禅寺、梵宫、五印坛城边缘分别小幅加密，建筑主体仍通过 keepout 留白。
+- 南门和出口缓冲区减少到 4 + 4 个实例，避免入口、停车和道路区域过密。
+
+默认实例数量从 187 个固化为 199 个，仍保持在第一版性能可控范围内。
+
+### 留白进一步收紧
+
+本阶段扩大了部分 keepout：
+
+- 胜境广场中心。
+- 九龙灌浴水景核心。
+- 佛前广场和大佛 marker 周边。
+- 祥符禅寺建筑主体。
+- 梵宫主体。
+- 五印坛城主体。
+
+主路线 corridor 从 23m 加宽到 29m。这样树群仍形成林带，但不压住主金线、当前位置、下一站、核心广场和建筑主体。
+
+### debugGarden 批量校准
+
+`/map-3d-guide-c?debugGarden=1` 增强为可用于人工校准的面板：
+
+- 按 zone 筛选。
+- 按 kind 筛选。
+- 按 priority 筛选。
+- 按 visible 筛选。
+- 可选中当前筛选结果首项。
+- 可批量显示 / 隐藏当前筛选资产。
+- 可批量缩放当前筛选资产。
+- 可批量调整 height。
+- 可批量调整 opacity。
+- 可批量微调 lat / lng 偏移。
+- 保留单点 lat / lng、scale、height、yaw、opacity、visible、priority、routeFraction 调整。
+- 保留复制 TS 配置和复制调试摘要。
+
+localStorage key 升级为：
+
+`lingshan-map-3d-guide-garden-assets-v6-calibrated-aerial-zones`
+
+如果浏览器保存过旧配置，默认不会继续覆盖本阶段固化后的 199 点校准布局。调试面板仍提供“恢复默认”，可回到当前航拍参考树群布局。
+
+### 固化策略
+
+本阶段没有依赖用户浏览器 localStorage 才能看到正确效果。默认树群配置已经固化在 `src/data/lingshanMap3DGardenAssets.ts` 的 zone 参数中，刷新页面后仍会得到稳定、可复现的 199 个实例。

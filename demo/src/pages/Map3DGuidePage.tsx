@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
 import {
   getDefaultMap3DGardenAssets,
+  lingshanMap3DGardenVegetationZones,
   type LingshanMap3DGardenAsset
 } from '../data/lingshanMap3DGardenAssets'
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
@@ -83,6 +84,21 @@ type GardenModelReport = {
   errorIds: string[]
 }
 
+type GardenAssetFilterState = {
+  zoneId: string
+  kind: string
+  priority: string
+  visible: string
+}
+
+type GardenBatchAdjustState = {
+  scaleMultiplier: number
+  heightDelta: number
+  opacityDelta: number
+  latOffset: number
+  lngOffset: number
+}
+
 type Map3DGuideVisualVariantConfig = {
   id: Map3DGuideVariant
   className: string
@@ -116,7 +132,20 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v5-aerial-zones'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v6-calibrated-aerial-zones'
+const defaultGardenFilters: GardenAssetFilterState = {
+  zoneId: 'all',
+  kind: 'all',
+  priority: 'all',
+  visible: 'all'
+}
+const defaultGardenBatchAdjust: GardenBatchAdjustState = {
+  scaleMultiplier: 1.08,
+  heightDelta: 0,
+  opacityDelta: 0.05,
+  latOffset: 0,
+  lngOffset: 0
+}
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
@@ -273,6 +302,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
   const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
   const [selectedGardenId, setSelectedGardenId] = useState(() => loadStoredGardenAssets(visualVariant.id)[0]?.id ?? '')
+  const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
+  const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
   const [gardenModelReport, setGardenModelReport] = useState<GardenModelReport>({
     createdCount: 0,
@@ -354,6 +385,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
   const selectedGardenAsset = gardenAssets.find((asset) => asset.id === selectedGardenId) ?? gardenAssets[0]
+  const filteredGardenAssets = useMemo(
+    () => gardenAssets.filter((asset) => matchesGardenFilters(asset, gardenFilters)),
+    [gardenAssets, gardenFilters]
+  )
+  const gardenZoneCountText = `${lingshanMap3DGardenVegetationZones.length} 个 vegetation zones`
 
   useEffect(() => {
     let cancelled = false
@@ -1190,10 +1226,80 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     )
   }
 
+  const updateGardenFilter = (patch: Partial<GardenAssetFilterState>) => {
+    setGardenFilters((current) => ({ ...current, ...patch }))
+  }
+
+  const updateGardenBatchAdjust = (patch: Partial<GardenBatchAdjustState>) => {
+    setGardenBatchAdjust((current) => ({ ...current, ...patch }))
+  }
+
+  const updateFilteredGardenAssets = (mapper: (asset: LingshanMap3DGardenAsset) => LingshanMap3DGardenAsset) => {
+    const filteredIds = new Set(filteredGardenAssets.map((asset) => asset.id))
+    if (!filteredIds.size) {
+      setGardenCopyStatus('当前筛选没有资产可调整')
+      return
+    }
+
+    setGardenAssets((items) => items.map((asset) => (filteredIds.has(asset.id) ? mapper(asset) : asset)))
+  }
+
+  const selectFirstFilteredGardenAsset = () => {
+    if (!filteredGardenAssets[0]) {
+      setGardenCopyStatus('当前筛选没有资产')
+      return
+    }
+
+    setSelectedGardenId(filteredGardenAssets[0].id)
+    setGardenCopyStatus(`已选中筛选结果首项：${filteredGardenAssets[0].name}`)
+  }
+
+  const applyFilteredGardenVisibility = (visible: boolean) => {
+    updateFilteredGardenAssets((asset) => ({ ...asset, visible }))
+    setGardenCopyStatus(visible ? '已显示当前筛选资产' : '已隐藏当前筛选资产')
+  }
+
+  const applyFilteredGardenScale = () => {
+    updateFilteredGardenAssets((asset) => ({
+      ...asset,
+      scale: clampNumber(Math.round(asset.scale * gardenBatchAdjust.scaleMultiplier), 1, 2400)
+    }))
+    setGardenCopyStatus(`已按 ${gardenBatchAdjust.scaleMultiplier} 倍缩放当前筛选资产`)
+  }
+
+  const applyFilteredGardenHeight = () => {
+    updateFilteredGardenAssets((asset) => ({
+      ...asset,
+      height: roundNumber(asset.height + gardenBatchAdjust.heightDelta, 2)
+    }))
+    setGardenCopyStatus(`已调整当前筛选资产 height：${gardenBatchAdjust.heightDelta}`)
+  }
+
+  const applyFilteredGardenOpacity = () => {
+    updateFilteredGardenAssets((asset) => ({
+      ...asset,
+      opacity: clampNumber(roundNumber(asset.opacity + gardenBatchAdjust.opacityDelta, 2), 0, 1)
+    }))
+    setGardenCopyStatus(`已调整当前筛选资产 opacity：${gardenBatchAdjust.opacityDelta}`)
+  }
+
+  const applyFilteredGardenOffset = () => {
+    updateFilteredGardenAssets((asset) => ({
+      ...asset,
+      location: {
+        lat: roundNumber(asset.location.lat + gardenBatchAdjust.latOffset, 6),
+        lng: roundNumber(asset.location.lng + gardenBatchAdjust.lngOffset, 6)
+      }
+    }))
+    setGardenCopyStatus(`已平移当前筛选资产：lat ${gardenBatchAdjust.latOffset}, lng ${gardenBatchAdjust.lngOffset}`)
+  }
+
   const resetGardenConfig = () => {
     const defaults = getDefaultMap3DGardenAssets()
     setGardenAssets(defaults)
     setSelectedGardenId(defaults[0]?.id ?? '')
+    setGardenFilters(defaultGardenFilters)
+    setGardenBatchAdjust(defaultGardenBatchAdjust)
     window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
     setGardenCopyStatus('已恢复默认航拍参考树群布局')
   }
@@ -1410,12 +1516,85 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <div>
               <strong>3D 园林资产调试</strong>
               <span>
-                prototype-c · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
+                prototype-c · {gardenZoneCountText} · 筛选 {filteredGardenAssets.length}/{gardenAssets.length} · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
               </span>
             </div>
             <button type="button" onClick={copyGardenConfig}>
               复制 TS 配置
             </button>
+          </div>
+
+          <div className="map-3d-guide-garden-debug__subsection">
+            <strong>筛选资产</strong>
+            <div className="map-3d-guide-decor-debug__grid">
+              <label>
+                zone
+                <select
+                  value={gardenFilters.zoneId}
+                  onChange={(event) => updateGardenFilter({ zoneId: event.target.value })}
+                >
+                  <option value="all">全部 zone</option>
+                  {lingshanMap3DGardenVegetationZones.map((zone) => (
+                    <option key={zone.id} value={zone.id}>
+                      {zone.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                kind
+                <select
+                  value={gardenFilters.kind}
+                  onChange={(event) => updateGardenFilter({ kind: event.target.value })}
+                >
+                  <option value="all">全部 kind</option>
+                  <option value="pine_cluster">pine_cluster</option>
+                  <option value="mixed_grove">mixed_grove</option>
+                  <option value="bamboo_grove">bamboo_grove</option>
+                  <option value="forest_edge">forest_edge</option>
+                  <option value="shrub_mass">shrub_mass</option>
+                  <option value="rock_cluster">rock_cluster</option>
+                  <option value="stone_mass">stone_mass</option>
+                </select>
+              </label>
+              <label>
+                priority
+                <select
+                  value={gardenFilters.priority}
+                  onChange={(event) => updateGardenFilter({ priority: event.target.value })}
+                >
+                  <option value="all">全部 priority</option>
+                  <option value="high">high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <label>
+                visible
+                <select
+                  value={gardenFilters.visible}
+                  onChange={(event) => updateGardenFilter({ visible: event.target.value })}
+                >
+                  <option value="all">全部 visible</option>
+                  <option value="true">visible=true</option>
+                  <option value="false">visible=false</option>
+                </select>
+              </label>
+            </div>
+            <div className="map-3d-guide-decor-debug__actions">
+              <button type="button" onClick={selectFirstFilteredGardenAsset}>
+                选中筛选首项
+              </button>
+              <button type="button" onClick={() => setGardenFilters(defaultGardenFilters)}>
+                清空筛选
+              </button>
+              <button type="button" onClick={() => applyFilteredGardenVisibility(true)}>
+                显示筛选资产
+              </button>
+              <button type="button" onClick={() => applyFilteredGardenVisibility(false)}>
+                隐藏筛选资产
+              </button>
+            </div>
           </div>
 
           <label>
@@ -1424,9 +1603,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               value={selectedGardenAsset?.id ?? ''}
               onChange={(event) => setSelectedGardenId(event.target.value)}
             >
-              {gardenAssets.map((asset) => (
+              {filteredGardenAssets.map((asset) => (
                 <option key={asset.id} value={asset.id}>
-                  {asset.name} · {asset.kind}
+                  {asset.name} · {asset.kind} · {getGardenAssetZoneId(asset)}
                 </option>
               ))}
             </select>
@@ -1539,8 +1718,83 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
                   <option value="low">low</option>
                 </select>
               </label>
+              <label>
+                zone
+                <input value={getGardenAssetZoneId(selectedGardenAsset)} readOnly />
+              </label>
             </div>
           ) : null}
+
+          <div className="map-3d-guide-garden-debug__subsection">
+            <strong>批量调整当前筛选资产</strong>
+            <div className="map-3d-guide-decor-debug__grid">
+              <label>
+                scale 乘数
+                <input
+                  type="number"
+                  min="0.1"
+                  max="5"
+                  step="0.01"
+                  value={gardenBatchAdjust.scaleMultiplier}
+                  onChange={(event) => updateGardenBatchAdjust({ scaleMultiplier: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                height 增量
+                <input
+                  type="number"
+                  min="-100"
+                  max="100"
+                  step="0.1"
+                  value={gardenBatchAdjust.heightDelta}
+                  onChange={(event) => updateGardenBatchAdjust({ heightDelta: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                opacity 增量
+                <input
+                  type="number"
+                  min="-1"
+                  max="1"
+                  step="0.01"
+                  value={gardenBatchAdjust.opacityDelta}
+                  onChange={(event) => updateGardenBatchAdjust({ opacityDelta: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                lat 偏移
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={gardenBatchAdjust.latOffset}
+                  onChange={(event) => updateGardenBatchAdjust({ latOffset: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                lng 偏移
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={gardenBatchAdjust.lngOffset}
+                  onChange={(event) => updateGardenBatchAdjust({ lngOffset: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+            <div className="map-3d-guide-decor-debug__actions">
+              <button type="button" onClick={applyFilteredGardenScale}>
+                应用缩放
+              </button>
+              <button type="button" onClick={applyFilteredGardenHeight}>
+                应用 height
+              </button>
+              <button type="button" onClick={applyFilteredGardenOpacity}>
+                应用 opacity
+              </button>
+              <button type="button" onClick={applyFilteredGardenOffset}>
+                应用经纬度偏移
+              </button>
+            </div>
+          </div>
 
           <div className="map-3d-guide-decor-debug__actions">
             <button type="button" onClick={copyGardenSummary}>
@@ -2003,6 +2257,44 @@ function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
   } catch {
     return defaults
   }
+}
+
+function getGardenAssetZoneId(asset: LingshanMap3DGardenAsset) {
+  if (asset.zoneId) {
+    return asset.zoneId
+  }
+
+  const match = asset.id.match(/^c-zone-(.*)-\d+$/)
+  return match?.[1] ?? 'manual'
+}
+
+function matchesGardenFilters(asset: LingshanMap3DGardenAsset, filters: GardenAssetFilterState) {
+  if (filters.zoneId !== 'all' && getGardenAssetZoneId(asset) !== filters.zoneId) {
+    return false
+  }
+
+  if (filters.kind !== 'all' && asset.kind !== filters.kind) {
+    return false
+  }
+
+  if (filters.priority !== 'all' && asset.priority !== filters.priority) {
+    return false
+  }
+
+  if (filters.visible !== 'all' && String(asset.visible) !== filters.visible) {
+    return false
+  }
+
+  return true
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function roundNumber(value: number, precision: number) {
+  const factor = 10 ** precision
+  return Math.round(value * factor) / factor
 }
 
 function loadStoredDecorOverlays(variant: Map3DGuideVariant = 'default') {
@@ -2970,6 +3262,14 @@ const map3DGuideCss = `
     linear-gradient(135deg, rgba(250, 247, 232, .96), rgba(229, 238, 224, .92));
 }
 
+.map-3d-guide-garden-debug__subsection {
+  margin: 12px 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .34);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
+}
+
 .map-3d-guide-decor-debug__header {
   display: flex;
   align-items: flex-start;
@@ -3040,6 +3340,7 @@ const map3DGuideCss = `
 
 .map-3d-guide-decor-debug__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }

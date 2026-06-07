@@ -13,6 +13,7 @@ export type Map3DGardenAssetPriority = 'low' | 'medium' | 'high'
 
 export type LingshanMap3DGardenAsset = {
   id: string
+  zoneId?: string
   kind: Map3DGardenAssetKind
   name: string
   assetUrl: string
@@ -90,10 +91,10 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 235,
     radiusY: 150,
     rotation: -8,
-    count: 25,
+    count: 31,
     routeFraction: [0.64, 0.74],
-    scale: [124, 188],
-    height: [8, 14],
+    scale: [132, 202],
+    height: [9, 16],
     opacity: [0.82, 0.98],
     priority: 'high',
     assetPool: denseTreePool,
@@ -106,9 +107,9 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 190,
     radiusY: 105,
     rotation: -22,
-    count: 14,
+    count: 16,
     routeFraction: [0.58, 0.72],
-    scale: [104, 162],
+    scale: [108, 168],
     height: [5, 10],
     opacity: [0.74, 0.94],
     priority: 'high',
@@ -122,9 +123,9 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 185,
     radiusY: 110,
     rotation: 18,
-    count: 14,
+    count: 16,
     routeFraction: [0.58, 0.73],
-    scale: [98, 154],
+    scale: [102, 164],
     height: [5, 10],
     opacity: [0.72, 0.92],
     priority: 'high',
@@ -155,9 +156,9 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 380,
     radiusY: 58,
     rotation: -28,
-    count: 18,
+    count: 20,
     routeFraction: [0.35, 0.62],
-    scale: [82, 138],
+    scale: [86, 144],
     height: [3, 7],
     opacity: [0.64, 0.9],
     priority: 'high',
@@ -171,9 +172,9 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 350,
     radiusY: 56,
     rotation: -28,
-    count: 16,
+    count: 17,
     routeFraction: [0.36, 0.62],
-    scale: [78, 132],
+    scale: [82, 138],
     height: [3, 7],
     opacity: [0.62, 0.88],
     priority: 'medium',
@@ -251,7 +252,7 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 170,
     radiusY: 88,
     rotation: 8,
-    count: 10,
+    count: 11,
     routeFraction: [0.68, 0.8],
     scale: [72, 128],
     height: [3, 6],
@@ -267,7 +268,7 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 205,
     radiusY: 105,
     rotation: -12,
-    count: 12,
+    count: 13,
     routeFraction: [0.78, 0.9],
     scale: [62, 126],
     height: [2, 6],
@@ -283,7 +284,7 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 175,
     radiusY: 95,
     rotation: 20,
-    count: 12,
+    count: 13,
     routeFraction: [0.84, 0.95],
     scale: [50, 112],
     height: [1, 5],
@@ -299,7 +300,7 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 170,
     radiusY: 72,
     rotation: 0,
-    count: 6,
+    count: 4,
     routeFraction: [0.01, 0.1],
     scale: [44, 86],
     height: [1, 3],
@@ -315,7 +316,7 @@ export const lingshanMap3DGardenVegetationZones: VegetationZone[] = [
     radiusX: 150,
     radiusY: 70,
     rotation: -4,
-    count: 6,
+    count: 4,
     routeFraction: [0.92, 0.99],
     scale: [48, 96],
     height: [1, 4],
@@ -351,37 +352,37 @@ export const lingshanMap3DGardenKeepouts: KeepoutCircle[] = [
   {
     id: 'shengjing-square-open',
     center: { lat: 31.42328, lng: 120.10152 },
-    radius: 78,
+    radius: 86,
     note: '胜境广场中心留白。'
   },
   {
     id: 'jiulong-water-open',
     center: { lat: 31.42455, lng: 120.10028 },
-    radius: 82,
+    radius: 92,
     note: '九龙灌浴水景和表演核心留白。'
   },
   {
     id: 'foqian-square-open',
     center: { lat: 31.42952, lng: 120.09642 },
-    radius: 92,
+    radius: 105,
     note: '佛前广场和大佛 marker 周边留白。'
   },
   {
     id: 'xiangfu-temple-building',
     center: { lat: 31.42786, lng: 120.0978 },
-    radius: 52,
+    radius: 62,
     note: '祥符禅寺建筑主体上方不放树。'
   },
   {
     id: 'fan-gong-building',
     center: { lat: 31.42718, lng: 120.1021 },
-    radius: 72,
+    radius: 86,
     note: '梵宫主体和广场留白。'
   },
   {
     id: 'wuyin-building',
     center: { lat: 31.42472, lng: 120.1042 },
-    radius: 64,
+    radius: 76,
     note: '五印坛城圆形建筑主体留白。'
   },
   {
@@ -426,6 +427,7 @@ function buildZoneAssets(zone: VegetationZone): LingshanMap3DGardenAsset[] {
     assets.push(
       gardenAsset({
         id: `c-zone-${zone.id}-${String(index + 1).padStart(2, '0')}`,
+        zoneId: zone.id,
         kind,
         name: `${zone.name}${index + 1}`,
         location: {
@@ -460,7 +462,7 @@ function sampleZonePoint(zone: VegetationZone, seed: number, attempt: number): L
 }
 
 function isPointAllowed(point: LatLngPoint, keepoutScale: number) {
-  if (distanceToPolylineMeters(point, routeKeepoutPath) < 23) {
+  if (distanceToPolylineMeters(point, routeKeepoutPath) < 29) {
     return false
   }
 
