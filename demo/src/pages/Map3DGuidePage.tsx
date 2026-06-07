@@ -116,7 +116,7 @@ const MAP_3D_GUIDE_BASE_MAP = {
   features: ['base', 'building3d', 'label']
 } as const
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v3-vendor-nature'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v4-dense-grove'
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
@@ -164,7 +164,7 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     stationPanelTitle: '园林化历史文化节点',
     controlTitle: '3D 园林导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-c`,
-    decorStrategy: '禁用 PNG 贴片，改用 Kenney CC0 低模自然 GLB 资产沿路线锚定。'
+    decorStrategy: '禁用 PNG 贴片，改用高密度 Kenney CC0 低模自然 GLB 资产沿路线锚定。'
   }
 }
 const inkDecorKinds: InkDecorKind[] = [
@@ -726,6 +726,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           rotation: [0, asset.yaw, 0],
           scale: asset.scale
         })
+        if (typeof model.setOpacity === 'function') {
+          model.setOpacity(asset.opacity)
+        }
         models.set(asset.id, model)
 
         if (typeof model.on === 'function') {
@@ -1191,7 +1194,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setGardenAssets(defaults)
     setSelectedGardenId(defaults[0]?.id ?? '')
     window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-    setGardenCopyStatus('已恢复默认 Kenney vendor 树群配置')
+    setGardenCopyStatus('已恢复默认高密度 Kenney 树群配置')
   }
 
   const copyGardenConfig = async () => {
@@ -1493,6 +1496,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
                 />
               </label>
               <label>
+                opacity
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={selectedGardenAsset.opacity}
+                  onChange={(event) => updateSelectedGardenAsset({ opacity: Number(event.target.value) })}
+                />
+              </label>
+              <label>
                 显现进度
                 <input
                   type="number"
@@ -1536,7 +1550,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             </button>
           </div>
           <p>
-            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到新版 localStorage；如果仍看到旧 fallback 树群，请点击“恢复默认”切回 vendor 树群配置。
+            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动。调参会自动保存到新版 localStorage；如果仍看到旧 19 点配置，请点击“恢复默认”切回高密度树群配置。
           </p>
           <p>
             {gardenModelReport.unavailable
@@ -2294,24 +2308,31 @@ function getVisibleGardenAssets(
     rerouteActive: boolean
   }
 ) {
-  const revealAhead = options.debugGarden ? 1 : 0.14
-  const progress = options.debugGarden ? 1 : Math.max(0, Math.min(1, options.routeProgressRatio + revealAhead))
+  const progress = Math.max(0, Math.min(1, options.routeProgressRatio))
 
-  return assets.filter((asset) => {
-    if (!asset.visible) {
-      return false
-    }
+  return assets
+    .filter((asset) => asset.visible)
+    .map((asset) => {
+      if (options.debugGarden) {
+        return { ...asset, opacity: Math.max(asset.opacity, 0.92) }
+      }
 
-    if (options.debugGarden) {
-      return true
-    }
+      const distanceFromProgress = asset.routeFraction - progress
+      const isCurrentBand = Math.abs(distanceFromProgress) <= 0.12
+      const isPassed = distanceFromProgress < -0.12
+      const isAhead = distanceFromProgress > 0.12
+      const priorityOpacityBoost = asset.priority === 'high' ? 0.08 : asset.priority === 'medium' ? 0.04 : 0
+      const rerouteDimming = options.rerouteActive && asset.priority === 'low' ? 0.76 : 1
+      const bandOpacity = isCurrentBand ? 0.94 : isPassed ? 0.72 : isAhead ? 0.46 : 0.62
+      const opacity = Number(Math.max(0.34, Math.min(1, (bandOpacity + priorityOpacityBoost) * rerouteDimming * asset.opacity)).toFixed(3))
+      const scaleBoost = isCurrentBand ? 1.12 : isPassed ? 1.02 : isAhead ? 0.94 : 1
 
-    if (options.rerouteActive && asset.priority === 'low') {
-      return false
-    }
-
-    return asset.routeFraction <= progress
-  })
+      return {
+        ...asset,
+        opacity,
+        scale: Math.round(asset.scale * scaleBoost)
+      }
+    })
 }
 
 function uniqueStrings(values: string[]) {

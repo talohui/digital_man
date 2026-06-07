@@ -8437,3 +8437,103 @@ C 版继续以腾讯地图真实坐标为底座，所有自然 GLB 仍通过 `TM
 2. 用 `debugGarden=1` 微调个别点的 scale / height / yaw。
 3. 如果仍需更东方、更沉稳的树种，可继续下载并核验 Quaternius CC0 glTF 包。
 4. 只有在位置、比例和文化语境明确后，再恢复桥、院墙、香炉、法轮、莲台等复杂非树资产。
+
+## 阶段七十五：C 版树群密度、种类与显现逻辑增强
+
+### 日期
+
+2026-06-07
+
+### 本次目标
+
+解决 `/map-3d-guide-c` 中树群数量太少、种类不明显、未到区域隐藏过强的问题，让 C 版更接近灵山胜境俯拍图中的“山林包围、中轴林带、节点绿化”空间关系。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关配置和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork`。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 树群实例数量
+
+C 版默认 3D 园林实例从 19 个增加到 67 个。
+
+### 使用的 Kenney 资产类型
+
+仍使用阶段七十四接入的 Kenney Nature Kit CC0 GLB，覆盖：
+
+- `pine_cluster`：松树。
+- `bamboo_grove`：针叶树。
+- `mixed_grove`：深色阔叶树。
+- `forest_edge`：林缘 / 山林边界。
+- `shrub_mass`：灌木 / 低树。
+- `rock_cluster`：低矮山石。
+- `stone_mass`：竖向山石。
+
+每类资产均有多个实例，通过 `scale`、`height`、`yaw` 和位置微调做变化，避免视觉上只有一种树。
+
+### 参考俯拍图的布局调整
+
+本阶段按灵山胜境俯拍结构调整布局：
+
+- 南门到大佛中轴两侧形成连续林带。
+- 大佛背后和两侧增加最高密度山林背景。
+- 祥符禅寺、梵宫、五印坛城边缘布置中密度树群。
+- 水体和广场边缘使用灌木、低树和少量山石。
+- 胜境广场、佛手广场、九龙灌浴水景、建筑主体和主路线保持留白。
+
+### 显现逻辑调整
+
+旧逻辑按 `routeFraction <= progress` 过滤资产，导致未到区域几乎不可见。新逻辑改为：
+
+- 所有 `visible=true` 的树群默认始终创建。
+- 未到区域低透明、略小 scale，作为整体山林氛围。
+- 当前进度附近提高透明度并略微放大，形成路线唤醒效果。
+- 已经过区域保持可见，不突然消失。
+- 偏航 / 重规划时只轻微降低低优先级树群，不隐藏主林带。
+
+如果腾讯 `GLTFModel` 支持 `setOpacity`，会应用计算后的透明度；如果不支持，则至少通过 scale 和常显策略保证总览中树群连续可见。
+
+### debugGarden
+
+`/map-3d-guide-c?debugGarden=1` 保持可用：
+
+- 支持位置、scale、height、yaw、opacity、routeFraction、visible、priority 调整。
+- localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v4-dense-grove`，避免旧 19 点配置覆盖新默认配置。
+- “恢复默认”会回到高密度 Kenney 树群配置。
+- 复制 TS 配置和调试摘要仍可用。
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 用浏览器实际检查 67 个模型在腾讯地图倾斜视角下的性能和遮挡。
+2. 如有性能压力，按距离或 progress 分组做加载节流。
+3. 用 `debugGarden=1` 微调大佛背后、梵宫和水岸附近的树群高度与比例。
