@@ -8964,3 +8964,91 @@ localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v7-forest-patche
 1. 用浏览器在 `debugGarden=1` 下人工绘制 1 个小范围 zone 和 keepout，检查拖拽顶点和预览点生成。
 2. 将导出的 TS 配置整理成下一版默认 `lingshanMap3DGardenAssets.ts` 数据。
 3. 后续可加入“撤销一步”和“删除选中顶点 / 删除选中 zone”能力。
+
+## 阶段七十八 B：图形化园林编辑器可用性优化
+
+日期：2026-06-08
+
+### 本次目标
+
+优化 `/map-3d-guide-c?debugGarden=1` 图形化园林编辑器的日常使用体验，解决本地草稿残留、zone / keepout 底色过重和操作说明不够清楚的问题。目标是让用户可以不用 DevTools，直接在页面中清空旧草稿、恢复默认航拍参考布局，并按说明完成“画禁放区 -> 画放树区 -> 生成预览 -> 应用 GLB -> 导出配置”的流程。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关代码和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork`。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-garden-editor-usage.md`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 区域显示修正
+
+vegetation zone 和 keepout zone 默认不再使用明显的大面积填充色：
+
+- vegetation zone 改为青绿色边框为主。
+- keepout zone 改为红棕色边框为主，并尝试使用虚线边框。
+- 非选中区域只保留近似透明的极低填充，避免覆盖地图细节。
+- 选中区域保留约 0.08 的弱填充，用于提示当前编辑对象。
+
+普通 `/map-3d-guide-c` 不显示编辑区域；`debugGarden` 中也尽量避免色块压住路线、POI、当前位置和树群。
+
+### 草稿管理
+
+debugGarden 面板新增本地草稿状态提示：
+
+- `正在使用 localStorage 草稿`
+- `当前为默认航拍参考布局`
+
+新增“清空本地草稿”，并强化“重置为默认航拍参考布局”。两者都会清理 debugGarden 相关 localStorage，包括旧版 garden editor / garden assets key，并恢复源码内置默认配置。用户不需要手动打开浏览器 DevTools 删除 localStorage。
+
+### 使用说明
+
+新增 `docs/map-3d-guide-garden-editor-usage.md`，记录：
+
+- 打开方式。
+- 编辑器用途。
+- 推荐先画 keepout、再画 vegetation。
+- 如何生成预览点。
+- 如何应用为 GLB 树群。
+- 如何添加单个资产。
+- 如何保存、清空草稿、重置默认。
+- 如何导出完整 TS 配置。
+- 注意事项：主路线和广场留白、建筑主体留白、大佛背后高密、中轴两侧林带。
+
+面板内新增“使用说明 / 帮助”折叠区，提供简明操作流程并指向该文档。
+
+### 保持能力
+
+- 多边形 vegetation zone 绘制保留。
+- 多边形 keepout zone 绘制保留。
+- 顶点拖拽保留。
+- 预览点生成保留。
+- 应用 GLB 保留。
+- 单个资产添加保留。
+- localStorage 保存 / 恢复保留。
+- 导出配置保留。
+- 模拟偏航和腾讯 walking route 重规划保留。
+- `mapStyleId: 'style1'` 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 用户在 `debugGarden=1` 中完成大佛背后、中轴两侧、建筑边缘和水边的人工 zone / keepout 校准。
+2. 将“导出完整配置”结果交给 Codex，整理固化到 `src/data/lingshanMap3DGardenAssets.ts`。
+3. 后续可继续补“删除选中 zone / 删除选中顶点 / 撤销一步”等编辑器能力。

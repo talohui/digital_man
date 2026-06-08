@@ -385,6 +385,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [forestPatchesVisible, setForestPatchesVisible] = useState(debugGarden)
   const [gardenEditorMode, setGardenEditorMode] = useState<GardenEditorMode>('inspect')
   const [gardenEditorState, setGardenEditorState] = useState<GardenEditorState>(() => loadStoredGardenEditorState())
+  const [gardenEditorUsesStoredDraft, setGardenEditorUsesStoredDraft] = useState(() => hasStoredGardenEditorDraft())
   const [gardenDraftPolygon, setGardenDraftPolygon] = useState<GardenDraftPolygon>(null)
   const [selectedEditorZoneId, setSelectedEditorZoneId] = useState(() => loadStoredGardenEditorState().zones[0]?.id ?? '')
   const [selectedKeepoutZoneId, setSelectedKeepoutZoneId] = useState(() => loadStoredGardenEditorState().keepouts[0]?.id ?? '')
@@ -550,20 +551,20 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
 
   useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c') {
+    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
       return
     }
 
     window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
-  }, [debugGarden, gardenAssets, visualVariant.id])
+  }, [debugGarden, gardenAssets, gardenEditorUsesStoredDraft, visualVariant.id])
 
   useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c') {
+    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
       return
     }
 
     window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
-  }, [debugGarden, gardenEditorState, visualVariant.id])
+  }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
 
   useEffect(() => {
     if (!gardenEditorDragOffset) {
@@ -1003,7 +1004,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    const polygonItems = buildGardenEditorPolygonItems(gardenEditorState, gardenDraftPolygon)
+    const polygonItems = buildGardenEditorPolygonItems(
+      gardenEditorState,
+      gardenDraftPolygon,
+      selectedEditorZoneId,
+      selectedKeepoutZoneId
+    )
 
     if (polygonItems.length && window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
       gardenEditorPolygonLayerRef.current = new window.TMap.MultiPolygon({
@@ -1015,7 +1021,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               color: item.fill,
               borderColor: item.border,
               borderWidth: 2,
-              showBorder: true
+              showBorder: true,
+              borderDashArray: item.dashed ? [8, 6] : undefined
             })
           ])
         ),
@@ -1885,18 +1892,38 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   const resetGardenEditorState = () => {
     const editorState = buildDefaultGardenEditorState()
+    const defaultAssets = getDefaultMap3DGardenAssets()
     setGardenEditorState(editorState)
+    setGardenAssets(defaultAssets)
     setGardenDraftPolygon(null)
     setGardenEditorMode('inspect')
     setSelectedEditorZoneId(editorState.zones[0]?.id ?? '')
     setSelectedKeepoutZoneId(editorState.keepouts[0]?.id ?? '')
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
-    setGardenCopyStatus('已重置图形化编辑器状态')
+    setSelectedGardenId(defaultAssets[0]?.id ?? '')
+    clearGardenEditorLocalStorage()
+    setGardenEditorUsesStoredDraft(false)
+    setGardenCopyStatus('已重置为默认航拍参考布局，并清空本地草稿')
+  }
+
+  const clearGardenLocalDraft = () => {
+    const editorState = buildDefaultGardenEditorState()
+    const defaultAssets = getDefaultMap3DGardenAssets()
+    setGardenEditorState(editorState)
+    setGardenAssets(defaultAssets)
+    setGardenDraftPolygon(null)
+    setGardenEditorMode('inspect')
+    setSelectedEditorZoneId(editorState.zones[0]?.id ?? '')
+    setSelectedKeepoutZoneId(editorState.keepouts[0]?.id ?? '')
+    setSelectedGardenId(defaultAssets[0]?.id ?? '')
+    clearGardenEditorLocalStorage()
+    setGardenEditorUsesStoredDraft(false)
+    setGardenCopyStatus('已清空 debugGarden 本地草稿，恢复默认航拍参考布局')
   }
 
   const saveGardenEditorStateToLocalStorage = () => {
     window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
     window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
+    setGardenEditorUsesStoredDraft(true)
     setGardenCopyStatus('已保存 zones、keepouts、preview 和当前 GLB 树群到 localStorage')
   }
 
@@ -2194,6 +2221,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <p>
               点击地图绘制 vegetation zone / keepout zone，顶点可拖拽。生成预览点后可一键应用为 GLB 树群；结果保存到 localStorage，并可复制 TS 配置片段。
             </p>
+            <small>
+              草稿状态：{gardenEditorUsesStoredDraft ? '正在使用 localStorage 草稿' : '当前为默认航拍参考布局'}
+            </small>
             <div className="map-3d-guide-decor-debug__actions">
               <button
                 type="button"
@@ -2260,8 +2290,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               <button type="button" onClick={clearGardenPreviewAssets}>
                 清空预览
               </button>
+              <button type="button" onClick={clearGardenLocalDraft}>
+                清空本地草稿
+              </button>
               <button type="button" onClick={resetGardenEditorState}>
-                重置图形编辑器
+                重置为默认航拍参考布局
               </button>
               <button type="button" onClick={saveGardenEditorStateToLocalStorage}>
                 保存到本地
@@ -2282,6 +2315,21 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
                 导出完整配置
               </button>
             </div>
+
+            <details className="map-3d-guide-garden-debug__help">
+              <summary>使用说明 / 帮助</summary>
+              <ol>
+                <li>先用“绘制 keepout”围出主路线、广场、建筑、停车场和 POI 标记周围的禁放区。</li>
+                <li>再用“绘制 vegetation”围出大佛背后、中轴两侧、寺院/水体边缘等放树区。</li>
+                <li>点击“生成预览点”检查点位，确认不压住路线、广场、建筑和站点。</li>
+                <li>点击“应用为 GLB 树群”把预览点转成真实 3D 树、灌木、山石。</li>
+                <li>需要补点时选择单个资产类型，切到“添加单个资产”后点击地图。</li>
+                <li>满意后“保存到本地”，最终用“导出完整配置”复制 TS 片段交给 Codex 固化。</li>
+              </ol>
+              <p>
+                完整说明见 docs/map-3d-guide-garden-editor-usage.md。原则：主路线和广场留白，大佛背后高密，中轴两侧形成林带，水边使用低矮灌木。
+              </p>
+            </details>
           </div>
 
           <div className="map-3d-guide-garden-debug__subsection">
@@ -3210,6 +3258,41 @@ function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
   }
 }
 
+function hasStoredGardenEditorDraft() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    return Boolean(
+      window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY) ||
+        window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
+    )
+  } catch {
+    return false
+  }
+}
+
+function clearGardenEditorLocalStorage() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
+    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
+
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index)
+      if (key?.startsWith('lingshan-map-3d-guide-garden-editor-') || key?.startsWith('lingshan-map-3d-guide-garden-assets-')) {
+        window.localStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // Browser storage can be disabled; reset still works for in-memory state.
+  }
+}
+
 function buildDefaultGardenEditorState(): GardenEditorState {
   return {
     zones: [
@@ -3515,7 +3598,12 @@ function chooseEditorAssetKind(zone: GardenEditorVegetationZone, seed: number, a
   return weightedPool[0]?.kind ?? 'mixed_grove'
 }
 
-function buildGardenEditorPolygonItems(state: GardenEditorState, draft: GardenDraftPolygon) {
+function buildGardenEditorPolygonItems(
+  state: GardenEditorState,
+  draft: GardenDraftPolygon,
+  selectedZoneId: string,
+  selectedKeepoutZoneId: string
+) {
   const items = [
     ...state.zones
       .filter((zone) => zone.visible && zone.vertices.length >= 3)
@@ -3524,8 +3612,9 @@ function buildGardenEditorPolygonItems(state: GardenEditorState, draft: GardenDr
         type: 'vegetation' as const,
         name: zone.name,
         vertices: zone.vertices,
-        fill: zone.kind === 'forest' ? 'rgba(38, 92, 63, 0.24)' : zone.kind === 'axis_grove' ? 'rgba(90, 124, 70, 0.22)' : 'rgba(63, 128, 111, 0.20)',
-        border: 'rgba(35, 93, 67, 0.78)'
+        fill: zone.id === selectedZoneId ? 'rgba(38, 92, 63, 0.08)' : 'rgba(38, 92, 63, 0.015)',
+        border: zone.kind === 'forest' ? 'rgba(31, 106, 72, 0.92)' : zone.kind === 'axis_grove' ? 'rgba(75, 111, 61, 0.90)' : 'rgba(48, 122, 99, 0.88)',
+        dashed: false
       })),
     ...state.keepouts
       .filter((zone) => zone.visible && zone.vertices.length >= 3)
@@ -3534,8 +3623,9 @@ function buildGardenEditorPolygonItems(state: GardenEditorState, draft: GardenDr
         type: 'keepout' as const,
         name: zone.name,
         vertices: zone.vertices,
-        fill: 'rgba(245, 158, 11, 0.20)',
-        border: 'rgba(180, 83, 9, 0.82)'
+        fill: zone.id === selectedKeepoutZoneId ? 'rgba(180, 83, 9, 0.08)' : 'rgba(180, 83, 9, 0.01)',
+        border: 'rgba(158, 67, 32, 0.94)',
+        dashed: true
       }))
   ]
 
@@ -3545,8 +3635,9 @@ function buildGardenEditorPolygonItems(state: GardenEditorState, draft: GardenDr
       type: draft.mode === 'vegetation' ? 'vegetation' : 'keepout',
       name: draft.mode === 'vegetation' ? '绘制中的 vegetation zone' : '绘制中的 keepout zone',
       vertices: draft.vertices,
-      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(217, 119, 6, 0.16)',
-      border: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.84)' : 'rgba(217, 119, 6, 0.84)'
+      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      border: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.90)' : 'rgba(217, 119, 6, 0.90)',
+      dashed: draft.mode === 'keepout'
     })
   }
 
