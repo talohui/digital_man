@@ -8880,3 +8880,87 @@ localStorage key 升级为 `lingshan-map-3d-guide-garden-assets-v7-forest-patche
 1. 在浏览器中确认 `MultiPolygon` 是否可用；如果 fallback 为 marker 但视觉足够稳定，可继续保留。
 2. 人工检查 patch 是否压住路线局部，如有需要可在 patch 配置中微调半径和透明度。
 3. 继续把 C 版作为主线，后续再考虑 zone 级懒加载或更细的材质优化。
+
+## 阶段七十七 B：C 版图形化园林编辑器
+
+日期：2026-06-08
+
+### 本次目标
+
+在 `/map-3d-guide-c?debugGarden=1` 中增加第一版图形化园林资产编辑器，用于后续人工绘制林地 zone、留白 keepout、生成半透明预览点，并一键应用为地图坐标锚定的 GLB 树群资产。目标是减少纯数字输入校准成本，让 C 版从“代码调参”进入“浏览器可视化校准”。
+
+### 本次约束
+
+- 只修改 `/map-3d-guide-c` 相关代码、树群配置导出能力和文档。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 行为。
+- 不修改 `routeGeometry` / `roadNetwork`。
+- 不修改腾讯 walking route 算法。
+- 不读取、不修改 `.env`、API Key、token。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `docs/map-3d-guide-3d-garden-prototype.md`
+- `docs/map-3d-development-log.md`
+
+### 图形化编辑器能力
+
+`debugGarden` 面板升级为可拖拽浮动窗口，新增：
+
+- `inspect` / `drawVegetation` / `drawKeepout` / `addAsset` 四种编辑模式。
+- 点击地图添加 vegetation zone 顶点。
+- 点击地图添加 keepout zone 顶点。
+- 顶点以腾讯地图 Marker 显示，可拖拽校准。
+- vegetation / keepout 多边形优先用 `TMap.MultiPolygon` 显示，保持地图经纬度锚定。
+- 可编辑 zone 的 `density`、`assetPool`、`assetRatios`、`minScale`、`maxScale`、`height`、`opacity`、`priority`、`visible`。
+- 可编辑 keepout 的 `reason` 与 `visible`。
+- 可添加单个 GLB 资产点。
+
+### 预览与应用
+
+- “生成预览点”会根据 vegetation zone、keepout zone、主路线留白距离，生成半透明预览 Marker。
+- “应用为 GLB 树群”会把当前预览点转换为 `TMap.model.GLTFModel` 树群实例。
+- 生成结果不写源码文件，而是先进入浏览器运行态和 localStorage。
+- “保存到本地”会显式写入编辑器状态和当前 GLB 树群到 localStorage。
+- “复制 assets”可单独复制生成后的 `lingshanMap3DGardenAssets` TS 片段。
+- “导出完整配置”会复制 vegetation zones、keepouts 和生成后的 `lingshanMap3DGardenAssets` TS 片段，供后续固化。
+
+### localStorage
+
+新增编辑器专用 localStorage key：
+
+`lingshan-map-3d-guide-garden-editor-v1`
+
+它只保存图形化编辑器的 zone / keepout / preview 状态，不覆盖 C 版默认固化树群。普通 `/map-3d-guide-c` 不依赖 localStorage 才能显示稳定树群。
+
+### 默认产品态调整
+
+为避免普通 C 页面出现不自然的大面积林地 patch，本阶段将 forest patch 默认限制在 `debugGarden` 模式下显示。普通 `/map-3d-guide-c` 继续以 GLB 树群、路线、POI 和轻量氛围为主；patch 作为调试与校准辅助。
+
+### 保持能力
+
+- `mapStyleId: 'style1'` 保留。
+- 历史文化路线保留。
+- 当前站点 / 下一站保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+
+### 对其它页面的影响
+
+本阶段不修改普通 `/map`、`/map?debugGltfModel=1`、`/map-3d-guide`、`/map-3d-guide-a`、`/map-3d-guide-b` 和 `/scenic-3d-map`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍为体积提示，不阻断构建。
+
+### 下一步建议
+
+1. 用浏览器在 `debugGarden=1` 下人工绘制 1 个小范围 zone 和 keepout，检查拖拽顶点和预览点生成。
+2. 将导出的 TS 配置整理成下一版默认 `lingshanMap3DGardenAssets.ts` 数据。
+3. 后续可加入“撤销一步”和“删除选中顶点 / 删除选中 zone”能力。

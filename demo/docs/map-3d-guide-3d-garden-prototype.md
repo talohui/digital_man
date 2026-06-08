@@ -455,3 +455,60 @@ localStorage key 升级为：
 `lingshan-map-3d-guide-garden-assets-v7-forest-patches`
 
 旧的树群 localStorage 不会覆盖本阶段的 patch 诊断与默认树群布局。
+
+## 15. 图形化园林编辑器
+
+阶段七十七 B 在 `/map-3d-guide-c?debugGarden=1` 中增加第一版图形化园林编辑器。它不改变普通 C 页面默认展示，而是服务后续人工校准和配置固化。
+
+### 编辑模式
+
+调试面板变为可拖拽浮动窗口，提供四种模式：
+
+- `inspect`：查看当前 zone、keepout、preview 和 GLB 树群状态。
+- `drawVegetation`：点击地图绘制 vegetation zone。
+- `drawKeepout`：点击地图绘制留白 keepout。
+- `addAsset`：点击地图添加单个树 / 灌木 / 山石资产点。
+
+vegetation zone 和 keepout zone 都使用真实经纬度顶点。它们在地图上优先通过 `TMap.MultiPolygon` 显示，顶点通过 `TMap.MultiMarker` 显示并支持拖拽。所有调试图形都跟随腾讯地图缩放、旋转和平移，不使用固定屏幕坐标。
+
+### 可调字段
+
+vegetation zone 支持调整：
+
+- `kind`
+- `density`
+- `assetPool`
+- `assetRatios`
+- `minScale` / `maxScale`
+- `minHeight` / `maxHeight`
+- `opacity`
+- `priority`
+- `visible`
+
+keepout zone 支持调整：
+
+- `reason`
+- `visible`
+
+单点资产可以选择 `pine_cluster`、`mixed_grove`、`bamboo_grove`、`forest_edge`、`shrub_mass`、`rock_cluster`、`stone_mass`。
+
+### 预览与应用
+
+“生成预览点”会在 vegetation zone 内按 deterministic seed 生成半透明预览 Marker，并跳过 keepout zone 和主路线附近区域。“应用为 GLB 树群”会把预览点转换为 `TMap.model.GLTFModel` 树群实例，直接用于浏览器实时预览。
+
+生成逻辑不会写源码文件。调试结果保存在 localStorage：
+
+`lingshan-map-3d-guide-garden-editor-v1`
+
+“保存到本地”会显式写入编辑器状态和当前 GLB 树群到 localStorage。“复制 assets”可单独复制生成后的 `lingshanMap3DGardenAssets` TS 片段。“导出完整配置”可复制 vegetation zones、keepouts 和生成后的 `lingshanMap3DGardenAssets` TS 片段，供后续整理进 `src/data/lingshanMap3DGardenAssets.ts`。
+
+### 默认产品态
+
+普通 `/map-3d-guide-c` 仍使用已固化的 GLB 树群布局，不依赖浏览器 localStorage。林地 patch 目前只在 `debugGarden` 模式中作为校准辅助显示，避免普通产品态出现不自然的大面积色块。
+
+### 后续建议
+
+- 增加删除选中顶点和删除选中 zone。
+- 增加撤销 / 重做。
+- 将人工导出的最佳配置固化到数据文件。
+- 对大批量 GLB 树群做视距加载或分层加载优化。

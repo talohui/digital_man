@@ -82,6 +82,14 @@ const gardenAssetUrls: Record<Map3DGardenAssetKind, string> = {
   stone_mass: `${vendorAssetBaseUrl}/kenney_rock_tall_h_sage.glb`
 }
 
+export function getMap3DGardenAssetUrl(kind: Map3DGardenAssetKind) {
+  return gardenAssetUrls[kind]
+}
+
+export function getMap3DGardenLicenseId() {
+  return kenneyNatureKitLicenseId
+}
+
 const denseTreePool: Map3DGardenAssetKind[] = [
   'mixed_grove',
   'forest_edge',
