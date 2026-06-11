@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { Map3DPerfPanel } from '../components/map3d/Map3DPerfPanel'
 import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
 import {
   getDefaultMap3DGardenAssets,
   getMap3DGardenAssetUrl,
   getMap3DGardenLicenseId,
   lingshanMap3DForestPatches,
-  lingshanMap3DGardenVegetationZones,
   type Map3DGardenAssetKind,
   type Map3DGardenAssetPriority,
   type LingshanMap3DForestPatch,
@@ -16,9 +16,13 @@ import {
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
 import { getMapModelOverlayByPoiId, type LingshanMapModelOverlay } from '../data/lingshanMapModelOverlays'
 import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
+import { useGardenAssetOverlays, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
 import { loadTMap } from '../lib/loadTMap'
+import { createMap3DPerfRecorder } from '../lib/map3dPerf'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
+
+const GardenDebugWizard = lazy(() => import('../components/map3d/GardenDebugWizard'))
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
@@ -81,17 +85,6 @@ type DecorSmokeReport = {
 
 type AssetLoadState = Record<string, 'loaded' | 'error'>
 
-type GardenModelReport = {
-  createdCount: number
-  visibleCount: number
-  patchCount: number
-  patchFallback: boolean
-  unavailable: boolean
-  assetUrls: string[]
-  loadedIds: string[]
-  errorIds: string[]
-}
-
 type GardenAssetFilterState = {
   zoneId: string
   kind: string
@@ -108,7 +101,7 @@ type GardenBatchAdjustState = {
 }
 
 type GardenEditorZoneKind = 'forest' | 'axis_grove' | 'water_edge' | 'node_green'
-type GardenKeepoutReason = 'route' | 'plaza' | 'building' | 'parking' | 'water' | 'marker'
+type GardenKeepoutReason = string
 type GardenEditorMode = 'inspect' | 'drawVegetation' | 'drawKeepout' | 'addAsset'
 
 type GardenAssetRatios = Partial<Record<Map3DGardenAssetKind, number>>
@@ -149,11 +142,6 @@ type GardenDraftPolygon = {
   mode: 'vegetation' | 'keepout'
   vertices: LatLngPoint[]
 } | null
-
-type GardenEditorPanelPosition = {
-  x: number
-  y: number
-}
 
 type Map3DGuideVisualVariantConfig = {
   id: Map3DGuideVariant
@@ -348,10 +336,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const gardenEditorPolygonLayerRef = useRef<any>(null)
   const gardenEditorVertexLayerRef = useRef<any>(null)
   const gardenPreviewMarkerLayerRef = useRef<any>(null)
+  const gardenAssetEditMarkerLayerRef = useRef<any>(null)
   const gltfModelRef = useRef<any>(null)
-  const gardenModelRefs = useRef<Map<string, any>>(new Map())
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
+  const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
+  const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
@@ -379,31 +369,21 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   })
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
   const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
-  const [selectedGardenId, setSelectedGardenId] = useState(() => loadStoredGardenAssets(visualVariant.id)[0]?.id ?? '')
+  const [selectedGardenId, setSelectedGardenId] = useState(() => (debugGarden ? '' : loadStoredGardenAssets(visualVariant.id)[0]?.id ?? ''))
   const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
   const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
-  const [forestPatchesVisible, setForestPatchesVisible] = useState(debugGarden)
+  const [forestPatchesVisible, setForestPatchesVisible] = useState(false)
   const [gardenEditorMode, setGardenEditorMode] = useState<GardenEditorMode>('inspect')
   const [gardenEditorState, setGardenEditorState] = useState<GardenEditorState>(() => loadStoredGardenEditorState())
   const [gardenEditorUsesStoredDraft, setGardenEditorUsesStoredDraft] = useState(() => hasStoredGardenEditorDraft())
   const [gardenDraftPolygon, setGardenDraftPolygon] = useState<GardenDraftPolygon>(null)
-  const [selectedEditorZoneId, setSelectedEditorZoneId] = useState(() => loadStoredGardenEditorState().zones[0]?.id ?? '')
-  const [selectedKeepoutZoneId, setSelectedKeepoutZoneId] = useState(() => loadStoredGardenEditorState().keepouts[0]?.id ?? '')
+  const [selectedEditorZoneId, setSelectedEditorZoneId] = useState('')
+  const [selectedKeepoutZoneId, setSelectedKeepoutZoneId] = useState('')
   const [selectedGardenVertexId, setSelectedGardenVertexId] = useState('')
+  const [gardenAssetEditDraft, setGardenAssetEditDraft] = useState<LingshanMap3DGardenAsset | null>(null)
   const [editorAddAssetKind, setEditorAddAssetKind] = useState<Map3DGardenAssetKind>('pine_cluster')
-  const [gardenEditorPanelPosition, setGardenEditorPanelPosition] = useState<GardenEditorPanelPosition>({ x: 18, y: 76 })
-  const [gardenEditorDragOffset, setGardenEditorDragOffset] = useState<GardenEditorPanelPosition | null>(null)
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
-  const [gardenModelReport, setGardenModelReport] = useState<GardenModelReport>({
-    createdCount: 0,
-    visibleCount: 0,
-    patchCount: 0,
-    patchFallback: false,
-    unavailable: false,
-    assetUrls: [],
-    loadedIds: [],
-    errorIds: []
-  })
+  const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -475,14 +455,166 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   )
   const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
-  const selectedGardenAsset = gardenAssets.find((asset) => asset.id === selectedGardenId) ?? gardenAssets[0]
-  const selectedEditorZone = gardenEditorState.zones.find((zone) => zone.id === selectedEditorZoneId) ?? gardenEditorState.zones[0]
-  const selectedKeepoutZone = gardenEditorState.keepouts.find((zone) => zone.id === selectedKeepoutZoneId) ?? gardenEditorState.keepouts[0]
+  const selectedGardenAsset = selectedGardenId ? gardenAssets.find((asset) => asset.id === selectedGardenId) : undefined
+  const selectedGardenAssetDraft = selectedGardenAsset && gardenAssetEditDraft?.id === selectedGardenId ? gardenAssetEditDraft : selectedGardenAsset
+  const selectedEditorZone = selectedEditorZoneId ? gardenEditorState.zones.find((zone) => zone.id === selectedEditorZoneId) : undefined
+  const selectedKeepoutZone = selectedKeepoutZoneId ? gardenEditorState.keepouts.find((zone) => zone.id === selectedKeepoutZoneId) : undefined
   const filteredGardenAssets = useMemo(
     () => gardenAssets.filter((asset) => matchesGardenFilters(asset, gardenFilters)),
     [gardenAssets, gardenFilters]
   )
-  const gardenZoneCountText = `${lingshanMap3DGardenVegetationZones.length} 个 vegetation zones`
+  const {
+    report: gardenOverlayReport,
+    loading: gardenAssetLoading,
+    progressText: gardenAssetProgressText
+  } = useGardenAssetOverlays({
+    active: visualVariant.id === 'prototype-c',
+    assets: gardenAssets,
+    debugPerf,
+    debugGarden,
+    map: mapRef.current,
+    mapReady: mapStatus === 'ready',
+    perfRecorder,
+    rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route',
+    routeProgressRatio
+  })
+  const gardenModelReport: GardenModelReport = {
+    ...gardenOverlayReport,
+    patchCount: gardenPatchReport.patchCount,
+    patchFallback: gardenPatchReport.patchFallback
+  }
+
+  const focusMapOnVertices = (vertices: LatLngPoint[]) => {
+    const center = getPathCenter(vertices)
+
+    if (!center || !vertices.length) {
+      return
+    }
+
+    const bounds = getPolygonBounds(vertices)
+    const diagonalMeters = haversineDistanceMeters(
+      { lat: bounds.minLat, lng: bounds.minLng },
+      { lat: bounds.maxLat, lng: bounds.maxLng }
+    )
+    const zoom = diagonalMeters > 520 ? 17.25 : diagonalMeters > 260 ? 18 : 18.7
+
+    moveMapCamera(center, {
+      id: 'topdown',
+      label: '编辑视角',
+      description: '聚焦当前编辑区域',
+      zoom,
+      pitch: 42,
+      rotation: activeCameraPreset.rotation
+    })
+  }
+
+  const selectEditorZone = (zoneId: string) => {
+    const zone = gardenEditorState.zones.find((item) => item.id === zoneId)
+    setSelectedEditorZoneId(zoneId)
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
+    setSelectedGardenVertexId('')
+
+    if (zone) {
+      focusMapOnVertices(zone.vertices)
+    }
+  }
+
+  const selectKeepoutZone = (zoneId: string) => {
+    const zone = gardenEditorState.keepouts.find((item) => item.id === zoneId)
+    setSelectedKeepoutZoneId(zoneId)
+    setSelectedEditorZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
+    setSelectedGardenVertexId('')
+
+    if (zone) {
+      focusMapOnVertices(zone.vertices)
+    }
+  }
+
+  const selectGardenAssetForEditing = (assetId: string) => {
+    const asset = gardenAssets.find((item) => item.id === assetId)
+    setSelectedGardenId(assetId)
+    setSelectedEditorZoneId('')
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenVertexId('')
+    setGardenAssetEditDraft(asset ? cloneGardenAsset(asset) : null)
+
+    if (asset) {
+      moveMapCamera(asset.location, {
+        id: 'focus',
+        label: '资产编辑',
+        description: '聚焦当前资产点',
+        zoom: 19.2,
+        pitch: 54,
+        rotation: activeCameraPreset.rotation
+      })
+    }
+  }
+
+  const updateGardenAssetEditDraft = (patch: Partial<LingshanMap3DGardenAsset>) => {
+    setGardenAssetEditDraft((current) => {
+      if (!current) {
+        return current
+      }
+
+      return {
+        ...current,
+        ...patch,
+        location: patch.location ?? current.location
+      }
+    })
+  }
+
+  const persistGardenDraft = (nextEditorState: GardenEditorState, nextAssets: LingshanMap3DGardenAsset[]) => {
+    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(nextEditorState))
+    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(nextAssets))
+    setGardenEditorUsesStoredDraft(true)
+  }
+
+  const completeDraftGardenPolygon = (extraPoint?: LatLngPoint | null) => {
+    setGardenDraftPolygon((current) => {
+      if (!current) {
+        setGardenCopyStatus('当前没有正在绘制的多边形')
+        return current
+      }
+
+      const vertices = extraPoint && !isSameLatLngPoint(current.vertices[current.vertices.length - 1], extraPoint)
+        ? [...current.vertices, extraPoint]
+        : current.vertices
+
+      if (vertices.length < 3) {
+        setGardenCopyStatus('至少需要 3 个顶点才能完成多边形')
+        return current
+      }
+
+      if (current.mode === 'vegetation') {
+        const zone = createEditorVegetationZone(vertices, gardenEditorState.zones.length)
+        setGardenEditorState((state) => ({
+          ...state,
+          zones: [...state.zones, zone]
+        }))
+        setSelectedEditorZoneId(zone.id)
+        setSelectedKeepoutZoneId('')
+        setGardenCopyStatus(`已创建 vegetation zone：${zone.name}`)
+      } else {
+        const keepout = createEditorKeepoutZone(vertices, gardenEditorState.keepouts.length)
+        setGardenEditorState((state) => ({
+          ...state,
+          keepouts: [...state.keepouts, keepout]
+        }))
+        setSelectedKeepoutZoneId(keepout.id)
+        setSelectedEditorZoneId('')
+        setGardenCopyStatus(`已创建 keepout zone：${keepout.name}`)
+      }
+
+      setGardenEditorMode('inspect')
+      setSelectedGardenVertexId('')
+      return null
+    })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -494,6 +626,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
       setMapStatus('loading')
       setPageMessage('正在加载腾讯地图真实底座...')
+      perfRecorder.markStageStart('mapInit')
 
       try {
         const TMap = await loadTMap()
@@ -515,7 +648,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         setMapStyleSupport(inspectMapStyleSupport(map, TMap))
         setMapStatus('ready')
         setPageMessage('真实 3D 地图导览模式已就绪')
+        perfRecorder.markStageEnd('mapInit')
       } catch (error) {
+        perfRecorder.markStageEnd('mapInit')
         setMapStatus('error')
         setPageMessage(error instanceof Error ? error.message : '腾讯地图加载失败')
       }
@@ -536,11 +671,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenPreviewMarkerLayerRef.current?.setMap?.(null)
       clearGltfModel(gltfModelRef.current)
       gltfModelRef.current = null
-      clearGardenModels(gardenModelRefs.current)
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
-  }, [])
+  }, [perfRecorder])
 
   useEffect(() => {
     if (!debugDecor) {
@@ -565,30 +699,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
   }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
-
-  useEffect(() => {
-    if (!gardenEditorDragOffset) {
-      return
-    }
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const viewportWidth = window.innerWidth
-      const viewportHeight = window.innerHeight
-      setGardenEditorPanelPosition({
-        x: clampNumber(event.clientX - gardenEditorDragOffset.x, 8, Math.max(8, viewportWidth - 360)),
-        y: clampNumber(event.clientY - gardenEditorDragOffset.y, 8, Math.max(8, viewportHeight - 120))
-      })
-    }
-    const handleMouseUp = () => setGardenEditorDragOffset(null)
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [gardenEditorDragOffset])
 
   useEffect(() => {
     if (!debugGarden || visualVariant.id !== 'prototype-c' || mapStatus !== 'ready' || !mapRef.current) {
@@ -626,17 +736,28 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           ...current,
           previewAssets: [...current.previewAssets, asset]
         }))
-        setSelectedGardenId(asset.id)
+        setSelectedGardenId('')
         setGardenCopyStatus(`已添加单个资产：${asset.name}`)
       }
     }
 
+    const handleMapDoubleClick = (event: any) => {
+      if (gardenEditorMode !== 'drawVegetation' && gardenEditorMode !== 'drawKeepout') {
+        return
+      }
+
+      event?.preventDefault?.()
+      completeDraftGardenPolygon(extractMapEventLatLng(event))
+    }
+
     mapRef.current.on?.('click', handleMapClick)
+    mapRef.current.on?.('dblclick', handleMapDoubleClick)
 
     return () => {
       mapRef.current?.off?.('click', handleMapClick)
+      mapRef.current?.off?.('dblclick', handleMapDoubleClick)
     }
-  }, [debugGarden, editorAddAssetKind, gardenEditorMode, gardenEditorState.previewAssets.length, mapStatus, visualVariant.id])
+  }, [completeDraftGardenPolygon, debugGarden, editorAddAssetKind, gardenEditorMode, gardenEditorState.previewAssets.length, mapStatus, visualVariant.id])
 
   useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
@@ -666,6 +787,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
+    perfRecorder.markStageStart('routeDraw')
     routeLayerRef.current?.setMap?.(null)
     routeLayerRef.current = new window.TMap.MultiPolyline({
       map: mapRef.current,
@@ -724,12 +846,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       },
       geometries: buildGuideRouteGeometries()
     })
+    perfRecorder.markStageEnd('routeDraw')
 
     return () => {
       routeLayerRef.current?.setMap?.(null)
       routeLayerRef.current = null
     }
-  }, [mapStatus, nextStop.nextStopId, routePathIndex, selectedStopId])
+  }, [mapStatus, nextStop.nextStopId, perfRecorder, routePathIndex, selectedStopId])
 
   function getActiveRoutePath(currentStopId?: string | null, nextStopId?: string | null) {
     const currentLocation = getRouteStopLocation(currentStopId)
@@ -886,11 +1009,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     forestPatchLayerRef.current = null
 
     if (visualVariant.id !== 'prototype-c' || !debugGarden || !forestPatchesVisible) {
-      setGardenModelReport((current) => ({
-        ...current,
+      setGardenPatchReport({
         patchCount: 0,
         patchFallback: false
-      }))
+      })
       return
     }
 
@@ -924,11 +1046,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             rank: 1
           }))
         })
-        setGardenModelReport((current) => ({
-          ...current,
+        setGardenPatchReport({
           patchCount: visiblePatches.length,
           patchFallback: false
-        }))
+        })
         return () => {
           forestPatchLayerRef.current?.setMap?.(null)
           forestPatchLayerRef.current = null
@@ -973,17 +1094,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           }
         }))
       })
-      setGardenModelReport((current) => ({
-        ...current,
+      setGardenPatchReport({
         patchCount: visiblePatches.length,
         patchFallback: true
-      }))
+      })
     } catch {
-      setGardenModelReport((current) => ({
-        ...current,
+      setGardenPatchReport({
         patchCount: 0,
         patchFallback: true
-      }))
+      })
     }
 
     return () => {
@@ -1022,7 +1141,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               borderColor: item.border,
               borderWidth: 2,
               showBorder: true,
-              borderDashArray: item.dashed ? [8, 6] : undefined
+              ...(item.dashed ? { borderDashArray: [8, 6] } : {})
             })
           ])
         ),
@@ -1038,7 +1157,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       })
     }
 
-    const vertices = buildGardenEditorVertexItems(gardenEditorState, gardenDraftPolygon)
+    const vertices = buildGardenEditorVertexItems(
+      gardenEditorState,
+      gardenDraftPolygon,
+      selectedEditorZoneId,
+      selectedKeepoutZoneId
+    )
     if (vertices.length) {
       gardenEditorVertexLayerRef.current = new window.TMap.MultiMarker({
         map: mapRef.current,
@@ -1130,116 +1254,78 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenEditorVertexLayerRef.current = null
       gardenPreviewMarkerLayerRef.current = null
     }
-  }, [debugGarden, gardenDraftPolygon, gardenEditorState, mapStatus, visualVariant.id])
+  }, [debugGarden, gardenDraftPolygon, gardenEditorState, mapStatus, selectedEditorZoneId, selectedKeepoutZoneId, visualVariant.id])
 
   useEffect(() => {
-    clearGardenModels(gardenModelRefs.current)
-    gardenModelRefs.current = new Map()
+    gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
+    gardenAssetEditMarkerLayerRef.current = null
 
-    if (visualVariant.id !== 'prototype-c') {
-      setGardenModelReport({
-        createdCount: 0,
-        visibleCount: 0,
-        patchCount: 0,
-        patchFallback: false,
-        unavailable: false,
-        assetUrls: [],
-        loadedIds: [],
-        errorIds: []
-      })
+    if (
+      !debugGarden ||
+      visualVariant.id !== 'prototype-c' ||
+      mapStatus !== 'ready' ||
+      !window.TMap ||
+      !mapRef.current ||
+      !selectedGardenAssetDraft
+    ) {
       return
     }
 
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
-      setGardenModelReport((current) => ({
-        ...current,
-        createdCount: 0,
-        visibleCount: 0,
-        unavailable: false
-      }))
-      return
-    }
-
-    const visibleAssets = getVisibleGardenAssets(gardenAssets, {
-      debugGarden,
-      routeProgressRatio,
-      rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
-    })
-    const assetUrls = Array.from(new Set(visibleAssets.map((asset) => asset.assetUrl)))
-
-    if (!window.TMap.model?.GLTFModel) {
-      setGardenModelReport((current) => ({
-        ...current,
-        createdCount: 0,
-        visibleCount: visibleAssets.length,
-        unavailable: true,
-        assetUrls,
-        loadedIds: [],
-        errorIds: []
-      }))
-      return
-    }
-
-    const models = new Map<string, any>()
-    const immediateErrors: string[] = []
-
-    visibleAssets.forEach((asset) => {
-      try {
-        const model = new window.TMap.model.GLTFModel({
-          id: `map-3d-guide-garden-${asset.id}`,
-          map: mapRef.current,
-          url: asset.assetUrl,
-          position: new window.TMap.LatLng(asset.location.lat, asset.location.lng, asset.height),
-          rotation: [0, asset.yaw, 0],
-          scale: asset.scale,
-          opacity: asset.opacity
+    gardenAssetEditMarkerLayerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      enableDragging: true,
+      styles: {
+        assetEditVertex: new window.TMap.MarkerStyle({
+          width: 26,
+          height: 26,
+          anchor: { x: 13, y: 13 },
+          src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
         })
-        if (typeof model.setOpacity === 'function') {
-          model.setOpacity(asset.opacity)
+      },
+      geometries: [
+        {
+          id: `asset:${selectedGardenAssetDraft.id}`,
+          styleId: 'assetEditVertex',
+          position: toTMapLatLng(selectedGardenAssetDraft.location),
+          draggable: true,
+          rank: 45,
+          properties: {
+            title: selectedGardenAssetDraft.name
+          }
         }
-        models.set(asset.id, model)
-
-        if (typeof model.on === 'function') {
-          model.on('loaded', () => {
-            setGardenModelReport((current) => ({
-              ...current,
-              loadedIds: uniqueStrings([...current.loadedIds, asset.id])
-            }))
-          })
-          model.on('error', () => {
-            setGardenModelReport((current) => ({
-              ...current,
-              errorIds: uniqueStrings([...current.errorIds, asset.id])
-            }))
-          })
-        }
-      } catch {
-        immediateErrors.push(asset.id)
-      }
+      ]
     })
 
-    gardenModelRefs.current = models
-    setGardenModelReport((current) => ({
-      ...current,
-      createdCount: models.size,
-      visibleCount: visibleAssets.length,
-      unavailable: false,
-      assetUrls,
-      loadedIds: [],
-      errorIds: immediateErrors
-    }))
+    const handleAssetDragEnd = (event: any) => {
+      const point = extractMapEventLatLng(event)
+
+      if (!point) {
+        return
+      }
+
+      updateGardenAssetEditDraft({
+        location: {
+          lat: roundNumber(point.lat, 6),
+          lng: roundNumber(point.lng, 6)
+        }
+      })
+      setGardenCopyStatus('已移动资产编辑点，点击“保存当前资产修改”后写入本地草稿')
+    }
+
+    gardenAssetEditMarkerLayerRef.current.on?.('dragend', handleAssetDragEnd)
 
     return () => {
-      clearGardenModels(gardenModelRefs.current)
-      gardenModelRefs.current = new Map()
+      gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
+      gardenAssetEditMarkerLayerRef.current = null
     }
-  }, [debugGarden, gardenAssets, mapStatus, rerouteStatus, routeProgressRatio, visualVariant.id])
+  }, [debugGarden, mapStatus, selectedGardenAssetDraft, visualVariant.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
       return
     }
 
+    perfRecorder.markStageStart('poiInit')
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
     const currentStopId = routeStops[selectedStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
@@ -1293,12 +1379,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       styles: markerStyles,
       geometries: poiGeometries
     })
+    perfRecorder.markStageEnd('poiInit')
 
     return () => {
       poiMarkerLayerRef.current?.setMap?.(null)
       poiMarkerLayerRef.current = null
     }
-  }, [mapStatus, nextStop.nextStopId, routeStops, selectedStopIndex, terminalStopId])
+  }, [mapStatus, nextStop.nextStopId, perfRecorder, routeStops, selectedStopIndex, terminalStopId])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -1658,6 +1745,95 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     )
   }
 
+  const saveGardenAssetEditDraft = () => {
+    if (!selectedGardenAssetDraft) {
+      setGardenCopyStatus('请先选择一个资产点')
+      return
+    }
+
+    const nextAssets = gardenAssets.map((asset) =>
+      asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
+    )
+    const nextEditorState = {
+      ...gardenEditorState,
+      previewAssets: gardenEditorState.previewAssets.map((asset) =>
+        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
+      ),
+      appliedAssets: gardenEditorState.appliedAssets.map((asset) =>
+        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
+      )
+    }
+
+    setGardenAssets(nextAssets)
+    setGardenEditorState(nextEditorState)
+    setGardenAssetEditDraft(cloneGardenAsset(selectedGardenAssetDraft))
+    persistGardenDraft(nextEditorState, nextAssets)
+    setGardenCopyStatus(`已保存当前资产修改：${selectedGardenAssetDraft.name}`)
+  }
+
+  const deleteSelectedGardenAsset = () => {
+    if (!selectedGardenAsset) {
+      setGardenCopyStatus('请先选择一个资产点')
+      return
+    }
+
+    if (!window.confirm(`确认删除资产点“${selectedGardenAsset.name}”？此操作会写入本地草稿。`)) {
+      return
+    }
+
+    const nextAssets = gardenAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
+    const nextEditorState = {
+      ...gardenEditorState,
+      previewAssets: gardenEditorState.previewAssets.filter((asset) => asset.id !== selectedGardenAsset.id),
+      appliedAssets: gardenEditorState.appliedAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
+    }
+
+    setGardenAssets(nextAssets)
+    setGardenEditorState(nextEditorState)
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
+    persistGardenDraft(nextEditorState, nextAssets)
+    setGardenCopyStatus(`已删除资产点：${selectedGardenAsset.name}`)
+  }
+
+  const deleteSelectedEditorZone = () => {
+    if (!selectedEditorZone) {
+      setGardenCopyStatus('请先选择一个 vegetation zone')
+      return
+    }
+
+    if (!window.confirm(`确认删除放树区“${selectedEditorZone.name}”？`)) {
+      return
+    }
+
+    setGardenEditorState((current) => ({
+      ...current,
+      zones: current.zones.filter((zone) => zone.id !== selectedEditorZone.id)
+    }))
+    setSelectedEditorZoneId('')
+    setSelectedGardenVertexId('')
+    setGardenCopyStatus(`已删除 vegetation zone：${selectedEditorZone.name}`)
+  }
+
+  const deleteSelectedKeepoutZone = () => {
+    if (!selectedKeepoutZone) {
+      setGardenCopyStatus('请先选择一个 keepout zone')
+      return
+    }
+
+    if (!window.confirm(`确认删除禁放区“${selectedKeepoutZone.name}”？`)) {
+      return
+    }
+
+    setGardenEditorState((current) => ({
+      ...current,
+      keepouts: current.keepouts.filter((zone) => zone.id !== selectedKeepoutZone.id)
+    }))
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenVertexId('')
+    setGardenCopyStatus(`已删除 keepout zone：${selectedKeepoutZone.name}`)
+  }
+
   const updateGardenFilter = (patch: Partial<GardenAssetFilterState>) => {
     setGardenFilters((current) => ({ ...current, ...patch }))
   }
@@ -1682,7 +1858,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    setSelectedGardenId(filteredGardenAssets[0].id)
+    selectGardenAssetForEditing(filteredGardenAssets[0].id)
     setGardenCopyStatus(`已选中筛选结果首项：${filteredGardenAssets[0].name}`)
   }
 
@@ -1729,41 +1905,25 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const beginVegetationZoneDrawing = () => {
     setGardenEditorMode('drawVegetation')
     setGardenDraftPolygon({ mode: 'vegetation', vertices: [] })
+    setSelectedEditorZoneId('')
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
     setGardenCopyStatus('开始绘制 vegetation zone：点击地图添加顶点')
   }
 
   const beginKeepoutZoneDrawing = () => {
     setGardenEditorMode('drawKeepout')
     setGardenDraftPolygon({ mode: 'keepout', vertices: [] })
+    setSelectedEditorZoneId('')
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
     setGardenCopyStatus('开始绘制 keepout zone：点击地图添加顶点')
   }
 
   const finishDraftGardenPolygon = () => {
-    if (!gardenDraftPolygon || gardenDraftPolygon.vertices.length < 3) {
-      setGardenCopyStatus('至少需要 3 个顶点才能完成多边形')
-      return
-    }
-
-    if (gardenDraftPolygon.mode === 'vegetation') {
-      const zone = createEditorVegetationZone(gardenDraftPolygon.vertices, gardenEditorState.zones.length)
-      setGardenEditorState((current) => ({
-        ...current,
-        zones: [...current.zones, zone]
-      }))
-      setSelectedEditorZoneId(zone.id)
-      setGardenCopyStatus(`已创建 vegetation zone：${zone.name}`)
-    } else {
-      const keepout = createEditorKeepoutZone(gardenDraftPolygon.vertices, gardenEditorState.keepouts.length)
-      setGardenEditorState((current) => ({
-        ...current,
-        keepouts: [...current.keepouts, keepout]
-      }))
-      setSelectedKeepoutZoneId(keepout.id)
-      setGardenCopyStatus(`已创建 keepout zone：${keepout.name}`)
-    }
-
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
+    completeDraftGardenPolygon()
   }
 
   const cancelDraftGardenPolygon = () => {
@@ -1868,9 +2028,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const applyGardenPreviewAsGlb = () => {
-    const generatedAssets = gardenEditorState.previewAssets.length
-      ? gardenEditorState.previewAssets
-      : generateGardenAssetsFromEditor(gardenEditorState.zones, gardenEditorState.keepouts)
+    if (!gardenEditorState.previewAssets.length) {
+      setGardenCopyStatus('请先在第 3 步生成预览点')
+      return
+    }
+
+    const generatedAssets = gardenEditorState.previewAssets.map(cloneGardenAsset)
 
     setGardenEditorState((current) => ({
       ...current,
@@ -1878,7 +2041,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       appliedAssets: generatedAssets
     }))
     setGardenAssets(generatedAssets)
-    setSelectedGardenId(generatedAssets[0]?.id ?? '')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
     setGardenCopyStatus(`已应用 ${generatedAssets.length} 个 GLB 树群资产`)
   }
 
@@ -1897,9 +2061,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setGardenAssets(defaultAssets)
     setGardenDraftPolygon(null)
     setGardenEditorMode('inspect')
-    setSelectedEditorZoneId(editorState.zones[0]?.id ?? '')
-    setSelectedKeepoutZoneId(editorState.keepouts[0]?.id ?? '')
-    setSelectedGardenId(defaultAssets[0]?.id ?? '')
+    setSelectedEditorZoneId('')
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
     clearGardenEditorLocalStorage()
     setGardenEditorUsesStoredDraft(false)
     setGardenCopyStatus('已重置为默认航拍参考布局，并清空本地草稿')
@@ -1912,9 +2077,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setGardenAssets(defaultAssets)
     setGardenDraftPolygon(null)
     setGardenEditorMode('inspect')
-    setSelectedEditorZoneId(editorState.zones[0]?.id ?? '')
-    setSelectedKeepoutZoneId(editorState.keepouts[0]?.id ?? '')
-    setSelectedGardenId(defaultAssets[0]?.id ?? '')
+    setSelectedEditorZoneId('')
+    setSelectedKeepoutZoneId('')
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
     clearGardenEditorLocalStorage()
     setGardenEditorUsesStoredDraft(false)
     setGardenCopyStatus('已清空 debugGarden 本地草稿，恢复默认航拍参考布局')
@@ -1928,12 +2094,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const copyEditorAssetsConfig = async () => {
-    const generatedAssets = gardenEditorState.previewAssets.length
-      ? gardenEditorState.previewAssets
-      : generateGardenAssetsFromEditor(gardenEditorState.zones, gardenEditorState.keepouts)
-    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(generatedAssets, null, 2)} as const\n`
+    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const\n`
     const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 assets TS 配置' : '复制失败，请查看浏览器权限')
+    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
   }
 
   const copyEditorZonesConfig = async () => {
@@ -1949,35 +2112,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const copyCompleteGardenSourceSnippet = async () => {
-    const generatedAssets = gardenEditorState.previewAssets.length
-      ? gardenEditorState.previewAssets
-      : generateGardenAssetsFromEditor(gardenEditorState.zones, gardenEditorState.keepouts)
     const snippet = [
       `export const lingshanMap3DEditorVegetationZones = ${JSON.stringify(gardenEditorState.zones, null, 2)} as const`,
       `export const lingshanMap3DEditorKeepoutZones = ${JSON.stringify(gardenEditorState.keepouts, null, 2)} as const`,
-      `export const lingshanMap3DGardenAssets = ${JSON.stringify(generatedAssets, null, 2)} as const`
+      `export const lingshanMap3DGardenGenerationParams = ${JSON.stringify(buildGardenGenerationParamsSnapshot(gardenEditorState), null, 2)} as const`,
+      `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const`
     ].join('\n\n')
     const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制完整 lingshanMap3DGardenAssets.ts 片段' : '复制失败，请查看浏览器权限')
-  }
-
-  const resetGardenConfig = () => {
-    const defaults = getDefaultMap3DGardenAssets()
-    setGardenAssets(defaults)
-    setSelectedGardenId(defaults[0]?.id ?? '')
-    setGardenFilters(defaultGardenFilters)
-    setGardenBatchAdjust(defaultGardenBatchAdjust)
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-    setGardenCopyStatus('已恢复默认航拍参考树群布局')
-  }
-
-  const copyGardenConfig = async () => {
-    const snippet = [
-      `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const`,
-      `export const lingshanMap3DForestPatches = ${JSON.stringify(lingshanMap3DForestPatches, null, 2)} as const`
-    ].join('\n\n')
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 3D 园林 TS 配置片段' : '复制失败，请查看浏览器权限')
+    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
   }
 
   const copyGardenSummary = async () => {
@@ -2001,26 +2143,41 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   return (
-    <main className={`map-3d-guide-shell ${visualVariant.className}`}>
+    <main
+      className={`map-3d-guide-shell ${visualVariant.className} ${debugGarden ? 'map-3d-guide-shell--debug-garden' : ''} ${
+        debugPerf ? 'map-3d-guide-shell--debug-perf' : ''
+      }`}
+    >
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
       {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
-
-      <section className="map-3d-guide-hero">
-        <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
-        <h1>{visualVariant.title}</h1>
-        <p>{visualVariant.subtitle}</p>
-        <div className="map-3d-guide-top-actions">
-          <button type="button" onClick={() => navigate('/map')}>
-            进入真实地图
-          </button>
-          <button type="button" onClick={() => navigate('/scenic-3d-map')}>
-            进入文化沙盘
-          </button>
+      {visualVariant.id === 'prototype-c' && (gardenAssetLoading || gardenModelReport.unavailable || gardenModelReport.errorIds.length > 0) ? (
+        <div className={`map-3d-guide-garden-load ${gardenModelReport.unavailable || gardenModelReport.errorIds.length ? 'is-warning' : ''}`}>
+          {gardenModelReport.unavailable
+            ? '园林资产加载不可用'
+            : gardenModelReport.errorIds.length
+              ? `园林资产部分失败 ${gardenModelReport.errorIds.length}`
+              : gardenAssetProgressText}
         </div>
-      </section>
+      ) : null}
+
+      {!debugGarden ? (
+        <section className="map-3d-guide-hero">
+          <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
+          <h1>{visualVariant.title}</h1>
+          <p>{visualVariant.subtitle}</p>
+          <div className="map-3d-guide-top-actions">
+            <button type="button" onClick={() => navigate('/map')}>
+              进入真实地图
+            </button>
+            <button type="button" onClick={() => navigate('/scenic-3d-map')}>
+              进入文化沙盘
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="map-3d-guide-camera">
         <div>
@@ -2184,638 +2341,86 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       ) : null}
 
       {debugGarden ? (
-        <section
-          className="map-3d-guide-garden-debug map-3d-guide-garden-debug--editor"
-          style={{
-            left: gardenEditorPanelPosition.x,
-            top: gardenEditorPanelPosition.y
-          }}
+        <Suspense
+          fallback={
+            <section className="map-3d-guide-garden-debug map-3d-guide-garden-debug--editor">
+              <small className="map-3d-guide-garden-debug__status">正在加载 debugGarden 工作台...</small>
+            </section>
+          }
         >
-          <div
-            className="map-3d-guide-decor-debug__header map-3d-guide-garden-debug__drag-handle"
-            onMouseDown={(event) => {
-              const target = event.target as HTMLElement
-              if (target.closest('button, input, select, textarea, label')) {
-                return
-              }
-              setGardenEditorDragOffset({
-                x: event.clientX - gardenEditorPanelPosition.x,
-                y: event.clientY - gardenEditorPanelPosition.y
-              })
-            }}
-          >
-            <div>
-              <strong>3D 园林资产调试</strong>
-              <span>
-                prototype-c · {gardenZoneCountText} · 林地 patch {gardenModelReport.patchCount}/{lingshanMap3DForestPatches.length}
-                {gardenModelReport.patchFallback ? ' marker fallback' : ' polygon'} · 图形 zones {gardenEditorState.zones.length} · keepouts {gardenEditorState.keepouts.length} · preview {gardenEditorState.previewAssets.length} · 筛选 {filteredGardenAssets.length}/{gardenAssets.length} · 已创建模型 {gardenModelReport.createdCount}/{gardenModelReport.visibleCount} · 路线进度 {routeProgressPercent}%
-              </span>
-            </div>
-            <button type="button" onClick={copyGardenConfig}>
-              复制 TS 配置
-            </button>
-          </div>
-
-          <div className="map-3d-guide-garden-debug__subsection">
-            <strong>图形化林地编辑器</strong>
-            <p>
-              点击地图绘制 vegetation zone / keepout zone，顶点可拖拽。生成预览点后可一键应用为 GLB 树群；结果保存到 localStorage，并可复制 TS 配置片段。
-            </p>
-            <small>
-              草稿状态：{gardenEditorUsesStoredDraft ? '正在使用 localStorage 草稿' : '当前为默认航拍参考布局'}
-            </small>
-            <div className="map-3d-guide-decor-debug__actions">
-              <button
-                type="button"
-                className={gardenEditorMode === 'inspect' ? 'is-active' : ''}
-                onClick={() => {
-                  setGardenEditorMode('inspect')
-                  setGardenDraftPolygon(null)
-                }}
-              >
-                查看
-              </button>
-              <button type="button" className={gardenEditorMode === 'drawVegetation' ? 'is-active' : ''} onClick={beginVegetationZoneDrawing}>
-                绘制 vegetation
-              </button>
-              <button type="button" className={gardenEditorMode === 'drawKeepout' ? 'is-active' : ''} onClick={beginKeepoutZoneDrawing}>
-                绘制 keepout
-              </button>
-              <button type="button" className={gardenEditorMode === 'addAsset' ? 'is-active' : ''} onClick={() => setGardenEditorMode('addAsset')}>
-                添加单个资产
-              </button>
-              <button type="button" onClick={finishDraftGardenPolygon}>
-                完成多边形
-              </button>
-              <button type="button" onClick={cancelDraftGardenPolygon}>
-                取消草稿
-              </button>
-            </div>
-
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                当前模式
-                <input value={gardenEditorMode} readOnly />
-              </label>
-              <label>
-                草稿顶点
-                <input value={gardenDraftPolygon ? `${gardenDraftPolygon.mode} · ${gardenDraftPolygon.vertices.length}` : 'none'} readOnly />
-              </label>
-              <label>
-                选中顶点
-                <input value={selectedGardenVertexId || 'none'} readOnly />
-              </label>
-              <label>
-                单点资产类型
-                <select
-                  value={editorAddAssetKind}
-                  onChange={(event) => setEditorAddAssetKind(event.target.value as Map3DGardenAssetKind)}
-                >
-                  {gardenAssetKindOptions.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="map-3d-guide-decor-debug__actions">
-              <button type="button" onClick={generateGardenPreviewAssets}>
-                生成预览点
-              </button>
-              <button type="button" onClick={applyGardenPreviewAsGlb}>
-                应用为 GLB 树群
-              </button>
-              <button type="button" onClick={clearGardenPreviewAssets}>
-                清空预览
-              </button>
-              <button type="button" onClick={clearGardenLocalDraft}>
-                清空本地草稿
-              </button>
-              <button type="button" onClick={resetGardenEditorState}>
-                重置为默认航拍参考布局
-              </button>
-              <button type="button" onClick={saveGardenEditorStateToLocalStorage}>
-                保存到本地
-              </button>
-            </div>
-
-            <div className="map-3d-guide-decor-debug__actions">
-              <button type="button" onClick={copyEditorAssetsConfig}>
-                复制 assets
-              </button>
-              <button type="button" onClick={copyEditorZonesConfig}>
-                复制 zones
-              </button>
-              <button type="button" onClick={copyEditorKeepoutsConfig}>
-                复制 keepouts
-              </button>
-              <button type="button" onClick={copyCompleteGardenSourceSnippet}>
-                导出完整配置
-              </button>
-            </div>
-
-            <details className="map-3d-guide-garden-debug__help">
-              <summary>使用说明 / 帮助</summary>
-              <ol>
-                <li>先用“绘制 keepout”围出主路线、广场、建筑、停车场和 POI 标记周围的禁放区。</li>
-                <li>再用“绘制 vegetation”围出大佛背后、中轴两侧、寺院/水体边缘等放树区。</li>
-                <li>点击“生成预览点”检查点位，确认不压住路线、广场、建筑和站点。</li>
-                <li>点击“应用为 GLB 树群”把预览点转成真实 3D 树、灌木、山石。</li>
-                <li>需要补点时选择单个资产类型，切到“添加单个资产”后点击地图。</li>
-                <li>满意后“保存到本地”，最终用“导出完整配置”复制 TS 片段交给 Codex 固化。</li>
-              </ol>
-              <p>
-                完整说明见 docs/map-3d-guide-garden-editor-usage.md。原则：主路线和广场留白，大佛背后高密，中轴两侧形成林带，水边使用低矮灌木。
-              </p>
-            </details>
-          </div>
-
-          <div className="map-3d-guide-garden-debug__subsection">
-            <strong>编辑 vegetation zone</strong>
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                zone
-                <select
-                  value={selectedEditorZone?.id ?? ''}
-                  onChange={(event) => setSelectedEditorZoneId(event.target.value)}
-                >
-                  {gardenEditorState.zones.map((zone) => (
-                    <option key={zone.id} value={zone.id}>
-                      {zone.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                名称
-                <input value={selectedEditorZone?.name ?? ''} onChange={(event) => updateSelectedEditorZone({ name: event.target.value })} />
-              </label>
-              <label>
-                类型
-                <select
-                  value={selectedEditorZone?.kind ?? 'forest'}
-                  onChange={(event) => updateSelectedEditorZone({ kind: event.target.value as GardenEditorZoneKind })}
-                >
-                  <option value="forest">forest</option>
-                  <option value="axis_grove">axis_grove</option>
-                  <option value="water_edge">water_edge</option>
-                  <option value="node_green">node_green</option>
-                </select>
-              </label>
-              <label>
-                density
-                <input
-                  type="number"
-                  min="0"
-                  max="160"
-                  value={selectedEditorZone?.density ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ density: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                minScale
-                <input
-                  type="number"
-                  value={selectedEditorZone?.minScale ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ minScale: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                maxScale
-                <input
-                  type="number"
-                  value={selectedEditorZone?.maxScale ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ maxScale: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                minHeight
-                <input
-                  type="number"
-                  step="0.1"
-                  value={selectedEditorZone?.minHeight ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ minHeight: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                maxHeight
-                <input
-                  type="number"
-                  step="0.1"
-                  value={selectedEditorZone?.maxHeight ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ maxHeight: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                opacity
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedEditorZone?.opacity ?? 0}
-                  onChange={(event) => updateSelectedEditorZone({ opacity: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                priority
-                <select
-                  value={selectedEditorZone?.priority ?? 'medium'}
-                  onChange={(event) => updateSelectedEditorZone({ priority: event.target.value as Map3DGardenAssetPriority })}
-                >
-                  <option value="high">high</option>
-                  <option value="medium">medium</option>
-                  <option value="low">low</option>
-                </select>
-              </label>
-              <label>
-                visible
-                <select
-                  value={selectedEditorZone?.visible ? 'true' : 'false'}
-                  onChange={(event) => updateSelectedEditorZone({ visible: event.target.value === 'true' })}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </label>
-              <label>
-                顶点数
-                <input value={selectedEditorZone?.vertices.length ?? 0} readOnly />
-              </label>
-            </div>
-            <label>
-              assetPool
-              <input
-                value={selectedEditorZone?.assetPool.join(', ') ?? ''}
-                onChange={(event) => {
-                  const pool = event.target.value
-                    .split(',')
-                    .map((item) => item.trim())
-                    .filter((item): item is Map3DGardenAssetKind => gardenAssetKindOptions.includes(item as Map3DGardenAssetKind))
-                  updateSelectedEditorZone({ assetPool: pool })
-                }}
-              />
-            </label>
-            <label>
-              assetRatios
-              <input
-                value={selectedEditorZone ? formatGardenAssetRatios(selectedEditorZone.assetRatios) : ''}
-                onChange={(event) => updateSelectedEditorZone({ assetRatios: parseGardenAssetRatios(event.target.value) })}
-              />
-            </label>
-          </div>
-
-          <div className="map-3d-guide-garden-debug__subsection">
-            <strong>编辑 keepout zone</strong>
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                keepout
-                <select
-                  value={selectedKeepoutZone?.id ?? ''}
-                  onChange={(event) => setSelectedKeepoutZoneId(event.target.value)}
-                >
-                  {gardenEditorState.keepouts.map((zone) => (
-                    <option key={zone.id} value={zone.id}>
-                      {zone.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                名称
-                <input value={selectedKeepoutZone?.name ?? ''} onChange={(event) => updateSelectedKeepoutZone({ name: event.target.value })} />
-              </label>
-              <label>
-                reason
-                <select
-                  value={selectedKeepoutZone?.reason ?? 'plaza'}
-                  onChange={(event) => updateSelectedKeepoutZone({ reason: event.target.value as GardenKeepoutReason })}
-                >
-                  <option value="route">route</option>
-                  <option value="plaza">plaza</option>
-                  <option value="building">building</option>
-                  <option value="parking">parking</option>
-                  <option value="water">water</option>
-                  <option value="marker">marker</option>
-                </select>
-              </label>
-              <label>
-                visible
-                <select
-                  value={selectedKeepoutZone?.visible ? 'true' : 'false'}
-                  onChange={(event) => updateSelectedKeepoutZone({ visible: event.target.value === 'true' })}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </label>
-              <label>
-                顶点数
-                <input value={selectedKeepoutZone?.vertices.length ?? 0} readOnly />
-              </label>
-            </div>
-          </div>
-
-          <div className="map-3d-guide-garden-debug__subsection">
-            <strong>筛选资产</strong>
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                zone
-                <select
-                  value={gardenFilters.zoneId}
-                  onChange={(event) => updateGardenFilter({ zoneId: event.target.value })}
-                >
-                  <option value="all">全部 zone</option>
-                  {lingshanMap3DGardenVegetationZones.map((zone) => (
-                    <option key={zone.id} value={zone.id}>
-                      {zone.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                kind
-                <select
-                  value={gardenFilters.kind}
-                  onChange={(event) => updateGardenFilter({ kind: event.target.value })}
-                >
-                  <option value="all">全部 kind</option>
-                  <option value="pine_cluster">pine_cluster</option>
-                  <option value="mixed_grove">mixed_grove</option>
-                  <option value="bamboo_grove">bamboo_grove</option>
-                  <option value="forest_edge">forest_edge</option>
-                  <option value="shrub_mass">shrub_mass</option>
-                  <option value="rock_cluster">rock_cluster</option>
-                  <option value="stone_mass">stone_mass</option>
-                </select>
-              </label>
-              <label>
-                priority
-                <select
-                  value={gardenFilters.priority}
-                  onChange={(event) => updateGardenFilter({ priority: event.target.value })}
-                >
-                  <option value="all">全部 priority</option>
-                  <option value="high">high</option>
-                  <option value="medium">medium</option>
-                  <option value="low">low</option>
-                </select>
-              </label>
-              <label>
-                visible
-                <select
-                  value={gardenFilters.visible}
-                  onChange={(event) => updateGardenFilter({ visible: event.target.value })}
-                >
-                  <option value="all">全部 visible</option>
-                  <option value="true">visible=true</option>
-                  <option value="false">visible=false</option>
-                </select>
-              </label>
-            </div>
-            <div className="map-3d-guide-decor-debug__actions">
-              <button type="button" onClick={selectFirstFilteredGardenAsset}>
-                选中筛选首项
-              </button>
-              <button type="button" onClick={() => setGardenFilters(defaultGardenFilters)}>
-                清空筛选
-              </button>
-              <button type="button" onClick={() => applyFilteredGardenVisibility(true)}>
-                显示筛选资产
-              </button>
-              <button type="button" onClick={() => applyFilteredGardenVisibility(false)}>
-                隐藏筛选资产
-              </button>
-              <button type="button" onClick={() => setForestPatchesVisible((visible) => !visible)}>
-                {forestPatchesVisible ? '隐藏林地 patch' : '显示林地 patch'}
-              </button>
-            </div>
-          </div>
-
-          <label>
-            3D 资产
-            <select
-              value={selectedGardenAsset?.id ?? ''}
-              onChange={(event) => setSelectedGardenId(event.target.value)}
-            >
-              {filteredGardenAssets.map((asset) => (
-                <option key={asset.id} value={asset.id}>
-                  {asset.name} · {asset.kind} · {getGardenAssetZoneId(asset)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {selectedGardenAsset ? (
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                纬度
-                <input
-                  type="number"
-                  step="0.000001"
-                  value={selectedGardenAsset.location.lat}
-                  onChange={(event) =>
-                    updateSelectedGardenAsset({
-                      location: {
-                        ...selectedGardenAsset.location,
-                        lat: Number(event.target.value)
-                      }
-                    })
-                  }
-                />
-              </label>
-              <label>
-                经度
-                <input
-                  type="number"
-                  step="0.000001"
-                  value={selectedGardenAsset.location.lng}
-                  onChange={(event) =>
-                    updateSelectedGardenAsset({
-                      location: {
-                        ...selectedGardenAsset.location,
-                        lng: Number(event.target.value)
-                      }
-                    })
-                  }
-                />
-              </label>
-              <label>
-                scale
-                <input
-                  type="number"
-                  min="1"
-                  max="2000"
-                  value={selectedGardenAsset.scale}
-                  onChange={(event) => updateSelectedGardenAsset({ scale: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                height
-                <input
-                  type="number"
-                  min="-50"
-                  max="300"
-                  value={selectedGardenAsset.height}
-                  onChange={(event) => updateSelectedGardenAsset({ height: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                yaw
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  value={selectedGardenAsset.yaw}
-                  onChange={(event) => updateSelectedGardenAsset({ yaw: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                opacity
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedGardenAsset.opacity}
-                  onChange={(event) => updateSelectedGardenAsset({ opacity: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                显现进度
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedGardenAsset.routeFraction}
-                  onChange={(event) => updateSelectedGardenAsset({ routeFraction: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                可见
-                <select
-                  value={selectedGardenAsset.visible ? 'true' : 'false'}
-                  onChange={(event) => updateSelectedGardenAsset({ visible: event.target.value === 'true' })}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </label>
-              <label>
-                优先级
-                <select
-                  value={selectedGardenAsset.priority}
-                  onChange={(event) => updateSelectedGardenAsset({ priority: event.target.value as LingshanMap3DGardenAsset['priority'] })}
-                >
-                  <option value="high">high</option>
-                  <option value="medium">medium</option>
-                  <option value="low">low</option>
-                </select>
-              </label>
-              <label>
-                zone
-                <input value={getGardenAssetZoneId(selectedGardenAsset)} readOnly />
-              </label>
-            </div>
-          ) : null}
-
-          <div className="map-3d-guide-garden-debug__subsection">
-            <strong>批量调整当前筛选资产</strong>
-            <div className="map-3d-guide-decor-debug__grid">
-              <label>
-                scale 乘数
-                <input
-                  type="number"
-                  min="0.1"
-                  max="5"
-                  step="0.01"
-                  value={gardenBatchAdjust.scaleMultiplier}
-                  onChange={(event) => updateGardenBatchAdjust({ scaleMultiplier: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                height 增量
-                <input
-                  type="number"
-                  min="-100"
-                  max="100"
-                  step="0.1"
-                  value={gardenBatchAdjust.heightDelta}
-                  onChange={(event) => updateGardenBatchAdjust({ heightDelta: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                opacity 增量
-                <input
-                  type="number"
-                  min="-1"
-                  max="1"
-                  step="0.01"
-                  value={gardenBatchAdjust.opacityDelta}
-                  onChange={(event) => updateGardenBatchAdjust({ opacityDelta: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                lat 偏移
-                <input
-                  type="number"
-                  step="0.000001"
-                  value={gardenBatchAdjust.latOffset}
-                  onChange={(event) => updateGardenBatchAdjust({ latOffset: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                lng 偏移
-                <input
-                  type="number"
-                  step="0.000001"
-                  value={gardenBatchAdjust.lngOffset}
-                  onChange={(event) => updateGardenBatchAdjust({ lngOffset: Number(event.target.value) })}
-                />
-              </label>
-            </div>
-            <div className="map-3d-guide-decor-debug__actions">
-              <button type="button" onClick={applyFilteredGardenScale}>
-                应用缩放
-              </button>
-              <button type="button" onClick={applyFilteredGardenHeight}>
-                应用 height
-              </button>
-              <button type="button" onClick={applyFilteredGardenOpacity}>
-                应用 opacity
-              </button>
-              <button type="button" onClick={applyFilteredGardenOffset}>
-                应用经纬度偏移
-              </button>
-            </div>
-          </div>
-
-          <div className="map-3d-guide-decor-debug__actions">
-            <button type="button" onClick={copyGardenSummary}>
-              复制调试摘要
-            </button>
-            <button type="button" onClick={resetGardenConfig}>
-              恢复默认
-            </button>
-          </div>
-          <p>
-            3D 园林资产使用 TMap.model.GLTFModel，经纬度锚定并随腾讯地图相机移动；林地 patch 优先使用 TMap.MultiPolygon，经纬度面锚定，运行时不支持时退回锚定 Marker。调参会自动保存到新版 localStorage；如果仍看到旧点状树群，请点击“恢复默认”切回航拍参考树群布局。
-          </p>
-          <p>
-            {gardenModelReport.unavailable
-              ? '当前 TMap.model.GLTFModel 不可用，模型不会创建。'
-              : `素材：${gardenModelReport.assetUrls.length} 个 URL，loaded ${gardenModelReport.loadedIds.length}，error ${gardenModelReport.errorIds.length}`}
-          </p>
-          <small>{gardenCopyStatus}</small>
-        </section>
+          <GardenDebugWizard
+            applyFilteredGardenHeight={applyFilteredGardenHeight}
+            applyFilteredGardenOffset={applyFilteredGardenOffset}
+            applyFilteredGardenOpacity={applyFilteredGardenOpacity}
+            applyFilteredGardenScale={applyFilteredGardenScale}
+            applyFilteredGardenVisibility={applyFilteredGardenVisibility}
+            applyGardenPreviewAsGlb={applyGardenPreviewAsGlb}
+            beginKeepoutZoneDrawing={beginKeepoutZoneDrawing}
+            beginVegetationZoneDrawing={beginVegetationZoneDrawing}
+            cancelDraftGardenPolygon={cancelDraftGardenPolygon}
+            clearGardenLocalDraft={clearGardenLocalDraft}
+            clearGardenPreviewAssets={clearGardenPreviewAssets}
+            copyCompleteGardenSourceSnippet={copyCompleteGardenSourceSnippet}
+            copyEditorAssetsConfig={copyEditorAssetsConfig}
+            copyGardenSummary={copyGardenSummary}
+            deleteSelectedEditorZone={deleteSelectedEditorZone}
+            deleteSelectedGardenAsset={deleteSelectedGardenAsset}
+            deleteSelectedKeepoutZone={deleteSelectedKeepoutZone}
+            editorAddAssetKind={editorAddAssetKind}
+            filteredGardenAssets={filteredGardenAssets}
+            finishDraftGardenPolygon={finishDraftGardenPolygon}
+            forestPatchesVisible={forestPatchesVisible}
+            gardenAssetEditDraft={gardenAssetEditDraft}
+            gardenAssetKindOptions={gardenAssetKindOptions}
+            gardenAssets={gardenAssets}
+            gardenBatchAdjust={gardenBatchAdjust}
+            gardenCopyStatus={gardenCopyStatus}
+            gardenDraftPolygon={gardenDraftPolygon}
+            gardenEditorMode={gardenEditorMode}
+            gardenEditorState={gardenEditorState}
+            gardenEditorUsesStoredDraft={gardenEditorUsesStoredDraft}
+            gardenFilters={gardenFilters}
+            gardenModelReport={gardenModelReport}
+            generateGardenPreviewAssets={generateGardenPreviewAssets}
+            resetGardenEditorState={resetGardenEditorState}
+            saveGardenAssetEditDraft={saveGardenAssetEditDraft}
+            saveGardenEditorStateToLocalStorage={saveGardenEditorStateToLocalStorage}
+            selectedEditorZone={selectedEditorZone}
+            selectedEditorZoneId={selectedEditorZoneId}
+            selectedGardenAsset={selectedGardenAsset}
+            selectedGardenAssetDraft={selectedGardenAssetDraft}
+            selectedGardenId={selectedGardenId}
+            selectedGardenVertexId={selectedGardenVertexId}
+            selectedKeepoutZone={selectedKeepoutZone}
+            selectedKeepoutZoneId={selectedKeepoutZoneId}
+            selectEditorZone={selectEditorZone}
+            selectGardenAssetForEditing={selectGardenAssetForEditing}
+            selectFirstFilteredGardenAsset={selectFirstFilteredGardenAsset}
+            selectKeepoutZone={selectKeepoutZone}
+            setEditorAddAssetKind={setEditorAddAssetKind}
+            setForestPatchesVisible={setForestPatchesVisible}
+            setGardenDraftPolygon={setGardenDraftPolygon}
+            setGardenEditorMode={setGardenEditorMode}
+            setGardenFilters={setGardenFilters}
+            updateGardenAssetEditDraft={updateGardenAssetEditDraft}
+            updateGardenBatchAdjust={updateGardenBatchAdjust}
+            updateGardenFilter={updateGardenFilter}
+            updateSelectedEditorZone={updateSelectedEditorZone}
+            updateSelectedKeepoutZone={updateSelectedKeepoutZone}
+          />
+        </Suspense>
       ) : null}
+
+      {debugPerf ? <Map3DPerfPanel recorder={perfRecorder} /> : null}
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
         <h2>{visualVariant.statusTitle}</h2>
+        {debugGarden ? (
+          <button type="button" className="map-3d-guide-debug-exit" onClick={() => navigate('/map-3d-guide-c')}>
+            退出调试 / 返回普通导览页
+          </button>
+        ) : null}
         <dl>
           <div>
             <dt>当前路线</dt>
@@ -2966,6 +2571,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </details>
       </aside>
 
+      {!debugGarden ? (
       <section className="map-3d-guide-pois">
         <strong>{visualVariant.stationPanelTitle}</strong>
         <div>
@@ -2998,7 +2604,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           })}
         </div>
       </section>
+      ) : null}
 
+      {!debugGarden ? (
       <footer className="map-3d-guide-controlbar">
         <div className="map-3d-guide-progress">
           <span style={{ width: `${routeProgressPercent}%` }} />
@@ -3046,6 +2654,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           </button>
         </div>
       </footer>
+      ) : null}
 
       <style>{map3DGuideCss}</style>
     </main>
@@ -3213,11 +2822,6 @@ function clearGltfModel(model: any) {
   model?.setMap?.(null)
   model?.remove?.()
   model?.destroy?.()
-}
-
-function clearGardenModels(models: Map<string, any>) {
-  models.forEach((model) => clearGltfModel(model))
-  models.clear()
 }
 
 function isQueryEnabled(name: string) {
@@ -3509,6 +3113,52 @@ function createSingleEditorAsset(point: LatLngPoint, kind: Map3DGardenAssetKind,
   }
 }
 
+function cloneGardenAsset(asset: LingshanMap3DGardenAsset): LingshanMap3DGardenAsset {
+  return {
+    ...asset,
+    location: { ...asset.location }
+  }
+}
+
+function isSameLatLngPoint(a: LatLngPoint | undefined, b: LatLngPoint | undefined) {
+  if (!a || !b) {
+    return false
+  }
+
+  return Math.abs(a.lat - b.lat) < 0.000001 && Math.abs(a.lng - b.lng) < 0.000001
+}
+
+function buildGardenGenerationParamsSnapshot(state: GardenEditorState) {
+  return {
+    generator: 'generateGardenAssetsFromEditor',
+    trigger: 'manual preview button',
+    seed: 'hashString(zone.id)',
+    maxAttempts: 'Math.max(80, zone.density * 28)',
+    routeKeepoutMetersByZoneKind: {
+      forest: 18,
+      axis_grove: 13,
+      water_edge: 10,
+      node_green: 18
+    },
+    assetKindOptions: gardenAssetKindOptions,
+    zones: state.zones.map((zone) => ({
+      id: zone.id,
+      kind: zone.kind,
+      density: zone.density,
+      assetPool: zone.assetPool,
+      assetRatios: zone.assetRatios,
+      minScale: zone.minScale,
+      maxScale: zone.maxScale,
+      minHeight: zone.minHeight,
+      maxHeight: zone.maxHeight,
+      opacity: zone.opacity,
+      priority: zone.priority,
+      visible: zone.visible
+    })),
+    keepoutCount: state.keepouts.length
+  }
+}
+
 function generateGardenAssetsFromEditor(
   zones: GardenEditorVegetationZone[],
   keepouts: GardenEditorKeepoutZone[]
@@ -3606,24 +3256,24 @@ function buildGardenEditorPolygonItems(
 ) {
   const items = [
     ...state.zones
-      .filter((zone) => zone.visible && zone.vertices.length >= 3)
+      .filter((zone) => zone.id === selectedZoneId && zone.vertices.length >= 3)
       .map((zone) => ({
         id: `zone-${zone.id}`,
         type: 'vegetation' as const,
         name: zone.name,
         vertices: zone.vertices,
-        fill: zone.id === selectedZoneId ? 'rgba(38, 92, 63, 0.08)' : 'rgba(38, 92, 63, 0.015)',
+        fill: 'rgba(38, 92, 63, 0)',
         border: zone.kind === 'forest' ? 'rgba(31, 106, 72, 0.92)' : zone.kind === 'axis_grove' ? 'rgba(75, 111, 61, 0.90)' : 'rgba(48, 122, 99, 0.88)',
         dashed: false
       })),
     ...state.keepouts
-      .filter((zone) => zone.visible && zone.vertices.length >= 3)
+      .filter((zone) => zone.id === selectedKeepoutZoneId && zone.vertices.length >= 3)
       .map((zone) => ({
         id: `keepout-${zone.id}`,
         type: 'keepout' as const,
         name: zone.name,
         vertices: zone.vertices,
-        fill: zone.id === selectedKeepoutZoneId ? 'rgba(180, 83, 9, 0.08)' : 'rgba(180, 83, 9, 0.01)',
+        fill: 'rgba(180, 83, 9, 0)',
         border: 'rgba(158, 67, 32, 0.94)',
         dashed: true
       }))
@@ -3635,7 +3285,7 @@ function buildGardenEditorPolygonItems(
       type: draft.mode === 'vegetation' ? 'vegetation' : 'keepout',
       name: draft.mode === 'vegetation' ? '绘制中的 vegetation zone' : '绘制中的 keepout zone',
       vertices: draft.vertices,
-      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.08)' : 'rgba(217, 119, 6, 0.08)',
+      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0)' : 'rgba(217, 119, 6, 0)',
       border: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.90)' : 'rgba(217, 119, 6, 0.90)',
       dashed: draft.mode === 'keepout'
     })
@@ -3644,10 +3294,15 @@ function buildGardenEditorPolygonItems(
   return items
 }
 
-function buildGardenEditorVertexItems(state: GardenEditorState, draft: GardenDraftPolygon) {
+function buildGardenEditorVertexItems(
+  state: GardenEditorState,
+  draft: GardenDraftPolygon,
+  selectedZoneId: string,
+  selectedKeepoutZoneId: string
+) {
   const vertices: Array<{ id: string; styleId: 'vegetationVertex' | 'keepoutVertex' | 'draftVertex'; position: LatLngPoint }> = []
 
-  state.zones.forEach((zone) => {
+  state.zones.filter((zone) => zone.id === selectedZoneId).forEach((zone) => {
     zone.vertices.forEach((position, index) => {
       vertices.push({
         id: `zone:${zone.id}:${index}`,
@@ -3657,7 +3312,7 @@ function buildGardenEditorVertexItems(state: GardenEditorState, draft: GardenDra
     })
   })
 
-  state.keepouts.forEach((zone) => {
+  state.keepouts.filter((zone) => zone.id === selectedKeepoutZoneId).forEach((zone) => {
     zone.vertices.forEach((position, index) => {
       vertices.push({
         id: `keepout:${zone.id}:${index}`,
@@ -3782,27 +3437,6 @@ function gardenPreviewPointSvg(kind: Map3DGardenAssetKind) {
       ${shape}
     </g>
   </svg>`
-}
-
-function formatGardenAssetRatios(ratios: GardenAssetRatios) {
-  return Object.entries(ratios)
-    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
-    .map(([key, value]) => `${key}:${value}`)
-    .join(', ')
-}
-
-function parseGardenAssetRatios(value: string): GardenAssetRatios {
-  return value.split(',').reduce<GardenAssetRatios>((ratios, item) => {
-    const [rawKey, rawValue] = item.split(':').map((part) => part.trim())
-    const key = rawKey as Map3DGardenAssetKind
-    const numericValue = Number(rawValue)
-
-    if (gardenAssetKindOptions.includes(key) && Number.isFinite(numericValue)) {
-      ratios[key] = Math.max(0, numericValue)
-    }
-
-    return ratios
-  }, {})
 }
 
 function getGardenAssetZoneId(asset: LingshanMap3DGardenAsset) {
@@ -4222,45 +3856,6 @@ function forestPatchSvg(options: {
   </svg>`
 }
 
-function getVisibleGardenAssets(
-  assets: LingshanMap3DGardenAsset[],
-  options: {
-    debugGarden: boolean
-    routeProgressRatio: number
-    rerouteActive: boolean
-  }
-) {
-  const progress = Math.max(0, Math.min(1, options.routeProgressRatio))
-
-  return assets
-    .filter((asset) => asset.visible)
-    .map((asset) => {
-      if (options.debugGarden) {
-        return { ...asset, opacity: Math.max(asset.opacity, 0.92) }
-      }
-
-      const distanceFromProgress = asset.routeFraction - progress
-      const isCurrentBand = Math.abs(distanceFromProgress) <= 0.12
-      const isPassed = distanceFromProgress < -0.12
-      const isAhead = distanceFromProgress > 0.12
-      const priorityOpacityBoost = asset.priority === 'high' ? 0.08 : asset.priority === 'medium' ? 0.04 : 0
-      const rerouteDimming = options.rerouteActive && asset.priority === 'low' ? 0.76 : 1
-      const bandOpacity = isCurrentBand ? 0.94 : isPassed ? 0.72 : isAhead ? 0.46 : 0.62
-      const opacity = Number(Math.max(0.34, Math.min(1, (bandOpacity + priorityOpacityBoost) * rerouteDimming * asset.opacity)).toFixed(3))
-      const scaleBoost = isCurrentBand ? 1.12 : isPassed ? 1.02 : isAhead ? 0.94 : 1
-
-      return {
-        ...asset,
-        opacity,
-        scale: Math.round(asset.scale * scaleBoost)
-      }
-    })
-}
-
-function uniqueStrings(values: string[]) {
-  return Array.from(new Set(values))
-}
-
 function buildVisibleDecorGeometries(
   decorOverlays: InkDecorOverlay[],
   options: {
@@ -4327,9 +3922,11 @@ function buildRerouteDecorGeometries(reroutePlan: PlannedRoute | null): Rendered
 }
 
 async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
+  const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+
+  if (clipboard?.writeText) {
     try {
-      await navigator.clipboard.writeText(text)
+      await clipboard.writeText(text)
       return true
     } catch {
       // Fall through to textarea fallback.
@@ -4340,13 +3937,29 @@ async function copyText(text: string) {
   textarea.value = text
   textarea.setAttribute('readonly', 'true')
   textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
   textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
   document.body.appendChild(textarea)
+  textarea.focus({ preventScroll: true })
   textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+
+  let copiedByEvent = false
+  const handleCopy = (event: ClipboardEvent) => {
+    event.clipboardData?.setData('text/plain', text)
+    event.preventDefault()
+    copiedByEvent = true
+  }
+
+  document.addEventListener('copy', handleCopy)
 
   try {
-    return document.execCommand('copy')
+    const copiedByCommand = typeof document.execCommand === 'function' ? document.execCommand('copy') : false
+    return copiedByCommand || copiedByEvent
   } finally {
+    document.removeEventListener('copy', handleCopy)
     document.body.removeChild(textarea)
   }
 }
@@ -4901,9 +4514,373 @@ const map3DGuideCss = `
   resize: both;
 }
 
+.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-garden-debug--editor {
+  max-height: min(calc(100vh - 356px), 404px);
+}
+
 .map-3d-guide-garden-debug__drag-handle {
   cursor: move;
   user-select: none;
+}
+
+.map-3d-guide-shell--debug-garden .map-3d-guide-camera {
+  top: 18px;
+}
+
+.map-3d-guide-shell--debug-garden .map-3d-guide-status {
+  top: 118px;
+}
+
+.map-3d-guide-debug-exit {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.map-3d-guide-garden-debug__steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin: 10px 0;
+}
+
+.map-3d-guide-garden-debug__steps button {
+  min-height: 34px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+.map-3d-guide-garden-debug__object-lists {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.map-3d-guide-garden-debug__list-group {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .32);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.54);
+}
+
+.map-3d-guide-garden-debug__list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-3d-guide-garden-debug__list-heading strong {
+  font-size: 13px;
+}
+
+.map-3d-guide-garden-debug__list-heading span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(36, 72, 60, .10);
+  color: #24483c;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.map-3d-guide-garden-debug__list-scroll {
+  display: grid;
+  gap: 5px;
+  max-height: 86px;
+  overflow: auto;
+}
+
+.map-3d-guide-garden-debug__list-scroll--assets {
+  max-height: 118px;
+}
+
+.map-3d-guide-garden-debug__list-scroll button {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-height: 38px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.map-3d-guide-garden-debug__list-scroll button span {
+  width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-3d-guide-garden-debug__list-scroll button small {
+  width: 100%;
+  overflow: hidden;
+  color: #7b8176;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-3d-guide-garden-debug__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-3d-guide-garden-debug__primary {
+  border-color: rgba(32, 96, 72, .40) !important;
+  background: rgba(220, 241, 226, .96) !important;
+  color: #245640 !important;
+}
+
+.map-3d-guide-garden-debug__danger {
+  border-color: rgba(185, 74, 40, .34) !important;
+  background: rgba(255, 239, 229, .96) !important;
+  color: #9a3412 !important;
+}
+
+.map-3d-guide-garden-debug__draft-state,
+.map-3d-guide-garden-debug__stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.map-3d-guide-garden-debug__draft-state span,
+.map-3d-guide-garden-debug__stat-row span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 249, 229, .78);
+  color: #6f4a12;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.map-3d-guide-garden-debug__advanced {
+  margin-top: 10px;
+  border-top: 1px solid rgba(94, 112, 102, .12);
+}
+
+.map-3d-guide-garden-debug__advanced summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  color: #6d756e;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  list-style: none;
+}
+
+.map-3d-guide-garden-debug__advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-3d-guide-garden-debug__advanced summary::after {
+  content: "展开";
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 249, 229, .72);
+  color: #8a6a28;
+  font-size: 11px;
+}
+
+.map-3d-guide-garden-debug__advanced[open] summary::after {
+  content: "收起";
+}
+
+.map-3d-guide-garden-debug__status {
+  display: block;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .42);
+  color: #24483c;
+  font-weight: 900;
+}
+
+.map-3d-guide-garden-load {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(50, 88, 75, .16);
+  background: rgba(250, 252, 238, .88);
+  color: #24483c;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 10px 28px rgba(20, 45, 36, .14), inset 0 0 0 1px rgba(255,255,255,.52);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.map-3d-guide-garden-load.is-warning {
+  color: #8a3512;
+  border-color: rgba(182, 83, 24, .26);
+  background: rgba(255, 244, 228, .90);
+}
+
+.map-3d-guide-perf-panel {
+  position: absolute;
+  right: 24px;
+  bottom: 106px;
+  z-index: 25;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(58vh, 560px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(50, 88, 75, .18);
+  border-radius: 16px;
+  background: rgba(250, 252, 238, .92);
+  color: #24483c;
+  box-shadow: 0 18px 48px rgba(20, 45, 36, .18), inset 0 0 0 1px rgba(255,255,255,.58);
+  backdrop-filter: blur(16px);
+}
+
+.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-perf-panel {
+  bottom: 18px;
+  max-height: 220px;
+}
+
+.map-3d-guide-perf-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.map-3d-guide-perf-panel__header div {
+  display: grid;
+  gap: 2px;
+}
+
+.map-3d-guide-perf-panel__header strong {
+  color: #24483c;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 16px;
+}
+
+.map-3d-guide-perf-panel__header span,
+.map-3d-guide-perf-panel small {
+  color: rgba(36, 72, 60, .68);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.map-3d-guide-perf-panel button {
+  border: 1px solid rgba(160, 125, 48, .24);
+  border-radius: 10px;
+  background: rgba(255, 249, 229, .86);
+  color: #735016;
+  font-weight: 900;
+}
+
+.map-3d-guide-perf-panel__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.map-3d-guide-perf-panel__summary div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .42);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.62);
+}
+
+.map-3d-guide-perf-panel__summary dt {
+  color: rgba(36, 72, 60, .62);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.map-3d-guide-perf-panel__summary dd {
+  margin: 0;
+  color: #24483c;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.map-3d-guide-perf-panel__details {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.map-3d-guide-perf-panel__details section {
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .34);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
+}
+
+.map-3d-guide-perf-panel__details h3 {
+  margin: 0 0 6px;
+  color: #24483c;
+  font-size: 12px;
+}
+
+.map-3d-guide-perf-panel__details ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.map-3d-guide-perf-panel__details li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.map-3d-guide-perf-panel__details li span {
+  overflow: hidden;
+  color: #24483c;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-3d-guide-perf-panel__details p {
+  margin: 0;
+  color: rgba(36, 72, 60, .62);
+  font-size: 12px;
+}
+
+.map-3d-guide-perf-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.map-3d-guide-perf-panel__manual-copy {
+  width: 100%;
+  min-height: 92px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(50, 88, 75, .20);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .58);
+  color: #24483c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  resize: vertical;
 }
 
 .map-3d-guide-garden-debug__subsection {

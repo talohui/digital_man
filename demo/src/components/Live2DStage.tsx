@@ -18,6 +18,7 @@ import {
   type Live2DLikeModel,
   type RobotState
 } from '../lib/live2dManager'
+import { loadCubismCore } from '../lib/loadCubismCore'
 
 // pixi-live2d-display 0.4 通过全局 window.PIXI 访问 Pixi,必须在 import 之前注入
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
@@ -116,7 +117,8 @@ function Live2DStage({
     })
     appRef.current = app
 
-    import('pixi-live2d-display/cubism4')
+    loadCubismCore()
+      .then(() => import('pixi-live2d-display/cubism4'))
       .then(async ({ Live2DModel }) => {
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)

@@ -6,6 +6,7 @@ import {
   parseCostumeId,
   type CostumeId
 } from '../../lib/live2dCostume'
+import { loadCubismCore } from '../../lib/loadCubismCore'
 import type { Live2DLikeModel } from '../../lib/live2dManager'
 
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
@@ -57,7 +58,8 @@ function AdminLive2DPreview({ costumeId, className }: Props) {
     appRef.current = app
     modelRef.current = null
 
-    import('pixi-live2d-display/cubism4')
+    loadCubismCore()
+      .then(() => import('pixi-live2d-display/cubism4'))
       .then(async ({ Live2DModel }) => {
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
