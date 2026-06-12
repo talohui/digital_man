@@ -9963,3 +9963,57 @@ mode: 'none'
 ### 验证
 
 `npm run build` 通过。普通 `/map-3d-guide-c` 不显示候选版本切换；`/map-3d-guide-c?debugPerf=1` 中 `Landmark GLB Inspector` 仍可对五印坛城和梵宫进行 raw / safe-v1 / safe-v2 对比测试。
+
+## 2026-06-12｜阶段：8 个核心地标 safe-v2 runtime 正式切换
+
+### 本次目标
+
+将已人工验证可正常加载、显示和卸载的 8 个核心地标正式切换到 safe-v2 runtime GLB，并提交对应 safe-v2 资源、配置和文档。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/data/lingshanOptimizedModelCandidates.ts`
+- `docs/lingshan-glb-optimization-trial.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-development-log.md`
+- `public/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb`
+- `public/models/lingshan/optimized/baizi-milefo.safe-v2.glb`
+- `public/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb`
+- `public/models/lingshan/optimized/shengjing-plaza.safe-v2.glb`
+- `public/models/lingshan/optimized/sansheng-hall.safe-v2.glb`
+- `public/models/lingshan/optimized/xiangfu-temple.safe-v2.glb`
+- `public/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb`
+- `public/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb`
+
+### 切换结果
+
+新增正式切换到 safe-v2 的地标：
+
+- 灵山大佛
+- 佛手广场
+- 佛前广场
+- 曼龙飞塔
+- 三圣殿
+- 祥符禅寺
+- 百子戏弥勒
+- 胜境广场
+
+此前已切换的梵宫和五印坛城保持 safe-v2。当前 safe-v2 runtime 已覆盖 10 个核心地标。
+
+### 约束与边界
+
+- 未处理菩提大道，继续单独规划。
+- 未提交 raw GLB。
+- 未提交 safe-v1 / draco 试验产物。
+- 未使用 Draco；Draco 当前人工测试打不开，继续不采用。
+- 未修改 Tencent key。
+- 未修改 `mapStyleId: 'style1'`。
+- 未修改路线、POI、树群算法或 debugGarden 工作台。
+- 梵宫 polygon footprint mask 仍默认关闭。
+- 祥符禅寺未新增 polygon mask。
+
+### 后续建议
+
+三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续应继续推进二次优化、拆分、低模替代或建筑底座策略。菩提大道体积和形态特殊，应单独设计 runtime 接入方式。

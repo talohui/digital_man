@@ -253,3 +253,133 @@ Draco 候选文件虽然仍保留在本地 optimized 目录中，但当前人工
 - `bodhi-avenue.glb` 不参与本轮处理，后续需要单独策略。
 
 `Landmark GLB Inspector` 仍保留 raw / safe-v1 / safe-v2 对比能力，用于后续回归测试加载耗时、材质表现和卸载清理。
+
+## 13. 剩余地标 safe-v2 批处理
+
+### 本轮目标
+
+本轮继续沿用已经在五印坛城和梵宫上验证可用的 safe-compatible 压缩路线，只生成剩余核心地标的 safe-v2 runtime 候选，不修改正式 `modelUrl`，不处理 `bodhi-avenue.glb`。
+
+处理范围：
+
+- `lingshan-buddha-v2.glb`
+- `baizi-milefo.glb`
+- `buddha-hand-plaza.glb`
+- `shengjing-plaza.glb`
+- `sansheng-hall.glb`
+- `xiangfu-temple.glb`
+- `manlong-flying-tower.glb`
+- `buddha-front-plaza.glb`
+
+未处理：
+
+- `bodhi-avenue.glb`：体积约 464 MB，更像线性场景，后续单独拆解或低模化。
+- `wuyin-mandala.glb`、`fan-gong.glb`：已完成 safe-v2 并正式切换。
+
+### 优化命令
+
+每个模型使用同一套 safe-v2 命令：
+
+```bash
+gltf-transform prune <raw.glb> <tmp-prune.glb>
+gltf-transform dedup <tmp-prune.glb> <tmp-dedup.glb>
+gltf-transform weld <tmp-dedup.glb> <tmp-weld.glb>
+gltf-transform simplify <tmp-weld.glb> <tmp-simplify.glb> --ratio 0.72 --error 0.0005
+gltf-transform resize <tmp-simplify.glb> <safe-v2.glb> --width 1024 --height 1024
+```
+
+未使用 Draco、Meshopt、KTX2、WebP、AVIF。所有输出目标为 `extensionsUsed: none`。
+
+### 批处理结果
+
+| 模型 | raw 路径 | raw 大小 | safe-v2 输出路径 | safe-v2 大小 | 压缩率 | 使用命令 | glTF extension | validate error | validate warning | 是否建议进入 Inspector 人工测试 | 备注 |
+| --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | --- | --- | --- |
+| 灵山大佛 v2 | `public/models/lingshan/landmarks/lingshan-buddha-v2.glb` | 28.73 MB | `public/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb` | 14.57 MB | 49.3% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 后续需人工确认与已校准参数匹配。 |
+| 百子戏弥勒 | `public/models/lingshan/landmarks/baizi-milefo.glb` | 38.86 MB | `public/models/lingshan/optimized/baizi-milefo.safe-v2.glb` | 21.90 MB | 43.6% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 作为点状地标候选，适合优先测试。 |
+| 佛手广场 | `public/models/lingshan/landmarks/buddha-hand-plaza.glb` | 50.66 MB | `public/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb` | 30.04 MB | 40.7% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 后续检查广场细节和材质是否受贴图降采样影响。 |
+| 胜境广场 | `public/models/lingshan/landmarks/shengjing-plaza.glb` | 37.95 MB | `public/models/lingshan/optimized/shengjing-plaza.safe-v2.glb` | 20.90 MB | 44.9% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 适合与路线节点标识一起回归。 |
+| 三圣殿 | `public/models/lingshan/landmarks/sansheng-hall.glb` | 148.85 MB | `public/models/lingshan/optimized/sansheng-hall.safe-v2.glb` | 107.75 MB | 27.6% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 输出仍偏大，后续可能需要模型级拆解或更细 LOD。 |
+| 祥符禅寺 | `public/models/lingshan/landmarks/xiangfu-temple.glb` | 150.72 MB | `public/models/lingshan/optimized/xiangfu-temple.safe-v2.glb` | 108.73 MB | 27.9% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 输出仍偏大，并仍需后续 3D 底座 / 低模场景处理白模冲突。 |
+| 曼龙飞塔 | `public/models/lingshan/landmarks/manlong-flying-tower.glb` | 89.12 MB | `public/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb` | 58.97 MB | 33.8% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 后续检查塔身细节和远景可读性。 |
+| 佛前广场 | `public/models/lingshan/landmarks/buddha-front-plaza.glb` | 31.13 MB | `public/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb` | 16.80 MB | 46.0% | `prune` / `dedup` / `weld` / `simplify` / `resize 1024` | none | 无 | `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` | 是 | 压缩率较好，适合优先进入 Inspector 回归。 |
+
+### 当前结论
+
+- 8 个目标模型均成功生成 safe-v2。
+- 所有 safe-v2 输出均为 `extensionsUsed: none`，未引入 Draco、Meshopt、KTX2、WebP、AVIF。
+- validate 均无 error，统一保留 `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` warning。
+- 本轮没有修改 `src/data/lingshanMapModelOverlays.ts` 或 `src/data/lingshanOptimizedModelCandidates.ts`。
+- 正式游客页不会自动使用这些新 safe-v2，后续需要先通过 `/map-3d-guide-c?debugPerf=1` 的 Inspector 人工测试。
+
+## 14. Inspector 扩展剩余 safe-v2 候选测试
+
+### 本轮目标
+
+`Landmark GLB Inspector` 已扩展剩余 8 个 safe-v2 候选测试能力，用于在 `/map-3d-guide-c?debugPerf=1` 中逐个验证新增压缩模型。该能力只属于 debugPerf 调试态，不改变普通游客页，也不修改正式 `modelUrl`。
+
+### 新增候选
+
+| 地标 id | raw | safe-v2 | size |
+| --- | --- | --- | --- |
+| `giant_buddha` | `/models/lingshan/landmarks/lingshan-buddha-v2.glb` | `/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb` | 28.73 MB -> 14.57 MB |
+| `baizi_mile` | `/models/lingshan/landmarks/baizi-milefo.glb` | `/models/lingshan/optimized/baizi-milefo.safe-v2.glb` | 38.86 MB -> 21.90 MB |
+| `foshou_square` | `/models/lingshan/landmarks/buddha-hand-plaza.glb` | `/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb` | 50.66 MB -> 30.04 MB |
+| `shengjing_square` | `/models/lingshan/landmarks/shengjing-plaza.glb` | `/models/lingshan/optimized/shengjing-plaza.safe-v2.glb` | 37.95 MB -> 20.90 MB |
+| `sansheng_hall` | `/models/lingshan/landmarks/sansheng-hall.glb` | `/models/lingshan/optimized/sansheng-hall.safe-v2.glb` | 148.85 MB -> 107.75 MB |
+| `xiangfu_temple` | `/models/lingshan/landmarks/xiangfu-temple.glb` | `/models/lingshan/optimized/xiangfu-temple.safe-v2.glb` | 150.72 MB -> 108.73 MB |
+| `manlong_flying_tower` | `/models/lingshan/landmarks/manlong-flying-tower.glb` | `/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb` | 89.12 MB -> 58.97 MB |
+| `foqian_square` | `/models/lingshan/landmarks/buddha-front-plaza.glb` | `/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb` | 31.13 MB -> 16.80 MB |
+
+五印坛城和梵宫保持已有 raw / safe-v1 / safe-v2 候选。Draco 继续不进入 Inspector 候选。
+
+### 测试要求
+
+这些新增 safe-v2 尚未切正式配置，需要在 `/map-3d-guide-c?debugPerf=1` 中逐个检查：
+
+1. 是否能在腾讯地图 `GLTFModel` 中显示。
+2. 材质、透明度、法线是否异常。
+3. 尺寸、朝向和已固化校准参数是否保持。
+4. 切换 raw / safe-v2 后旧 overlay 是否卸载干净。
+5. debugPerf 中 `variant`、`selectedModelUrl`、`selectedSizeLabel` 是否正确记录。
+
+三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，即使人工测试可显示，后续仍建议继续拆解、低模化或制作更轻 runtime 版本。菩提大道仍未处理，继续单独规划。
+
+## 15. 剩余 8 个核心地标 safe-v2 正式 runtime 切换
+
+### 人工验证结论
+
+人工已在 `/map-3d-guide-c?debugPerf=1` 中验证以下 8 个 safe-v2 候选均可正常加载、显示和卸载：
+
+- 灵山大佛 safe-v2
+- 佛手广场 safe-v2
+- 佛前广场 safe-v2
+- 曼龙飞塔 safe-v2
+- 三圣殿 safe-v2
+- 祥符禅寺 safe-v2
+- 百子戏弥勒 safe-v2
+- 胜境广场 safe-v2
+
+### 正式切换结果
+
+正式 `src/data/lingshanMapModelOverlays.ts` 已切换以下 runtime `modelUrl`：
+
+| 地标 | runtime modelUrl | raw 回退路径 |
+| --- | --- | --- |
+| 灵山大佛 | `/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb` | `/models/lingshan/landmarks/lingshan-buddha-v2.glb` |
+| 百子戏弥勒 | `/models/lingshan/optimized/baizi-milefo.safe-v2.glb` | `/models/lingshan/landmarks/baizi-milefo.glb` |
+| 佛手广场 | `/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb` | `/models/lingshan/landmarks/buddha-hand-plaza.glb` |
+| 胜境广场 | `/models/lingshan/optimized/shengjing-plaza.safe-v2.glb` | `/models/lingshan/landmarks/shengjing-plaza.glb` |
+| 三圣殿 | `/models/lingshan/optimized/sansheng-hall.safe-v2.glb` | `/models/lingshan/landmarks/sansheng-hall.glb` |
+| 祥符禅寺 | `/models/lingshan/optimized/xiangfu-temple.safe-v2.glb` | `/models/lingshan/landmarks/xiangfu-temple.glb` |
+| 曼龙飞塔 | `/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb` | `/models/lingshan/landmarks/manlong-flying-tower.glb` |
+| 佛前广场 | `/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb` | `/models/lingshan/landmarks/buddha-front-plaza.glb` |
+
+至此，safe-v2 runtime 已覆盖 10 个核心地标：灵山大佛、梵宫、五印坛城、佛手广场、佛前广场、祥符禅寺、三圣殿、百子戏弥勒、曼龙飞塔、胜境广场。
+
+### 边界说明
+
+- raw GLB 继续本地保留，用于 debugPerf 对比和回退，不进入 Git。
+- safe-v1 / draco 继续作为本地试验产物，不进入 Git。
+- Draco 当前仍打不开，继续不作为腾讯地图运行时候选。
+- 菩提大道仍未处理，后续需要单独拆解、低模化或专门 runtime 策略。
+- 三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续仍建议二次优化或低模 / 底座策略。

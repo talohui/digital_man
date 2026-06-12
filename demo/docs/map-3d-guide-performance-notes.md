@@ -437,3 +437,118 @@ Draco 当前人工测试打不开，暂不加入 Inspector 候选，也不作为
 `Landmark GLB Inspector` 默认会匹配正式 `modelUrl`，因此这两个地标默认指向 safe-v2；仍可手动切换 raw / safe-v1 / safe-v2 做加载耗时和视觉回归对比。普通 `/map-3d-guide-c` 不显示候选版本切换。
 
 提交边界：只提交两个 safe-v2 runtime GLB。raw GLB 继续精确忽略，safe-v1 / draco 试验产物也精确忽略，不进入 Git。`bodhi-avenue.glb` 仍需单独处理。
+
+## 16. 剩余核心地标 safe-v2 生成
+
+### 背景
+
+五印坛城与梵宫已经完成 raw / safe-v1 / safe-v2 人工测试，并已正式切换到 safe-v2 runtime GLB。Draco 候选当前在腾讯地图 `TMap.model.GLTFModel` 中打不开，因此继续暂停作为运行时候选。
+
+本轮继续沿用 safe-compatible 路线生成剩余核心地标候选，只生成文件和报告，不修改正式 `modelUrl`。
+
+### 处理范围
+
+已生成 safe-v2：
+
+- `lingshan-buddha-v2.safe-v2.glb`
+- `baizi-milefo.safe-v2.glb`
+- `buddha-hand-plaza.safe-v2.glb`
+- `shengjing-plaza.safe-v2.glb`
+- `sansheng-hall.safe-v2.glb`
+- `xiangfu-temple.safe-v2.glb`
+- `manlong-flying-tower.safe-v2.glb`
+- `buddha-front-plaza.safe-v2.glb`
+
+未处理：
+
+- `bodhi-avenue.glb`：体积约 464 MB，属于线性场景类模型，后续需要单独拆解、低模化或专门 runtime 策略。
+- `wuyin-mandala.glb`、`fan-gong.glb`：此前已经完成 safe-v2 并正式切换。
+
+### 输出体积
+
+| 模型 | raw 大小 | safe-v2 大小 | 压缩率 | extension | validate |
+| --- | ---: | ---: | ---: | --- | --- |
+| 灵山大佛 v2 | 28.73 MB | 14.57 MB | 49.3% | none | 无 error；保留 tangent warning |
+| 百子戏弥勒 | 38.86 MB | 21.90 MB | 43.6% | none | 无 error；保留 tangent warning |
+| 佛手广场 | 50.66 MB | 30.04 MB | 40.7% | none | 无 error；保留 tangent warning |
+| 胜境广场 | 37.95 MB | 20.90 MB | 44.9% | none | 无 error；保留 tangent warning |
+| 三圣殿 | 148.85 MB | 107.75 MB | 27.6% | none | 无 error；保留 tangent warning |
+| 祥符禅寺 | 150.72 MB | 108.73 MB | 27.9% | none | 无 error；保留 tangent warning |
+| 曼龙飞塔 | 89.12 MB | 58.97 MB | 33.8% | none | 无 error；保留 tangent warning |
+| 佛前广场 | 31.13 MB | 16.80 MB | 46.0% | none | 无 error；保留 tangent warning |
+
+### 性能结论
+
+- 本轮输出均未引入 Draco、Meshopt、KTX2、WebP、AVIF 等额外运行时扩展，`extensionsUsed: none`。
+- validate 均无 error；warning 仍为 `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE`，与前两份 safe-v2 候选一致。
+- 三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续即使 Inspector 测试通过，也建议继续评估拆分、LOD 或更轻低模版本。
+- 正式配置尚未切换这些新 safe-v2，游客端不会默认加载。
+
+### 后续测试
+
+下一步应在 `/map-3d-guide-c?debugPerf=1` 中扩展或临时使用 `Landmark GLB Inspector` 测试这些 safe-v2：
+
+1. 能否在腾讯地图中显示。
+2. 材质和透明度是否异常。
+3. 尺寸、朝向和已固化校准参数是否保持合理。
+4. 加载耗时是否较 raw 明显改善。
+5. 卸载是否干净。
+
+只有人工测试通过后，再分批把正式 `modelUrl` 切换到对应 safe-v2。
+
+## 17. Inspector 扩展剩余 safe-v2 候选
+
+`Landmark GLB Inspector` 已支持本轮新生成的 8 个 safe-v2 候选测试。该能力只在 `/map-3d-guide-c?debugPerf=1` 中显示，普通 `/map-3d-guide-c` 不显示候选版本切换，也不会默认加载这些 optimized 模型。
+
+新增支持 raw / safe-v2 切换的地标：
+
+- `giant_buddha`
+- `baizi_mile`
+- `foshou_square`
+- `shengjing_square`
+- `sansheng_hall`
+- `xiangfu_temple`
+- `manlong_flying_tower`
+- `foqian_square`
+
+保持已有 raw / safe-v1 / safe-v2 候选的地标：
+
+- `wuyin_tancheng`
+- `fan_gong`
+
+实现边界：
+
+- 正式 `src/data/lingshanMapModelOverlays.ts` 未切换这 8 个地标的 `modelUrl`。
+- Draco 继续不作为 Inspector 候选。
+- `debugPerf` 会记录当前选择的 `variant`、`selectedModelUrl` 和 `selectedSizeLabel`。
+- 切换版本前会卸载当前地标 overlay，避免 raw 和 safe-v2 叠加。
+
+下一步需要逐个手动验证新增 safe-v2：能否显示、材质是否异常、尺寸/朝向是否保持、卸载是否干净、加载耗时是否有改善。三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续应继续评估二次优化、低模替代或分层加载。菩提大道继续单独规划，不纳入本轮测试。
+
+## 18. 10 个核心地标 safe-v2 runtime 覆盖
+
+### 本轮切换
+
+人工验证通过后，剩余 8 个核心地标已正式切换到 safe-v2 runtime GLB：
+
+- `giant_buddha` → `/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb`
+- `baizi_mile` → `/models/lingshan/optimized/baizi-milefo.safe-v2.glb`
+- `foshou_square` → `/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb`
+- `shengjing_square` → `/models/lingshan/optimized/shengjing-plaza.safe-v2.glb`
+- `sansheng_hall` → `/models/lingshan/optimized/sansheng-hall.safe-v2.glb`
+- `xiangfu_temple` → `/models/lingshan/optimized/xiangfu-temple.safe-v2.glb`
+- `manlong_flying_tower` → `/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb`
+- `foqian_square` → `/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb`
+
+此前已切换的 `wuyin_tancheng` 和 `fan_gong` 保持 safe-v2。当前 safe-v2 runtime 覆盖 10 个核心地标。
+
+### Inspector 与游客页边界
+
+`Landmark GLB Inspector` 保留 raw / safe-v2 对比能力；五印坛城和梵宫继续保留 raw / safe-v1 / safe-v2 对比。普通 `/map-3d-guide-c` 不显示候选切换，但正式地标配置会使用已验证的 safe-v2 runtime URL。
+
+### 后续风险
+
+- 三圣殿 safe-v2 约 107.75 MB，祥符禅寺 safe-v2 约 108.73 MB，仍偏大。
+- 两者后续需要继续评估二次优化、拆分、低模化或建筑底座策略。
+- 菩提大道仍使用 raw，并继续单独规划。
+- Draco 当前打不开，继续不采用。

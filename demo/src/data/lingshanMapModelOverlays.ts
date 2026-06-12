@@ -63,8 +63,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'giant_buddha',
     name: '灵山大佛',
-    modelUrl: '/models/lingshan/landmarks/lingshan-buddha-v2.glb',
-    fileSizeLabel: '27M',
+    modelUrl: '/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb',
+    fileSizeLabel: '14.57 MB',
     positionSource: 'navLocation',
     height: 73,
     scale: 380,
@@ -75,7 +75,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '新版灵山大佛 GLB 初始接入，旧 Meshy 路径 /models/lingshan/landmarks/lingshan_buddha_meshy_v1.glb 和历史 blockout 路径 /models/lingshan/landmarks/lingshan_buddha_blockout_v1.glb 保留为回退说明；仍需在 /map?debugGltfModel=1 或 /map-3d-guide-c 中校准 scale/height/yaw。'
+    note: '灵山大佛人工验证 safe-v2 可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb；raw 路径 /models/lingshan/landmarks/lingshan-buddha-v2.glb 仍保留在本地用于 debugPerf 对比和回退，旧 Meshy 与 blockout 路径继续作为历史回退说明。'
   },
   {
     poiId: 'fan_gong',
@@ -141,8 +141,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'foshou_square',
     name: '佛手广场',
-    modelUrl: '/models/lingshan/landmarks/buddha-hand-plaza.glb',
-    fileSizeLabel: '48M',
+    modelUrl: '/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb',
+    fileSizeLabel: '30.04 MB',
     positionSource: 'navLocation',
     height: 9,
     scale: 194,
@@ -153,13 +153,13 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '第二批人工校准 patch 已固化；debugPerf 本地校准草稿仍可覆盖默认值，方便后续继续微调。'
+    note: '第二批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb；raw 路径 /models/lingshan/landmarks/buddha-hand-plaza.glb 仍保留在本地用于 debugPerf 对比和回退。'
   },
   {
     poiId: 'xiangfu_temple',
     name: '祥符禅寺',
-    modelUrl: '/models/lingshan/landmarks/xiangfu-temple.glb',
-    fileSizeLabel: '144M',
+    modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v2.glb',
+    fileSizeLabel: '108.73 MB',
     positionSource: 'navLocation',
     height: 12,
     scale: 618,
@@ -170,13 +170,13 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '第二批人工校准 patch 已固化。祥符禅寺属于建筑类核心地标，当前位置、scale 和高度已初步校准，但仍存在与梵宫类似的腾讯 3D 白模建筑重叠风险；不新增 polygon footprint mask，后续需要真正 3D 场地底座 / 低模底座，或将底座整合进 GLB。'
+    note: '第二批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/xiangfu-temple.safe-v2.glb；raw 路径 /models/lingshan/landmarks/xiangfu-temple.glb 仍保留在本地用于 debugPerf 对比和回退。祥符禅寺属于建筑类核心地标，仍存在与梵宫类似的腾讯 3D 白模建筑重叠风险；不新增 polygon footprint mask，后续需要真正 3D 场地底座 / 低模底座，或将底座整合进 GLB。'
   },
   {
     poiId: 'foqian_square',
     name: '佛前广场',
-    modelUrl: '/models/lingshan/landmarks/buddha-front-plaza.glb',
-    fileSizeLabel: '30M',
+    modelUrl: '/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb',
+    fileSizeLabel: '16.80 MB',
     positionSource: 'navLocation',
     height: 3,
     scale: 103,
@@ -187,13 +187,13 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '第二批人工校准 patch 已固化；debugPerf 本地校准草稿仍可覆盖默认值，方便后续继续微调。'
+    note: '第二批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/buddha-front-plaza.safe-v2.glb；raw 路径 /models/lingshan/landmarks/buddha-front-plaza.glb 仍保留在本地用于 debugPerf 对比和回退。'
   },
   {
     poiId: 'baizi_mile',
     name: '百子戏弥勒',
-    modelUrl: '/models/lingshan/landmarks/baizi-milefo.glb',
-    fileSizeLabel: '37M',
+    modelUrl: '/models/lingshan/optimized/baizi-milefo.safe-v2.glb',
+    fileSizeLabel: '21.90 MB',
     positionSource: 'navLocation',
     height: 9,
     scale: 145,
@@ -204,7 +204,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'medium',
-    note: '第三批人工校准 patch 已固化；debugPerf 本地校准草稿仍可覆盖默认值，方便后续继续微调。'
+    note: '第三批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/baizi-milefo.safe-v2.glb；raw 路径 /models/lingshan/landmarks/baizi-milefo.glb 仍保留在本地用于 debugPerf 对比和回退。'
   },
   {
     poiId: 'puti_avenue',
@@ -224,8 +224,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'shengjing_square',
     name: '胜境广场',
-    modelUrl: '/models/lingshan/landmarks/shengjing-plaza.glb',
-    fileSizeLabel: '36M',
+    modelUrl: '/models/lingshan/optimized/shengjing-plaza.safe-v2.glb',
+    fileSizeLabel: '20.90 MB',
     positionSource: 'navLocation',
     height: 8,
     scale: 150,
@@ -236,13 +236,13 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'medium',
-    note: '第三批人工校准 patch 已固化；debugPerf 本地校准草稿仍可覆盖默认值，方便后续继续微调。'
+    note: '第三批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/shengjing-plaza.safe-v2.glb；raw 路径 /models/lingshan/landmarks/shengjing-plaza.glb 仍保留在本地用于 debugPerf 对比和回退。'
   },
   {
     poiId: 'sansheng_hall',
     name: '三圣殿',
-    modelUrl: '/models/lingshan/landmarks/sansheng-hall.glb',
-    fileSizeLabel: '142M',
+    modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v2.glb',
+    fileSizeLabel: '107.75 MB',
     positionSource: 'navLocation',
     height: 46,
     scale: 763,
@@ -253,14 +253,14 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'medium',
-    note: '第三批人工校准 patch 已固化。现有 POI 名称为三圣殿；GLB 文件按 sansheng-hall 接入，debugPerf 本地校准草稿仍可覆盖默认值。'
+    note: '第三批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/sansheng-hall.safe-v2.glb；raw 路径 /models/lingshan/landmarks/sansheng-hall.glb 仍保留在本地用于 debugPerf 对比和回退。现有 POI 名称为三圣殿；safe-v2 输出仍超过 100 MB，后续仍建议二次优化或低模化。'
   },
   {
     poiId: 'manfeilong_tower',
     inspectorId: 'manlong_flying_tower',
     name: '曼龙飞塔',
-    modelUrl: '/models/lingshan/landmarks/manlong-flying-tower.glb',
-    fileSizeLabel: '85M',
+    modelUrl: '/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb',
+    fileSizeLabel: '58.97 MB',
     positionSource: 'navLocation',
     height: 35,
     scale: 207.5,
@@ -271,7 +271,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'medium',
-    note: '第三批人工校准 patch 已固化。现有 POI anchor 仍使用 manfeilong_tower；Inspector / 模型调试 id 统一显示为曼龙飞塔 / manlong_flying_tower，debugPerf 本地校准草稿仍可覆盖默认值。'
+    note: '第三批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/manlong-flying-tower.safe-v2.glb；raw 路径 /models/lingshan/landmarks/manlong-flying-tower.glb 仍保留在本地用于 debugPerf 对比和回退。现有 POI anchor 仍使用 manfeilong_tower；Inspector / 模型调试 id 统一显示为曼龙飞塔 / manlong_flying_tower。'
   }
 ]
 

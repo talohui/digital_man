@@ -660,3 +660,49 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 验收结果
 
 人工测试确认五印坛城和梵宫 raw / safe-v1 / safe-v2 均可显示，safe-v2 材质、尺寸、朝向和卸载未发现明显问题。Draco 继续暂停，不作为腾讯地图运行时候选。菩提大道仍不处理，后续单独制定策略。
+
+## 阶段：8 个核心地标 safe-v2 runtime 正式切换
+
+### 背景问题
+
+第一批 safe-v2 已在五印坛城和梵宫上验证并正式启用。随后生成了剩余 8 个核心地标的 safe-v2 候选，并通过 `/map-3d-guide-c?debugPerf=1` 人工确认可正常加载、显示和卸载。
+
+### 改动摘要
+
+正式切换到 safe-v2 的地标：
+
+- 灵山大佛
+- 佛手广场
+- 佛前广场
+- 曼龙飞塔
+- 三圣殿
+- 祥符禅寺
+- 百子戏弥勒
+- 胜境广场
+
+当前 safe-v2 runtime 已覆盖 10 个核心地标：灵山大佛、梵宫、五印坛城、佛手广场、佛前广场、祥符禅寺、三圣殿、百子戏弥勒、曼龙飞塔、胜境广场。
+
+### 涉及文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/data/lingshanOptimizedModelCandidates.ts`
+- `public/models/lingshan/optimized/*.safe-v2.glb`
+- `docs/lingshan-glb-optimization-trial.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-development-log.md`
+
+### 验收结果
+
+- 8 个 safe-v2 已人工验证可正常加载、显示、卸载。
+- 正式 `modelUrl` 已切换到 safe-v2。
+- raw GLB 仍本地保留，但继续被 `.gitignore` 精确忽略。
+- safe-v1 / draco 试验产物不提交。
+- `fan_gong.footprintMask` 仍默认关闭。
+- `xiangfu_temple` 没有新增 polygon mask。
+
+### 后续注意事项
+
+- 三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续需要二次优化、拆分、低模或底座策略。
+- 菩提大道仍未处理，继续单独规划。
+- Draco 当前打不开，继续不作为腾讯地图运行时候选。
