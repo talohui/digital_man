@@ -2,6 +2,7 @@ export type Map3DPerfStage = 'mapInit' | 'routeDraw' | 'poiInit'
 
 export type Map3DPerfAssetStatus = 'loaded' | 'failed' | 'pending' | 'unloaded'
 export type Map3DPerfAssetCategory = 'garden' | 'landmark'
+export type Map3DPerfLandmarkVariant = 'raw' | 'safe-v1' | 'safe-v2'
 
 export type Map3DPerfBatchSnapshot = {
   batchIndex: number
@@ -18,6 +19,9 @@ export type Map3DPerfAssetSnapshot = {
   modelUrl?: string
   anchorId?: string
   fileSizeLabel?: string
+  variant?: Map3DPerfLandmarkVariant
+  selectedModelUrl?: string
+  selectedSizeLabel?: string
   category: Map3DPerfAssetCategory
   priority?: string
   loadCount?: number
@@ -89,6 +93,9 @@ export type Map3DPerfRecorder = {
     modelUrl: string
     anchorId?: string
     fileSizeLabel?: string
+    variant?: Map3DPerfLandmarkVariant
+    selectedModelUrl?: string
+    selectedSizeLabel?: string
     priority?: string
     batchIndex?: number
   }) => void
@@ -283,7 +290,7 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       removeAssetsByCategory(state, 'landmark')
       notify()
     },
-    startLandmarkAsset: ({ id, name, modelUrl, anchorId, fileSizeLabel, priority, batchIndex }) => {
+    startLandmarkAsset: ({ id, name, modelUrl, anchorId, fileSizeLabel, variant, selectedModelUrl, selectedSizeLabel, priority, batchIndex }) => {
       if (!enabled) {
         return
       }
@@ -296,6 +303,9 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         modelUrl,
         anchorId,
         fileSizeLabel,
+        variant,
+        selectedModelUrl,
+        selectedSizeLabel,
         category: 'landmark',
         priority,
         loadCount: (existing?.loadCount ?? 0) + 1,

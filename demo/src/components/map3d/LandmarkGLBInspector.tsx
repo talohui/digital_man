@@ -86,11 +86,28 @@ export function LandmarkGLBInspector({ inspector }: LandmarkGLBInspectorProps) {
               <div>
                 <strong>{item.name}</strong>
                 <small>
-                  {statusLabel[item.status]} · {item.fileSizeLabel ?? 'size ?'} · anchor: {item.anchorId}
+                  {statusLabel[item.status]} · {item.selectedVariant} · {item.fileSizeLabel ?? 'size ?'} · anchor: {item.anchorId}
                   {item.hasSavedDraft ? ' · local draft' : ''}
                   {item.isDirty ? ' · unsaved' : ''}
                 </small>
-                <code>{item.modelUrl ?? 'modelUrl missing'}</code>
+                <code>{item.selectedModelUrl ?? item.modelUrl ?? 'modelUrl missing'}</code>
+                {item.variantCandidates.length > 1 ? (
+                  <div className="map-3d-guide-landmark-inspector__variants">
+                    <span>测试版本</span>
+                    {item.variantCandidates.map((candidate) => (
+                      <button
+                        type="button"
+                        key={candidate.variant}
+                        className={candidate.variant === item.selectedVariant ? 'is-active' : ''}
+                        disabled={loading || candidate.variant === item.selectedVariant}
+                        onClick={() => inspector.setModelVariant(item.id, candidate.variant)}
+                      >
+                        {candidate.variant} · {candidate.sizeLabel}
+                      </button>
+                    ))}
+                    <small>Draco 当前人工测试打不开，暂不作为腾讯地图运行时候选；此处仅测试 raw / safe-v1 / safe-v2。</small>
+                  </div>
+                ) : null}
                 <small>
                   scale {item.calibration.scale} · h {item.calibration.height} · rotY {item.calibration.rotationY} ·
                   offset {formatOffset(item.calibration)}
@@ -133,7 +150,7 @@ export function LandmarkGLBInspector({ inspector }: LandmarkGLBInspectorProps) {
               <h3>地标模型校准</h3>
               <strong>{activeItem.name}</strong>
               <small>
-                {activeItem.id} · {activeItem.status} · anchor {activeItem.anchorId}
+                {activeItem.id} · {activeItem.status} · {activeItem.selectedVariant} · anchor {activeItem.anchorId}
               </small>
             </div>
             <button
@@ -147,7 +164,7 @@ export function LandmarkGLBInspector({ inspector }: LandmarkGLBInspectorProps) {
               重置当前模型
             </button>
           </div>
-          <code>{activeItem.modelUrl ?? 'modelUrl missing'}</code>
+          <code>{activeItem.selectedModelUrl ?? activeItem.modelUrl ?? 'modelUrl missing'}</code>
 
           <div className="map-3d-guide-landmark-calibration__grid">
             <CalibrationNumberField
@@ -498,6 +515,7 @@ function formatCalibrationPatchArray(patches: ReturnType<LandmarkModelInspector[
 ${patches.map((patch) => `  ${formatCalibrationPatch(patch).replace(/\n/g, '\n  ')}`).join(',\n')}
 ]`
 }
+
 
 function roundCalibrationNumber(value: number) {
   return Number(value.toFixed(6))

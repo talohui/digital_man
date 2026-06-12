@@ -32,3 +32,10 @@ public/models/lingshan/landmarks/xiangfu-temple.glb
 public/models/lingshan/landmarks/wuyin-mandala.glb
 public/models/lingshan/landmarks/manlong-flying-tower.glb
 public/models/lingshan/landmarks/buddha-front-plaza.glb
+
+# Lingshan optimization trial candidates kept local.
+# Runtime safe-v2 files may be committed individually after validation.
+public/models/lingshan/optimized/wuyin-mandala.safe.glb
+public/models/lingshan/optimized/wuyin-mandala.draco.glb
+public/models/lingshan/optimized/fan-gong.safe.glb
+public/models/lingshan/optimized/fan-gong.draco.glb

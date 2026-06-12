@@ -5010,6 +5010,31 @@ const map3DGuideCss = `
   color: #8a5d12;
 }
 
+.map-3d-guide-landmark-inspector__variants {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.map-3d-guide-landmark-inspector__variants span {
+  color: rgba(36, 72, 60, .68);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.map-3d-guide-landmark-inspector__variants button.is-active {
+  border-color: rgba(46, 130, 93, .42);
+  background: rgba(216, 242, 224, .78);
+  color: #24483c;
+}
+
+.map-3d-guide-landmark-inspector__variants small {
+  flex-basis: 100%;
+  color: rgba(138, 93, 18, .86);
+}
+
 .map-3d-guide-landmark-inspector__actions {
   display: flex;
   flex-wrap: wrap;

@@ -122,7 +122,7 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   <li key={asset.id}>
                     <span>{asset.name ?? asset.id}</span>
                     <small>
-                      {asset.category} · {formatMs(asset.durationMs)} · {asset.status}
+                      {asset.category} · {asset.variant ?? 'raw'} · {asset.selectedSizeLabel ?? asset.fileSizeLabel ?? 'size ?'} · {formatMs(asset.durationMs)} · {asset.status}
                     </small>
                     <code>{asset.modelUrl ?? asset.assetUrl}</code>
                   </li>
@@ -175,7 +175,7 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   <li key={asset.id}>
                     <span>{asset.name ?? asset.id}</span>
                     <small>
-                      {asset.category} · {asset.error ?? '未知错误'}
+                      {asset.category} · {asset.variant ?? 'raw'} · {asset.selectedSizeLabel ?? asset.fileSizeLabel ?? 'size ?'} · {asset.error ?? '未知错误'}
                     </small>
                     <code>{asset.modelUrl ?? asset.assetUrl}</code>
                   </li>

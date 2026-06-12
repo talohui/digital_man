@@ -80,8 +80,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'fan_gong',
     name: '梵宫',
-    modelUrl: '/models/lingshan/landmarks/fan-gong.glb',
-    fileSizeLabel: '67M',
+    modelUrl: '/models/lingshan/optimized/fan-gong.safe-v2.glb',
+    fileSizeLabel: '43.86 MB',
     positionSource: 'navLocation',
     height: 50,
     scale: 1012,
@@ -106,7 +106,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '最新梵宫人工校准 patch 已固化。polygon footprint mask 仍为高级调试实验，enabled=false 且 mode=none，不作为梵宫最终方案；若与腾讯底图白模建筑穿插，应在 style1 中弱化白模视觉，并后续制作真正 3D 场地底座 / 低模场景。'
+    note: '最新梵宫人工校准 patch 已固化。正式 runtime 已切换到 safe-v2：/models/lingshan/optimized/fan-gong.safe-v2.glb；raw 路径 /models/lingshan/landmarks/fan-gong.glb 仍保留在本地用于回退和 debugPerf 对比。polygon footprint mask 仍为高级调试实验，enabled=false 且 mode=none，不作为梵宫最终方案；若与腾讯底图白模建筑穿插，应在 style1 中弱化白模视觉，并后续制作真正 3D 场地底座 / 低模场景。'
   },
   {
     poiId: 'jiulong_guanyu',
@@ -124,8 +124,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'wuyin_tancheng',
     name: '五印坛城',
-    modelUrl: '/models/lingshan/landmarks/wuyin-mandala.glb',
-    fileSizeLabel: '31M',
+    modelUrl: '/models/lingshan/optimized/wuyin-mandala.safe-v2.glb',
+    fileSizeLabel: '16.53 MB',
     positionSource: 'navLocation',
     height: 32,
     scale: 420,
@@ -136,7 +136,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '核心景点 GLB 初始接入，位置和比例仍需人工校准。'
+    note: '五印坛城人工校准 patch 已固化。正式 runtime 已切换到 safe-v2：/models/lingshan/optimized/wuyin-mandala.safe-v2.glb；raw 路径 /models/lingshan/landmarks/wuyin-mandala.glb 仍保留在本地用于回退和 debugPerf 对比。'
   },
   {
     poiId: 'foshou_square',

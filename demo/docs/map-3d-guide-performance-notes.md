@@ -374,3 +374,66 @@ lingshan_landmark_calibration_draft_v1
 ### 构建结果
 
 本轮 `npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.55 kB`，gzip 约 `45.59 kB`。Vite chunk warning 主要来自既有 `ScenicModel`、`AdminDashboard` 和 `admin` vendor，不是核心景点 GLB public URL 配置导致。
+
+## 13. GLB safe-compatible 压缩路线更新
+
+### 人工测试结论
+
+通过 `/map-3d-guide-c?debugPerf=1` 的地标模型调试流程人工测试后，当前结论为：
+
+- 第一轮 `safe.glb` 可以打开。
+- 第一轮 `draco.glb` 当前打不开。
+- Draco 压缩率很高，但当前腾讯地图 `TMap.model.GLTFModel` 兼容性不满足运行时使用要求。
+- 除非后续明确确认腾讯 `GLTFModel` 支持 `KHR_draco_mesh_compression` 并通过浏览器验证，否则 Draco 暂停作为游客端候选。
+
+因此后续优先走 safe-compatible 路线：不依赖 Draco decoder，不引入 Meshopt / KTX2 / WebP / AVIF 等额外 runtime decoder 或高级扩展。
+
+### 第二轮 safe-v2 候选
+
+本轮只处理：
+
+- `public/models/lingshan/landmarks/wuyin-mandala.glb`
+- `public/models/lingshan/landmarks/fan-gong.glb`
+
+未处理 `bodhi-avenue.glb`。
+
+safe-v2 输出：
+
+| 模型 | raw | safe-v1 | safe-v2 | safe-v2 压缩率 | extension | validate |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| 五印坛城 | 31.00 MB | 23.69 MB | 16.53 MB | 46.7% | none | 无 error；保留 tangent warning |
+| 梵宫 | 67.17 MB | 58.92 MB | 43.86 MB | 34.7% | none | 无 error；保留 tangent warning |
+
+safe-v2 使用 `prune`、`dedup`、`weld`、`simplify --ratio 0.72 --error 0.0005` 和 `resize 1024`。该版本仍未接入正式 `modelUrl`，后续需要继续在 `Landmark GLB Inspector` 中手动测试加载稳定性、耗时和视觉细节。
+
+## 14. Landmark Inspector 压缩候选切换
+
+`Landmark GLB Inspector` 已支持对两个地标进行 raw / safe-v1 / safe-v2 候选版本测试：
+
+- `wuyin_tancheng`
+- `fan_gong`
+
+该能力只在 `debugPerf=1` 诊断态中使用。普通 `/map-3d-guide-c` 不显示候选版本切换，也不会默认加载 optimized 地标模型。
+
+实现边界：
+
+- 默认仍读取 `src/data/lingshanMapModelOverlays.ts` 中的正式 raw `modelUrl`。
+- 只有在 Inspector 中手动选择 `safe-v1` 或 `safe-v2` 后，当前单个地标加载才会使用候选 URL。
+- 切换版本会先卸载当前地标 overlay，避免 raw / safe 多版本叠加。
+- `debugPerf` 记录会包含 `variant`、`selectedModelUrl`、`selectedSizeLabel`。
+- 单体诊断 JSON 也包含当前 variant 信息。
+
+Draco 当前人工测试打不开，暂不加入 Inspector 候选，也不作为游客端运行时方案。后续测试重点是 raw / safe-v1 / safe-v2 的加载成功率、耗时、材质表现、尺寸/朝向保持情况和卸载清理情况。
+
+## 15. 五印坛城与梵宫 runtime GLB 切换
+
+人工测试确认五印坛城与梵宫的 raw / safe-v1 / safe-v2 都能在腾讯地图 `GLTFModel` 中显示，safe-v2 材质、尺寸、朝向和卸载流程未发现明显问题。Draco 仍然打不开，因此继续不纳入 Inspector 候选和游客端 runtime 方案。
+
+正式配置已切换：
+
+- `wuyin_tancheng` → `/models/lingshan/optimized/wuyin-mandala.safe-v2.glb`
+- `fan_gong` → `/models/lingshan/optimized/fan-gong.safe-v2.glb`
+
+`Landmark GLB Inspector` 默认会匹配正式 `modelUrl`，因此这两个地标默认指向 safe-v2；仍可手动切换 raw / safe-v1 / safe-v2 做加载耗时和视觉回归对比。普通 `/map-3d-guide-c` 不显示候选版本切换。
+
+提交边界：只提交两个 safe-v2 runtime GLB。raw GLB 继续精确忽略，safe-v1 / draco 试验产物也精确忽略，不进入 Git。`bodhi-avenue.glb` 仍需单独处理。

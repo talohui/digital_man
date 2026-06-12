@@ -630,3 +630,33 @@ mode: 'none'
 ### npm run build 结果
 
 `npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.55 kB`，gzip 约 `45.59 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有上传、替换、压缩或通过 TypeScript import 引入任何 GLB 文件。
+
+## safe-v2 runtime GLB 切换：五印坛城与梵宫
+
+### 背景问题
+
+raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一轮压缩试验中 safe 版本可打开，Draco 版本当前打不开，因此运行时优先采用 safe-compatible 路线。
+
+### 改动摘要
+
+- 五印坛城正式 `modelUrl` 切换到 `/models/lingshan/optimized/wuyin-mandala.safe-v2.glb`。
+- 梵宫正式 `modelUrl` 切换到 `/models/lingshan/optimized/fan-gong.safe-v2.glb`。
+- 保留原始 raw 路径用于本地回退和 `debugPerf` 对比测试。
+- `Landmark GLB Inspector` 保留 raw / safe-v1 / safe-v2 版本切换，不加入 Draco。
+- safe-v1 / draco 试验产物不提交，raw GLB 继续精确忽略。
+
+### 涉及文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/data/lingshanOptimizedModelCandidates.ts`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `src/lib/map3dPerf.ts`
+- `.gitignore`
+- `public/models/lingshan/optimized/wuyin-mandala.safe-v2.glb`
+- `public/models/lingshan/optimized/fan-gong.safe-v2.glb`
+
+### 验收结果
+
+人工测试确认五印坛城和梵宫 raw / safe-v1 / safe-v2 均可显示，safe-v2 材质、尺寸、朝向和卸载未发现明显问题。Draco 继续暂停，不作为腾讯地图运行时候选。菩提大道仍不处理，后续单独制定策略。

@@ -5,6 +5,11 @@ import {
   type LingshanMapModelOverlay,
   type MapModelFootprintMask
 } from '../data/lingshanMapModelOverlays'
+import {
+  getLandmarkOptimizedModelCandidates,
+  type LandmarkModelVariant,
+  type LandmarkOptimizedModelCandidate
+} from '../data/lingshanOptimizedModelCandidates'
 import type { LatLngPoint } from '../data/guideData'
 import type { Map3DPerfRecorder } from '../lib/map3dPerf'
 
@@ -38,6 +43,10 @@ export type LandmarkInspectorItem = {
   name: string
   modelUrl?: string
   fileSizeLabel?: string
+  selectedVariant: LandmarkModelVariant
+  selectedModelUrl?: string
+  selectedSizeLabel?: string
+  variantCandidates: LandmarkOptimizedModelCandidate[]
   priority: string
   anchorId: string
   status: LandmarkInspectorStatus
@@ -63,6 +72,7 @@ export type LandmarkModelInspector = {
   updateCalibration: (id: string, patch: Partial<LandmarkCalibrationValues>) => void
   updateFootprintMask: (id: string, patch: Partial<LandmarkFootprintMaskValues>) => void
   resetFootprintMask: (id: string) => void
+  setModelVariant: (id: string, variant: LandmarkModelVariant) => void
   saveCalibrationDraft: (id: string) => void
   resetCalibration: (id: string) => void
   clearAllCalibrationDrafts: () => void
@@ -111,6 +121,7 @@ export function useLandmarkModelInspector({
     buildInitialCalibrationEdits(overlays, active ? loadCalibrationDrafts() : {})
   )
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
+  const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
 
   useEffect(() => {
     if (!active) {
@@ -209,6 +220,7 @@ export function useLandmarkModelInspector({
           unloadCount: 0
         }
         const calibration = calibrationEdits[id] ?? buildDefaultCalibration(overlay)
+        const variantInfo = resolveVariantInfo(id, overlay, selectedVariants[id])
         const savedDraft = savedDrafts[id]
         const savedCalibration = savedDraft
           ? mergeCalibration(buildDefaultCalibration(overlay), savedDraft)
@@ -218,8 +230,12 @@ export function useLandmarkModelInspector({
           id,
           poiId: overlay.poiId,
           name: overlay.name,
-          modelUrl: overlay.modelUrl,
-          fileSizeLabel: overlay.fileSizeLabel,
+          modelUrl: variantInfo.modelUrl,
+          fileSizeLabel: variantInfo.sizeLabel,
+          selectedVariant: variantInfo.variant,
+          selectedModelUrl: variantInfo.modelUrl,
+          selectedSizeLabel: variantInfo.sizeLabel,
+          variantCandidates: variantInfo.candidates,
           priority: overlay.priority,
           anchorId: overlay.poiId,
           calibration,
@@ -231,7 +247,7 @@ export function useLandmarkModelInspector({
           ...itemState
         }
       }),
-    [calibrationEdits, overlays, savedDrafts, state]
+    [calibrationEdits, overlays, savedDrafts, selectedVariants, state]
   )
 
   const updateItemState = (
@@ -256,6 +272,38 @@ export function useLandmarkModelInspector({
     const overlay = overlayLookup.get(id)
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
     createLandmarkModel(id, { trackLoad: true, calibration })
+  }
+
+  const setModelVariant = (id: string, variant: LandmarkModelVariant) => {
+    const overlay = overlayLookup.get(id)
+    const variantInfo = overlay ? resolveVariantInfo(id, overlay, variant) : undefined
+
+    if (!overlay || !variantInfo?.candidates.some((candidate) => candidate.variant === variant)) {
+      return
+    }
+
+    const hadModel = modelsRef.current.has(id)
+    const model = modelsRef.current.get(id)
+    if (model) {
+      clearLandmarkModel(model)
+      modelsRef.current.delete(id)
+    }
+
+    versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
+    clearCalibrationTimer(calibrationApplyTimersRef.current, id)
+    setSelectedVariants((current) => ({
+      ...current,
+      [id]: variant
+    }))
+    updateItemState(id, (current) => ({
+      ...current,
+      status: hadModel || current.status === 'loaded' || current.status === 'loading' ? 'unloaded' : current.status,
+      error: undefined,
+      durationMs: undefined
+    }))
+    if (hadModel) {
+      perfRecorder.unloadLandmarkAsset(id)
+    }
   }
 
   const unloadLandmark = (id: string) => {
@@ -459,8 +507,9 @@ export function useLandmarkModelInspector({
     }
 
     const overlay = overlayLookup.get(id)
+    const variantInfo = overlay ? resolveVariantInfo(id, overlay, selectedVariants[id]) : undefined
 
-    if (!overlay?.modelUrl) {
+    if (!overlay || !variantInfo?.modelUrl) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
@@ -489,10 +538,13 @@ export function useLandmarkModelInspector({
         perfRecorder.startLandmarkAsset({
           id,
           name: overlay.name,
-          modelUrl: overlay.modelUrl,
+          modelUrl: variantInfo.modelUrl,
           anchorId: overlay.poiId,
-          fileSizeLabel: overlay.fileSizeLabel,
-          priority: overlay.priority
+          fileSizeLabel: variantInfo.sizeLabel,
+          priority: overlay.priority,
+          variant: variantInfo.variant,
+          selectedModelUrl: variantInfo.modelUrl,
+          selectedSizeLabel: variantInfo.sizeLabel
         })
       }
       perfRecorder.failLandmarkAsset(id, 'POI / anchor 坐标缺失')
@@ -518,10 +570,13 @@ export function useLandmarkModelInspector({
       perfRecorder.startLandmarkAsset({
         id,
         name: overlay.name,
-        modelUrl: overlay.modelUrl,
+        modelUrl: variantInfo.modelUrl,
         anchorId: overlay.poiId,
-        fileSizeLabel: overlay.fileSizeLabel,
-        priority: overlay.priority
+        fileSizeLabel: variantInfo.sizeLabel,
+        priority: overlay.priority,
+        variant: variantInfo.variant,
+        selectedModelUrl: variantInfo.modelUrl,
+        selectedSizeLabel: variantInfo.sizeLabel
       })
     }
 
@@ -529,7 +584,7 @@ export function useLandmarkModelInspector({
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${id}`,
         map,
-        url: overlay.modelUrl,
+        url: variantInfo.modelUrl,
         position: toTMapPosition(anchor, calibration),
         rotation: toTMapRotation(overlay, calibration),
         scale: calibration.scale
@@ -633,11 +688,32 @@ export function useLandmarkModelInspector({
     updateCalibration,
     updateFootprintMask,
     resetFootprintMask,
+    setModelVariant,
     saveCalibrationDraft,
     resetCalibration,
     clearAllCalibrationDrafts,
     getCalibrationPatch,
     getAllCalibrationPatches
+  }
+}
+
+function resolveVariantInfo(id: string, overlay: LingshanMapModelOverlay, selected?: LandmarkModelVariant) {
+  const candidates = getLandmarkOptimizedModelCandidates(id)
+  const fallbackRaw: LandmarkOptimizedModelCandidate = {
+    variant: 'raw',
+    modelUrl: overlay.modelUrl ?? '',
+    sizeLabel: overlay.fileSizeLabel ?? 'size ?'
+  }
+  const allCandidates = candidates.length ? candidates : [fallbackRaw]
+  const formalCandidate = allCandidates.find((candidate) => candidate.modelUrl === overlay.modelUrl)
+  const variant = selected ?? formalCandidate?.variant ?? 'raw'
+  const selectedCandidate = allCandidates.find((candidate) => candidate.variant === variant) ?? formalCandidate ?? allCandidates[0] ?? fallbackRaw
+
+  return {
+    variant: selectedCandidate.variant,
+    modelUrl: selectedCandidate.modelUrl || overlay.modelUrl,
+    sizeLabel: selectedCandidate.sizeLabel || overlay.fileSizeLabel,
+    candidates: allCandidates
   }
 }
 
