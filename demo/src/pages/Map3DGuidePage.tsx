@@ -14,9 +14,14 @@ import {
   type LingshanMap3DGardenAsset
 } from '../data/lingshanMap3DGardenAssets'
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
-import { getMapModelOverlayByPoiId, type LingshanMapModelOverlay } from '../data/lingshanMapModelOverlays'
+import {
+  getMapModelOverlayByPoiId,
+  getVisibleMapModelOverlays,
+  type LingshanMapModelOverlay
+} from '../data/lingshanMapModelOverlays'
 import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
 import { useGardenAssetOverlays, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
+import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
 import { createMap3DPerfRecorder } from '../lib/map3dPerf'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
@@ -337,11 +342,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const gardenEditorVertexLayerRef = useRef<any>(null)
   const gardenPreviewMarkerLayerRef = useRef<any>(null)
   const gardenAssetEditMarkerLayerRef = useRef<any>(null)
-  const gltfModelRef = useRef<any>(null)
+  const gltfModelRefs = useRef<Map<string, any>>(new Map())
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
+  const landmarkModelOverlays = useMemo(() => orderMapModelOverlaysForLoading(getVisibleMapModelOverlays()), [])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
@@ -384,6 +390,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [editorAddAssetKind, setEditorAddAssetKind] = useState<Map3DGardenAssetKind>('pine_cluster')
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
   const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
+  const landmarkInspector = useLandmarkModelInspector({
+    active: debugPerf,
+    map: mapRef.current,
+    mapReady: mapStatus === 'ready',
+    overlays: landmarkModelOverlays,
+    perfRecorder,
+    resolveLocation: getModelOverlayLocation
+  })
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -669,8 +683,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenEditorPolygonLayerRef.current?.setMap?.(null)
       gardenEditorVertexLayerRef.current?.setMap?.(null)
       gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-      clearGltfModel(gltfModelRef.current)
-      gltfModelRef.current = null
+      clearGltfModels(gltfModelRefs.current)
+      gltfModelRefs.current = new Map()
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
@@ -1479,11 +1493,20 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [mapStatus, reroutePlan])
 
   useEffect(() => {
-    clearGltfModel(gltfModelRef.current)
-    gltfModelRef.current = null
+    clearGltfModels(gltfModelRefs.current)
+    gltfModelRefs.current = new Map()
 
     if (!showModelBeta) {
       setModelStatus('未开启')
+      return
+    }
+
+    if (visualVariant.id === 'prototype-c') {
+      setModelStatus(
+        debugPerf
+          ? '已进入单体加载模式，请在运行时诊断面板中逐个加载地标 GLB'
+          : 'raw 地标 GLB 约 1.1GB；请使用 ?debugPerf=1 逐个检查，不在游客端批量加载'
+      )
       return
     }
 
@@ -1492,15 +1515,20 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    if (!defaultModelOverlay?.modelUrl || !window.TMap.model?.GLTFModel) {
+    if (!window.TMap.model?.GLTFModel) {
       setModelStatus('模型配置或 GLTFModel 不可用')
+      return
+    }
+
+    if (!defaultModelOverlay?.modelUrl) {
+      setModelStatus('灵山大佛模型配置缺失')
       return
     }
 
     const anchor = getModelOverlayLocation(defaultModelOverlay)
 
     if (!anchor) {
-      setModelStatus('模型锚点缺失')
+      setModelStatus('灵山大佛模型锚点缺失')
       return
     }
 
@@ -1513,7 +1541,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         rotation: defaultModelOverlay.rotation,
         scale: defaultModelOverlay.scale
       })
-      gltfModelRef.current = model
+      gltfModelRefs.current.set(defaultModelOverlay.poiId, model)
       setModelStatus('正在加载灵山大佛 GLB Beta')
 
       if (typeof model.on === 'function') {
@@ -1527,10 +1555,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
 
     return () => {
-      clearGltfModel(gltfModelRef.current)
-      gltfModelRef.current = null
+      clearGltfModels(gltfModelRefs.current)
+      gltfModelRefs.current = new Map()
     }
-  }, [mapStatus, showModelBeta])
+  }, [debugPerf, mapStatus, showModelBeta, visualVariant.id])
 
   const moveToStop = (nextIndex: number) => {
     const boundedIndex = Math.max(0, Math.min(routeStops.length - 1, nextIndex))
@@ -2411,7 +2439,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </Suspense>
       ) : null}
 
-      {debugPerf ? <Map3DPerfPanel recorder={perfRecorder} /> : null}
+      {debugPerf ? <Map3DPerfPanel landmarkInspector={landmarkInspector} recorder={perfRecorder} /> : null}
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
@@ -2822,6 +2850,23 @@ function clearGltfModel(model: any) {
   model?.setMap?.(null)
   model?.remove?.()
   model?.destroy?.()
+}
+
+function clearGltfModels(models: Map<string, any>) {
+  models.forEach((model) => clearGltfModel(model))
+}
+
+function orderMapModelOverlaysForLoading(overlays: LingshanMapModelOverlay[]) {
+  const priorityWeight: Record<LingshanMapModelOverlay['priority'], number> = {
+    high: 0,
+    medium: 1,
+    low: 2
+  }
+
+  return overlays
+    .map((overlay, index) => ({ overlay, index }))
+    .sort((a, b) => priorityWeight[a.overlay.priority] - priorityWeight[b.overlay.priority] || a.index - b.index)
+    .map((item) => item.overlay)
 }
 
 function isQueryEnabled(name: string) {
@@ -4750,7 +4795,7 @@ const map3DGuideCss = `
 
 .map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-perf-panel {
   bottom: 18px;
-  max-height: 220px;
+  max-height: min(46vh, 420px);
 }
 
 .map-3d-guide-perf-panel__header {
@@ -4881,6 +4926,177 @@ const map3DGuideCss = `
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   resize: vertical;
+}
+
+.map-3d-guide-landmark-inspector {
+  display: grid;
+  gap: 8px;
+}
+
+.map-3d-guide-landmark-inspector__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-3d-guide-landmark-inspector__heading h3 {
+  margin: 0 0 4px;
+}
+
+.map-3d-guide-landmark-inspector__heading p {
+  margin: 0;
+}
+
+.map-3d-guide-landmark-inspector__heading span {
+  flex: 0 0 auto;
+  color: #735016;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.map-3d-guide-landmark-inspector__list {
+  display: grid;
+  gap: 7px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.map-3d-guide-landmark-inspector__item {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(50, 88, 75, .14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .38);
+}
+
+.map-3d-guide-landmark-inspector__item.is-loaded {
+  border-color: rgba(46, 130, 93, .28);
+  background: rgba(231, 246, 232, .55);
+}
+
+.map-3d-guide-landmark-inspector__item.is-failed {
+  border-color: rgba(170, 80, 50, .30);
+  background: rgba(255, 238, 228, .58);
+}
+
+.map-3d-guide-landmark-inspector__item.is-calibrating {
+  border-color: rgba(184, 135, 37, .55);
+  background: rgba(255, 249, 222, .68);
+  box-shadow: 0 0 0 2px rgba(204, 158, 58, .12);
+}
+
+.map-3d-guide-landmark-inspector__item strong,
+.map-3d-guide-landmark-inspector__item small,
+.map-3d-guide-landmark-inspector__item code {
+  display: block;
+}
+
+.map-3d-guide-landmark-inspector__item code {
+  overflow: hidden;
+  color: rgba(36, 72, 60, .72);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-3d-guide-landmark-inspector__item .is-error {
+  color: #9b3b1f;
+}
+
+.map-3d-guide-landmark-inspector__item .is-warning {
+  color: #8a5d12;
+}
+
+.map-3d-guide-landmark-inspector__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-3d-guide-landmark-inspector__actions button:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.map-3d-guide-landmark-inspector__hint {
+  margin: 0;
+  color: rgba(36, 72, 60, .72);
+  font-size: 12px;
+}
+
+.map-3d-guide-landmark-calibration {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(184, 135, 37, .30);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255, 252, 231, .78), rgba(238, 248, 234, .64));
+}
+
+.map-3d-guide-landmark-calibration__title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-3d-guide-landmark-calibration__title h3,
+.map-3d-guide-landmark-calibration__title strong,
+.map-3d-guide-landmark-calibration__title small,
+.map-3d-guide-landmark-calibration > code {
+  display: block;
+}
+
+.map-3d-guide-landmark-calibration__title h3 {
+  margin: 0 0 4px;
+}
+
+.map-3d-guide-landmark-calibration > code {
+  overflow: hidden;
+  color: rgba(36, 72, 60, .72);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-3d-guide-landmark-calibration__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.map-3d-guide-landmark-calibration__grid label {
+  display: grid;
+  gap: 4px;
+  color: rgba(36, 72, 60, .72);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.map-3d-guide-landmark-calibration__grid input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(50, 88, 75, .20);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, .72);
+  color: #24483c;
+}
+
+.map-3d-guide-landmark-calibration__quick,
+.map-3d-guide-landmark-calibration__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-3d-guide-landmark-calibration p {
+  margin: 0;
+  color: rgba(36, 72, 60, .72);
+  font-size: 11px;
 }
 
 .map-3d-guide-garden-debug__subsection {

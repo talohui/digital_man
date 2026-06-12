@@ -9052,3 +9052,865 @@ debugGarden 面板新增本地草稿状态提示：
 1. 用户在 `debugGarden=1` 中完成大佛背后、中轴两侧、建筑边缘和水边的人工 zone / keepout 校准。
 2. 将“导出完整配置”结果交给 Codex，整理固化到 `src/data/lingshanMap3DGardenAssets.ts`。
 3. 后续可继续补“删除选中 zone / 删除选中顶点 / 撤销一步”等编辑器能力。
+
+## 阶段七十九 A：map-3d-guide-c 运行时加载诊断框架
+
+日期：2026-06-10
+
+### 本次目标
+
+在上传新的核心景点 GLB 前，为 `/map-3d-guide-c` 增加仅由 `debugPerf=1` 开启的运行时诊断能力，用于观察腾讯地图初始化、路线 / POI overlay 创建、GLB 园林资产批次加载、失败记录和重复 URL 情况。普通游客页面默认不显示诊断面板，也不改变当前视觉风格。
+
+### 本次约束
+
+- 不修改 Tencent Key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不修改路线逻辑、POI 数据、树群生成算法或默认 assets 数据。
+- 不上传、不替换新的核心景点 GLB。
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不读取、不修改 `.env`、API Key、token。
+
+### 修改文件
+
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `src/hooks/useGardenAssetOverlays.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-development-log.md`
+
+### 诊断字段
+
+新增 `map3dPerf` 轻量 recorder，记录：
+
+- `mapInitMs`
+- `routeDrawMs`
+- `poiInitMs`
+- `gardenTotal`
+- `gardenLoaded`
+- `gardenFailed`
+- `gardenFirstBatchMs`
+- `gardenAllDoneMs`
+- GLB batch 数量和耗时
+- 最慢 10 个 GLB asset
+- failed asset 列表
+- 重复 `assetUrl` 列表
+
+GLB 统计接入 `useGardenAssetOverlays` 的分批创建流程。当前统计的是 `TMap.model.GLTFModel` overlay 创建耗时，不等同于浏览器网络层完整下载耗时；该限制已在代码注释中说明。
+
+### debugPerf 面板
+
+`/map-3d-guide-c?debugPerf=1` 显示轻量悬浮诊断面板：
+
+- 默认显示摘要。
+- 展开后显示最慢 GLB、重复 URL、批次和失败列表。
+- 支持复制诊断 JSON。
+- 支持清空当前诊断记录。
+
+`/map-3d-guide-c?debugGarden=1&debugPerf=1` 可同时显示 debugGarden 工作台和性能诊断面板；两者位置分离，避免互相遮挡。
+
+### 对普通页面的影响
+
+普通 `/map-3d-guide-c` 不显示诊断面板。`debugPerf` 关闭时 recorder 方法为 no-op，避免引入重型依赖或额外 UI。
+
+### 保持能力
+
+- 历史文化路线保留。
+- 当前站点 / 下一站保留。
+- 模拟前进保留。
+- 模拟偏航保留。
+- 腾讯 walking route 重规划保留。
+- 重规划路线保留。
+- GLB 模型 Beta 保留。
+- debugGarden 工作台保留。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite chunk size warning 仍主要来自既有大块：`admin`、`AdminDashboard`、`ScenicModel` 等，不阻断构建。
+
+## 阶段七十九 B：map-3d-guide-c 加载优化文档整理
+
+日期：2026-06-10
+
+### 本次目标
+
+将最近几轮 `/map-3d-guide-c` 的加载优化、`debugGarden` 工作台优化、路由级拆包和运行时诊断能力整理为项目维护文档。本阶段只修改 Markdown，不修改业务代码、资产、路线、POI、树群生成算法或腾讯地图配置。
+
+### 修改文件
+
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-guide-garden-editor-usage.md`
+- `docs/map-3d-development-log.md`
+
+### 文档整理内容
+
+新增 `docs/map-3d-guide-c-optimization-log.md`，记录：
+
+- `debugGarden` 5 步园林配置工作台。
+- 第一阶段加载优化：`React.lazy` + `Suspense` 拆分 `GardenDebugWizard`。
+- GLB 园林资产 overlay 生命周期拆到 `useGardenAssetOverlays.ts`。
+- GLB 分批创建，当前批大小约 16 个。
+- 第二阶段加载优化：路由级拆包、Provider 隔离、PostHog 按需加载、Cubism Core 按需加载。
+- 第三阶段准备：`debugPerf=1` 运行时诊断。
+
+新增 `docs/map-3d-guide-performance-notes.md`，记录：
+
+- 入口包从约 2.72 MB 降至当前生产入口约 188.09 kB，gzip 约 61.68 kB。
+- 普通 `/map-3d-guide-c` 不再加载 `GardenDebugWizard`、`ScenicModel`、`Scenic3DMapPage`、后台 chunk、Cubism Core / Cubism chunk。
+- `/map-3d-guide-c?debugGarden=1` 会加载 `GardenDebugWizard`，但仍不加载 `ScenicModel`。
+- 当前剩余 Vite chunk warning 主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor，不是 C 版普通首屏问题。
+- `debugPerf=1` 的诊断字段和限制。
+
+重写 `docs/map-3d-guide-garden-editor-usage.md`，对齐当前 5 步工作台：
+
+- 第 1 步禁放区。
+- 第 2 步放树区。
+- 第 3 步生成预览。
+- 第 4 步应用 GLB。
+- 第 5 步导出配置。
+- 记录 zone / keepout 默认不显示边界和底色，选中后才显示边框和顶点。
+- 记录资产点默认显示 GLB，选中后才显示编辑标记。
+- 记录单个资产拖动后必须点击“保存当前资产修改”才写入草稿。
+
+### 验证方式
+
+本阶段不运行构建，因为只整理 Markdown 文档。按要求使用 `git diff -- docs README.md` 查看文档差异；当前仓库没有 `README.md` 时，以 `docs` 差异为准。
+
+### 对功能的影响
+
+本阶段没有修改功能代码，不影响 `/map-3d-guide-c`、`/map`、`/map?debugGltfModel=1` 或 `/scenic-3d-map`。
+
+## 阶段八十：map-3d-guide-c 核心景点 GLB 配置接入
+
+日期：2026-06-11
+
+### 本次目标
+
+将用户已手动移动到 `public/models/lingshan/landmarks/` 的 11 个核心景点 GLB 正式接入 `/map-3d-guide-c` 的 GLB Beta 配置。重点是替换灵山大佛模型为新版 `lingshan-buddha-v2.glb`，并让其它核心景点具备初始锚定和加载诊断能力。
+
+本阶段只做模型配置接入、初始锚定和 `debugPerf` 诊断扩展，不做精细位置 / 比例 / 朝向校准。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### GLB 文件确认
+
+本阶段确认以下文件存在于 `public/models/lingshan/landmarks/`：
+
+- `lingshan-buddha-v2.glb`
+- `fan-gong.glb`
+- `baizi-milefo.glb`
+- `buddha-hand-plaza.glb`
+- `bodhi-avenue.glb`
+- `shengjing-plaza.glb`
+- `sansheng-hall.glb`
+- `xiangfu-temple.glb`
+- `wuyin-mandala.glb`
+- `manlong-flying-tower.glb`
+- `buddha-front-plaza.glb`
+
+旧灵山大佛 Meshy v1 文件 `lingshan_buddha_meshy_v1.glb` 仍保留在目录中，未删除。配置 note 中保留旧路径说明，便于后续回退。
+
+### 模型配置与锚定
+
+新增或更新的模型配置均写入 `lingshanMapModelOverlays.ts`，并继续使用 public URL 字符串，不通过 TypeScript import 引入 GLB。
+
+| POI | 模型文件 | 当前锚定 |
+| --- | --- | --- |
+| 灵山大佛 | `lingshan-buddha-v2.glb` | `giant_buddha` |
+| 梵宫 | `fan-gong.glb` | `fan_gong` |
+| 百子戏弥勒 | `baizi-milefo.glb` | `baizi_mile` |
+| 佛手广场 | `buddha-hand-plaza.glb` | `foshou_square` |
+| 菩提大道 | `bodhi-avenue.glb` | `puti_avenue` |
+| 胜境广场 | `shengjing-plaza.glb` | `shengjing_square` |
+| 三圣殿 | `sansheng-hall.glb` | `sansheng_hall` |
+| 祥符禅寺 | `xiangfu-temple.glb` | `xiangfu_temple` |
+| 五印坛城 | `wuyin-mandala.glb` | `wuyin_tancheng` |
+| 曼飞龙塔 | `manlong-flying-tower.glb` | `manfeilong_tower` |
+| 佛前广场 | `buddha-front-plaza.glb` | `foqian_square` |
+
+用户口径中的“三胜殿”按现有 POI 数据中的“三圣殿”锚定；“曼龙飞塔”文件按现有 POI “曼飞龙塔”锚定。未新增或修改 POI 坐标语义。
+
+### 加载策略
+
+`/map-3d-guide-c` 的 GLB Beta 从单个灵山大佛覆盖物扩展为配置驱动的多地标覆盖物：
+
+- 普通页面默认不加载地标 GLB。
+- 用户打开“显示 3D 景点模型 Beta”后才开始加载。
+- 地图、路线、POI、导览牌和树群先显示。
+- 地标 GLB 按 priority 分批创建，当前每批 3 个。
+- 单个模型创建失败会记录到诊断，不会导致整页崩溃。
+
+### debugPerf 扩展
+
+`/map-3d-guide-c?debugPerf=1` 现在同时记录 Garden GLB 与 Landmark GLB。地标模型记录字段包含：
+
+- `id`
+- `name`
+- `modelUrl`
+- `category`
+- `priority`
+- `batchIndex`
+- `status`
+- `durationMs`
+- `error`
+
+当前统计的是腾讯 `TMap.model.GLTFModel` overlay 创建耗时，不等同于浏览器网络层完整下载耗时。
+
+### 保持不变
+
+- 本阶段没有修改普通 `/map`。
+- 本阶段没有修改 `/scenic-3d-map`。
+- 本阶段没有修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 本阶段没有修改 routeGeometry / roadNetwork 数据。
+- 本阶段没有修改腾讯 walking route 算法。
+- 本阶段没有修改 POI 坐标语义。
+- 本阶段没有修改树群生成算法或 debugGarden 5 步工作台交互。
+- 本阶段没有读取、输出或修改 API Key / `.env`。
+
+### npm run build 结果
+
+`npm run build` 通过。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段接入的 GLB 通过 public URL 加载，没有进入 JS chunk。
+
+### 下一步建议
+
+下一阶段建议先在 `/map-3d-guide-c?debugPerf=1` 中启用 GLB Beta，记录每个地标模型加载耗时和失败情况；随后逐个校准 `scale`、`height`、`rotation`。体积较大的 `bodhi-avenue.glb`、`xiangfu-temple.glb`、`sansheng-hall.glb` 应优先做压缩、贴图降采样和材质整理。
+
+## 阶段八十一：Landmark GLB Inspector 单体加载检查器
+
+日期：2026-06-11
+
+### 本次目标
+
+在 11 个核心景点 raw GLB 已配置到 `/map-3d-guide-c` 后，新增只在 `debugPerf=1` 下显示的 `Landmark GLB Inspector`。它用于逐个加载、卸载、聚焦和复制诊断单个地标 GLB，避免游客端或普通调试流程一次性加载约 1.1 GB 的 raw 模型。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台交互。
+- 不上传、不替换、不删除任何 GLB 文件。
+- 不读取、输出或修改 API Key / `.env`。
+
+### 修改文件
+
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/data/lingshanMapModelOverlays.ts`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 实现方式
+
+`Landmark GLB Inspector` 只在以下入口显示：
+
+```text
+/map-3d-guide-c?debugPerf=1
+/map-3d-guide-c?debugGarden=1&debugPerf=1
+```
+
+普通 `/map-3d-guide-c` 不显示 Inspector，也不会默认批量创建 11 个 raw 地标 GLB。C 版的 GLB Beta 面板会提示 raw 地标 GLB 体积较大，应进入 `debugPerf=1` 逐个检查。
+
+Inspector 每个条目支持：
+
+- 加载：为单个地标创建腾讯 `TMap.model.GLTFModel`。
+- 卸载：尝试 `setMap(null)`、`remove()` 和 `destroy()` 清理覆盖物。
+- 聚焦：移动腾讯地图相机到当前地标锚点。
+- 复制诊断：复制单个模型的当前状态 JSON。
+
+### 诊断字段
+
+单个地标诊断包含：
+
+- `id`
+- `poiId`
+- `name`
+- `modelUrl`
+- `fileSizeLabel`
+- `anchorId`
+- `priority`
+- `status`
+- `durationMs`
+- `error`
+- `loadCount`
+- `unloadCount`
+
+`debugPerf` 的“复制诊断 JSON”会同时包含 `landmarkInspector` 当前状态，便于记录未加载、加载中、已加载、失败和已卸载状态。
+
+### 命名兼容
+
+现有 POI 锚点仍使用 `manfeilong_tower`，模型文件为 `manlong-flying-tower.glb`。本阶段通过 `inspectorId: 'manlong_flying_tower'` 兼容 Inspector 显示与调试命名，不改变 POI 数据语义。
+
+### 对现有功能的影响
+
+- 普通 `/map-3d-guide-c` 默认不开启诊断 UI。
+- `/map-3d-guide-c?debugPerf=1` 可显示性能诊断面板和 Landmark GLB Inspector。
+- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 可同时显示 debugGarden 工作台和性能诊断面板。
+- 单个地标模型加载失败只记录到诊断，不应导致整页崩溃。
+- 地图、路线、POI、树群、导览牌、相机卡和模拟偏航 / 腾讯重规划逻辑保持不变。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `136.87 kB`，gzip 约 `39.98 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有把 GLB 通过 TypeScript import 打进 JS chunk。
+
+### 下一步建议
+
+后续不应让普通游客端直接加载 11 个 raw GLB。建议先用 Inspector 逐个记录加载耗时、失败情况和视觉校准参数，再制作 optimized / runtime GLB 或 proxy 占位模型，并按当前站点、下一站或视野范围逐步启用。
+
+## 阶段八十二：Landmark GLB Inspector 校准面板
+
+日期：2026-06-11
+
+### 本次目标
+
+为 `/map-3d-guide-c?debugPerf=1` 的 `Landmark GLB Inspector` 增加地标模型校准能力。当前 11 个地标 GLB 已可逐个加载和卸载，但仍需要人工微调 scale、height、水平旋转和坐标 offset。本阶段只做调试态校准工具，不压缩 GLB、不改模型文件、不自动写回源码配置。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不读取、输出或修改 API Key / `.env`。
+- 普通 `/map-3d-guide-c` 不默认加载全部 raw 地标 GLB，也不应用 debug 校准草稿。
+
+### 修改文件
+
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 校准字段
+
+每个地标支持以下 debug-only 校准字段：
+
+- `scale`：模型整体缩放。
+- `height`：腾讯 `TMap.LatLng(lat, lng, height)` 的高度 / Z 偏移。
+- `rotationY`：水平朝向旋转。
+- `lngOffset`：经度微调。
+- `latOffset`：纬度微调。
+
+经纬度微调只作为模型 overlay offset 存在，不修改 POI 坐标。
+
+### 本地草稿
+
+校准草稿保存到浏览器 localStorage：
+
+```text
+lingshan_landmark_calibration_draft_v1
+```
+
+`debugPerf=1` 下加载地标时优先应用本地草稿。普通游客页不读取和应用该草稿，避免调试状态污染正式展示。
+
+### 实时预览
+
+调整参数后，当前已加载地标会在短延迟后更新：
+
+- 优先调用 `GLTFModel.setScale`。
+- 优先调用 `GLTFModel.setRotation`。
+- 优先调用 `GLTFModel.setPosition`。
+- 如果运行环境不支持上述方法或调用失败，只重建当前单个地标 overlay。
+
+单个模型更新失败不会影响树群 overlay、路线、POI 或其它地标。
+
+### 导出与重置
+
+校准面板支持：
+
+- 保存当前校准到本地草稿。
+- 复制当前模型配置 patch。
+- 复制全部地标校准 patch。
+- 重置当前模型校准。
+- 清空全部地标校准草稿。
+
+复制 patch 只用于后续人工确认后固化到 `lingshanMapModelOverlays.ts`，本阶段不会自动修改源码配置。
+
+### debugPerf 扩展
+
+诊断快照增加：
+
+- `calibrationDraftCount`
+- `activeCalibrationId`
+- `lastCalibrationUpdatedAt`
+- `activeCalibration`
+
+`Map3DPerfPanel` 摘要区会显示当前校准草稿数量和当前校准地标 id；复制完整诊断 JSON 时也会带上 `landmarkInspector` 的当前状态。
+
+### 保持不变
+
+- `mapStyleId: 'style1'` 保留。
+- 普通 `/map-3d-guide-c` 默认不显示 Inspector。
+- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 可同时使用 debugGarden 工作台和 Landmark 校准。
+- 地图、路线、POI、树群、导览牌、相机卡和模拟偏航 / 腾讯重规划逻辑保持不变。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `147.45 kB`，gzip 约 `42.98 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有把 GLB 通过 TypeScript import 打进 JS chunk。
+
+### 下一步建议
+
+人工逐个校准地标后，复制 patch 交由 Codex 或人工整理，统一固化到 `lingshanMapModelOverlays.ts`。体积过大的模型仍应在固化前做压缩、贴图降采样和材质合并。
+
+## 阶段八十三：核心地标校准 patch 固化与腾讯白模冲突记录
+
+日期：2026-06-11
+
+### 本次目标
+
+将已经人工确认的灵山大佛、五印坛城、梵宫三个核心地标校准 patch 固化到 `lingshanMapModelOverlays.ts`，并记录腾讯底图 3D 白模建筑与自定义 GLB 地标重叠的问题。代码层面只固化 scale / height / rotationY / offset，不通过异常抬高模型或放大模型遮挡白模。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不修改 Tencent key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不读取、输出或修改 API Key / `.env`。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 固化 patch
+
+已固化：
+
+```ts
+[
+  {
+    id: 'giant_buddha',
+    scale: 380,
+    height: 73,
+    rotationY: 15,
+    lngOffset: 0,
+    latOffset: 0.00005
+  },
+  {
+    id: 'wuyin_tancheng',
+    scale: 420,
+    height: 32,
+    rotationY: 9,
+    lngOffset: -0.00001,
+    latOffset: 0
+  },
+  {
+    id: 'fan_gong',
+    scale: 900,
+    height: 48,
+    rotationY: 9,
+    lngOffset: -0.00009,
+    latOffset: 0.00101
+  }
+]
+```
+
+`rotationY` 继续映射到配置中的 `rotation[1]`。`lngOffset / latOffset` 作为模型 overlay 的坐标微调字段，不修改 POI 坐标。
+
+灵山大佛继续使用：
+
+```text
+/models/lingshan/landmarks/lingshan-buddha-v2.glb
+```
+
+旧灵山大佛模型文件仍保留，未删除。
+
+### debugPerf 草稿覆盖
+
+`useLandmarkModelInspector` 的默认校准值现在会读取 overlay 配置中的 `lngOffset / latOffset`。`debugPerf=1` 下如果存在 localStorage 校准草稿，草稿仍会覆盖这些固化默认值，便于后续继续微调和复制 patch。
+
+### 腾讯底图白模建筑与自定义 GLB 地标重叠
+
+现象：
+
+- 梵宫等建筑类 GLB 与腾讯地图自带 3D 白模建筑重叠。
+- 导入 GLB 只是叠加层，不会替换底图白模。
+
+结论：
+
+- 不建议全局关闭腾讯 3D 建筑白模，否则非核心建筑也会消失，景区空间密度会下降。
+- 不应靠抬高模型或放大模型硬遮挡白模。
+- 推荐采用混合策略：非核心建筑保留腾讯白模，但在 `style1` 中弱化颜色、阴影和对比度；核心地标使用自定义 GLB 表现。
+- 冲突严重的核心地标增加局部 footprint mask / 场地底座，先在梵宫验证。
+- 腾讯底图继续提供坐标、道路、水系、弱化建筑背景和空间参照；核心地标由自定义 GLB 提供。
+
+后续动作：
+
+1. 在腾讯地图样式编辑器中检查 `style1`。
+2. 找到建筑物 / 3D 建筑 / 白模建筑相关图层。
+3. 不全局关闭白模，优先降低非核心建筑的颜色、阴影和对比度。
+4. 保持道路、水系、绿地、地名和非核心建筑轮廓可读。
+5. 在 `/map-3d-guide-c?debugPerf=1` 中先为梵宫验证局部 footprint mask / 场地底座。
+6. 如果可行，再推广到五印坛城、祥符禅寺、三胜殿等建筑类地标。
+
+### Inspector 提示
+
+`LandmarkGLBInspector` 对 `fan_gong` 增加轻量提示：如果出现腾讯白模建筑穿插，不要全局关闭白模，也不要通过异常 height / scale 硬遮挡；应在 `style1` 中弱化白模视觉，并后续制作真正 3D 场地底座 / 低模场景。polygon footprint mask 仅作为高级实验保留。
+
+### 梵宫 footprint mask MVP
+
+梵宫配置新增 `footprintMask` 草稿字段，默认关闭。`/map-3d-guide-c?debugPerf=1` 下进入 `fan_gong` 校准时，可以在 `Landmark GLB Inspector` 中启用和调试梵宫局部遮罩 / 场地底座。
+
+- `mode` 支持 `none`、`solid`、`ring`。
+- `ring` 和 `solid` 均只作为实验模式保留，后续实测已不再推荐用于梵宫最终效果。
+- `width / depth` 控制外层场地范围。
+- `innerWidth / innerDepth` 控制中间留空区域，避免覆盖梵宫 GLB 主体。
+- `rotationY / lngOffset / latOffset` 控制对齐，`color / opacity` 控制视觉强度。
+- 当前 MVP 使用腾讯地图 `MultiPolygon` 绘制地面 footprint。`ring` 模式由四块周边 polygon 组成，不依赖 polygon holes；中间留空，不压住 GLB 主体。
+- 第一版实心 polygon mask 会像贴片一样干扰梵宫 GLB，因此不作为推荐方案。
+- 这是局部视觉处理，不是删除腾讯底图白模。
+- 草稿保存到 localStorage，可复制 `fan_gong footprint mask patch`。
+
+如果白模仍在梵宫主体内部穿插，ring mask 不能从技术上删除腾讯白模。后续应继续通过 `style1` 弱化白模视觉、更完整的 GLB 自身遮挡，或真正的 3D 场地底座 / 低模替换方案解决。
+
+## 阶段八十四：梵宫 ring footprint mask 修正（后续已降级为实验）
+
+日期：2026-06-11
+
+### 本次目标
+
+修正梵宫 footprint mask 的默认处理方式：不再把实心矩形遮罩作为推荐方案，改为默认 ring 场地铺装 mask。ring mask 只显示梵宫周边铺装，中间留空，避免遮挡或干扰梵宫 GLB 主体。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不修改 Tencent key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不读取、输出或修改 API Key / `.env`。
+- 不全局关闭腾讯 3D 建筑白模。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### ring mask 设计
+
+`footprintMask` 新增 / 明确以下字段：
+
+- `mode: 'none' | 'solid' | 'ring'`
+- `innerWidth`
+- `innerDepth`
+
+其中：
+
+- `none`：不显示 mask。
+- `solid`：保留旧实心矩形能力，仅作为临时调试备用，UI 中提示它可能像贴片一样干扰模型。
+- `ring`：推荐模式，外层为场地范围，中间留出建筑主体区域。
+
+当前实现没有依赖 polygon holes，而是用四块 `TMap.MultiPolygon` 几何组成 ring：
+
+- 上侧铺装。
+- 下侧铺装。
+- 左侧铺装。
+- 右侧铺装。
+
+这样可以兼容不确定 holes 支持的运行环境，也能保证中间区域不被 footprint mask 覆盖。
+
+### Inspector 调试能力
+
+`LandmarkGLBInspector` 的梵宫局部遮罩 / 场地底座区域增加：
+
+- `mode` 选择。
+- `innerWidth`。
+- `innerDepth`。
+- solid 模式风险提示。
+- ring 参数校验提示：`innerWidth / innerDepth` 必须小于外层 `width / depth`。
+
+保存草稿、复制 `fan_gong footprint mask patch` 和重置功能保持不变。
+
+### 策略说明
+
+实心 polygon mask 不能作为梵宫最终处理方式，因为它会像大贴片一样压在 GLB 下方并干扰模型主体。ring mask 只能做周边铺装和场地统一，不能删除腾讯白模。如果白模仍在梵宫主体内部穿插，后续仍应通过 `style1` 弱化白模视觉、更完整的 GLB 自身遮挡，或真正的 3D 底座 / 低模替换方案解决。
+
+### 保持不变
+
+- 普通 `/map-3d-guide-c` 不显示 footprint mask。
+- 普通 `/map-3d-guide-c` 不应用 debug mask 草稿。
+- 普通 `/map-3d-guide-c` 不默认加载全部 raw 地标 GLB。
+- debugGarden 工作台保持不变。
+- 模拟前进、模拟偏航、腾讯 walking route 重规划保持不变。
+- 树群、路线、POI、导览牌、相机卡保持不变。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.38 kB`，gzip 约 `45.49 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有上传、替换、压缩或通过 TypeScript import 引入任何 GLB 文件。
+
+## 阶段八十五：梵宫 polygon footprint mask 实验结论
+
+日期：2026-06-12
+
+### 本次目标
+
+废弃当前 `fan_gong` 的 polygon footprint mask 作为推荐方案。实测 `solid` 和 `ring` 两种 `TMap.MultiPolygon` mask 都过于突兀，视觉上像贴片，会干扰梵宫 GLB。代码保留为高级实验功能，但默认彻底关闭，不再作为梵宫白模冲突的推荐处理方式。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不修改 Tencent key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不读取、输出或修改 API Key / `.env`。
+- 不让普通游客页默认加载全部 raw 地标 GLB。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 默认行为修正
+
+`fan_gong` 的 `footprintMask` 默认值改为：
+
+```ts
+footprintMask: {
+  enabled: false,
+  mode: 'none'
+}
+```
+
+已有 `width / depth / innerWidth / innerDepth / color / opacity` 等实验参数保留，便于后续临时调试或复用到更适合 polygon 区域标记的广场类资产。但普通 `/map-3d-guide-c` 不显示 footprint mask，也不应用 debug footprint mask 草稿。
+
+### Inspector 文案修正
+
+`LandmarkGLBInspector` 中梵宫相关提示改为：
+
+- polygon footprint mask 是实验功能。
+- `TMap polygon footprint mask` 实测容易产生贴片感，不推荐作为最终方案。
+- 梵宫白模冲突应优先通过弱化腾讯白模视觉，或后续制作真正 3D 场地底座 / 低模场景解决。
+- `solid` 和 `ring` 模式均标注为实验，不再显示“推荐”。
+- 梵宫 footprint mask 调试区默认折叠到高级实验区。
+
+### 实验结论
+
+尝试方案：
+
+1. `solid` polygon mask。
+2. `ring` polygon mask。
+
+实测问题：
+
+- `solid` mask 会像大贴片一样压在梵宫下面。
+- `ring` mask 虽然避开主体，但周边铺装仍然突兀。
+- `TMap.MultiPolygon` 更适合地图区域标记，不适合作为核心建筑的自然 3D 底座。
+
+结论：
+
+- polygon footprint mask 不作为梵宫最终方案。
+- 默认关闭。
+- 代码保留为高级实验能力，不删除。
+- 不通过异常 `height / scale` 硬遮挡腾讯白模。
+- 不全局关闭腾讯 3D 建筑白模。
+
+### 后续推荐方向
+
+1. 在腾讯 `style1` 中弱化 3D 白模建筑的颜色、阴影、对比度，但不全局关闭。
+2. 为梵宫制作真正的 3D 低矮场地底座或低模场景，使其与 GLB 统一材质和深度关系。
+3. 或在梵宫 GLB 模型本身中整合场地 / 底座。
+
+### 保持不变
+
+- 普通 `/map-3d-guide-c` 正常。
+- `/map-3d-guide-c?debugPerf=1` 正常。
+- debugGarden 工作台保持不变。
+- 模拟前进、模拟偏航、腾讯 walking route 重规划保持不变。
+- 树群、路线、POI、导览牌、相机卡保持不变。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.55 kB`，gzip 约 `45.58 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有上传、替换、压缩或通过 TypeScript import 引入任何 GLB 文件。
+
+## 阶段八十六：第二批地标校准 patch 固化与祥符禅寺白模冲突记录
+
+日期：2026-06-12
+
+### 本次目标
+
+固化第二批已人工确认的核心地标校准 patch：佛手广场、佛前广场、祥符禅寺。同时记录祥符禅寺也存在与梵宫类似的腾讯 3D 白模建筑冲突，后续统一进入建筑类地标白模冲突处理任务。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不修改 Tencent key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不新增祥符禅寺 polygon footprint mask。
+- 不读取、输出或修改 API Key / `.env`。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 第二批固化参数
+
+已将以下人工确认 patch 固化到 `lingshanMapModelOverlays.ts`：
+
+| 地标 | scale | height | rotationY | lngOffset | latOffset |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 佛手广场 | 194 | 9 | 30 | -0.00017 | -0.00017 |
+| 祥符禅寺 | 618 | 12 | 31 | -0.00006 | 0.00009 |
+| 佛前广场 | 103 | 3 | 28 | -0.00004 | 0.00005 |
+
+`debugPerf=1` 下的 localStorage calibration draft 仍可覆盖这些默认值，便于后续继续微调。
+
+### 祥符禅寺白模冲突
+
+人工观察发现，`xiangfu_temple` 也存在与 `fan_gong` 类似的腾讯底图 3D 白模建筑重叠或穿插问题。该问题不应通过异常放大模型、抬高模型或 polygon mask 硬遮挡。
+
+本阶段没有为祥符禅寺新增 `footprintMask`，也没有复用梵宫 polygon mask。建筑类核心地标后续应统一进入“弱化腾讯白模 + 真正 3D 低矮场地底座 / 低模场景”任务：
+
+1. 不全局关闭腾讯 3D 白模建筑。
+2. 非核心白模尽量在 `style1` 中弱化为背景。
+3. 核心建筑后续制作真正的 3D 低矮场地底座 / 低模场景。
+4. polygon footprint mask 对建筑主体容易产生贴片感，不推荐作为最终方案。
+
+### 保持不变
+
+- 已固化的灵山大佛、五印坛城、梵宫参数保持不变。
+- 旧灵山大佛模型仍保留，不删除。
+- 普通 `/map-3d-guide-c` 不默认加载全部 raw 地标 GLB。
+- debugGarden 工作台保持不变。
+- 模拟前进、模拟偏航、腾讯 walking route 重规划保持不变。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.55 kB`，gzip 约 `45.59 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有上传、替换、压缩或通过 TypeScript import 引入任何 GLB 文件。
+
+## 阶段八十七：第三批地标校准 patch 固化与祥符禅寺底座方向记录
+
+日期：2026-06-12
+
+### 本次目标
+
+固化最新一批人工确认的核心地标校准 patch，包括重新校准后的梵宫，以及曼龙飞塔、三圣殿、百子戏弥勒、胜境广场。同时记录祥符禅寺仍需要后续制作真正 3D 场地底座 / 低模底座，不使用 polygon mask 硬盖。
+
+### 本次约束
+
+- 不修改普通 `/map`。
+- 不修改 `/scenic-3d-map`。
+- 不修改 `/map-3d-guide-a` 或 `/map-3d-guide-b`。
+- 不修改 routeGeometry / roadNetwork 数据。
+- 不修改腾讯 walking route 算法。
+- 不修改 POI 数据语义、树群生成算法或 debugGarden 5 步工作台。
+- 不删除、不替换、不压缩任何 GLB 文件。
+- 不修改 Tencent key。
+- 不修改 `mapStyleId: 'style1'`。
+- 不新增祥符禅寺 polygon footprint mask。
+- 不重新启用梵宫 polygon footprint mask。
+- 不读取、输出或修改 API Key / `.env`。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 最新固化参数
+
+已将以下人工确认 patch 固化到 `lingshanMapModelOverlays.ts`：
+
+| 地标 | scale | height | rotationY | lngOffset | latOffset |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 梵宫 | 1012 | 50 | 10 | -0.00004 | 0.0006 |
+| 曼龙飞塔 | 207.5 | 35 | 15 | -0.00005 | -0.00006 |
+| 三圣殿 | 763 | 46 | 53 | 0.00011 | -0.00021 |
+| 百子戏弥勒 | 145 | 9 | 20 | 0.00009 | 0 |
+| 胜境广场 | 150 | 8 | 30 | 0.00001 | 0 |
+
+`debugPerf=1` 下的 localStorage calibration draft 仍可覆盖这些默认值，便于后续继续微调。
+
+### 梵宫 footprint mask 状态
+
+梵宫 `footprintMask` 实验字段保留，但默认仍关闭：
+
+```ts
+enabled: false
+mode: 'none'
+```
+
+本阶段没有重新启用 `solid` 或 `ring` polygon mask。梵宫白模冲突后续仍应走弱化腾讯白模 + 真正 3D 场地底座 / 低模场景方向。
+
+### 曼龙飞塔 id 兼容
+
+用户调试口径使用 `manlong_flying_tower`，现有 POI anchor 仍为 `manfeilong_tower`。本阶段保持：
+
+- `poiId: 'manfeilong_tower'`
+- `inspectorId: 'manlong_flying_tower'`
+
+这样不会修改 POI 数据语义，也能保持 Inspector 和导出 patch 与用户口径一致。文档中文名称统一使用“曼龙飞塔”。
+
+### 祥符禅寺后续底座
+
+祥符禅寺当前位置、scale 和高度已初步校准，但建筑类白模冲突仍存在。当前不新增祥符禅寺 polygon footprint mask，不使用 TMap polygon 面片硬盖。后续应制作真正 3D 场地底座 / 低模底座，或将底座直接整合进 GLB。
+
+### 保持不变
+
+- 已固化的灵山大佛、五印坛城、佛手广场、佛前广场、祥符禅寺参数保持不变。
+- 普通 `/map-3d-guide-c` 不默认加载全部 raw 地标 GLB。
+- debugGarden 工作台保持不变。
+- 模拟前进、模拟偏航、腾讯 walking route 重规划保持不变。
+- 本阶段没有加载或校准菩提大道。
+
+### npm run build 结果
+
+`npm run build` 通过。当前输出中 `Map3DGuidePage` chunk 约 `156.55 kB`，gzip 约 `45.59 kB`。Vite 仍提示部分既有 chunk 超过 500 kB，主要来自 `ScenicModel`、`AdminDashboard` 和 `admin` vendor；本阶段没有上传、替换、压缩或通过 TypeScript import 引入任何 GLB 文件。

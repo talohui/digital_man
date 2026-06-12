@@ -18,3 +18,17 @@ tmp/
 
 # macOS
 .DS_Store
+
+# Lingshan raw landmark GLB assets - local inspection only.
+# Do not commit raw versions; commit optimized/runtime versions later.
+public/models/lingshan/landmarks/lingshan-buddha-v2.glb
+public/models/lingshan/landmarks/fan-gong.glb
+public/models/lingshan/landmarks/baizi-milefo.glb
+public/models/lingshan/landmarks/buddha-hand-plaza.glb
+public/models/lingshan/landmarks/bodhi-avenue.glb
+public/models/lingshan/landmarks/shengjing-plaza.glb
+public/models/lingshan/landmarks/sansheng-hall.glb
+public/models/lingshan/landmarks/xiangfu-temple.glb
+public/models/lingshan/landmarks/wuyin-mandala.glb
+public/models/lingshan/landmarks/manlong-flying-tower.glb
+public/models/lingshan/landmarks/buddha-front-plaza.glb
