@@ -10017,3 +10017,47 @@ mode: 'none'
 ### 后续建议
 
 三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续应继续推进二次优化、拆分、低模替代或建筑底座策略。菩提大道体积和形态特殊，应单独设计 runtime 接入方式。
+
+## 2026-06-12｜阶段：/map-3d-guide-c 酒庄航拍式相机体验优化
+
+### 本次目标
+
+优化 `/map-3d-guide-c` 的默认相机视角和地标聚焦镜头，让 3D 导览更接近“酒庄航拍 / 水墨杭州式”的沉浸式路线沙盘体验。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 相机预设
+
+新增和整理相机预设：
+
+- `overviewEstate`：默认开场总览，斜俯核心景区。
+- `axisCruise`：主轴线慢推游览。
+- `routeOverview`：完整路线总览。
+- `landmarkFocus`：地标聚焦，两段式慢推。
+- `closeInspect`：debugPerf 下模型近看。
+- `guideFollow`：模拟位置跟随。
+
+### 镜头节奏
+
+地标聚焦改为两段式镜头：先轻微回拉，再平滑靠近目标。大佛、梵宫、五印坛城等大地标保留更远距离，广场类使用中等距离，百子戏弥勒和曼龙飞塔可更近观察。
+
+### debugPerf
+
+`debugPerf=1` 新增相机事件记录，包含 `cameraPreset`、目标 POI / Landmark、开始时间、结束时间和耗时，便于后续评估镜头节奏。
+
+### 约束
+
+本阶段没有修改 GLB 文件、树群算法、路线逻辑、POI 语义、腾讯底图样式、Tencent key 或 `mapStyleId: 'style1'`。未处理菩提大道，未重新启用梵宫 footprint mask。
+
+### 构建结果
+
+`npm run build` 通过。Vite 仍有既有大 chunk warning，主要来自 `ScenicModel`、`AdminDashboard` 和 admin vendor。

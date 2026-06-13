@@ -1,3 +1,4 @@
+import type { Map3DCameraEvent } from './map3dCamera'
 export type Map3DPerfStage = 'mapInit' | 'routeDraw' | 'poiInit'
 
 export type Map3DPerfAssetStatus = 'loaded' | 'failed' | 'pending' | 'unloaded'
@@ -66,6 +67,8 @@ export type Map3DPerfSnapshot = {
     assetUrl: string
     count: number
   }>
+  cameraEvents: Map3DCameraEvent[]
+  latestCameraEvent?: Map3DCameraEvent
 }
 
 export type Map3DPerfRecorder = {
@@ -113,6 +116,7 @@ export type Map3DPerfRecorder = {
       latOffset: number
     }
   }) => void
+  recordCameraEvent: (event: Map3DCameraEvent) => void
   subscribe: (listener: () => void) => () => void
 }
 
@@ -147,6 +151,7 @@ type MutableMap3DPerfState = {
   assets: Map<string, Map3DPerfAssetSnapshot>
   urlCounts: Map<string, number>
   stageStarts: Map<Map3DPerfStage, number>
+  cameraEvents: Map3DCameraEvent[]
 }
 
 export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
@@ -389,6 +394,13 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       updateLandmarkAllDone(state)
       notify()
     },
+    recordCameraEvent: (event) => {
+      if (!enabled) {
+        return
+      }
+      state.cameraEvents = [...state.cameraEvents, event].slice(-16)
+      notify()
+    },
     failGardenAsset: (id, error) => {
       if (!enabled) {
         return
@@ -437,7 +449,8 @@ function createInitialState(): MutableMap3DPerfState {
     batches: new Map(),
     assets: new Map(),
     urlCounts: new Map(),
-    stageStarts: new Map()
+    stageStarts: new Map(),
+    cameraEvents: []
   }
 }
 
@@ -475,7 +488,9 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     batches: Array.from(state.batches.values()).sort((a, b) => a.batchIndex - b.batchIndex),
     slowestAssets,
     failedAssets,
-    duplicatedUrls
+    duplicatedUrls,
+    cameraEvents: state.cameraEvents,
+    latestCameraEvent: state.cameraEvents[state.cameraEvents.length - 1]
   }
 }
 

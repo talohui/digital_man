@@ -97,6 +97,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           </dd>
         </div>
         <div>
+          <dt>Camera</dt>
+          <dd>{snapshot.latestCameraEvent?.cameraPreset ?? '-'}</dd>
+        </div>
+        <div>
           <dt>Failed</dt>
           <dd>{snapshot.gardenFailed + snapshot.landmarkFailed}</dd>
         </div>
@@ -113,6 +117,24 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
       {expanded ? (
         <div className="map-3d-guide-perf-panel__details">
           {landmarkInspector ? <LandmarkGLBInspector inspector={landmarkInspector} /> : null}
+
+          <section>
+            <h3>相机事件</h3>
+            {snapshot.cameraEvents.length ? (
+              <ol>
+                {snapshot.cameraEvents.slice(-8).map((event, index) => (
+                  <li key={`${event.startedAt}-${index}`}>
+                    <span>{event.cameraPreset}</span>
+                    <small>
+                      {event.targetLandmarkId ? `landmark: ${event.targetLandmarkId}` : event.targetPoiId ? `poi: ${event.targetPoiId}` : 'overview'} · {formatMs(event.durationMs)}
+                    </small>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>暂无相机事件</p>
+            )}
+          </section>
 
           <section>
             <h3>最慢 GLB asset</h3>

@@ -552,3 +552,40 @@ Draco 当前人工测试打不开，暂不加入 Inspector 候选，也不作为
 - 两者后续需要继续评估二次优化、拆分、低模化或建筑底座策略。
 - 菩提大道仍使用 raw，并继续单独规划。
 - Draco 当前打不开，继续不采用。
+
+## 19. 相机事件诊断与镜头节奏
+
+### 相机体验目标
+
+C 版导览相机从普通地图视角调整为更接近酒庄航拍和水墨杭州式导览的镜头语言：斜俯、慢推、主轴漫游、路线总览、地标停顿和调试近看。
+
+### 新增预设
+
+- `overviewEstate`：默认总览，斜俯展示核心园区、路线和地标关系。
+- `axisCruise`：沿主轴线慢推，强化游览方向和空间层次。
+- `routeOverview`：完整路线总览。
+- `landmarkFocus`：游客侧地标聚焦，两段式慢推。
+- `closeInspect`：debugPerf 下近距离检查 GLB 地标。
+- `guideFollow`：模拟前进、回到路线、偏航位置的内部跟随镜头。
+
+### debugPerf 记录
+
+`Map3DPerfSnapshot` 新增：
+
+- `cameraEvents`
+- `latestCameraEvent`
+
+每个事件记录：
+
+- `cameraPreset`
+- `targetPoiId`
+- `targetLandmarkId`
+- `durationMs`
+- `startedAt`
+- `finishedAt`
+
+`Map3DPerfPanel` 展示最近相机事件，复制诊断 JSON 时也包含这些字段。
+
+### 边界
+
+该诊断只在 `debugPerf=1` 时记录。普通游客页不显示诊断面板，也不会因相机事件记录产生额外 UI。

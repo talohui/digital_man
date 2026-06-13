@@ -98,6 +98,7 @@ type UseLandmarkModelInspectorOptions = {
   overlays: LingshanMapModelOverlay[]
   perfRecorder: Map3DPerfRecorder
   resolveLocation: (overlay: LingshanMapModelOverlay) => LatLngPoint | null
+  onFocusLandmark?: (target: { id: string; overlay: LingshanMapModelOverlay; location: LatLngPoint }) => void
 }
 
 export function useLandmarkModelInspector({
@@ -106,7 +107,8 @@ export function useLandmarkModelInspector({
   mapReady,
   overlays,
   perfRecorder,
-  resolveLocation
+  resolveLocation,
+  onFocusLandmark
 }: UseLandmarkModelInspectorOptions): LandmarkModelInspector {
   const modelsRef = useRef<Map<string, any>>(new Map())
   const footprintMaskLayerRef = useRef<any>(null)
@@ -329,11 +331,21 @@ export function useLandmarkModelInspector({
     const anchor = overlay ? resolveLocation(overlay) : null
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
 
-    if (!active || !mapReady || !window.TMap || !map || !anchor || !calibration) {
+    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
       return
     }
 
-    const center = new window.TMap.LatLng(anchor.lat + calibration.latOffset, anchor.lng + calibration.lngOffset)
+    const targetLocation = {
+      lat: anchor.lat + calibration.latOffset,
+      lng: anchor.lng + calibration.lngOffset
+    }
+
+    if (onFocusLandmark) {
+      onFocusLandmark({ id, overlay, location: targetLocation })
+      return
+    }
+
+    const center = new window.TMap.LatLng(targetLocation.lat, targetLocation.lng)
 
     if (typeof map.easeTo === 'function') {
       map.easeTo({ center, zoom: 18.8, pitch: 65, rotation: -28 }, { duration: 500 })

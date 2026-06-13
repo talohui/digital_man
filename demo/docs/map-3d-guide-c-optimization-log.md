@@ -706,3 +706,37 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 三圣殿和祥符禅寺 safe-v2 仍超过 100 MB，后续需要二次优化、拆分、低模或底座策略。
 - 菩提大道仍未处理，继续单独规划。
 - Draco 当前打不开，继续不作为腾讯地图运行时候选。
+
+## 阶段：酒庄航拍 / 水墨杭州式相机体验优化
+
+### 背景问题
+
+`/map-3d-guide-c` 已具备腾讯真实底图、路线、POI、树群和核心地标 GLB，但默认视角和地标聚焦仍偏普通地图操作感。为了让 C 版更像“酒庄航拍 / 水墨杭州式”的沉浸导览，需要将镜头从普通平面导航视角收敛为斜俯、慢推、主轴线和地标停顿的 3D 沙盘镜头。
+
+### 改动摘要
+
+- 新增 `src/lib/map3dCamera.ts`，集中管理相机预设和飞行逻辑。
+- 默认进入视角调整为 `overviewEstate`，以较高斜俯角展示核心园区和路线关系。
+- 相机预设调整为：`overviewEstate`、`axisCruise`、`routeOverview`、`landmarkFocus`、`closeInspect`、内部跟随 `guideFollow`。
+- 地标聚焦从单段跳转改为两段式：先轻微回拉，再平滑慢推靠近地标。
+- `Landmark GLB Inspector` 的聚焦复用同一套相机逻辑，debugPerf 下使用更近的 `closeInspect`。
+- `debugPerf` 增加 camera event 记录：preset、targetPoiId、targetLandmarkId、startedAt、finishedAt、durationMs。
+
+### 涉及文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+
+### 验收结果
+
+- `npm run build` 通过。
+- 普通游客页不显示 debugPerf 面板。
+- debugPerf JSON 和面板可查看最近相机事件。
+- 本阶段未修改 GLB、树群算法、路线逻辑、POI 语义、Tencent key 或 `mapStyleId: 'style1'`。
+
+### 后续注意事项
+
+后续视觉优化仍应继续围绕腾讯底图配色、白模弱化、树群资产筛选、建筑底座和游客端加载节奏推进。本阶段只处理镜头体验，不改变资产和底图策略。

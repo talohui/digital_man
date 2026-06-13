@@ -23,6 +23,12 @@ import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeo
 import { useGardenAssetOverlays, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
+import {
+  flyMap3DCamera,
+  MAP_3D_GUIDE_CAMERA_PRESETS,
+  type Map3DCameraPreset,
+  type Map3DCameraPresetId
+} from '../lib/map3dCamera'
 import { createMap3DPerfRecorder } from '../lib/map3dPerf'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
@@ -31,17 +37,8 @@ const GardenDebugWizard = lazy(() => import('../components/map3d/GardenDebugWiza
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
-type GuideCameraMode = 'overview' | 'current' | 'next' | 'focus' | 'topdown' | 'guide'
+type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
-
-type GuideCameraPreset = {
-  id: GuideCameraMode
-  label: string
-  description: string
-  zoom: number
-  pitch: number
-  rotation: number
-}
 
 type MapStyleSupportReport = {
   mapMethods: Record<string, boolean>
@@ -170,6 +167,13 @@ const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
 const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
+const axisCruiseTarget =
+  getPathCenter([
+    getRouteStopLocation('south_gate') ?? initialPosition,
+    getRouteStopLocation('shengjing_square') ?? routeCenter,
+    getRouteStopLocation('foqian_square') ?? routeCenter,
+    getRouteStopLocation('giant_buddha') ?? routeCenter
+  ]) ?? routeCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 const MAP_3D_GUIDE_STYLE_ID = 'style1'
 const MAP_3D_GUIDE_RENDER_OPTIONS = {
@@ -276,55 +280,12 @@ const inkDecorKinds: InkDecorKind[] = [
   'stair'
 ]
 
-const guideCameraPresets: GuideCameraPreset[] = [
-  {
-    id: 'overview',
-    label: '路线总览',
-    description: '俯瞰历史文化主线',
-    zoom: 17.1,
-    pitch: 54,
-    rotation: -25
-  },
-  {
-    id: 'current',
-    label: '当前站点',
-    description: '靠近模拟当前位置',
-    zoom: 19,
-    pitch: 65,
-    rotation: -18
-  },
-  {
-    id: 'next',
-    label: '下一站',
-    description: '提前看下一处景点',
-    zoom: 19.2,
-    pitch: 64,
-    rotation: 12
-  },
-  {
-    id: 'focus',
-    label: '景点聚焦',
-    description: '聚焦当前文化节点',
-    zoom: 20,
-    pitch: 67,
-    rotation: 28
-  },
-  {
-    id: 'topdown',
-    label: '俯视检查',
-    description: '检查路线和站点关系',
-    zoom: 18.1,
-    pitch: 0,
-    rotation: 0
-  },
-  {
-    id: 'guide',
-    label: '导览视角',
-    description: '回到跟随导览视角',
-    zoom: 18.7,
-    pitch: 65,
-    rotation: -28
-  }
+const guideCameraPresets: Map3DCameraPreset[] = [
+  MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate,
+  MAP_3D_GUIDE_CAMERA_PRESETS.axisCruise,
+  MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview,
+  MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus,
+  MAP_3D_GUIDE_CAMERA_PRESETS.closeInspect
 ]
 
 export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DGuideVariant }) {
@@ -343,6 +304,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const gardenPreviewMarkerLayerRef = useRef<any>(null)
   const gardenAssetEditMarkerLayerRef = useRef<any>(null)
   const gltfModelRefs = useRef<Map<string, any>>(new Map())
+  const cameraSequenceRef = useRef(0)
+  const entryCameraPlayedRef = useRef(false)
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
@@ -358,7 +321,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [reroutePlan, setReroutePlan] = useState<PlannedRoute | null>(null)
   const [showModelBeta, setShowModelBeta] = useState(false)
   const [modelStatus, setModelStatus] = useState('未开启')
-  const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('guide')
+  const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('overviewEstate')
   const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
     mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
     mapRelatedMethods: [],
@@ -396,7 +359,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     mapReady: mapStatus === 'ready',
     overlays: landmarkModelOverlays,
     perfRecorder,
-    resolveLocation: getModelOverlayLocation
+    resolveLocation: getModelOverlayLocation,
+    onFocusLandmark: ({ id, location }) => focusLandmarkCamera(id, location, true)
   })
 
   const routeStops = demoGuideRoute.stops
@@ -426,7 +390,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const nextStopPoi = getPoiDisplay(nextStop.nextStopId)
   const currentStop = getPoiDisplay(routeStops[selectedStopIndex]?.spotId)
   const selectedStopId = routeStops[selectedStopIndex]?.spotId
-  const activeCameraPreset = guideCameraPresets.find((preset) => preset.id === activeCameraMode) ?? guideCameraPresets[0]
+  const activeCameraPreset = MAP_3D_GUIDE_CAMERA_PRESETS[activeCameraMode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
+  const visibleCameraPresets = debugPerf
+    ? guideCameraPresets
+    : guideCameraPresets.filter((preset) => preset.id !== 'closeInspect')
   const routeProgressPercent = nearestRoutePoint
     ? Math.max(0, Math.min(100, Math.round(nearestRoutePoint.progressRatio * 100)))
     : 0
@@ -513,12 +480,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const zoom = diagonalMeters > 520 ? 17.25 : diagonalMeters > 260 ? 18 : 18.7
 
     moveMapCamera(center, {
-      id: 'topdown',
+      id: 'routeOverview',
       label: '编辑视角',
       description: '聚焦当前编辑区域',
       zoom,
       pitch: 42,
-      rotation: activeCameraPreset.rotation
+      rotation: activeCameraPreset.rotation,
+      durationMs: 700
     })
   }
 
@@ -558,12 +526,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     if (asset) {
       moveMapCamera(asset.location, {
-        id: 'focus',
+        id: 'closeInspect',
         label: '资产编辑',
         description: '聚焦当前资产点',
         zoom: 19.2,
         pitch: 54,
-        rotation: activeCameraPreset.rotation
+        rotation: activeCameraPreset.rotation,
+        durationMs: 720
       })
     }
   }
@@ -650,10 +619,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         }
 
         const map = new TMap.Map(mapElementRef.current, {
-          center: new TMap.LatLng(initialPosition.lat, initialPosition.lng),
-          zoom: 17.8,
-          pitch: 64,
-          rotation: -28,
+          center: new TMap.LatLng(routeCenter.lat, routeCenter.lng),
+          zoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom - 0.35,
+          pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+          rotation: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
           baseMap: MAP_3D_GUIDE_BASE_MAP,
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
@@ -689,6 +658,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapRef.current = null
     }
   }, [perfRecorder])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden) {
+      return
+    }
+
+    entryCameraPlayedRef.current = true
+    setActiveCameraMode('overviewEstate')
+    moveMapCamera(routeCenter, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
+  }, [debugGarden, mapStatus])
 
   useEffect(() => {
     if (!debugDecor) {
@@ -1575,7 +1554,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setRerouteStatus('idle')
     setReroutePlan(null)
     setRerouteMessage('已回到主题路线')
-    focusMap(location, 18.4)
+    focusLandmarkCamera(stop.spotId, location)
   }
 
   const simulateForward = () => {
@@ -1589,7 +1568,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setRerouteStatus('idle')
     setReroutePlan(null)
     setRerouteMessage('已沿金色路线模拟前进')
-    focusMap(nextPosition, 18)
+    focusMap(nextPosition, 18, routeStops[inferredStopIndex]?.spotId)
   }
 
   const returnToRoute = () => {
@@ -1602,7 +1581,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setRerouteStatus('idle')
     setReroutePlan(null)
     setRerouteMessage('已回到主路线')
-    focusMap(nearest, 18)
+    focusMap(nearest, 18, routeStops[getNearestStopIndex(nearest, routeStops)]?.spotId)
   }
 
   const simulateDeviation = async () => {
@@ -1619,7 +1598,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setRerouteStatus('planning')
     setReroutePlan(null)
     setRerouteMessage(`正在为你规划临时路线至下一站：${targetName}`)
-    focusMap(offRoutePosition, 18)
+    focusMap(offRoutePosition, 18, targetStopId)
 
     if (!target) {
       setRerouteStatus('failed')
@@ -1643,64 +1622,72 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const applyGuideCamera = (mode: GuideCameraMode) => {
-    const preset = guideCameraPresets.find((item) => item.id === mode) ?? guideCameraPresets[0]
+    const preset = MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
     const target =
-      mode === 'overview'
+      mode === 'overviewEstate'
         ? routeCenter
-        : mode === 'current'
-          ? getRouteStopLocation(selectedStopId) ?? simulatedPosition
-          : mode === 'next'
-            ? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
-            : mode === 'focus'
+        : mode === 'axisCruise'
+          ? axisCruiseTarget
+          : mode === 'routeOverview'
+            ? routeCenter
+            : mode === 'closeInspect'
               ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
-              : mode === 'topdown'
-                ? routeCenter
+              : mode === 'landmarkFocus'
+                ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
                 : simulatedPosition
+    const targetPoiId =
+      mode === 'landmarkFocus' || mode === 'closeInspect'
+        ? selectedStopId ?? nextStop.nextStopId
+        : undefined
 
     setActiveCameraMode(mode)
-    moveMapCamera(target, preset)
-  }
-
-  const focusMap = (position: LatLngPoint, zoom?: number) => {
-    setActiveCameraMode('guide')
-    moveMapCamera(position, {
-      id: 'guide',
-      label: '导览视角',
-      description: '跟随模拟位置',
-      zoom: zoom ?? 18,
-      pitch: 64,
-      rotation: -28
+    moveMapCamera(target, preset, {
+      targetPoiId,
+      twoStage: mode === 'landmarkFocus' || mode === 'closeInspect'
     })
   }
 
-  const moveMapCamera = (position: LatLngPoint, preset: GuideCameraPreset) => {
+  const focusMap = (position: LatLngPoint, zoom?: number, targetPoiId?: string) => {
+    const preset = {
+      ...MAP_3D_GUIDE_CAMERA_PRESETS.guideFollow,
+      zoom: zoom ?? MAP_3D_GUIDE_CAMERA_PRESETS.guideFollow.zoom
+    }
+    setActiveCameraMode('guideFollow')
+    moveMapCamera(position, preset, { targetPoiId })
+  }
+
+  function focusLandmarkCamera(id: string, position: LatLngPoint, closeInspect = false) {
+    const preset = buildLandmarkCameraPreset(id, closeInspect)
+    setActiveCameraMode(closeInspect ? 'closeInspect' : 'landmarkFocus')
+    moveMapCamera(position, preset, {
+      targetPoiId: id,
+      targetLandmarkId: id,
+      twoStage: true
+    })
+  }
+
+  const moveMapCamera = (
+    position: LatLngPoint,
+    preset: Map3DCameraPreset,
+    options: { targetPoiId?: string; targetLandmarkId?: string; twoStage?: boolean } = {}
+  ) => {
     const map = mapRef.current
 
     if (!map || !window.TMap) {
       return
     }
 
-    const center = new window.TMap.LatLng(position.lat, position.lng)
-
-    if (typeof map.easeTo === 'function') {
-      map.easeTo(
-        {
-          center,
-          zoom: preset.zoom,
-          pitch: preset.pitch,
-          rotation: preset.rotation
-        },
-        { duration: 420 }
-      )
-      return
-    }
-
-    map.setCenter?.(center)
-    if (typeof map.setZoom === 'function') {
-      map.setZoom(preset.zoom)
-    }
-    map.setPitch?.(preset.pitch)
-    map.setRotation?.(preset.rotation)
+    flyMap3DCamera({
+      map,
+      TMap: window.TMap,
+      target: position,
+      preset,
+      sequenceRef: cameraSequenceRef,
+      targetPoiId: options.targetPoiId,
+      targetLandmarkId: options.targetLandmarkId,
+      twoStage: options.twoStage,
+      onComplete: (event) => perfRecorder.recordCameraEvent(event)
+    })
   }
 
   const selectedDecor = decorOverlays.find((decor) => decor.id === selectedDecorId) ?? decorOverlays[0]
@@ -2213,7 +2200,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           <span>{activeCameraPreset.description}</span>
         </div>
         <div className="map-3d-guide-camera__buttons">
-          {guideCameraPresets.map((preset) => (
+          {visibleCameraPresets.map((preset) => (
             <button
               key={preset.id}
               type="button"
@@ -2687,6 +2674,31 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       <style>{map3DGuideCss}</style>
     </main>
   )
+}
+
+function buildLandmarkCameraPreset(id: string, closeInspect: boolean): Map3DCameraPreset {
+  const base = closeInspect ? MAP_3D_GUIDE_CAMERA_PRESETS.closeInspect : MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus
+  const largeLandmarks = new Set(['giant_buddha', 'fan_gong', 'wuyin_tancheng', 'xiangfu_temple', 'sansheng_hall'])
+  const plazaLandmarks = new Set(['foshou_square', 'foqian_square', 'shengjing_square'])
+  const compactLandmarks = new Set(['baizi_mile', 'manlong_flying_tower', 'manfeilong_tower'])
+  const zoom = closeInspect
+    ? compactLandmarks.has(id)
+      ? 19.72
+      : plazaLandmarks.has(id)
+        ? 19.45
+        : 19.15
+    : largeLandmarks.has(id)
+      ? 18.42
+      : plazaLandmarks.has(id)
+        ? 18.82
+        : compactLandmarks.has(id)
+          ? 19.15
+          : base.zoom
+
+  return {
+    ...base,
+    zoom
+  }
 }
 
 function getRouteStopLocations(route: GuideRoute) {
