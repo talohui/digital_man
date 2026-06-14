@@ -10061,3 +10061,233 @@ mode: 'none'
 ### 构建结果
 
 `npm run build` 通过。Vite 仍有既有大 chunk warning，主要来自 `ScenicModel`、`AdminDashboard` 和 admin vendor。
+
+## 2026-06-13｜阶段：/map-3d-guide-c 佛境沙盘导览第一轮特色交互
+
+### 本次目标
+
+在上一轮相机优化提交 `9514435828f6f7643766f456e8d1d6598834b59f` 基础上，继续复用 `src/lib/map3dCamera.ts`，新增“佛境巡游 + 路线预演 + 地标呼吸光”第一轮特色交互，让 C 版导览从普通地图镜头进一步升级为“佛境沙盘导览”。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增“佛境巡游”按钮，播放南门 / 胜境广场、佛手广场、梵宫、五印坛城、灵山大佛 5 个节点。
+- 新增“路线预演”按钮，基于当前路线和站点序列做近似预演，叠加临时路线进度高亮并沿站点滑行。
+- 新增地标 active highlight，用淡金呼吸环表达当前聚焦地标，不修改 GLB 材质。
+- 新增 `tourMode`、`activeTourStepId`、`activeLandmarkId` 和 route preview progress 状态，避免巡游、预演和手动镜头互相打架。
+- 点击地图、手动切换相机、切站点、模拟前进、模拟偏航、回到路线或点击停止按钮会中止当前播放。
+- `debugPerf` 新增 tour / route preview 事件记录，并在 `Map3DPerfPanel` 展示最近事件。
+
+### 设计边界
+
+本轮参考酒庄航拍、Apple Flyover City Tour 和 Google route preview 的轻量交互思路，只做镜头叙事、路线预演和地标高亮。未修改腾讯底图配色，未修改 `mapStyleId: 'style1'`，未修改 GLB 文件，未处理菩提大道，未修改树群生成算法，未修改 POI 数据语义，未改地标 scale / height / rotationY / offset，未重新启用梵宫 footprint mask，未让游客页默认加载 raw GLB。
+
+### 验证
+
+`npm run build` 通过。in-app Browser 因安全策略拒绝访问 `http://127.0.0.1:5173`，当前工具内未能完成浏览器交互验收；后续需要人工确认 `/map-3d-guide-c`、`/map-3d-guide-c?debugPerf=1` 和 `/map-3d-guide-c?debugGarden=1&debugPerf=1` 的播放、停止、active highlight 和 debugPerf 事件。
+
+## 2026-06-13｜阶段：佛境巡游改为沿路线 geometry 滑行
+
+### 本次目标
+
+修正第一版“佛境巡游”从地标直接飞到下一个地标的问题，将巡游改为沿当前导航路线 geometry 逐段滑行。目标是让镜头像航拍 / 纪录片一样沿路线推进，在接近核心地标时自然减速、停顿并显示呼吸光。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 佛境巡游优先使用当前页面实际显示的 `demoRouteGeometry.path` / `demoRoutePath` 采样 waypoint。
+- 普通路段按距离采样，转弯处补点，减少突然转向。
+- 根据 route bearing 驱动相机 rotation，并做平滑处理。
+- 普通 waypoint 不再每段两段式回拉，改为平稳 `guideFollow` 滑行。
+- 胜境广场 / 南门附近、佛手广场、梵宫、五印坛城、灵山大佛作为 route 上的兴趣点，接近时 slow，抵达附近 pause。
+- pause 时切换 `activeLandmarkId`，显示淡金呼吸光，停顿后继续沿路线推进。
+- 巡游复用 route progress 高亮，让路线有“正在推进”的状态。
+- 如果 route geometry 不存在，回退到第一版 POI 序列巡游。
+
+### debugPerf
+
+`debugPerf` 新增 / 扩展：
+
+- `tourWaypoint`
+- `tourLandmarkPause`
+- `tourCompleted`
+
+事件记录 progress、target lat/lng、bearing、nearbyLandmarkId、相机 preset、duration 和停止原因。`Map3DPerfPanel` 展示最近巡游 / 预演事件中的 progress 和 bearing。
+
+### 约束
+
+本轮只改巡游镜头逻辑，没有修改底图配色、Tencent key、`mapStyleId: 'style1'`、GLB 文件、模型压缩、菩提大道、树群生成算法、POI 数据语义、地标 scale / height / rotationY / offset，也没有重新启用梵宫 footprint mask 或让游客页默认加载 raw GLB。
+
+### 验证
+
+`npm run build` 通过。路线预演保持可用，仍与佛境巡游互斥。浏览器内的实际视觉顺滑度、停顿点和停止按钮需要人工打开 `/map-3d-guide-c` 继续确认。
+
+## 2026-06-13｜阶段：佛境巡游 requestAnimationFrame 连续时间轴
+
+### 本次目标
+
+修复佛境巡游沿 route geometry 推进后仍“一顿顿前进”的问题。上一版路线方向正确，但执行层仍是 waypoint 分段 `flyTo`，本轮改为 `requestAnimationFrame` 连续时间轴，让镜头像无人机一样连续沿路线滑行。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增 rAF 连续巡游播放器，停止时会 `cancelAnimationFrame`。
+- 佛境巡游沿整条 route path 使用单一 progress 推进。
+- 相机位置按路线累计距离插值，而不是按 waypoint 分段跳转。
+- bearing / rotation 使用最短角插值平滑，减少转弯突变。
+- 速度曲线在地标附近自然减速，pause 只暂停 progress，不重新触发两段式 flyTo。
+- pause 期间保留淡金呼吸光和轻微 zoom 漂移，结束后继续沿路线推进。
+- debugPerf 按 10% progress 节流记录 `tourProgress`，并保留 `tourLandmarkPause`、`tourStopped`、`tourCompleted`。
+
+### 约束
+
+本轮只改佛境巡游运动连续性。未修改底图、Tencent key、`mapStyleId: 'style1'`、GLB、模型压缩、菩提大道、树群生成算法、POI 数据语义、地标 scale / height / rotationY / offset、梵宫 footprint mask 或游客端 raw GLB 加载策略。
+
+### 验证
+
+`npm run build` 通过。路线预演保持现有实现，仍与佛境巡游互斥。实际视觉顺滑度需要人工打开 `/map-3d-guide-c` 重点确认。
+
+## 2026-06-13｜阶段：佛境巡游遨游感和平稳性优化
+
+### 本次目标
+
+在 rAF 连续 route-following 巡游基础上继续优化手感。目标是让 `/map-3d-guide-c` 的“佛境巡游”更接近无人机遨游 / 航拍纪录片：转向提前、相机有惯性、路线不贴脸、地标停顿不死停。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 佛境巡游新增 lookAhead 前视点，bearing / rotation 根据路线前方方向计算。
+- rAF 播放器新增 camera inertia smoothing，center、rotation、zoom、pitch 不再直接硬落目标值。
+- 相机中心加入轻微 lateral offset，普通段从路线旁侧掠过，地标附近自然收敛。
+- 速度曲线加入更柔和的开头、结尾和地标附近减速 / 恢复。
+- 地标 pause 保留呼吸光，同时加入极轻微中心、转向、zoom、pitch 慢漂移，避免像动画暂停。
+- bearing 使用窗口平滑，减少 route path 小折线引起的抖动。
+- debugPerf 节流记录 smoothing、lookAhead、侧偏和估算 FPS。
+
+### 约束
+
+本轮只优化佛境巡游的平稳性和遨游感。未修改底图、Tencent key、`mapStyleId: 'style1'`、GLB、模型压缩、菩提大道、树群生成算法、POI 数据语义、地标 scale / height / rotationY / offset、梵宫 footprint mask 或游客端 raw GLB 加载策略。路线预演保持现有实现。
+
+## 2026-06-13｜阶段：佛境巡游路线进度连续化
+
+### 本次目标
+
+修复 `/map-3d-guide-c` 佛境巡游中“已走路线变灰”与相机巡游速度不匹配的问题，并稳定处理前往 / 返回路线空间重叠导致的灰线横跳。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 佛境巡游 route progress 跟随同一个 continuous `frame.progress`。
+- 路线切分按累计距离完成，当前段插入插值点，traveled / remaining path 在 currentPoint 无缝衔接。
+- 重叠路线按 route path 顺序处理，不通过空间最近点判断，避免前往 / 返回重叠段横跳。
+- 佛境巡游期间不再使用离散 `routePreviewProgressIndex` 重建路线进度 layer。
+- 新增 ref 驱动的临时 progress overlay，约 30fps 更新，减少 React 重渲染。
+- 停止、完成、打断或切换路线预演时清除临时 overlay，恢复普通路线。
+- debugPerf 新增 route progress started/update/stopped/completed/reset 事件，记录 source、点数、current point 和 overlap 标记。
+
+### 约束
+
+本轮只修路线进度渲染和重叠路线显示稳定性。未修改相机手感主逻辑、底图、Tencent key、`style1`、GLB、模型压缩、菩提大道、树群生成算法、POI 语义、地标 transform、梵宫 footprint mask 或游客端 raw GLB 加载策略。
+
+## 2026-06-14｜阶段：首屏地图黑底 ready gating
+
+### 本次目标
+
+修复 `/map-3d-guide-c` 刚进入页面时可能出现黑色地图底的问题。目标是在腾讯底图视觉 ready 前，用浅色佛境 loading curtain 和浅色地图容器兜底，避免用户看到黑底 canvas。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增 `isMapCreated`、`isMapIdle`、`isMapVisualReady`、`mapReadyTimedOut` 和 `loadingCurtainVisible`。
+- `mapStatus=ready` 仍表示实例 ready，route / POI / GLB 可后台创建；视觉 ready 独立判断。
+- 优先监听 `idle`、`tilesloaded`、`rendercomplete`，并保留 900ms fallback。
+- 超过 4.8s 仍未 visual ready 时显示地图加载较慢提示，不暴露黑底。
+- 新增浅米绿 / 米白 / 青绿雾感 loading curtain，visual ready 后淡出。
+- 地图容器增加浅色 fallback background。
+- visual loading 期间降低 skin / paperedge 的压暗效果。
+- debugPerf 新增 map visual events 和 curtain duration。
+
+### 约束
+
+本轮只修首屏地图黑底 / ready 时序。未修改 Tencent key、`mapStyleId: 'style1'`、底图 style、GLB、模型压缩、树群生成算法、路线数据、POI 语义、地标 scale / height / rotationY / offset 或游客端 raw GLB 策略。
+
+## 2026-06-14｜阶段：首屏启动阶段分层 gating
+
+### 本次目标
+
+修复 `/map-3d-guide-c` 首屏仍可能出现黑底、地图加载较慢时路线 / POI / 树群早于腾讯底图显示的问题。目标是先确保腾讯底图视觉 ready，再显示路线 / POI，再分批加载树群 GLB。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/hooks/useGardenAssetOverlays.ts`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增 `MapStartupStage` 和 `startupStage` 状态，覆盖 SDK 加载、地图创建、等待底图、overlay 显示、树群加载、ready、slow、failed。
+- `mapVisualReady` 不再由单个地图事件立即触发；现在需要底图事件、最小可视延迟和 2 帧 RAF。
+- 4.8s 未 ready 时进入 slow 状态，继续显示浅色佛境 curtain，并提供继续等待 / 重新加载地图。
+- 路线、POI、用户点、重规划线、地标高亮和 debugGarden 编辑 overlay 统一等 `mapVisualReadyForOverlays` 后显示。
+- 树群 GLB 通过 `shouldLoadGardenAssets` 等底图 visual ready 后再开始分批创建，树群生成算法和资产数据不变。
+- debugPerf 显示 startup stage、overlay start、route/POI shown、garden after ready 和 curtain duration。
+
+### 约束
+
+本轮只重排启动时序、加载慢提示和首屏黑底暴露问题。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、GLB 文件、模型压缩、树群生成算法、POI 语义、地标 scale / height / rotationY / offset、梵宫 footprint mask、游客端 raw GLB 策略、佛境巡游相机逻辑或路线预演逻辑。

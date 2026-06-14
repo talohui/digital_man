@@ -589,3 +589,283 @@ C 版导览相机从普通地图视角调整为更接近酒庄航拍和水墨杭
 ### 边界
 
 该诊断只在 `debugPerf=1` 时记录。普通游客页不显示诊断面板，也不会因相机事件记录产生额外 UI。
+
+## 20. 佛境巡游、路线预演与 active highlight 诊断
+
+### 交互目标
+
+本轮在 `/map-3d-guide-c` 上新增第一轮“佛境沙盘导览”特色交互：佛境巡游、路线预演和地标呼吸光。实现重点是镜头叙事和轻量状态反馈，不改底图、不改模型、不重算路线。
+
+### 佛境巡游
+
+游客端新增“佛境巡游”按钮。点击后按 5 个核心节点播放：
+
+1. 南门 / 胜境广场
+2. 佛手广场
+3. 梵宫
+4. 五印坛城
+5. 灵山大佛
+
+巡游复用 `map3dCamera.ts` 中的 preset 系统，单步飞行采用轻微回拉、转向、慢推和短暂停顿，避免普通地图瞬移感。
+
+### 路线预演
+
+游客端新增“路线预演”按钮。当前实现不重算路线，也不改变路线数据结构；它复用历史文化路线站点顺序和当前 `demoRoutePath`，通过临时 route preview polyline 展示从起点到当前预演点的淡金高亮，并让镜头沿站点序列滑行。结束后回到路线总览。
+
+### 地标呼吸光
+
+active highlight 使用 TMap marker 和内联 SVG 绘制淡金小环，颜色限制在淡金 `#D6B46A`、米白 `#E6DDC7`、青绿 `#8FAF9B`。普通状态不显示；巡游、路线预演经过地标时显示；停止、切换或结束后清除。该方案不修改 GLB 材质，也不影响 Landmark Inspector 的加载和卸载。
+
+### debugPerf 记录
+
+`Map3DPerfSnapshot` 新增：
+
+- `tourEvents`
+- `latestTourEvent`
+
+事件类型包括：
+
+- `tourStarted`
+- `tourStep`
+- `tourStopped`
+- `routePreviewStarted`
+- `routePreviewStep`
+- `routePreviewStopped`
+
+每个事件可记录当前 `activeLandmarkId`、相机 preset、target id、step index、step count、duration 和 stopped reason。`Map3DPerfPanel` 新增“巡游 / 预演事件”列表，仍保持轻量文本展示，不引入图表。
+
+### 构建与风险
+
+`npm run build` 通过。Vite 仍提示既有大 chunk warning。本轮没有新增 GLB import，没有修改 raw / safe-v1 / safe-v2 / draco 资源，没有改 `style1`，没有触碰 Tencent key。
+
+## 21. Route-following 佛境巡游诊断
+
+### 问题修正
+
+第一版佛境巡游按地标直接跳转，debugPerf 中主要体现为 `tourStep` 和地标 target。该方式能验证地标停顿，但镜头不是沿导航路线前进，容易出现从一个景点直接飞到下一个景点的机械感。
+
+### 新实现
+
+佛境巡游现在优先使用当前页面实际显示的 route geometry：`demoRouteGeometry.path`，并回退到 `demoRoutePath`。不重算路线，不修改路线数据。
+
+巡游 waypoint 生成逻辑：
+
+- 按 route path 累计距离采样普通巡游点。
+- 转弯处补充 waypoint。
+- 根据相邻 route point 计算 bearing。
+- 对 bearing 做平滑，避免 rotation 硬切。
+- 根据核心地标 anchor 找 route 最近点，在前后插入 slow / pause waypoint。
+
+### 事件记录
+
+新增或扩展的 tour 事件：
+
+- `tourStarted`
+- `tourWaypoint`
+- `tourLandmarkPause`
+- `tourStopped`
+- `tourCompleted`
+
+每条 waypoint / pause 事件可记录：
+
+- `progress`
+- `targetLat`
+- `targetLng`
+- `bearing`
+- `nearbyLandmarkId`
+- `activeLandmarkId`
+- `cameraPreset`
+- `durationMs`
+- `reason`
+
+`Map3DPerfPanel` 在“巡游 / 预演事件”中显示 progress 百分比和 bearing，便于人工判断路线滑行是否顺畅。
+
+### 视觉与性能边界
+
+路线推进高亮复用现有 route preview polyline 样式，不新增复杂图层。地标呼吸光仍是轻量 TMap marker，不改 GLB 材质。普通 waypoint 不使用 two-stage fly，减少回拉-推近带来的机械感；只有地标附近通过 slow / pause 节奏产生纪录片式停顿。
+
+## 22. requestAnimationFrame 连续巡游诊断
+
+### 问题修正
+
+route-following 第一版虽然沿路线 geometry 前进，但仍是 waypoint 串行 `flyTo` / `easeTo`。每个 waypoint 有独立 duration 和 timeout，视觉上会出现“一顿顿前进”。
+
+### 连续时间轴
+
+佛境巡游现在使用 `requestAnimationFrame` 播放器：
+
+- 用单一 progress 表示整条路线 0 → 1。
+- 每帧按 elapsed time 和速度曲线更新 progress。
+- 按 route path 累计距离插值当前经纬度。
+- 每帧轻量更新相机 center / zoom / pitch / rotation。
+- 普通路段不再触发逐段 flyTo。
+- 地标 pause 只暂停 progress，不打断相机连续状态。
+
+### 平滑策略
+
+- bearing 使用路线前后距离窗口计算，避免只看单个短 segment。
+- rotation 使用 `lerpAngle` 做最短角平滑，避免 359° / 1° 断点。
+- 普通路段保持较高斜俯和轻微 zoom / pitch 起伏。
+- 地标附近通过速度 multiplier 降速，并以 smoothstep 推近 zoom / pitch。
+
+### debugPerf 节流
+
+为避免每帧记录导致面板卡顿：
+
+- `tourProgress` 只按 10% progress 桶记录。
+- `tourLandmarkPause` 只在地标 pause 触发时记录。
+- `tourCompleted` / `tourStopped` 保留结束和中止原因。
+
+诊断事件仍包含 progress、targetLat、targetLng、bearing、nearbyLandmarkId 和 durationMs。
+
+## 23. 佛境巡游遨游感诊断
+
+### 问题修正
+
+rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果每帧直接把 route 当前点写入相机，镜头仍容易贴线、转向过于即时，地标 pause 也会像动画暂停。
+
+### 新增平滑层
+
+佛境巡游现在在目标帧之外增加相机惯性：
+
+- center、rotation、zoom、pitch 由播放器内部 camera state ref 插值到目标值。
+- rotation 使用最短角插值，避免跨 0 度时突然回转。
+- 目标 bearing 来自 current point 到 lookAhead point，而不是当前短 segment。
+- bearing 窗口按路线长度自适应，过滤小折线带来的抖动。
+
+### 航拍感参数
+
+巡游目标帧加入：
+
+- lookAhead 前视点：普通段约 0.026 progress，地标附近约 0.012 progress。
+- 侧向偏移：普通段约 22m，地标附近收敛到 6-11m。
+- 开头 / 结尾 / 地标附近 smoothstep 速度曲线。
+- 地标 pause 慢漂移：progress 暂停，但 center、rotation、zoom、pitch 保持极轻微悬停变化。
+
+### debugPerf 字段
+
+`tourProgress` 仍按 10% progress 节流记录。新增诊断字段包括：
+
+- `smoothingEnabled`
+- `lookAheadProgress`
+- `lateralOffsetMeters`
+- `averageFrameMs`
+- `estimatedFps`
+
+这些字段用于确认平滑层启用、前视距离和侧偏距离是否符合预期，同时避免每帧记录造成面板卡顿。
+
+## 24. 佛境巡游 route progress overlay 诊断
+
+### 问题修正
+
+佛境巡游相机已是 continuous timeline，但路线灰线之前仍可能通过离散 route index 或 nearest point 间接更新。这样会造成两类问题：
+
+- 灰线推进不是同一份 `tourProgress`，与镜头速度不完全一致。
+- 前往 / 返回路线空间重叠时，空间最近点有歧义，已走线和原路线可能横跳或抢显示。
+
+### 新渲染策略
+
+巡游路线进度改为按 route sequence 和累计距离切分：
+
+- `progress` 来自佛境巡游同一帧的 continuous `frame.progress`。
+- `splitRouteByProgress` 使用 route cumulative distance 找到当前段。
+- 在当前段内插入插值点，保证 traveledPath 末尾和 remainingPath 开头是同一个 currentPoint。
+- 不做空间去重，不用最近点判断已走段。
+- 重叠路线仍保留 path 数组顺序，已走线只来自 `path[0..progress]`，未走线只来自 `path[progress..end]`。
+
+### Overlay 与性能
+
+佛境巡游期间使用临时 route progress overlay：
+
+- remaining route 保留金色 / 米白方向感。
+- traveled route 使用低饱和灰米色。
+- overlay 由 refs 管理，约 30fps 更新。
+- React state 只更新按钮、地标和诊断 UI，不参与每帧路线绘制。
+- 停止、完成或切换路线预演时清理 overlay，并恢复普通路线 layer。
+
+### debugPerf 字段
+
+新增节流事件：
+
+- `routeProgressStarted`
+- `routeProgressUpdate`
+- `routeProgressStopped`
+- `routeProgressCompleted`
+- `routeProgressOverlayReset`
+
+事件记录 `source: tourProgress`、progress、traveledPointCount、remainingPointCount、currentLat/currentLng 和 `routeHasOverlaps`，用于判断路线进度是否来自同一个连续时间轴。
+
+## 25. 首屏地图视觉 Ready 诊断
+
+### 问题修正
+
+`mapStatus=ready` 原本表示腾讯地图实例已创建，但不代表底图 canvas 已经完成首帧可视渲染。路线、POI、树群和 UI 可能早于底图瓦片 / 3D 底图显示，导致用户短暂看到黑底地图区域。
+
+### 新 ready gating
+
+新增独立的 visual ready 判断：
+
+- `mapCreated`：`new TMap.Map(...)` 完成。
+- `mapFirstIdle`：监听到 `idle` / `tilesloaded` / `rendercomplete` 之一。
+- `mapVisualReady`：底图被认为可视稳定，或 900ms fallback 兜底触发。
+- `mapReadyTimedOut`：4.8s 仍未 ready 时记录慢加载状态。
+
+该逻辑不阻塞 GLB 树群加载；树群仍按原策略分批创建。
+
+### Loading curtain
+
+地图主体上方新增浅色 loading curtain：
+
+- 米白 / 浅青绿雾感背景，避免黑底 canvas 暴露。
+- visual ready 后延迟约 420ms 淡出。
+- timeout 时显示“地图加载较慢”轻提示。
+- 地图容器自身也改为浅米绿兜底背景。
+- visual loading 期间降低 skin / paperedge 压暗，避免首屏被 overlay 压黑。
+
+### debugPerf 字段
+
+`Map3DPerfPanel` 现在展示：
+
+- map visual ready time
+- map first idle time
+- loading curtain duration
+- timed out 状态
+- 最近 map visual events
+
+这些事件只在状态变化时记录，不做逐帧采样。
+
+## 26. 启动阶段分层 gating 诊断
+
+### 问题修正
+
+单独的 loading curtain 只能遮住一部分首屏问题；如果 `mapStatus=ready` 后 overlay 立即创建，而腾讯底图视觉 ready 仍滞后，路线、POI、树群就可能早于底图显示，形成“黑底半成品”。
+
+### 新启动时序
+
+启动流程拆分为 startup stage：
+
+- `loadingSdk`：腾讯地图 SDK 加载中。
+- `creatingMap`：SDK 已返回，创建 TMap 实例。
+- `waitingBaseMap`：地图实例和初始 camera 已应用，等待底图首帧稳定。
+- `baseMapReady`：收到可信底图事件后，经过最小延迟和 2 帧 RAF。
+- `overlaysReady`：开始显示路线 / POI 等地图 overlay。
+- `gardenLoading`：底图 ready 后开始树群 GLB 分批加载。
+- `ready`：启动阶段完成。
+- `slow` / `failed`：保持浅色兜底，不暴露黑底。
+
+### Overlay gating
+
+路线、POI、用户 marker、重规划线、地标高亮、debugGarden 编辑 overlay 都改为依赖 `mapVisualReadyForOverlays`。树群 GLB 通过 `shouldLoadGardenAssets` 显式等待底图 visual ready 后再创建，继续沿用原来的 batch 和 overlay 去重逻辑。
+
+### debugPerf 字段
+
+`Map3DPerfPanel` 显示：
+
+- 当前 startup stage
+- `overlaysStart`
+- `routePoiShown`
+- `gardenLoadStartedAfterMapReady`
+- `mapSlow` / `mapFailed`
+- loading curtain duration
+
+这些事件只在阶段变化时记录，不参与逐帧采样，不会放大运行时开销。

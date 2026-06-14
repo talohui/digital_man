@@ -24,12 +24,24 @@ import { useGardenAssetOverlays, type GardenModelReport } from '../hooks/useGard
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
 import {
+  BUDDHA_REALM_TOUR_CONFIG,
   flyMap3DCamera,
   MAP_3D_GUIDE_CAMERA_PRESETS,
+  startBuddhaRealmTour,
+  startBuddhaRealmTimelineTour,
+  startRoutePreview,
+  stopBuddhaRealmTour,
+  stopRoutePreview,
+  type Map3DRouteTourFrame,
+  type Map3DRouteTourPause,
   type Map3DCameraPreset,
-  type Map3DCameraPresetId
+  type Map3DCameraPresetId,
+  type Map3DTourMode,
+  type Map3DTourPlaybackRef,
+  type Map3DTourStep,
+  type Map3DTourStopReason
 } from '../lib/map3dCamera'
-import { createMap3DPerfRecorder } from '../lib/map3dPerf'
+import { createMap3DPerfRecorder, type Map3DStartupStage } from '../lib/map3dPerf'
 import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
 
@@ -39,6 +51,10 @@ type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
+
+const MAP_3D_GUIDE_MIN_BASEMAP_READY_MS = 1050
+const MAP_3D_GUIDE_SLOW_READY_MS = 4800
+const MAP_3D_GUIDE_CURTAIN_FADE_MS = 520
 
 type MapStyleSupportReport = {
   mapMethods: Record<string, boolean>
@@ -145,6 +161,30 @@ type GardenDraftPolygon = {
   vertices: LatLngPoint[]
 } | null
 
+type TourWaypoint = LatLngPoint & {
+  progress: number
+  pathIndex: number
+  bearing?: number
+  nearbyLandmarkId?: string
+  nearbyLandmarkLabel?: string
+  speedMode: 'cruise' | 'slow' | 'pause'
+  holdMs?: number
+}
+
+type BuddhaRealmTimelineTourConfig = {
+  path: LatLngPoint[]
+  cumulative: number[]
+  totalDistance: number
+  pauses: Map3DRouteTourPause[]
+  durationMs: number
+}
+
+type SplitRouteByProgressResult = {
+  traveledPath: LatLngPoint[]
+  remainingPath: LatLngPoint[]
+  currentPoint: LatLngPoint
+}
+
 type Map3DGuideVisualVariantConfig = {
   id: Map3DGuideVariant
   className: string
@@ -167,6 +207,9 @@ const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
 const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
+const demoRouteCumulativeDistances = buildPathCumulativeDistances(demoRoutePath)
+const demoRouteTotalDistance = demoRouteCumulativeDistances[demoRouteCumulativeDistances.length - 1] ?? 0
+const demoRouteHasSequenceOverlaps = detectRouteSequenceOverlaps(demoRoutePath)
 const axisCruiseTarget =
   getPathCenter([
     getRouteStopLocation('south_gate') ?? initialPosition,
@@ -294,9 +337,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
+  const tourRouteProgressLayerRef = useRef<any>(null)
   const poiMarkerLayerRef = useRef<any>(null)
   const userMarkerLayerRef = useRef<any>(null)
   const rerouteLayerRef = useRef<any>(null)
+  const landmarkHighlightLayerRef = useRef<any>(null)
   const decorMarkerLayerRef = useRef<any>(null)
   const forestPatchLayerRef = useRef<any>(null)
   const gardenEditorPolygonLayerRef = useRef<any>(null)
@@ -305,6 +350,22 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const gardenAssetEditMarkerLayerRef = useRef<any>(null)
   const gltfModelRefs = useRef<Map<string, any>>(new Map())
   const cameraSequenceRef = useRef(0)
+  const tourPlaybackRef = useRef<Map3DTourPlaybackRef['current']>(null)
+  const buddhaTourUiFrameRef = useRef(0)
+  const buddhaTourProgressBucketRef = useRef(-1)
+  const buddhaTourFrameStatsRef = useRef({ lastAt: 0, averageFrameMs: 0 })
+  const buddhaTourRouteProgressRef = useRef({
+    isActive: false,
+    lastRenderedAt: 0,
+    lastEventBucket: 0,
+    latestProgress: 0
+  })
+  const mapVisualReadyRef = useRef(false)
+  const mapFirstIdleRef = useRef(false)
+  const mapOverlaysStartedRef = useRef(false)
+  const mapRoutePoiShownRef = useRef(false)
+  const mapGardenLoadStartedRef = useRef(false)
+  const mapLoadingCurtainShownAtRef = useRef<number | null>(null)
   const entryCameraPlayedRef = useRef(false)
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
@@ -312,6 +373,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const landmarkModelOverlays = useMemo(() => orderMapModelOverlaysForLoading(getVisibleMapModelOverlays()), [])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
+  const [isMapCreated, setIsMapCreated] = useState(false)
+  const [isMapIdle, setIsMapIdle] = useState(false)
+  const [isMapVisualReady, setIsMapVisualReady] = useState(false)
+  const [mapReadyTimedOut, setMapReadyTimedOut] = useState(false)
+  const [loadingCurtainVisible, setLoadingCurtainVisible] = useState(true)
+  const [startupStage, setStartupStage] = useState<Map3DStartupStage>('loadingSdk')
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
   const [routePathIndex, setRoutePathIndex] = useState(0)
@@ -322,6 +389,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [showModelBeta, setShowModelBeta] = useState(false)
   const [modelStatus, setModelStatus] = useState('未开启')
   const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('overviewEstate')
+  const [tourMode, setTourMode] = useState<Map3DTourMode | 'idle'>('idle')
+  const [activeTourStepId, setActiveTourStepId] = useState<string | undefined>()
+  const [activeLandmarkId, setActiveLandmarkId] = useState<string | undefined>()
+  const [routePreviewProgressIndex, setRoutePreviewProgressIndex] = useState<number | null>(null)
   const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
     mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
     mapRelatedMethods: [],
@@ -391,6 +462,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const currentStop = getPoiDisplay(routeStops[selectedStopIndex]?.spotId)
   const selectedStopId = routeStops[selectedStopIndex]?.spotId
   const activeCameraPreset = MAP_3D_GUIDE_CAMERA_PRESETS[activeCameraMode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
+  const isTourPlaying = tourMode !== 'idle'
+  const mapVisualReadyForOverlays = mapStatus === 'ready' && isMapVisualReady
+  const canUseMapInteractions = mapVisualReadyForOverlays && !mapReadyTimedOut
+  const shouldLoadGardenAssets = visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays
+  const tourStateLabel =
+    tourMode === 'buddhaRealmTour'
+      ? `佛境巡游中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
+      : tourMode === 'routePreview'
+        ? `路线预演中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
+        : '待命'
   const visibleCameraPresets = debugPerf
     ? guideCameraPresets
     : guideCameraPresets.filter((preset) => preset.id !== 'closeInspect')
@@ -457,13 +538,51 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     mapReady: mapStatus === 'ready',
     perfRecorder,
     rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route',
-    routeProgressRatio
+    routeProgressRatio,
+    shouldLoadGardenAssets
   })
   const gardenModelReport: GardenModelReport = {
     ...gardenOverlayReport,
     patchCount: gardenPatchReport.patchCount,
     patchFallback: gardenPatchReport.patchFallback
   }
+
+  useEffect(() => {
+    if (!shouldLoadGardenAssets || mapGardenLoadStartedRef.current) {
+      return
+    }
+
+    mapGardenLoadStartedRef.current = true
+    setStartupStage('gardenLoading')
+    perfRecorder.recordMapVisualEvent({
+      type: 'startupStageChanged',
+      startupStage: 'gardenLoading',
+      reason: 'garden-after-map-ready'
+    })
+    perfRecorder.recordMapVisualEvent({
+      type: 'gardenLoadStartedAfterMapReady',
+      reason: 'visual-ready'
+    })
+  }, [perfRecorder, shouldLoadGardenAssets])
+
+  useEffect(() => {
+    if (!mapVisualReadyForOverlays || startupStage === 'ready') {
+      return
+    }
+
+    if (visualVariant.id === 'prototype-c') {
+      if (gardenModelReport.visibleCount === 0 || (gardenAssetLoading && !gardenModelReport.unavailable)) {
+        return
+      }
+    }
+
+    setStartupStage('ready')
+    perfRecorder.recordMapVisualEvent({
+      type: 'startupStageChanged',
+      startupStage: 'ready',
+      reason: visualVariant.id === 'prototype-c' ? 'garden-batches-ready' : 'overlays-ready'
+    })
+  }, [gardenAssetLoading, gardenModelReport.unavailable, gardenModelReport.visibleCount, mapVisualReadyForOverlays, perfRecorder, startupStage, visualVariant.id])
 
   const focusMapOnVertices = (vertices: LatLngPoint[]) => {
     const center = getPathCenter(vertices)
@@ -601,6 +720,93 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   useEffect(() => {
     let cancelled = false
+    let visualReadyTimer: number | null = null
+    let visualTimeoutTimer: number | null = null
+    let curtainHideTimer: number | null = null
+    let visualReadyRafIds: number[] = []
+    let visualReadyScheduled = false
+    let mapCreatedAt = 0
+    const mapVisualEventCleanups: Array<() => void> = []
+
+    const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
+      setStartupStage(stage)
+      perfRecorder.recordMapVisualEvent({
+        type: 'startupStageChanged',
+        startupStage: stage,
+        reason
+      })
+    }
+
+    const recordCurtainHidden = () => {
+      const shownAt = mapLoadingCurtainShownAtRef.current
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      perfRecorder.recordMapVisualEvent({
+        type: 'loadingCurtainHidden',
+        curtainDurationMs: shownAt !== null ? Math.round(now - shownAt) : undefined
+      })
+    }
+
+    const markMapVisualReady = (reason: string) => {
+      if (cancelled || mapVisualReadyRef.current) {
+        return
+      }
+
+      mapVisualReadyRef.current = true
+      if (visualTimeoutTimer !== null) {
+        window.clearTimeout(visualTimeoutTimer)
+        visualTimeoutTimer = null
+      }
+      setIsMapVisualReady(true)
+      setMapReadyTimedOut(false)
+      recordStartupStage('baseMapReady', reason)
+      setPageMessage('真实 3D 地图导览模式已就绪')
+      perfRecorder.recordMapVisualEvent({
+        type: 'mapVisualReady',
+        reason
+      })
+      curtainHideTimer = window.setTimeout(() => {
+        if (cancelled) {
+          return
+        }
+        setLoadingCurtainVisible(false)
+        recordCurtainHidden()
+      }, MAP_3D_GUIDE_CURTAIN_FADE_MS)
+    }
+
+    const scheduleMapVisualReady = (reason: string) => {
+      if (cancelled || mapVisualReadyRef.current || visualReadyScheduled) {
+        return
+      }
+
+      perfRecorder.recordMapVisualEvent({
+        type: 'baseMapEventReceived',
+        reason
+      })
+
+      if (!mapFirstIdleRef.current) {
+        mapFirstIdleRef.current = true
+        setIsMapIdle(true)
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapFirstIdle',
+          reason
+        })
+      }
+
+      visualReadyScheduled = true
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const remainingDelay = Math.max(0, MAP_3D_GUIDE_MIN_BASEMAP_READY_MS - (now - mapCreatedAt))
+
+      visualReadyTimer = window.setTimeout(() => {
+        visualReadyRafIds = [
+          window.requestAnimationFrame(() => {
+            const secondRafId = window.requestAnimationFrame(() => {
+              markMapVisualReady(reason)
+            })
+            visualReadyRafIds = [...visualReadyRafIds, secondRafId]
+          })
+        ]
+      }, remainingDelay)
+    }
 
     async function initMap() {
       if (!mapElementRef.current) {
@@ -608,16 +814,59 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }
 
       setMapStatus('loading')
+      recordStartupStage('loadingSdk', 'init')
+      setIsMapCreated(false)
+      setIsMapIdle(false)
+      setIsMapVisualReady(false)
+      setMapReadyTimedOut(false)
+      setLoadingCurtainVisible(true)
+      mapVisualReadyRef.current = false
+      mapFirstIdleRef.current = false
+      mapOverlaysStartedRef.current = false
+      mapRoutePoiShownRef.current = false
+      mapGardenLoadStartedRef.current = false
+      mapLoadingCurtainShownAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
       setPageMessage('正在加载腾讯地图真实底座...')
       perfRecorder.markStageStart('mapInit')
+      perfRecorder.recordMapVisualEvent({
+        type: 'loadingCurtainShown'
+      })
+      perfRecorder.recordMapVisualEvent({
+        type: 'tmapScriptLoadStarted',
+        reason: 'loadTMap'
+      })
+
+      visualTimeoutTimer = window.setTimeout(() => {
+        if (cancelled || mapVisualReadyRef.current) {
+          return
+        }
+
+        setMapReadyTimedOut(true)
+        setPageMessage('地图底图加载较慢，正在继续展开佛境沙盘')
+        recordStartupStage('slow', 'visual-ready-timeout')
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapReadyTimedOut',
+          reason: 'visual-ready-timeout'
+        })
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapSlow',
+          reason: 'visual-ready-timeout'
+        })
+      }, MAP_3D_GUIDE_SLOW_READY_MS)
 
       try {
         const TMap = await loadTMap()
+        perfRecorder.recordMapVisualEvent({
+          type: 'tmapScriptLoaded',
+          reason: 'loadTMap'
+        })
+        recordStartupStage('creatingMap', 'tmap-loaded')
 
         if (cancelled || !mapElementRef.current) {
           return
         }
 
+        mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(routeCenter.lat, routeCenter.lng),
           zoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom - 0.35,
@@ -628,14 +877,46 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
         })
         mapRef.current = map
+        setIsMapCreated(true)
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapCreated'
+        })
+        perfRecorder.recordMapVisualEvent({
+          type: 'initialCameraApplied',
+          reason: 'constructor-camera'
+        })
+        recordStartupStage('waitingBaseMap', 'map-created')
         setMapStyleSupport(inspectMapStyleSupport(map, TMap))
         setMapStatus('ready')
-        setPageMessage('真实 3D 地图导览模式已就绪')
+        setPageMessage('正在展开佛境沙盘底图...')
         perfRecorder.markStageEnd('mapInit')
+
+        const visualReadyEventNames = ['idle', 'tilesloaded', 'rendercomplete']
+        visualReadyEventNames.forEach((eventName) => {
+          const handler = () => scheduleMapVisualReady(eventName)
+          map.on?.(eventName, handler)
+          mapVisualEventCleanups.push(() => map.off?.(eventName, handler))
+        })
       } catch (error) {
         perfRecorder.markStageEnd('mapInit')
         setMapStatus('error')
+        if (visualTimeoutTimer !== null) {
+          window.clearTimeout(visualTimeoutTimer)
+          visualTimeoutTimer = null
+        }
+        setMapReadyTimedOut(true)
+        setIsMapVisualReady(false)
+        setLoadingCurtainVisible(true)
+        recordStartupStage('failed', 'map-load-error')
         setPageMessage(error instanceof Error ? error.message : '腾讯地图加载失败')
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapReadyTimedOut',
+          reason: 'map-load-error'
+        })
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapFailed',
+          reason: 'map-load-error'
+        })
       }
     }
 
@@ -643,10 +924,23 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     return () => {
       cancelled = true
+      if (visualReadyTimer !== null) {
+        window.clearTimeout(visualReadyTimer)
+      }
+      if (visualTimeoutTimer !== null) {
+        window.clearTimeout(visualTimeoutTimer)
+      }
+      if (curtainHideTimer !== null) {
+        window.clearTimeout(curtainHideTimer)
+      }
+      visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
+      mapVisualEventCleanups.forEach((cleanup) => cleanup())
       routeLayerRef.current?.setMap?.(null)
+      tourRouteProgressLayerRef.current?.setMap?.(null)
       poiMarkerLayerRef.current?.setMap?.(null)
       userMarkerLayerRef.current?.setMap?.(null)
       rerouteLayerRef.current?.setMap?.(null)
+      landmarkHighlightLayerRef.current?.setMap?.(null)
       decorMarkerLayerRef.current?.setMap?.(null)
       forestPatchLayerRef.current?.setMap?.(null)
       gardenEditorPolygonLayerRef.current?.setMap?.(null)
@@ -654,6 +948,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenPreviewMarkerLayerRef.current?.setMap?.(null)
       clearGltfModels(gltfModelRefs.current)
       gltfModelRefs.current = new Map()
+      stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
+      stopRoutePreview(tourPlaybackRef, 'unmount')
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
@@ -668,6 +964,42 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setActiveCameraMode('overviewEstate')
     moveMapCamera(routeCenter, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
   }, [debugGarden, mapStatus])
+
+  useEffect(() => {
+    if (!mapVisualReadyForOverlays || mapOverlaysStartedRef.current) {
+      return
+    }
+
+    mapOverlaysStartedRef.current = true
+    setStartupStage('overlaysReady')
+    perfRecorder.recordMapVisualEvent({
+      type: 'startupStageChanged',
+      startupStage: 'overlaysReady',
+      reason: 'visual-ready-overlays'
+    })
+    perfRecorder.recordMapVisualEvent({
+      type: 'overlaysStart',
+      reason: 'visual-ready'
+    })
+  }, [mapVisualReadyForOverlays, perfRecorder])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !mapRef.current) {
+      return
+    }
+
+    const handleManualMapClick = () => {
+      if (tourPlaybackRef.current) {
+        stopActiveTour('interrupted')
+      }
+    }
+
+    mapRef.current.on?.('click', handleManualMapClick)
+
+    return () => {
+      mapRef.current?.off?.('click', handleManualMapClick)
+    }
+  }, [mapStatus])
 
   useEffect(() => {
     if (!debugDecor) {
@@ -694,7 +1026,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
 
   useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || mapStatus !== 'ready' || !mapRef.current) {
+    if (!debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !mapRef.current) {
       return
     }
 
@@ -750,7 +1082,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapRef.current?.off?.('click', handleMapClick)
       mapRef.current?.off?.('dblclick', handleMapDoubleClick)
     }
-  }, [completeDraftGardenPolygon, debugGarden, editorAddAssetKind, gardenEditorMode, gardenEditorState.previewAssets.length, mapStatus, visualVariant.id])
+  }, [completeDraftGardenPolygon, debugGarden, editorAddAssetKind, gardenEditorMode, gardenEditorState.previewAssets.length, mapVisualReadyForOverlays, visualVariant.id])
 
   useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
@@ -776,7 +1108,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [assetLoadState, decorOverlays, visualVariant.id])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -835,6 +1167,19 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           borderWidth: 5,
           borderColor: 'rgba(121, 79, 12, 0.40)',
           lineCap: 'round'
+        }),
+        routePreviewHalo: new window.TMap.PolylineStyle({
+          color: 'rgba(214, 180, 106, 0.32)',
+          width: 28,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        routePreview: new window.TMap.PolylineStyle({
+          color: '#E6DDC7',
+          width: 12,
+          borderWidth: 4,
+          borderColor: 'rgba(143, 175, 155, 0.38)',
+          lineCap: 'round'
         })
       },
       geometries: buildGuideRouteGeometries()
@@ -845,7 +1190,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       routeLayerRef.current?.setMap?.(null)
       routeLayerRef.current = null
     }
-  }, [mapStatus, nextStop.nextStopId, perfRecorder, routePathIndex, selectedStopId])
+  }, [mapVisualReadyForOverlays, nextStop.nextStopId, perfRecorder, routePathIndex, routePreviewProgressIndex, selectedStopId, tourMode])
 
   function getActiveRoutePath(currentStopId?: string | null, nextStopId?: string | null) {
     const currentLocation = getRouteStopLocation(currentStopId)
@@ -871,6 +1216,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   function buildGuideRouteGeometries() {
     const completedPath = demoRoutePath.slice(0, Math.min(demoRoutePath.length, routePathIndex + 1))
     const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
+    const showStandardProgress = tourMode !== 'buddhaRealmTour'
     const geometries = [
         {
           id: 'historical-culture-route-shadow',
@@ -899,7 +1245,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         }
       ]
 
-    if (completedPath.length > 1) {
+    if (showStandardProgress && completedPath.length > 1) {
       geometries.push({
         id: 'historical-culture-completed-route',
         styleId: 'completedRoute',
@@ -907,7 +1253,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       })
     }
 
-    if (activePath.length > 1) {
+    if (showStandardProgress && activePath.length > 1) {
       geometries.push(
         {
           id: 'historical-culture-active-route-halo',
@@ -922,11 +1268,244 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       )
     }
 
+    if (tourMode === 'routePreview' && routePreviewProgressIndex !== null) {
+      const boundedPreviewIndex = Math.max(1, Math.min(demoRoutePath.length - 1, routePreviewProgressIndex))
+      const previewPath = demoRoutePath.slice(0, boundedPreviewIndex + 1)
+
+      if (previewPath.length > 1) {
+        geometries.push(
+          {
+            id: 'historical-culture-route-preview-halo',
+            styleId: 'routePreviewHalo',
+            paths: previewPath.map(toTMapLatLng)
+          },
+          {
+            id: 'historical-culture-route-preview',
+            styleId: 'routePreview',
+            paths: previewPath.map(toTMapLatLng)
+          }
+        )
+      }
+    }
+
     return geometries
   }
 
+  function startTourRouteProgressOverlay() {
+    buddhaTourRouteProgressRef.current = {
+      isActive: true,
+      lastRenderedAt: 0,
+      lastEventBucket: 0,
+      latestProgress: 0
+    }
+    updateTourRouteProgressOverlay(0, { force: true, recordUpdate: false })
+
+    const split = splitRouteByProgress(demoRoutePath, 0, demoRouteCumulativeDistances)
+    perfRecorder.recordTourEvent({
+      type: 'routeProgressStarted',
+      mode: 'buddhaRealmTour',
+      progress: 0,
+      traveledPointCount: split.traveledPath.length,
+      remainingPointCount: split.remainingPath.length,
+      currentLat: split.currentPoint.lat,
+      currentLng: split.currentPoint.lng,
+      source: 'tourProgress',
+      routeHasOverlaps: demoRouteHasSequenceOverlaps
+    })
+  }
+
+  function updateTourRouteProgressOverlay(
+    progress: number,
+    options: {
+      force?: boolean
+      recordUpdate?: boolean
+    } = {}
+  ) {
+    if (!mapRef.current || !window.TMap || !buddhaTourRouteProgressRef.current.isActive) {
+      return
+    }
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+
+    if (!options.force && now - buddhaTourRouteProgressRef.current.lastRenderedAt < 34) {
+      buddhaTourRouteProgressRef.current.latestProgress = progress
+      return
+    }
+
+    const split = splitRouteByProgress(demoRoutePath, progress, demoRouteCumulativeDistances)
+    renderTourRouteProgressOverlay(split)
+    buddhaTourRouteProgressRef.current.lastRenderedAt = now
+    buddhaTourRouteProgressRef.current.latestProgress = progress
+
+    if (options.recordUpdate === false) {
+      return
+    }
+
+    const progressBucket = Math.floor(clampNumber(progress, 0, 1) * 10)
+
+    if (progressBucket > buddhaTourRouteProgressRef.current.lastEventBucket && progressBucket >= 0 && progressBucket <= 10) {
+      buddhaTourRouteProgressRef.current.lastEventBucket = progressBucket
+      perfRecorder.recordTourEvent({
+        type: 'routeProgressUpdate',
+        mode: 'buddhaRealmTour',
+        progress,
+        traveledPointCount: split.traveledPath.length,
+        remainingPointCount: split.remainingPath.length,
+        currentLat: split.currentPoint.lat,
+        currentLng: split.currentPoint.lng,
+        source: 'tourProgress',
+        routeHasOverlaps: demoRouteHasSequenceOverlaps
+      })
+    }
+  }
+
+  function finishTourRouteProgressOverlay(reason: Map3DTourStopReason) {
+    const routeProgressState = buddhaTourRouteProgressRef.current
+
+    if (!routeProgressState.isActive) {
+      resetTourRouteProgressOverlay(false)
+      return
+    }
+
+    const isCompleted = reason === 'completed'
+    const progress = isCompleted ? 1 : routeProgressState.latestProgress
+    const split = splitRouteByProgress(demoRoutePath, progress, demoRouteCumulativeDistances)
+
+    perfRecorder.recordTourEvent({
+      type: isCompleted ? 'routeProgressCompleted' : 'routeProgressStopped',
+      mode: 'buddhaRealmTour',
+      progress,
+      traveledPointCount: split.traveledPath.length,
+      remainingPointCount: split.remainingPath.length,
+      currentLat: split.currentPoint.lat,
+      currentLng: split.currentPoint.lng,
+      source: 'tourProgress',
+      routeHasOverlaps: demoRouteHasSequenceOverlaps,
+      reason
+    })
+
+    resetTourRouteProgressOverlay(true)
+  }
+
+  function resetTourRouteProgressOverlay(recordReset = true) {
+    tourRouteProgressLayerRef.current?.setMap?.(null)
+    tourRouteProgressLayerRef.current = null
+    buddhaTourRouteProgressRef.current = {
+      isActive: false,
+      lastRenderedAt: 0,
+      lastEventBucket: 0,
+      latestProgress: 0
+    }
+    if (!recordReset) {
+      return
+    }
+
+    perfRecorder.recordTourEvent({
+      type: 'routeProgressOverlayReset',
+      mode: 'buddhaRealmTour',
+      source: 'tourProgress',
+      routeHasOverlaps: demoRouteHasSequenceOverlaps
+    })
+  }
+
+  function renderTourRouteProgressOverlay(split: SplitRouteByProgressResult) {
+    const geometries = buildTourRouteProgressGeometries(split)
+
+    if (!geometries.length) {
+      tourRouteProgressLayerRef.current?.setMap?.(null)
+      tourRouteProgressLayerRef.current = null
+      return
+    }
+
+    const existingLayer = tourRouteProgressLayerRef.current
+
+    if (existingLayer && typeof existingLayer.setGeometries === 'function') {
+      existingLayer.setGeometries(geometries)
+      return
+    }
+
+    if (existingLayer && typeof existingLayer.updateGeometries === 'function') {
+      existingLayer.updateGeometries(geometries)
+      return
+    }
+
+    existingLayer?.setMap?.(null)
+    tourRouteProgressLayerRef.current = new window.TMap.MultiPolyline({
+      map: mapRef.current,
+      styles: buildTourRouteProgressStyles(),
+      geometries
+    })
+  }
+
+  function buildTourRouteProgressGeometries(split: SplitRouteByProgressResult) {
+    const geometries = []
+
+    if (split.remainingPath.length > 1) {
+      geometries.push(
+        {
+          id: 'buddha-realm-route-remaining-halo',
+          styleId: 'tourRouteRemainingHalo',
+          paths: split.remainingPath.map(toTMapLatLng)
+        },
+        {
+          id: 'buddha-realm-route-remaining',
+          styleId: 'tourRouteRemaining',
+          paths: split.remainingPath.map(toTMapLatLng)
+        }
+      )
+    }
+
+    if (split.traveledPath.length > 1) {
+      geometries.push(
+        {
+          id: 'buddha-realm-route-traveled-halo',
+          styleId: 'tourRouteTraveledHalo',
+          paths: split.traveledPath.map(toTMapLatLng)
+        },
+        {
+          id: 'buddha-realm-route-traveled',
+          styleId: 'tourRouteTraveled',
+          paths: split.traveledPath.map(toTMapLatLng)
+        }
+      )
+    }
+
+    return geometries
+  }
+
+  function buildTourRouteProgressStyles() {
+    return {
+      tourRouteRemainingHalo: new window.TMap.PolylineStyle({
+        color: 'rgba(230, 221, 199, 0.26)',
+        width: 24,
+        borderWidth: 0,
+        lineCap: 'round'
+      }),
+      tourRouteRemaining: new window.TMap.PolylineStyle({
+        color: 'rgba(241, 189, 62, 0.84)',
+        width: 9,
+        borderWidth: 3,
+        borderColor: 'rgba(255, 250, 226, 0.72)',
+        lineCap: 'round'
+      }),
+      tourRouteTraveledHalo: new window.TMap.PolylineStyle({
+        color: 'rgba(214, 207, 188, 0.24)',
+        width: 20,
+        borderWidth: 0,
+        lineCap: 'round'
+      }),
+      tourRouteTraveled: new window.TMap.PolylineStyle({
+        color: 'rgba(166, 161, 147, 0.70)',
+        width: 8,
+        borderWidth: 2,
+        borderColor: 'rgba(244, 241, 224, 0.46)',
+        lineCap: 'round'
+      })
+    }
+  }
+
   useEffect(() => {
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -995,7 +1574,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       decorMarkerLayerRef.current?.setMap?.(null)
       decorMarkerLayerRef.current = null
     }
-  }, [assetLoadState, debugDecor, decorOverlays, mapStatus, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
+  }, [assetLoadState, debugDecor, decorOverlays, mapVisualReadyForOverlays, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
 
   useEffect(() => {
     forestPatchLayerRef.current?.setMap?.(null)
@@ -1009,7 +1588,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -1102,7 +1681,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       forestPatchLayerRef.current?.setMap?.(null)
       forestPatchLayerRef.current = null
     }
-  }, [debugGarden, forestPatchesVisible, mapStatus, rerouteStatus, routeProgressRatio, visualVariant.id])
+  }, [debugGarden, forestPatchesVisible, mapVisualReadyForOverlays, rerouteStatus, routeProgressRatio, visualVariant.id])
 
   useEffect(() => {
     gardenEditorPolygonLayerRef.current?.setMap?.(null)
@@ -1112,7 +1691,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     gardenEditorVertexLayerRef.current = null
     gardenPreviewMarkerLayerRef.current = null
 
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -1247,7 +1826,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenEditorVertexLayerRef.current = null
       gardenPreviewMarkerLayerRef.current = null
     }
-  }, [debugGarden, gardenDraftPolygon, gardenEditorState, mapStatus, selectedEditorZoneId, selectedKeepoutZoneId, visualVariant.id])
+  }, [debugGarden, gardenDraftPolygon, gardenEditorState, mapVisualReadyForOverlays, selectedEditorZoneId, selectedKeepoutZoneId, visualVariant.id])
 
   useEffect(() => {
     gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
@@ -1256,7 +1835,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     if (
       !debugGarden ||
       visualVariant.id !== 'prototype-c' ||
-      mapStatus !== 'ready' ||
+      !mapVisualReadyForOverlays ||
       !window.TMap ||
       !mapRef.current ||
       !selectedGardenAssetDraft
@@ -1311,10 +1890,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
       gardenAssetEditMarkerLayerRef.current = null
     }
-  }, [debugGarden, mapStatus, selectedGardenAssetDraft, visualVariant.id])
+  }, [debugGarden, mapVisualReadyForOverlays, selectedGardenAssetDraft, visualVariant.id])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -1373,15 +1952,22 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       geometries: poiGeometries
     })
     perfRecorder.markStageEnd('poiInit')
+    if (!mapRoutePoiShownRef.current) {
+      mapRoutePoiShownRef.current = true
+      perfRecorder.recordMapVisualEvent({
+        type: 'routePoiShown',
+        reason: 'visual-ready'
+      })
+    }
 
     return () => {
       poiMarkerLayerRef.current?.setMap?.(null)
       poiMarkerLayerRef.current = null
     }
-  }, [mapStatus, nextStop.nextStopId, perfRecorder, routeStops, selectedStopIndex, terminalStopId])
+  }, [mapVisualReadyForOverlays, nextStop.nextStopId, perfRecorder, routeStops, selectedStopIndex, terminalStopId])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -1409,10 +1995,56 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       userMarkerLayerRef.current?.setMap?.(null)
       userMarkerLayerRef.current = null
     }
-  }, [mapStatus, simulatedPosition])
+  }, [mapVisualReadyForOverlays, simulatedPosition])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    landmarkHighlightLayerRef.current?.setMap?.(null)
+    landmarkHighlightLayerRef.current = null
+
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current || !activeLandmarkId) {
+      return
+    }
+
+    const location = getRouteStopLocation(activeLandmarkId)
+
+    if (!location) {
+      return
+    }
+
+    const size = activeLandmarkId === 'giant_buddha' ? 96 : activeLandmarkId === 'fan_gong' || activeLandmarkId === 'wuyin_tancheng' ? 86 : 74
+    const display = getPoiDisplay(activeLandmarkId)
+
+    landmarkHighlightLayerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      styles: {
+        activeLandmark: new window.TMap.MarkerStyle({
+          width: size,
+          height: size,
+          anchor: { x: size / 2, y: size / 2 },
+          src: createSvgDataUrl(activeLandmarkHaloSvg(size))
+        })
+      },
+      geometries: [
+        {
+          id: `active-landmark-${activeLandmarkId}`,
+          styleId: 'activeLandmark',
+          position: toTMapLatLng(location),
+          rank: 62,
+          properties: {
+            title: display?.name ?? activeLandmarkId
+          }
+        }
+      ]
+    })
+
+    return () => {
+      landmarkHighlightLayerRef.current?.setMap?.(null)
+      landmarkHighlightLayerRef.current = null
+    }
+  }, [activeLandmarkId, mapVisualReadyForOverlays])
+
+  useEffect(() => {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
 
@@ -1469,7 +2101,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       rerouteLayerRef.current?.setMap?.(null)
       rerouteLayerRef.current = null
     }
-  }, [mapStatus, reroutePlan])
+  }, [mapVisualReadyForOverlays, reroutePlan])
 
   useEffect(() => {
     clearGltfModels(gltfModelRefs.current)
@@ -1489,7 +2121,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       setModelStatus('等待地图就绪')
       return
     }
@@ -1537,9 +2169,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       clearGltfModels(gltfModelRefs.current)
       gltfModelRefs.current = new Map()
     }
-  }, [debugPerf, mapStatus, showModelBeta, visualVariant.id])
+  }, [debugPerf, mapVisualReadyForOverlays, showModelBeta, visualVariant.id])
 
   const moveToStop = (nextIndex: number) => {
+    stopActiveTour('manual')
     const boundedIndex = Math.max(0, Math.min(routeStops.length - 1, nextIndex))
     const stop = routeStops[boundedIndex]
     const location = getRouteStopLocation(stop.spotId)
@@ -1558,6 +2191,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const simulateForward = () => {
+    stopActiveTour('manual')
     const nextIndex = Math.min(demoRoutePath.length - 1, routePathIndex + progressStep)
     const nextPosition = demoRoutePath[nextIndex]
     const inferredStopIndex = getNearestStopIndex(nextPosition, routeStops)
@@ -1572,6 +2206,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const returnToRoute = () => {
+    stopActiveTour('manual')
     const nearest = nearestRoutePoint?.nearestPoint ?? demoRoutePath[routePathIndex] ?? initialPosition
     const nearestIndex = nearestRoutePoint?.nearestIndex ?? routePathIndex
 
@@ -1585,6 +2220,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const simulateDeviation = async () => {
+    stopActiveTour('manual')
     const base = simulatedPosition
     const offRoutePosition = {
       lat: Number((base.lat + offRouteOffset.lat).toFixed(6)),
@@ -1622,6 +2258,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const applyGuideCamera = (mode: GuideCameraMode) => {
+    stopActiveTour('manual')
     const preset = MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
     const target =
       mode === 'overviewEstate'
@@ -1648,6 +2285,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   const focusMap = (position: LatLngPoint, zoom?: number, targetPoiId?: string) => {
+    stopActiveTour('manual')
     const preset = {
       ...MAP_3D_GUIDE_CAMERA_PRESETS.guideFollow,
       zoom: zoom ?? MAP_3D_GUIDE_CAMERA_PRESETS.guideFollow.zoom
@@ -1657,6 +2295,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   function focusLandmarkCamera(id: string, position: LatLngPoint, closeInspect = false) {
+    stopActiveTour('manual')
     const preset = buildLandmarkCameraPreset(id, closeInspect)
     setActiveCameraMode(closeInspect ? 'closeInspect' : 'landmarkFocus')
     moveMapCamera(position, preset, {
@@ -1687,6 +2326,295 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       targetLandmarkId: options.targetLandmarkId,
       twoStage: options.twoStage,
       onComplete: (event) => perfRecorder.recordCameraEvent(event)
+    })
+  }
+
+  function setActiveLandmarkHighlight(id?: string) {
+    setActiveLandmarkId(id)
+  }
+
+  function clearActiveLandmarkHighlight() {
+    setActiveLandmarkId(undefined)
+  }
+
+  function stopActiveTour(reason: Map3DTourStopReason = 'manual') {
+    const hadPlayback = Boolean(tourPlaybackRef.current)
+    stopBuddhaRealmTour(tourPlaybackRef, reason)
+    stopRoutePreview(tourPlaybackRef, reason)
+
+    if (hadPlayback) {
+      setTourMode('idle')
+      setActiveTourStepId(undefined)
+      setRoutePreviewProgressIndex(null)
+      clearActiveLandmarkHighlight()
+    }
+  }
+
+  function handleTourStopped({
+    mode,
+    reason
+  }: {
+    mode: Map3DTourMode
+    reason: Map3DTourStopReason
+  }) {
+    const isCompleted = reason === 'completed'
+    perfRecorder.recordTourEvent({
+      type: mode === 'routePreview' ? 'routePreviewStopped' : isCompleted ? 'tourCompleted' : 'tourStopped',
+      mode,
+      reason,
+      activeLandmarkId
+    })
+    if (mode === 'buddhaRealmTour') {
+      finishTourRouteProgressOverlay(reason)
+    }
+    setTourMode('idle')
+    setActiveTourStepId(undefined)
+    setRoutePreviewProgressIndex(null)
+    clearActiveLandmarkHighlight()
+
+    if (mode === 'routePreview' && isCompleted) {
+      setActiveCameraMode('routeOverview')
+      moveMapCamera(routeCenter, MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview)
+    }
+  }
+
+  function handleBuddhaRealmTimelineFrame(frame: Map3DRouteTourFrame, elapsedMs: number) {
+    const now = Date.now()
+    const perfNow = typeof performance !== 'undefined' ? performance.now() : now
+    const frameStats = buddhaTourFrameStatsRef.current
+
+    if (frameStats.lastAt > 0) {
+      const frameMs = Math.max(1, perfNow - frameStats.lastAt)
+      frameStats.averageFrameMs = frameStats.averageFrameMs
+        ? frameStats.averageFrameMs * 0.9 + frameMs * 0.1
+        : frameMs
+    }
+
+    frameStats.lastAt = perfNow
+
+    if (now - buddhaTourUiFrameRef.current > BUDDHA_REALM_TOUR_CONFIG.uiFrameThrottleMs || frame.progress >= 0.995) {
+      const activeId = frame.nearbyLandmarkId
+      setTourMode('buddhaRealmTour')
+      setActiveCameraMode(activeId ? 'landmarkFocus' : 'guideFollow')
+      setActiveTourStepId(activeId)
+
+      if (activeId) {
+        setActiveLandmarkHighlight(activeId)
+      } else {
+        clearActiveLandmarkHighlight()
+      }
+
+      buddhaTourUiFrameRef.current = now
+    }
+    updateTourRouteProgressOverlay(frame.progress)
+
+    const progressBucket = Math.floor(frame.progress * 10)
+
+    if (progressBucket > buddhaTourProgressBucketRef.current && progressBucket >= 0 && progressBucket <= 10) {
+      buddhaTourProgressBucketRef.current = progressBucket
+      perfRecorder.recordTourEvent({
+        type: 'tourProgress',
+        mode: 'buddhaRealmTour',
+        progress: frame.progress,
+        targetLat: frame.lat,
+        targetLng: frame.lng,
+        bearing: frame.bearing,
+        nearbyLandmarkId: frame.nearbyLandmarkId,
+        activeLandmarkId: frame.nearbyLandmarkId,
+        cameraPreset: frame.nearbyLandmarkId ? 'landmarkFocus' : 'guideFollow',
+        durationMs: Math.round(elapsedMs),
+        smoothingEnabled: frame.smoothingEnabled,
+        lookAheadProgress: frame.lookAheadProgress,
+        lateralOffsetMeters: frame.lateralOffsetMeters,
+        averageFrameMs: frameStats.averageFrameMs ? roundNumber(frameStats.averageFrameMs, 1) : undefined,
+        estimatedFps: frameStats.averageFrameMs ? roundNumber(1000 / frameStats.averageFrameMs, 1) : undefined
+      })
+    }
+  }
+
+  function startBuddhaRealmTourPlayback() {
+    if (tourMode === 'buddhaRealmTour') {
+      stopActiveTour('userStop')
+      return
+    }
+
+    if (!canUseMapInteractions || !mapRef.current || !window.TMap) {
+      return
+    }
+
+    const timelineTour = buildBuddhaRealmTimelineTourConfig()
+    stopActiveTour('replaced')
+    resetTourRouteProgressOverlay(false)
+    setTourMode('buddhaRealmTour')
+    setActiveTourStepId(undefined)
+    setRoutePreviewProgressIndex(null)
+    clearActiveLandmarkHighlight()
+    buddhaTourUiFrameRef.current = 0
+    buddhaTourProgressBucketRef.current = -1
+    buddhaTourFrameStatsRef.current = { lastAt: 0, averageFrameMs: 0 }
+
+    if (timelineTour) {
+      startBuddhaRealmTimelineTour({
+        map: mapRef.current,
+        TMap: window.TMap,
+        sequenceRef: cameraSequenceRef,
+        playbackRef: tourPlaybackRef,
+        durationMs: timelineTour.durationMs,
+        pauses: timelineTour.pauses,
+        getSpeedMultiplier: (progress) => getBuddhaRealmTimelineSpeed(progress, timelineTour.pauses),
+        getFrame: createBuddhaRealmTimelineFrameSampler(timelineTour),
+        onStarted: ({ durationMs, pauseCount }) => {
+          startTourRouteProgressOverlay()
+          setActiveCameraMode('guideFollow')
+          perfRecorder.recordTourEvent({
+            type: 'tourStarted',
+            mode: 'buddhaRealmTour',
+            stepCount: pauseCount,
+            durationMs,
+            smoothingEnabled: true,
+            lookAheadProgress: BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.cruise,
+            lateralOffsetMeters: BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise
+          })
+        },
+        onFrame: ({ frame, elapsedMs }) => handleBuddhaRealmTimelineFrame(frame, elapsedMs),
+        onLandmarkPause: ({ pause, frame }) => {
+          setActiveCameraMode('landmarkFocus')
+          setTourMode('buddhaRealmTour')
+          setActiveTourStepId(pause.nearbyLandmarkId)
+          setActiveLandmarkHighlight(pause.nearbyLandmarkId)
+          perfRecorder.recordTourEvent({
+            type: 'tourLandmarkPause',
+            mode: 'buddhaRealmTour',
+            stepId: pause.id,
+            stepLabel: pause.label,
+            progress: frame.progress,
+            targetLat: frame.lat,
+            targetLng: frame.lng,
+            bearing: frame.bearing,
+            nearbyLandmarkId: pause.nearbyLandmarkId,
+            activeLandmarkId: pause.nearbyLandmarkId,
+            cameraPreset: 'landmarkFocus',
+            durationMs: pause.holdMs,
+            smoothingEnabled: frame.smoothingEnabled,
+            lookAheadProgress: frame.lookAheadProgress,
+            lateralOffsetMeters: frame.lateralOffsetMeters,
+            averageFrameMs: buddhaTourFrameStatsRef.current.averageFrameMs
+              ? roundNumber(buddhaTourFrameStatsRef.current.averageFrameMs, 1)
+              : undefined,
+            estimatedFps: buddhaTourFrameStatsRef.current.averageFrameMs
+              ? roundNumber(1000 / buddhaTourFrameStatsRef.current.averageFrameMs, 1)
+              : undefined
+          })
+        },
+        onStopped: handleTourStopped
+      })
+      return
+    }
+
+    const steps = buildBuddhaRealmPoiFallbackSteps()
+
+    startBuddhaRealmTour({
+      map: mapRef.current,
+      TMap: window.TMap,
+      steps,
+      sequenceRef: cameraSequenceRef,
+      playbackRef: tourPlaybackRef,
+      onStarted: ({ stepCount }) => {
+        perfRecorder.recordTourEvent({
+          type: 'tourStarted',
+          mode: 'buddhaRealmTour',
+          stepCount
+        })
+      },
+      onStep: ({ step, stepIndex, stepCount, preset }) => {
+        const activeId = step.activeLandmarkId ?? step.nearbyLandmarkId ?? step.targetLandmarkId
+        setTourMode('buddhaRealmTour')
+        setActiveTourStepId(activeId)
+        setActiveCameraMode(preset.id)
+        setRoutePreviewProgressIndex(step.routeProgressIndex ?? Math.round((step.progress ?? 0) * (demoRoutePath.length - 1)))
+        if (activeId) {
+          setActiveLandmarkHighlight(activeId)
+        } else {
+          clearActiveLandmarkHighlight()
+        }
+        perfRecorder.recordTourEvent({
+          type: step.speedMode === 'pause' ? 'tourLandmarkPause' : 'tourWaypoint',
+          mode: 'buddhaRealmTour',
+          stepId: step.id,
+          stepLabel: step.label,
+          stepIndex,
+          stepCount,
+          activeLandmarkId: activeId,
+          nearbyLandmarkId: step.nearbyLandmarkId,
+          progress: step.progress,
+          targetLat: step.target.lat,
+          targetLng: step.target.lng,
+          bearing: step.bearing,
+          cameraPreset: preset.id,
+          targetPoiId: step.targetPoiId,
+          targetLandmarkId: step.targetLandmarkId,
+          durationMs: preset.durationMs
+        })
+      },
+      onCameraComplete: (event) => perfRecorder.recordCameraEvent(event),
+      onStopped: handleTourStopped
+    })
+  }
+
+  function startRoutePreviewPlayback() {
+    if (tourMode === 'routePreview') {
+      stopActiveTour('manual')
+      return
+    }
+
+    if (!canUseMapInteractions || !mapRef.current || !window.TMap) {
+      return
+    }
+
+    const steps = buildRoutePreviewSteps(routeStops, selectedStopIndex)
+    stopActiveTour('replaced')
+    resetTourRouteProgressOverlay(false)
+    setTourMode('routePreview')
+    setActiveTourStepId(undefined)
+    setRoutePreviewProgressIndex(0)
+    clearActiveLandmarkHighlight()
+
+    startRoutePreview({
+      map: mapRef.current,
+      TMap: window.TMap,
+      steps,
+      sequenceRef: cameraSequenceRef,
+      playbackRef: tourPlaybackRef,
+      onStarted: ({ stepCount }) => {
+        perfRecorder.recordTourEvent({
+          type: 'routePreviewStarted',
+          mode: 'routePreview',
+          stepCount
+        })
+      },
+      onStep: ({ step, stepIndex, stepCount, preset }) => {
+        const activeId = step.activeLandmarkId ?? step.targetLandmarkId ?? step.targetPoiId ?? step.id
+        setTourMode('routePreview')
+        setActiveTourStepId(activeId)
+        setActiveCameraMode(preset.id)
+        setActiveLandmarkHighlight(activeId)
+        setRoutePreviewProgressIndex(step.routeProgressIndex ?? demoRoutePath.length - 1)
+        perfRecorder.recordTourEvent({
+          type: 'routePreviewStep',
+          mode: 'routePreview',
+          stepId: step.id,
+          stepLabel: step.label,
+          stepIndex,
+          stepCount,
+          activeLandmarkId: activeId,
+          cameraPreset: preset.id,
+          targetPoiId: step.targetPoiId,
+          targetLandmarkId: step.targetLandmarkId,
+          durationMs: preset.durationMs
+        })
+      },
+      onCameraComplete: (event) => perfRecorder.recordCameraEvent(event),
+      onStopped: handleTourStopped
     })
   }
 
@@ -2161,12 +3089,54 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     <main
       className={`map-3d-guide-shell ${visualVariant.className} ${debugGarden ? 'map-3d-guide-shell--debug-garden' : ''} ${
         debugPerf ? 'map-3d-guide-shell--debug-perf' : ''
-      }`}
+      } ${isMapVisualReady ? 'is-map-visual-ready' : 'is-map-visual-loading'} ${
+        loadingCurtainVisible ? 'is-loading-curtain-visible' : ''
+      } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''}`}
     >
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
+      {loadingCurtainVisible ? (
+        <div className={`map-3d-guide-loading-curtain ${isMapVisualReady ? 'is-hiding' : ''}`} aria-live="polite">
+          <div>
+            <strong>
+              {mapReadyTimedOut
+                ? startupStage === 'failed'
+                  ? '地图底图加载失败'
+                  : '地图底图加载较慢'
+                : isMapCreated
+                  ? isMapIdle
+                    ? '正在柔化沙盘视野'
+                    : '正在展开佛境沙盘'
+                  : '正在连接腾讯底图'}
+            </strong>
+            <span>
+              {mapReadyTimedOut
+                ? startupStage === 'failed'
+                  ? '已保留浅色佛境兜底，可重新加载地图'
+                  : '正在继续展开佛境沙盘，底图可见后再显示路线与园林资产'
+                : startupStage === 'loadingSdk'
+                  ? '加载腾讯地图 SDK'
+                  : startupStage === 'creatingMap'
+                    ? '创建地图实例与初始视角'
+                    : startupStage === 'waitingBaseMap'
+                      ? '等待底图瓦片完成首帧渲染'
+                      : '加载地图底图与园林资产'}
+            </span>
+            {mapReadyTimedOut ? (
+              <div className="map-3d-guide-loading-curtain__actions">
+                <button type="button" onClick={() => setPageMessage('继续等待腾讯底图稳定渲染...')}>
+                  继续等待
+                </button>
+                <button type="button" onClick={() => window.location.reload()}>
+                  重新加载地图
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
       {visualVariant.id === 'prototype-c' && (gardenAssetLoading || gardenModelReport.unavailable || gardenModelReport.errorIds.length > 0) ? (
         <div className={`map-3d-guide-garden-load ${gardenModelReport.unavailable || gardenModelReport.errorIds.length ? 'is-warning' : ''}`}>
@@ -2206,10 +3176,27 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               type="button"
               className={preset.id === activeCameraMode ? 'is-active' : ''}
               onClick={() => applyGuideCamera(preset.id)}
+              disabled={!canUseMapInteractions}
             >
               {preset.label}
             </button>
           ))}
+          <button
+            type="button"
+            className={tourMode === 'buddhaRealmTour' ? 'is-active' : ''}
+            onClick={startBuddhaRealmTourPlayback}
+            disabled={!canUseMapInteractions}
+          >
+            {tourMode === 'buddhaRealmTour' ? '停止巡游' : '佛境巡游'}
+          </button>
+          <button
+            type="button"
+            className={tourMode === 'routePreview' ? 'is-active' : ''}
+            onClick={startRoutePreviewPlayback}
+            disabled={!canUseMapInteractions}
+          >
+            {tourMode === 'routePreview' ? '停止预演' : '路线预演'}
+          </button>
         </div>
       </section>
 
@@ -2457,6 +3444,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <dt>当前状态</dt>
             <dd>{guideStateText}</dd>
           </div>
+          <div>
+            <dt>巡游状态</dt>
+            <dd>{tourStateLabel}</dd>
+          </div>
         </dl>
 
         <div className={`map-3d-guide-deviation map-3d-guide-deviation--${rerouteStatus}`}>
@@ -2649,6 +3640,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               <em>当前状态</em>
               {guideStateText}
             </span>
+            <span>
+              <em>巡游状态</em>
+              {isTourPlaying ? tourStateLabel : '待命'}
+            </span>
           </div>
         </div>
         <div className="map-3d-guide-controlbar__actions">
@@ -2699,6 +3694,734 @@ function buildLandmarkCameraPreset(id: string, closeInspect: boolean): Map3DCame
     ...base,
     zoom
   }
+}
+
+function buildBuddhaRealmTimelineTourConfig(): BuddhaRealmTimelineTourConfig | null {
+  if (!demoRouteGeometry?.path.length || demoRoutePath.length < 2) {
+    return null
+  }
+
+  const path = demoRoutePath
+  const cumulative = buildPathCumulativeDistances(path)
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+
+  if (totalDistance <= 0) {
+    return null
+  }
+
+  const pauses = buildBuddhaRealmInterestPoints(path, cumulative, totalDistance).map((landmark) => ({
+    id: `buddha-realm-pause-${landmark.id}`,
+    label: landmark.label,
+    progress: landmark.progress,
+    holdMs: landmark.holdMs,
+    nearbyLandmarkId: landmark.id
+  }))
+  const durationMs = clampNumber(
+    Math.round(totalDistance * BUDDHA_REALM_TOUR_CONFIG.durationPerMeterMs),
+    BUDDHA_REALM_TOUR_CONFIG.minDurationMs,
+    BUDDHA_REALM_TOUR_CONFIG.maxDurationMs
+  )
+
+  return {
+    path,
+    cumulative,
+    totalDistance,
+    pauses,
+    durationMs
+  }
+}
+
+function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourConfig) {
+  let smoothedBearing: number | undefined
+
+  return (
+    progress: number,
+    context: {
+      elapsedMs: number
+      isPaused: boolean
+      pauseElapsedMs: number
+      activeLandmarkId?: string
+    }
+  ): Map3DRouteTourFrame => {
+    const sample = sampleRouteAtProgress(config, progress)
+    const nearbyPause = getNearbyTourPause(config.pauses, progress, context.activeLandmarkId)
+    const landmarkInfluence = nearbyPause
+      ? 1 - smoothstep(
+          0,
+          BUDDHA_REALM_TOUR_CONFIG.landmarkInfluenceProgress,
+          Math.abs(progress - nearbyPause.progress)
+        )
+      : 0
+    const lookAheadProgress = context.isPaused
+      ? BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.slow
+      : lerpNumber(
+          BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.cruise,
+          BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.slow,
+          landmarkInfluence
+        )
+    const lookAheadSample = sampleRouteAtProgress(config, Math.min(1, progress + lookAheadProgress))
+    const lookAheadBearing = isSameLatLngPoint(sample, lookAheadSample)
+      ? sample.bearing
+      : getBearingDegrees(sample, lookAheadSample)
+    const targetBearing = lookAheadBearing ?? sample.bearing ?? smoothedBearing ?? 0
+    smoothedBearing =
+      smoothedBearing === undefined
+        ? targetBearing
+        : lerpAngle(
+            smoothedBearing,
+            targetBearing,
+            context.isPaused ? 0.032 : lerpNumber(0.082, 0.052, landmarkInfluence)
+          )
+    const baseLateralOffsetMeters = context.isPaused
+      ? BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.pause
+      : lerpNumber(
+          BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise,
+          BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.slow,
+          landmarkInfluence
+        )
+    const sideCenter = offsetLatLngByBearing(sample, smoothedBearing + 90, baseLateralOffsetMeters)
+    const pausePhase = context.pauseElapsedMs / 1000
+    const pauseDriftMeters = context.isPaused
+      ? Math.sin(pausePhase * 0.78) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftCenterMeters
+      : 0
+    const cameraCenter = pauseDriftMeters
+      ? offsetLatLngByBearing(sideCenter, smoothedBearing + 178 + Math.sin(pausePhase * 0.52) * 16, pauseDriftMeters)
+      : sideCenter
+    const pauseDriftRotation = context.isPaused
+      ? Math.sin(pausePhase * 0.58) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftRotationDeg
+      : 0
+    const pauseDriftZoom = context.isPaused
+      ? Math.sin(Math.min(Math.PI, pausePhase * Math.PI * 0.72)) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftZoom
+      : 0
+    const pauseDriftPitch = context.isPaused ? Math.sin(pausePhase * 0.64) * 0.18 : 0
+    const routeBreathing = Math.sin(progress * Math.PI * 3.4) * 0.035
+
+    return {
+      t: context.elapsedMs,
+      lat: cameraCenter.lat,
+      lng: cameraCenter.lng,
+      bearing: roundNumber(smoothedBearing, 1),
+      zoom: roundNumber(17.58 + routeBreathing + landmarkInfluence * 0.52 + pauseDriftZoom, 3),
+      pitch: roundNumber(58.2 + Math.sin(progress * Math.PI * 2.4) * 0.45 + landmarkInfluence * 4.8 + pauseDriftPitch, 2),
+      rotation: normalizeRotation(getRouteCameraRotation(smoothedBearing) + pauseDriftRotation),
+      progress: roundNumber(progress, 4),
+      routeProgressIndex: sample.pathIndex,
+      nearbyLandmarkId: nearbyPause?.nearbyLandmarkId,
+      smoothingEnabled: true,
+      lookAheadProgress: roundNumber(lookAheadProgress, 4),
+      lateralOffsetMeters: roundNumber(baseLateralOffsetMeters, 1)
+    }
+  }
+}
+
+function getBuddhaRealmTimelineSpeed(progress: number, pauses: Map3DRouteTourPause[]) {
+  const opening = progress < 0.07 ? lerpNumber(0.42, 1, smoothstep(0, 0.07, progress)) : 1
+  const ending = progress > 0.94 ? lerpNumber(1, 0.52, smoothstep(0.94, 1, progress)) : 1
+  const landmarkSlowdown = pauses.reduce((slowest, pause) => {
+    const distance = Math.abs(progress - pause.progress)
+
+    if (distance > BUDDHA_REALM_TOUR_CONFIG.landmarkSlowRadiusProgress) {
+      return slowest
+    }
+
+    const influence = 1 - smoothstep(0, BUDDHA_REALM_TOUR_CONFIG.landmarkSlowRadiusProgress, distance)
+    return Math.min(slowest, lerpNumber(1, 0.26, influence))
+  }, 1)
+
+  return opening * ending * landmarkSlowdown
+}
+
+function sampleRouteAtProgress(config: BuddhaRealmTimelineTourConfig, progress: number) {
+  const distance = clampNumber(progress, 0, 1) * config.totalDistance
+  const point = getPointAtPathDistance(config.path, config.cumulative, distance)
+  const nearest = findNearestRoutePoint(point, config.path)
+
+  return {
+    ...point,
+    pathIndex: nearest?.nearestIndex ?? 0,
+    bearing: getSmoothedPathBearing(
+      config.path,
+      config.cumulative,
+      distance,
+      clampNumber(config.totalDistance * BUDDHA_REALM_TOUR_CONFIG.bearingWindowProgress, 36, 92)
+    )
+  }
+}
+
+function getNearbyTourPause(pauses: Map3DRouteTourPause[], progress: number, activeLandmarkId?: string) {
+  if (activeLandmarkId) {
+    const activePause = pauses.find((pause) => pause.nearbyLandmarkId === activeLandmarkId)
+
+    if (activePause) {
+      return activePause
+    }
+  }
+
+  return pauses.find((pause) => Math.abs(progress - pause.progress) <= BUDDHA_REALM_TOUR_CONFIG.landmarkInfluenceProgress)
+}
+
+function buildBuddhaRealmTourSteps(): Map3DTourStep[] {
+  if (demoRouteGeometry?.path.length && demoRouteGeometry.path.length > 1) {
+    return buildRouteFollowingBuddhaRealmTourSteps(demoRoutePath)
+  }
+
+  return buildBuddhaRealmPoiFallbackSteps()
+}
+
+function buildRouteFollowingBuddhaRealmTourSteps(path: LatLngPoint[]): Map3DTourStep[] {
+  const waypoints = buildBuddhaRealmTourWaypoints(path)
+
+  return waypoints.map((waypoint, index) => {
+    const isPause = waypoint.speedMode === 'pause'
+    const isSlow = waypoint.speedMode === 'slow'
+    const label = waypoint.nearbyLandmarkLabel ?? `巡游路段 ${Math.round(waypoint.progress * 100)}%`
+    const rotation = waypoint.bearing !== undefined
+      ? getRouteCameraRotation(waypoint.bearing)
+      : -30
+
+    return {
+      id: `buddha-realm-route-${index + 1}`,
+      label,
+      target: {
+        lat: waypoint.lat,
+        lng: waypoint.lng
+      },
+      progress: roundNumber(waypoint.progress, 3),
+      bearing: waypoint.bearing,
+      nearbyLandmarkId: waypoint.nearbyLandmarkId,
+      speedMode: waypoint.speedMode,
+      activeLandmarkId: waypoint.nearbyLandmarkId,
+      targetPoiId: waypoint.nearbyLandmarkId,
+      targetLandmarkId: waypoint.nearbyLandmarkId,
+      presetId: isPause ? 'landmarkFocus' : 'guideFollow',
+      zoom: isPause ? 18.34 : isSlow ? 18.04 : 17.74 + Math.sin(index * 0.7) * 0.08,
+      pitch: isPause ? 64 : isSlow ? 63 : 59 + (index % 3) * 1.4,
+      rotation,
+      durationMs: isPause ? 1120 : isSlow ? 860 : 620,
+      holdMs: waypoint.holdMs ?? (isPause ? 1500 : isSlow ? 180 : 45),
+      routeProgressIndex: waypoint.pathIndex,
+      twoStage: false
+    }
+  })
+}
+
+function buildBuddhaRealmPoiFallbackSteps(): Map3DTourStep[] {
+  const southGate = getRouteStopLocation('south_gate')
+  const shengjingSquare = getRouteStopLocation('shengjing_square')
+  const entryAxisTarget = getPathCenter([southGate, shengjingSquare].filter((point): point is LatLngPoint => Boolean(point))) ?? shengjingSquare ?? routeCenter
+  const specs = [
+    {
+      id: 'buddha-realm-entry-axis',
+      label: '南门 / 胜境广场',
+      target: entryAxisTarget,
+      activeLandmarkId: 'shengjing_square',
+      targetPoiId: 'south_gate',
+      targetLandmarkId: 'shengjing_square',
+      zoom: 17.38,
+      pitch: 61,
+      rotation: -34,
+      durationMs: 1550,
+      holdMs: 1650
+    },
+    {
+      id: 'buddha-realm-foshou-square',
+      label: '佛手广场',
+      poiId: 'foshou_square',
+      zoom: 18.34,
+      pitch: 65,
+      rotation: -22,
+      durationMs: 1480,
+      holdMs: 1650
+    },
+    {
+      id: 'buddha-realm-fan-gong',
+      label: '梵宫',
+      poiId: 'fan_gong',
+      zoom: 18.12,
+      pitch: 64,
+      rotation: 18,
+      durationMs: 1650,
+      holdMs: 1750
+    },
+    {
+      id: 'buddha-realm-wuyin-tancheng',
+      label: '五印坛城',
+      poiId: 'wuyin_tancheng',
+      zoom: 18.18,
+      pitch: 62,
+      rotation: 38,
+      durationMs: 1550,
+      holdMs: 1650
+    },
+    {
+      id: 'buddha-realm-giant-buddha',
+      label: '灵山大佛',
+      poiId: 'giant_buddha',
+      zoom: 18.48,
+      pitch: 66,
+      rotation: -18,
+      durationMs: 1700,
+      holdMs: 1900
+    }
+  ]
+
+  const steps: Map3DTourStep[] = []
+
+  specs.forEach((spec) => {
+    const poiId = 'poiId' in spec ? spec.poiId : undefined
+    const target = 'target' in spec ? spec.target : getRouteStopLocation(poiId)
+
+    if (!target) {
+      return
+    }
+
+    const activeLandmarkId = ('activeLandmarkId' in spec ? spec.activeLandmarkId : undefined) ?? poiId
+    const targetPoiId = ('targetPoiId' in spec ? spec.targetPoiId : undefined) ?? poiId
+    const targetLandmarkId = ('targetLandmarkId' in spec ? spec.targetLandmarkId : undefined) ?? activeLandmarkId
+
+    steps.push({
+      id: spec.id,
+      label: spec.label,
+      target,
+      activeLandmarkId,
+      targetPoiId,
+      targetLandmarkId,
+      presetId: 'landmarkFocus',
+      zoom: spec.zoom,
+      pitch: spec.pitch,
+      rotation: spec.rotation,
+      durationMs: spec.durationMs,
+      holdMs: spec.holdMs,
+      twoStage: true
+    })
+  })
+
+  return steps
+}
+
+function buildBuddhaRealmTourWaypoints(path: LatLngPoint[]): TourWaypoint[] {
+  if (path.length < 2) {
+    return []
+  }
+
+  const cumulative = buildPathCumulativeDistances(path)
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+  const sampleMeters = totalDistance > 3200 ? 185 : totalDistance > 1800 ? 145 : 110
+  const turnCandidates = buildTurnTourCandidates(path, cumulative, totalDistance)
+  const candidates: Array<{ distance: number; speedMode: TourWaypoint['speedMode']; nearbyLandmarkId?: string; nearbyLandmarkLabel?: string; holdMs?: number }> = [
+    { distance: 0, speedMode: 'cruise' },
+    { distance: totalDistance, speedMode: 'cruise' },
+    ...turnCandidates
+  ]
+
+  for (let distance = sampleMeters; distance < totalDistance; distance += sampleMeters) {
+    candidates.push({ distance, speedMode: 'cruise' })
+  }
+
+  const landmarks = buildBuddhaRealmInterestPoints(path, cumulative, totalDistance)
+  landmarks.forEach((landmark) => {
+    const pauseDistance = cumulative[landmark.pathIndex] ?? landmark.distance
+    candidates.push(
+      {
+        distance: Math.max(0, pauseDistance - 105),
+        speedMode: 'slow',
+        nearbyLandmarkId: landmark.id,
+        nearbyLandmarkLabel: landmark.label
+      },
+      {
+        distance: pauseDistance,
+        speedMode: 'pause',
+        nearbyLandmarkId: landmark.id,
+        nearbyLandmarkLabel: landmark.label,
+        holdMs: landmark.holdMs
+      },
+      {
+        distance: Math.min(totalDistance, pauseDistance + 82),
+        speedMode: 'slow',
+        nearbyLandmarkId: landmark.id,
+        nearbyLandmarkLabel: landmark.label
+      }
+    )
+  })
+
+  const priority: Record<TourWaypoint['speedMode'], number> = {
+    pause: 3,
+    slow: 2,
+    cruise: 1
+  }
+  const deduped = candidates
+    .filter((candidate) => Number.isFinite(candidate.distance))
+    .sort((a, b) => a.distance - b.distance || priority[b.speedMode] - priority[a.speedMode])
+    .reduce<typeof candidates>((items, candidate) => {
+      const previous = items[items.length - 1]
+
+      if (previous && Math.abs(previous.distance - candidate.distance) < 28) {
+        if (priority[candidate.speedMode] > priority[previous.speedMode]) {
+          items[items.length - 1] = candidate
+        }
+        return items
+      }
+
+      items.push(candidate)
+      return items
+    }, [])
+
+  const waypoints = deduped.map((candidate) => {
+    const point = getPointAtPathDistance(path, cumulative, candidate.distance)
+    const pathIndex = findNearestRoutePoint(point, path)?.nearestIndex ?? 0
+    const progress = totalDistance > 0 ? candidate.distance / totalDistance : 0
+    const bearing = getSmoothedPathBearing(path, cumulative, candidate.distance)
+
+    return {
+      ...point,
+      progress: clampNumber(progress, 0, 1),
+      pathIndex,
+      bearing,
+      nearbyLandmarkId: candidate.nearbyLandmarkId,
+      nearbyLandmarkLabel: candidate.nearbyLandmarkLabel,
+      speedMode: candidate.speedMode,
+      holdMs: candidate.holdMs
+    }
+  })
+
+  return smoothTourWaypointBearings(waypoints)
+}
+
+function buildBuddhaRealmInterestPoints(path: LatLngPoint[], cumulative: number[], totalDistance: number) {
+  const specs = [
+    { id: 'shengjing_square', label: '南门 / 胜境广场', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.entry },
+    { id: 'foshou_square', label: '佛手广场', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.foshou },
+    { id: 'fan_gong', label: '梵宫', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.fanGong },
+    { id: 'wuyin_tancheng', label: '五印坛城', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.wuyin },
+    { id: 'giant_buddha', label: '灵山大佛', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.buddha }
+  ]
+
+  return specs
+    .map((spec) => {
+      const location = getRouteStopLocation(spec.id)
+      const nearest = location ? findNearestRoutePoint(location, path) : null
+
+      if (!location || !nearest) {
+        return null
+      }
+
+      return {
+        ...spec,
+        location,
+        pathIndex: nearest.nearestIndex,
+        progress: totalDistance > 0 ? clampNumber(cumulative[nearest.nearestIndex] / totalDistance, 0, 1) : nearest.progressRatio,
+        distance: cumulative[nearest.nearestIndex] ?? 0
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => a.progress - b.progress)
+}
+
+function buildTurnTourCandidates(path: LatLngPoint[], cumulative: number[], totalDistance: number) {
+  const candidates: Array<{ distance: number; speedMode: TourWaypoint['speedMode'] }> = []
+
+  for (let index = 1; index < path.length - 1; index += 1) {
+    const before = getBearingDegrees(path[index - 1], path[index])
+    const after = getBearingDegrees(path[index], path[index + 1])
+    const delta = Math.abs(normalizeRotation(after - before))
+
+    if (delta > 28) {
+      candidates.push({
+        distance: Math.max(0, Math.min(totalDistance, cumulative[index] ?? 0)),
+        speedMode: 'cruise'
+      })
+    }
+  }
+
+  return candidates
+}
+
+function buildPathCumulativeDistances(path: LatLngPoint[]) {
+  const cumulative = [0]
+
+  for (let index = 1; index < path.length; index += 1) {
+    cumulative[index] = cumulative[index - 1] + haversineDistanceMeters(path[index - 1], path[index])
+  }
+
+  return cumulative
+}
+
+function getPointAtPathDistance(path: LatLngPoint[], cumulative: number[], distance: number): LatLngPoint {
+  if (!path.length) {
+    return routeCenter
+  }
+
+  if (distance <= 0) {
+    return path[0]
+  }
+
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+
+  if (distance >= totalDistance) {
+    return path[path.length - 1]
+  }
+
+  for (let index = 1; index < cumulative.length; index += 1) {
+    const segmentEndDistance = cumulative[index]
+
+    if (segmentEndDistance < distance) {
+      continue
+    }
+
+    const segmentStartDistance = cumulative[index - 1]
+    const segmentLength = Math.max(1, segmentEndDistance - segmentStartDistance)
+    const ratio = clampNumber((distance - segmentStartDistance) / segmentLength, 0, 1)
+
+    return {
+      lat: lerpNumber(path[index - 1].lat, path[index].lat, ratio),
+      lng: lerpNumber(path[index - 1].lng, path[index].lng, ratio)
+    }
+  }
+
+  return path[path.length - 1]
+}
+
+function splitRouteByProgress(
+  path: LatLngPoint[],
+  progress: number,
+  cumulative: number[] = buildPathCumulativeDistances(path)
+): SplitRouteByProgressResult {
+  if (!path.length) {
+    return {
+      traveledPath: [],
+      remainingPath: [],
+      currentPoint: routeCenter
+    }
+  }
+
+  if (path.length === 1) {
+    return {
+      traveledPath: [path[0]],
+      remainingPath: [path[0]],
+      currentPoint: path[0]
+    }
+  }
+
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+
+  if (totalDistance <= 0) {
+    return {
+      traveledPath: [path[0]],
+      remainingPath: [...path],
+      currentPoint: path[0]
+    }
+  }
+
+  const boundedProgress = clampNumber(progress, 0, 1)
+  const targetDistance = totalDistance * boundedProgress
+
+  if (targetDistance <= 0) {
+    return {
+      traveledPath: [path[0]],
+      remainingPath: [...path],
+      currentPoint: path[0]
+    }
+  }
+
+  if (targetDistance >= totalDistance) {
+    const currentPoint = path[path.length - 1]
+    return {
+      traveledPath: [...path],
+      remainingPath: [currentPoint],
+      currentPoint
+    }
+  }
+
+  let segmentIndex = 1
+
+  for (; segmentIndex < cumulative.length; segmentIndex += 1) {
+    if (cumulative[segmentIndex] >= targetDistance) {
+      break
+    }
+  }
+
+  segmentIndex = Math.max(1, Math.min(path.length - 1, segmentIndex))
+  const segmentStartDistance = cumulative[segmentIndex - 1] ?? 0
+  const segmentEndDistance = cumulative[segmentIndex] ?? segmentStartDistance
+  const segmentLength = segmentEndDistance - segmentStartDistance
+  const ratio = segmentLength > 0
+    ? clampNumber((targetDistance - segmentStartDistance) / segmentLength, 0, 1)
+    : 0
+  const start = path[segmentIndex - 1]
+  const end = path[segmentIndex]
+  const currentPoint = {
+    lat: lerpNumber(start.lat, end.lat, ratio),
+    lng: lerpNumber(start.lng, end.lng, ratio)
+  }
+  const traveledPath = path.slice(0, segmentIndex)
+  appendRouteSplitPoint(traveledPath, currentPoint)
+  const remainingPath = [currentPoint]
+
+  for (const point of path.slice(segmentIndex)) {
+    appendRouteSplitPoint(remainingPath, point)
+  }
+
+  return {
+    traveledPath,
+    remainingPath,
+    currentPoint
+  }
+}
+
+function appendRouteSplitPoint(path: LatLngPoint[], point: LatLngPoint) {
+  const lastPoint = path[path.length - 1]
+
+  if (!lastPoint || !isSameLatLngPoint(lastPoint, point)) {
+    path.push(point)
+  }
+}
+
+function detectRouteSequenceOverlaps(path: LatLngPoint[]) {
+  const segmentKeys = new Set<string>()
+
+  for (let index = 1; index < path.length; index += 1) {
+    const from = getRouteOverlapPointKey(path[index - 1])
+    const to = getRouteOverlapPointKey(path[index])
+    const segmentKey = [from, to].sort().join('|')
+
+    if (segmentKeys.has(segmentKey)) {
+      return true
+    }
+
+    segmentKeys.add(segmentKey)
+  }
+
+  return false
+}
+
+function getRouteOverlapPointKey(point: LatLngPoint) {
+  return `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`
+}
+
+function getSmoothedPathBearing(path: LatLngPoint[], cumulative: number[], distance: number, windowMeters = 42) {
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+  const from = getPointAtPathDistance(path, cumulative, Math.max(0, distance - windowMeters))
+  const to = getPointAtPathDistance(path, cumulative, Math.min(totalDistance, distance + windowMeters))
+
+  if (isSameLatLngPoint(from, to)) {
+    return undefined
+  }
+
+  return getBearingDegrees(from, to)
+}
+
+function smoothTourWaypointBearings(waypoints: TourWaypoint[]) {
+  let previousBearing: number | undefined
+
+  return waypoints.map((waypoint) => {
+    if (waypoint.bearing === undefined || previousBearing === undefined) {
+      previousBearing = waypoint.bearing ?? previousBearing
+      return waypoint
+    }
+
+    const delta = normalizeRotation(waypoint.bearing - previousBearing)
+    const smoothedBearing = (previousBearing + clampNumber(delta, -18, 18) + 360) % 360
+    previousBearing = smoothedBearing
+
+    return {
+      ...waypoint,
+      bearing: roundNumber(smoothedBearing, 1)
+    }
+  })
+}
+
+function buildRoutePreviewSteps(routeStops: GuideRoute['stops'], selectedStopIndex: number): Map3DTourStep[] {
+  const startIndex = Math.max(0, Math.min(routeStops.length - 1, selectedStopIndex))
+  const previewStops = routeStops.slice(startIndex)
+  const previewPoints = previewStops
+    .map((stop) => ({
+      stop,
+      location: getRouteStopLocation(stop.spotId)
+    }))
+    .filter((item): item is { stop: GuideRoute['stops'][number]; location: LatLngPoint } => Boolean(item.location))
+
+  return previewPoints.map((item, index) => {
+    const previous = previewPoints[Math.max(0, index - 1)]?.location ?? item.location
+    const next = previewPoints[Math.min(previewPoints.length - 1, index + 1)]?.location ?? item.location
+    const routeProgressIndex = findNearestRoutePoint(item.location, demoRoutePath)?.nearestIndex ?? demoRoutePath.length - 1
+    const display = getPoiDisplay(item.stop.spotId)
+    const isEndpoint = index === 0 || index === previewPoints.length - 1
+
+    return {
+      id: `route-preview-${item.stop.spotId}`,
+      label: display?.name ?? item.stop.spotId,
+      target: item.location,
+      activeLandmarkId: item.stop.spotId,
+      targetPoiId: item.stop.spotId,
+      targetLandmarkId: item.stop.spotId,
+      presetId: isEndpoint ? 'routeOverview' : 'guideFollow',
+      zoom: isEndpoint ? 17.42 : 18.08,
+      pitch: isEndpoint ? 57 : 61,
+      rotation: getRoutePreviewRotation(previous, next, index),
+      durationMs: isEndpoint ? 980 : 860,
+      holdMs: isEndpoint ? 720 : 560,
+      routeProgressIndex,
+      twoStage: false
+    }
+  })
+}
+
+function getRoutePreviewRotation(from: LatLngPoint, to: LatLngPoint, index: number) {
+  if (isSameLatLngPoint(from, to)) {
+    return -30 + (index % 3) * 8
+  }
+
+  const bearing = getBearingDegrees(from, to)
+  return getRouteCameraRotation(bearing)
+}
+
+function getRouteCameraRotation(bearing: number) {
+  return normalizeRotation(24 - bearing)
+}
+
+function lerpAngle(current: number, target: number, alpha: number) {
+  const delta = normalizeRotation(target - current)
+  return (current + delta * clampNumber(alpha, 0, 1) + 360) % 360
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  if (edge0 === edge1) {
+    return value >= edge1 ? 1 : 0
+  }
+
+  const t = clampNumber((value - edge0) / (edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+function getBearingDegrees(from: LatLngPoint, to: LatLngPoint) {
+  const fromLat = toRadians(from.lat)
+  const toLat = toRadians(to.lat)
+  const lngDelta = toRadians(to.lng - from.lng)
+  const y = Math.sin(lngDelta) * Math.cos(toLat)
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(lngDelta)
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360
+}
+
+function normalizeRotation(value: number) {
+  let rotation = value
+
+  while (rotation > 180) {
+    rotation -= 360
+  }
+
+  while (rotation < -180) {
+    rotation += 360
+  }
+
+  return roundNumber(rotation, 1)
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180
+}
+
+function toDegrees(value: number) {
+  return (value * 180) / Math.PI
 }
 
 function getRouteStopLocations(route: GuideRoute) {
@@ -3876,6 +5599,11 @@ function offsetLatLngMeters(origin: LatLngPoint, eastMeters: number, northMeters
   }
 }
 
+function offsetLatLngByBearing(origin: LatLngPoint, bearing: number, meters: number): LatLngPoint {
+  const radians = toRadians(bearing)
+  return offsetLatLngMeters(origin, Math.sin(radians) * meters, Math.cos(radians) * meters)
+}
+
 function colorWithOpacity(color: string, opacity: number) {
   const normalized = color.replace('#', '')
   if (normalized.length !== 6) {
@@ -4023,6 +5751,27 @@ async function copyText(text: string) {
 
 function createSvgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function activeLandmarkHaloSvg(size: number) {
+  const gold = '#D6B46A'
+  const paper = '#E6DDC7'
+  const jade = '#8FAF9B'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 100 100">
+    <defs>
+      <filter id="softHalo" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.2"/>
+      </filter>
+    </defs>
+    <circle cx="50" cy="50" r="34" fill="none" stroke="${gold}" stroke-width="4" opacity=".42" filter="url(#softHalo)">
+      <animate attributeName="r" values="29;36;29" dur="2.4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".22;.48;.22" dur="2.4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="50" cy="50" r="22" fill="rgba(214,180,106,.10)" stroke="${paper}" stroke-width="2" opacity=".72"/>
+    <circle cx="50" cy="50" r="8" fill="${paper}" stroke="${gold}" stroke-width="2.5" opacity=".9"/>
+    <path d="M50 13v9M50 78v9M13 50h9M78 50h9" stroke="${jade}" stroke-width="3" stroke-linecap="round" opacity=".42"/>
+  </svg>`
 }
 
 function inkDecorSvg(
@@ -4207,6 +5956,9 @@ const map3DGuideCss = `
 .map-3d-guide-map {
   position: absolute;
   inset: 0;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(242, 235, 216, .92), rgba(221, 233, 217, .88) 52%, rgba(207, 222, 209, .96) 100%),
+    #dde9d9;
   opacity: .98;
   filter: saturate(.84) sepia(.08) contrast(.96) brightness(1.04);
 }
@@ -4241,6 +5993,96 @@ const map3DGuideCss = `
     radial-gradient(ellipse at center, transparent 58%, rgba(250, 246, 226, .15) 80%, rgba(52, 75, 61, .12) 100%),
     linear-gradient(90deg, rgba(250, 246, 226, .14), transparent 16%, transparent 84%, rgba(250, 246, 226, .14));
   box-shadow: inset 0 0 88px rgba(55, 70, 47, .13);
+}
+
+.map-3d-guide-shell.is-map-visual-loading .map-3d-guide-skin {
+  mix-blend-mode: normal;
+  opacity: .20;
+}
+
+.map-3d-guide-shell.is-map-visual-loading .map-3d-guide-mist {
+  opacity: .62;
+}
+
+.map-3d-guide-shell.is-map-visual-loading .map-3d-guide-paperedge {
+  box-shadow: inset 0 0 42px rgba(91, 117, 84, .08);
+  opacity: .44;
+}
+
+.map-3d-guide-loading-curtain {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 52% 38%, rgba(255, 251, 230, .86), rgba(242, 235, 216, .72) 34%, transparent 58%),
+    radial-gradient(circle at 28% 62%, rgba(221, 233, 217, .78), transparent 42%),
+    linear-gradient(135deg, rgba(242, 235, 216, .92), rgba(221, 233, 217, .86));
+  opacity: 1;
+  transition: opacity 520ms ease, visibility 520ms ease;
+}
+
+.map-3d-guide-loading-curtain.is-hiding {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.map-3d-guide-loading-curtain > div {
+  display: grid;
+  gap: 7px;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 15px 18px;
+  border: 1px solid rgba(143, 175, 155, .28);
+  border-radius: 10px;
+  background: rgba(255, 252, 238, .64);
+  color: #2d4f43;
+  text-align: center;
+  box-shadow: 0 24px 70px rgba(46, 74, 54, .12), inset 0 0 0 1px rgba(255,255,255,.46);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.map-3d-guide-loading-curtain strong {
+  color: #24483d;
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.map-3d-guide-loading-curtain span {
+  color: #627568;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.map-3d-guide-loading-curtain__actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.map-3d-guide-loading-curtain__actions button {
+  border: 1px solid rgba(143, 175, 155, .40);
+  border-radius: 7px;
+  background: rgba(255, 252, 238, .78);
+  color: #2d4f43;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.map-3d-guide-loading-curtain__actions button:hover {
+  background: rgba(255, 248, 223, .95);
+  border-color: rgba(214, 180, 106, .58);
+}
+
+.map-3d-guide-shell.is-map-ready-timeout .map-3d-guide-loading-curtain > div {
+  border-color: rgba(214, 180, 106, .46);
+  background: rgba(255, 249, 229, .72);
 }
 
 .map-3d-guide-prototype-badge {
@@ -5590,6 +7432,7 @@ const map3DGuideCss = `
   background: rgba(224, 249, 243, .92);
 }
 
+.map-3d-guide-camera button:disabled,
 .map-3d-guide-controlbar button:disabled {
   cursor: wait;
   opacity: .58;

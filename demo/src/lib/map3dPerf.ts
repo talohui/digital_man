@@ -1,4 +1,4 @@
-import type { Map3DCameraEvent } from './map3dCamera'
+import type { Map3DCameraEvent, Map3DCameraPresetId, Map3DTourMode, Map3DTourStopReason } from './map3dCamera'
 export type Map3DPerfStage = 'mapInit' | 'routeDraw' | 'poiInit'
 
 export type Map3DPerfAssetStatus = 'loaded' | 'failed' | 'pending' | 'unloaded'
@@ -35,10 +35,108 @@ export type Map3DPerfAssetSnapshot = {
   error?: string
 }
 
+export type Map3DPerfTourEventType =
+  | 'tourStarted'
+  | 'tourStep'
+  | 'tourProgress'
+  | 'tourWaypoint'
+  | 'tourLandmarkPause'
+  | 'tourStopped'
+  | 'tourCompleted'
+  | 'routePreviewStarted'
+  | 'routePreviewStep'
+  | 'routePreviewStopped'
+  | 'routeProgressStarted'
+  | 'routeProgressUpdate'
+  | 'routeProgressStopped'
+  | 'routeProgressCompleted'
+  | 'routeProgressOverlayReset'
+
+export type Map3DPerfTourEvent = {
+  type: Map3DPerfTourEventType
+  mode: Map3DTourMode
+  recordedAt: string
+  stepId?: string
+  stepLabel?: string
+  stepIndex?: number
+  stepCount?: number
+  progress?: number
+  targetLat?: number
+  targetLng?: number
+  bearing?: number
+  nearbyLandmarkId?: string
+  activeLandmarkId?: string
+  cameraPreset?: Map3DCameraPresetId
+  targetPoiId?: string
+  targetLandmarkId?: string
+  durationMs?: number
+  reason?: Map3DTourStopReason
+  smoothingEnabled?: boolean
+  lookAheadProgress?: number
+  lateralOffsetMeters?: number
+  averageFrameMs?: number
+  estimatedFps?: number
+  traveledPointCount?: number
+  remainingPointCount?: number
+  currentLat?: number
+  currentLng?: number
+  source?: 'tourProgress'
+  routeHasOverlaps?: boolean
+}
+
+export type Map3DPerfMapVisualEventType =
+  | 'startupStageChanged'
+  | 'tmapScriptLoadStarted'
+  | 'tmapScriptLoaded'
+  | 'mapCreated'
+  | 'initialCameraApplied'
+  | 'baseMapEventReceived'
+  | 'mapFirstIdle'
+  | 'mapVisualReady'
+  | 'mapReadyTimedOut'
+  | 'mapSlow'
+  | 'mapFailed'
+  | 'overlaysStart'
+  | 'routePoiShown'
+  | 'gardenLoadStartedAfterMapReady'
+  | 'loadingCurtainShown'
+  | 'loadingCurtainHidden'
+
+export type Map3DStartupStage =
+  | 'loadingSdk'
+  | 'creatingMap'
+  | 'waitingBaseMap'
+  | 'baseMapReady'
+  | 'overlaysReady'
+  | 'gardenLoading'
+  | 'ready'
+  | 'slow'
+  | 'failed'
+
+export type Map3DPerfMapVisualEvent = {
+  type: Map3DPerfMapVisualEventType
+  recordedAt: string
+  elapsedMs?: number
+  curtainDurationMs?: number
+  reason?: string
+  startupStage?: Map3DStartupStage
+}
+
 export type Map3DPerfSnapshot = {
   enabled: boolean
   pageStartedAt: number
   mapInitMs?: number
+  mapCreatedMs?: number
+  mapFirstIdleMs?: number
+  mapVisualReadyMs?: number
+  mapReadyTimedOut: boolean
+  loadingCurtainShownMs?: number
+  loadingCurtainHiddenMs?: number
+  loadingCurtainDurationMs?: number
+  startupStage: Map3DStartupStage
+  overlaysStartedMs?: number
+  routePoiShownMs?: number
+  gardenLoadStartedAfterMapReadyMs?: number
   routeDrawMs?: number
   poiInitMs?: number
   gardenTotal: number
@@ -46,6 +144,11 @@ export type Map3DPerfSnapshot = {
   gardenFailed: number
   gardenFirstBatchMs?: number
   gardenAllDoneMs?: number
+  gardenOverlayCreated: number
+  gardenOverlayRemoved: number
+  gardenOverlayDuplicatePrevented: number
+  gardenOverlayLiveCount: number
+  gardenLoadGeneration: number
   landmarkTotal: number
   landmarkLoaded: number
   landmarkFailed: number
@@ -69,6 +172,10 @@ export type Map3DPerfSnapshot = {
   }>
   cameraEvents: Map3DCameraEvent[]
   latestCameraEvent?: Map3DCameraEvent
+  mapVisualEvents: Map3DPerfMapVisualEvent[]
+  latestMapVisualEvent?: Map3DPerfMapVisualEvent
+  tourEvents: Map3DPerfTourEvent[]
+  latestTourEvent?: Map3DPerfTourEvent
 }
 
 export type Map3DPerfRecorder = {
@@ -117,6 +224,15 @@ export type Map3DPerfRecorder = {
     }
   }) => void
   recordCameraEvent: (event: Map3DCameraEvent) => void
+  recordTourEvent: (event: Omit<Map3DPerfTourEvent, 'recordedAt'> & { recordedAt?: string }) => void
+  recordGardenOverlayEvent: (event: {
+    created?: number
+    removed?: number
+    duplicatePrevented?: number
+    liveCount?: number
+    generation?: number
+  }) => void
+  recordMapVisualEvent: (event: Omit<Map3DPerfMapVisualEvent, 'recordedAt'> & { recordedAt?: string }) => void
   subscribe: (listener: () => void) => () => void
 }
 
@@ -124,6 +240,17 @@ type MutableMap3DPerfState = {
   pageStartedAt: number
   perfPageStartedAt: number
   mapInitMs?: number
+  mapCreatedMs?: number
+  mapFirstIdleMs?: number
+  mapVisualReadyMs?: number
+  mapReadyTimedOut: boolean
+  loadingCurtainShownMs?: number
+  loadingCurtainHiddenMs?: number
+  loadingCurtainDurationMs?: number
+  startupStage: Map3DStartupStage
+  overlaysStartedMs?: number
+  routePoiShownMs?: number
+  gardenLoadStartedAfterMapReadyMs?: number
   routeDrawMs?: number
   poiInitMs?: number
   gardenStartedAt?: number
@@ -132,6 +259,11 @@ type MutableMap3DPerfState = {
   gardenFailed: number
   gardenFirstBatchMs?: number
   gardenAllDoneMs?: number
+  gardenOverlayCreated: number
+  gardenOverlayRemoved: number
+  gardenOverlayDuplicatePrevented: number
+  gardenOverlayLiveCount: number
+  gardenLoadGeneration: number
   landmarkStartedAt?: number
   landmarkTotal: number
   landmarkLoaded: number
@@ -152,6 +284,8 @@ type MutableMap3DPerfState = {
   urlCounts: Map<string, number>
   stageStarts: Map<Map3DPerfStage, number>
   cameraEvents: Map3DCameraEvent[]
+  mapVisualEvents: Map3DPerfMapVisualEvent[]
+  tourEvents: Map3DPerfTourEvent[]
 }
 
 export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
@@ -401,6 +535,82 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       state.cameraEvents = [...state.cameraEvents, event].slice(-16)
       notify()
     },
+    recordTourEvent: (event) => {
+      if (!enabled) {
+        return
+      }
+      state.tourEvents = [
+        ...state.tourEvents,
+        {
+          ...event,
+          recordedAt: event.recordedAt ?? new Date().toISOString()
+        }
+      ].slice(-48)
+      notify()
+    },
+    recordGardenOverlayEvent: ({ created = 0, removed = 0, duplicatePrevented = 0, liveCount, generation }) => {
+      if (!enabled) {
+        return
+      }
+      state.gardenOverlayCreated += created
+      state.gardenOverlayRemoved += removed
+      state.gardenOverlayDuplicatePrevented += duplicatePrevented
+      if (liveCount !== undefined) {
+        state.gardenOverlayLiveCount = liveCount
+      }
+      if (generation !== undefined) {
+        state.gardenLoadGeneration = generation
+      }
+      notify()
+    },
+    recordMapVisualEvent: (event) => {
+      if (!enabled) {
+        return
+      }
+      const elapsedMs = event.elapsedMs ?? roundDuration(now() - state.perfPageStartedAt)
+      const normalizedEvent = {
+        ...event,
+        elapsedMs,
+        recordedAt: event.recordedAt ?? new Date().toISOString()
+      }
+      state.mapVisualEvents = [...state.mapVisualEvents, normalizedEvent].slice(-16)
+
+      if (event.type === 'startupStageChanged' && event.startupStage) {
+        state.startupStage = event.startupStage
+      } else if (event.type === 'mapCreated') {
+        state.mapCreatedMs = elapsedMs
+      } else if (event.type === 'baseMapEventReceived') {
+        state.mapFirstIdleMs = state.mapFirstIdleMs ?? elapsedMs
+      } else if (event.type === 'mapFirstIdle') {
+        state.mapFirstIdleMs = elapsedMs
+      } else if (event.type === 'mapVisualReady') {
+        state.mapVisualReadyMs = elapsedMs
+        state.mapReadyTimedOut = false
+      } else if (event.type === 'mapReadyTimedOut') {
+        state.mapReadyTimedOut = true
+      } else if (event.type === 'mapSlow') {
+        state.mapReadyTimedOut = true
+        state.startupStage = 'slow'
+      } else if (event.type === 'mapFailed') {
+        state.mapReadyTimedOut = true
+        state.startupStage = 'failed'
+      } else if (event.type === 'overlaysStart') {
+        state.overlaysStartedMs = elapsedMs
+      } else if (event.type === 'routePoiShown') {
+        state.routePoiShownMs = elapsedMs
+      } else if (event.type === 'gardenLoadStartedAfterMapReady') {
+        state.gardenLoadStartedAfterMapReadyMs = elapsedMs
+      } else if (event.type === 'loadingCurtainShown') {
+        state.loadingCurtainShownMs = elapsedMs
+      } else if (event.type === 'loadingCurtainHidden') {
+        state.loadingCurtainHiddenMs = elapsedMs
+        state.loadingCurtainDurationMs =
+          event.curtainDurationMs ??
+          (state.loadingCurtainShownMs !== undefined ? roundDuration(elapsedMs - state.loadingCurtainShownMs) : undefined)
+      }
+
+      notify()
+    },
     failGardenAsset: (id, error) => {
       if (!enabled) {
         return
@@ -439,9 +649,16 @@ function createInitialState(): MutableMap3DPerfState {
   return {
     pageStartedAt: Date.now(),
     perfPageStartedAt: now(),
+    mapReadyTimedOut: false,
+    startupStage: 'loadingSdk',
     gardenTotal: 0,
     gardenLoaded: 0,
     gardenFailed: 0,
+    gardenOverlayCreated: 0,
+    gardenOverlayRemoved: 0,
+    gardenOverlayDuplicatePrevented: 0,
+    gardenOverlayLiveCount: 0,
+    gardenLoadGeneration: 0,
     landmarkTotal: 0,
     landmarkLoaded: 0,
     landmarkFailed: 0,
@@ -450,7 +667,9 @@ function createInitialState(): MutableMap3DPerfState {
     assets: new Map(),
     urlCounts: new Map(),
     stageStarts: new Map(),
-    cameraEvents: []
+    cameraEvents: [],
+    mapVisualEvents: [],
+    tourEvents: []
   }
 }
 
@@ -470,6 +689,17 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     enabled,
     pageStartedAt: state.pageStartedAt,
     mapInitMs: state.mapInitMs,
+    mapCreatedMs: state.mapCreatedMs,
+    mapFirstIdleMs: state.mapFirstIdleMs,
+    mapVisualReadyMs: state.mapVisualReadyMs,
+    mapReadyTimedOut: state.mapReadyTimedOut,
+    loadingCurtainShownMs: state.loadingCurtainShownMs,
+    loadingCurtainHiddenMs: state.loadingCurtainHiddenMs,
+    loadingCurtainDurationMs: state.loadingCurtainDurationMs,
+    startupStage: state.startupStage,
+    overlaysStartedMs: state.overlaysStartedMs,
+    routePoiShownMs: state.routePoiShownMs,
+    gardenLoadStartedAfterMapReadyMs: state.gardenLoadStartedAfterMapReadyMs,
     routeDrawMs: state.routeDrawMs,
     poiInitMs: state.poiInitMs,
     gardenTotal: state.gardenTotal,
@@ -477,6 +707,11 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     gardenFailed: state.gardenFailed,
     gardenFirstBatchMs: state.gardenFirstBatchMs,
     gardenAllDoneMs: state.gardenAllDoneMs,
+    gardenOverlayCreated: state.gardenOverlayCreated,
+    gardenOverlayRemoved: state.gardenOverlayRemoved,
+    gardenOverlayDuplicatePrevented: state.gardenOverlayDuplicatePrevented,
+    gardenOverlayLiveCount: state.gardenOverlayLiveCount,
+    gardenLoadGeneration: state.gardenLoadGeneration,
     landmarkTotal: state.landmarkTotal,
     landmarkLoaded: state.landmarkLoaded,
     landmarkFailed: state.landmarkFailed,
@@ -490,7 +725,11 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     failedAssets,
     duplicatedUrls,
     cameraEvents: state.cameraEvents,
-    latestCameraEvent: state.cameraEvents[state.cameraEvents.length - 1]
+    latestCameraEvent: state.cameraEvents[state.cameraEvents.length - 1],
+    mapVisualEvents: state.mapVisualEvents,
+    latestMapVisualEvent: state.mapVisualEvents[state.mapVisualEvents.length - 1],
+    tourEvents: state.tourEvents,
+    latestTourEvent: state.tourEvents[state.tourEvents.length - 1]
   }
 }
 

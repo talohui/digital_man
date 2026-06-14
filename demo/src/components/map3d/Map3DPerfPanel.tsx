@@ -67,7 +67,15 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
       <dl className="map-3d-guide-perf-panel__summary">
         <div>
           <dt>Map init</dt>
-          <dd>{formatMs(snapshot.mapInitMs)}</dd>
+          <dd>
+            {formatMs(snapshot.mapInitMs)}
+            {snapshot.mapVisualReadyMs !== undefined ? ` · visual ${formatMs(snapshot.mapVisualReadyMs)}` : ''}
+            {snapshot.mapReadyTimedOut ? ' · timeout' : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Startup</dt>
+          <dd>{snapshot.startupStage}</dd>
         </div>
         <div>
           <dt>Route</dt>
@@ -81,6 +89,7 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           <dt>Garden GLB</dt>
           <dd>
             {snapshot.gardenLoaded}/{snapshot.gardenTotal}
+            {snapshot.gardenOverlayLiveCount ? ` · live ${snapshot.gardenOverlayLiveCount}` : ''}
           </dd>
         </div>
         <div>
@@ -101,6 +110,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           <dd>{snapshot.latestCameraEvent?.cameraPreset ?? '-'}</dd>
         </div>
         <div>
+          <dt>Tour</dt>
+          <dd>{snapshot.latestTourEvent?.type ?? '-'}</dd>
+        </div>
+        <div>
           <dt>Failed</dt>
           <dd>{snapshot.gardenFailed + snapshot.landmarkFailed}</dd>
         </div>
@@ -119,6 +132,48 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           {landmarkInspector ? <LandmarkGLBInspector inspector={landmarkInspector} /> : null}
 
           <section>
+            <h3>地图视觉 Ready</h3>
+            <ol>
+              <li>
+                <span>{snapshot.latestMapVisualEvent?.type ?? 'pending'}</span>
+                <small>
+                  created {formatMs(snapshot.mapCreatedMs)} · idle {formatMs(snapshot.mapFirstIdleMs)} · visual {formatMs(snapshot.mapVisualReadyMs)} · curtain {formatMs(snapshot.loadingCurtainDurationMs)}
+                  {snapshot.mapReadyTimedOut ? ' · timed out' : ''}
+                </small>
+              </li>
+              <li>
+                <span>Startup stage</span>
+                <small>
+                  {snapshot.startupStage} · overlays {formatMs(snapshot.overlaysStartedMs)} · route/poi {formatMs(snapshot.routePoiShownMs)} · garden after ready {formatMs(snapshot.gardenLoadStartedAfterMapReadyMs)}
+                </small>
+              </li>
+              {snapshot.mapVisualEvents.slice(-6).map((event, index) => (
+                <li key={`${event.recordedAt}-${index}`}>
+                  <span>{event.type}</span>
+                  <small>
+                    {event.elapsedMs !== undefined ? formatMs(event.elapsedMs) : '-'}
+                    {event.startupStage ? ` · ${event.startupStage}` : ''}
+                    {event.curtainDurationMs !== undefined ? ` · curtain ${formatMs(event.curtainDurationMs)}` : ''}
+                    {event.reason ? ` · ${event.reason}` : ''}
+                  </small>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section>
+            <h3>园林 Overlay</h3>
+            <ol>
+              <li>
+                <span>Live garden overlays</span>
+                <small>
+                  live {snapshot.gardenOverlayLiveCount} · created {snapshot.gardenOverlayCreated} · removed {snapshot.gardenOverlayRemoved} · duplicate prevented {snapshot.gardenOverlayDuplicatePrevented} · generation {snapshot.gardenLoadGeneration}
+                </small>
+              </li>
+            </ol>
+          </section>
+
+          <section>
             <h3>相机事件</h3>
             {snapshot.cameraEvents.length ? (
               <ol>
@@ -133,6 +188,38 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
               </ol>
             ) : (
               <p>暂无相机事件</p>
+            )}
+          </section>
+
+          <section>
+            <h3>巡游 / 预演事件</h3>
+            {snapshot.tourEvents.length ? (
+              <ol>
+                {snapshot.tourEvents.slice(-14).map((event, index) => (
+                  <li key={`${event.recordedAt}-${index}`}>
+                    <span>{event.type}</span>
+                    <small>
+                      {event.stepLabel ?? event.stepId ?? event.mode}
+                      {event.activeLandmarkId ? ` · active: ${event.activeLandmarkId}` : ''}
+                      {event.nearbyLandmarkId ? ` · near: ${event.nearbyLandmarkId}` : ''}
+                      {event.progress !== undefined ? ` · ${Math.round(event.progress * 100)}%` : ''}
+                      {event.bearing !== undefined ? ` · bearing ${Math.round(event.bearing)}°` : ''}
+                      {event.lookAheadProgress !== undefined ? ` · lookAhead ${Math.round(event.lookAheadProgress * 1000) / 10}%` : ''}
+                      {event.lateralOffsetMeters !== undefined ? ` · offset ${Math.round(event.lateralOffsetMeters)}m` : ''}
+                      {event.estimatedFps !== undefined ? ` · ${Math.round(event.estimatedFps)}fps` : ''}
+                      {event.source ? ` · source ${event.source}` : ''}
+                      {event.traveledPointCount !== undefined ? ` · traveled ${event.traveledPointCount}` : ''}
+                      {event.remainingPointCount !== undefined ? ` · remaining ${event.remainingPointCount}` : ''}
+                      {event.routeHasOverlaps ? ' · overlaps' : ''}
+                      {event.cameraPreset ? ` · ${event.cameraPreset}` : ''}
+                      {event.durationMs !== undefined ? ` · ${formatMs(event.durationMs)}` : ''}
+                      {event.reason ? ` · ${event.reason}` : ''}
+                    </small>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>暂无巡游 / 预演事件</p>
             )}
           </section>
 

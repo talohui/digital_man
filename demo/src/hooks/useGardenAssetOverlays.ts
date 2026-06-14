@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
 import type { LingshanMap3DGardenAsset } from '../data/lingshanMap3DGardenAssets'
 import type { Map3DPerfRecorder } from '../lib/map3dPerf'
@@ -24,6 +24,13 @@ type UseGardenAssetOverlaysOptions = {
   perfRecorder?: Map3DPerfRecorder
   rerouteActive: boolean
   routeProgressRatio: number
+  shouldLoadGardenAssets?: boolean
+}
+
+type GardenOverlayHandle = {
+  asset: LingshanMap3DGardenAsset
+  generation: number
+  model: any
 }
 
 const GARDEN_ASSET_BATCH_SIZE = 16
@@ -48,52 +55,70 @@ export function useGardenAssetOverlays({
   mapReady,
   perfRecorder,
   rerouteActive,
-  routeProgressRatio
+  routeProgressRatio,
+  shouldLoadGardenAssets = mapReady
 }: UseGardenAssetOverlaysOptions) {
-  const modelsRef = useRef<Map<string, any>>(new Map())
+  const overlayByIdRef = useRef<Map<string, GardenOverlayHandle>>(new Map())
+  const activeLoadGenerationRef = useRef(0)
+  const pendingTimersRef = useRef<number[]>([])
+  const pendingAnimationFramesRef = useRef<number[]>([])
+  const gardenTotalSignatureRef = useRef('')
+  const perfRecorderRef = useRef<Map3DPerfRecorder | undefined>(perfRecorder)
   const [report, setReport] = useState<GardenModelReport>(emptyGardenModelReport)
+
+  useEffect(() => {
+    perfRecorderRef.current = perfRecorder
+  }, [perfRecorder])
 
   const visibleAssets = useMemo(
     () =>
       active
-        ? getVisibleGardenAssets(assets, {
-            debugGarden,
-            routeProgressRatio,
-            rerouteActive
-          })
+        ? assets
+            .filter((asset) => asset.visible)
+            .map((asset) => (debugGarden ? { ...asset, opacity: Math.max(asset.opacity, 0.92) } : asset))
         : [],
-    [active, assets, debugGarden, rerouteActive, routeProgressRatio]
+    [active, assets, debugGarden]
   )
 
   useEffect(() => {
-    let cancelled = false
-    let timeoutId: number | null = null
-    let frameId: number | null = null
+    return () => {
+      activeLoadGenerationRef.current += 1
+      cancelPendingGardenLoadTasks(pendingTimersRef, pendingAnimationFramesRef)
+      clearGardenModels(overlayByIdRef.current, perfRecorderRef.current, activeLoadGenerationRef.current)
+    }
+  }, [])
 
-    clearGardenModels(modelsRef.current)
-    modelsRef.current = new Map()
+  useEffect(() => {
+    const generation = activeLoadGenerationRef.current + 1
+    activeLoadGenerationRef.current = generation
+    cancelPendingGardenLoadTasks(pendingTimersRef, pendingAnimationFramesRef)
 
     if (!active) {
+      clearGardenModels(overlayByIdRef.current, perfRecorder, generation)
+      gardenTotalSignatureRef.current = ''
+      perfRecorder?.setGardenTotal(0)
       setReport(emptyGardenModelReport)
-      return undefined
+      return
     }
 
     const assetUrls = Array.from(new Set(visibleAssets.map((asset) => asset.assetUrl)))
 
-    if (!mapReady || !window.TMap || !map) {
+    if (!mapReady || !shouldLoadGardenAssets || !window.TMap || !map) {
+      clearGardenModels(overlayByIdRef.current, perfRecorder, generation)
       setReport((current) => ({
         ...current,
         createdCount: 0,
-        visibleCount: visibleAssets.length,
+        visibleCount: shouldLoadGardenAssets ? visibleAssets.length : 0,
         unavailable: false,
         assetUrls,
         loadedIds: [],
         errorIds: []
       }))
-      return undefined
+      return
     }
 
     if (!window.TMap.model?.GLTFModel) {
+      clearGardenModels(overlayByIdRef.current, perfRecorder, generation)
       setReport((current) => ({
         ...current,
         createdCount: 0,
@@ -103,117 +128,114 @@ export function useGardenAssetOverlays({
         loadedIds: [],
         errorIds: []
       }))
-      return undefined
+      return
     }
 
     const orderedAssets = orderGardenAssetsForLoading(visibleAssets)
-    const immediateErrors: string[] = []
+    const orderedAssetById = new Map(orderedAssets.map((asset) => [asset.id, asset]))
+    const totalSignature = debugPerf ? orderedAssets.map((asset) => asset.id).join('|') : ''
     let cursor = 0
     let batchIndex = 0
 
+    overlayByIdRef.current.forEach((handle, id) => {
+      const nextAsset = orderedAssetById.get(id)
+
+      if (!nextAsset || shouldRecreateGardenOverlay(handle.asset, nextAsset)) {
+        removeGardenModel(id, overlayByIdRef.current, perfRecorder, generation)
+      }
+    })
+
+    orderedAssets.forEach((asset) => {
+      const existing = overlayByIdRef.current.get(asset.id)
+
+      if (existing) {
+        updateGardenModel(existing.model, asset)
+        existing.asset = asset
+      }
+    })
+
     setReport((current) => ({
       ...current,
-      createdCount: 0,
+      createdCount: overlayByIdRef.current.size,
       visibleCount: orderedAssets.length,
       unavailable: false,
       assetUrls,
-      loadedIds: [],
-      errorIds: []
+      loadedIds: current.loadedIds.filter((id) => orderedAssetById.has(id)),
+      errorIds: current.errorIds.filter((id) => orderedAssetById.has(id))
     }))
-    perfRecorder?.setGardenTotal(debugPerf ? orderedAssets.length : 0)
+
+    if (gardenTotalSignatureRef.current !== totalSignature) {
+      gardenTotalSignatureRef.current = totalSignature
+      perfRecorder?.setGardenTotal(debugPerf ? orderedAssets.length : 0)
+    }
+
+    const assetsToCreate = orderedAssets.filter((asset) => !overlayByIdRef.current.has(asset.id))
+
+    if (!assetsToCreate.length) {
+      perfRecorder?.recordGardenOverlayEvent({
+        liveCount: overlayByIdRef.current.size,
+        generation
+      })
+      return
+    }
 
     // GLTFModel construction is relatively heavy. Build in small batches so the
     // map, route, POI, and control UI can paint before all garden models exist.
     const createNextBatch = () => {
-      if (cancelled) {
+      if (!isGardenLoadGenerationActive(activeLoadGenerationRef, generation)) {
         return
       }
 
-      const batch = orderedAssets.slice(cursor, cursor + GARDEN_ASSET_BATCH_SIZE)
+      const batch = assetsToCreate.slice(cursor, cursor + GARDEN_ASSET_BATCH_SIZE)
       const currentBatchIndex = batchIndex
       batchIndex += 1
       cursor += batch.length
       perfRecorder?.startGardenBatch(currentBatchIndex, batch.length)
 
       batch.forEach((asset) => {
-        perfRecorder?.startGardenAsset({
-          id: asset.id,
-          assetUrl: asset.assetUrl,
-          priority: asset.priority,
-          batchIndex: currentBatchIndex
+        createGardenModel({
+          asset,
+          batchIndex: currentBatchIndex,
+          generation,
+          map,
+          overlayByIdRef,
+          perfRecorder,
+          activeLoadGenerationRef,
+          setReport
         })
-        try {
-          // Tencent GLTFModel does not expose a stable browser network timing
-          // API here, so debugPerf records overlay construction time. The
-          // existing loaded/error events are still surfaced in the model report.
-          const model = new window.TMap.model.GLTFModel({
-            id: `map-3d-guide-garden-${asset.id}`,
-            map,
-            url: asset.assetUrl,
-            position: new window.TMap.LatLng(asset.location.lat, asset.location.lng, asset.height),
-            rotation: [0, asset.yaw, 0],
-            scale: asset.scale,
-            opacity: asset.opacity
-          })
-          if (typeof model.setOpacity === 'function') {
-            model.setOpacity(asset.opacity)
-          }
-          modelsRef.current.set(asset.id, model)
-          perfRecorder?.finishGardenAsset(asset.id)
-
-          if (typeof model.on === 'function') {
-            model.on('loaded', () => {
-              if (!cancelled) {
-                setReport((current) => ({
-                  ...current,
-                  loadedIds: uniqueStrings([...current.loadedIds, asset.id])
-                }))
-              }
-            })
-            model.on('error', () => {
-              if (!cancelled) {
-                perfRecorder?.failGardenAsset(asset.id, 'GLTFModel error event')
-                setReport((current) => ({
-                  ...current,
-                  errorIds: uniqueStrings([...current.errorIds, asset.id])
-                }))
-              }
-            })
-          }
-        } catch (error) {
-          immediateErrors.push(asset.id)
-          perfRecorder?.failGardenAsset(asset.id, error)
-        }
       })
       perfRecorder?.finishGardenBatch(currentBatchIndex)
 
       setReport((current) => ({
         ...current,
-        createdCount: modelsRef.current.size,
-        errorIds: uniqueStrings([...current.errorIds, ...immediateErrors])
+        createdCount: overlayByIdRef.current.size
       }))
 
-      if (cursor < orderedAssets.length) {
-        frameId = window.requestAnimationFrame(() => {
-          timeoutId = window.setTimeout(createNextBatch, 24)
-        })
+      if (cursor < assetsToCreate.length) {
+        scheduleGardenBatch(createNextBatch, pendingTimersRef, pendingAnimationFramesRef)
       }
     }
 
-    frameId = window.requestAnimationFrame(createNextBatch)
+    scheduleGardenBatch(createNextBatch, pendingTimersRef, pendingAnimationFramesRef)
+  }, [active, debugPerf, map, mapReady, perfRecorder, shouldLoadGardenAssets, visibleAssets])
 
-    return () => {
-      cancelled = true
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId)
-      }
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId)
-      }
-      clearGardenModels(modelsRef.current)
-      modelsRef.current = new Map()
+  useEffect(() => {
+    if (!active || !shouldLoadGardenAssets || !overlayByIdRef.current.size) {
+      return
     }
-  }, [active, debugPerf, map, mapReady, perfRecorder, visibleAssets])
+
+    getVisibleGardenAssets(assets, {
+      debugGarden,
+      routeProgressRatio,
+      rerouteActive
+    }).forEach((asset) => {
+      const existing = overlayByIdRef.current.get(asset.id)
+
+      if (existing) {
+        updateGardenModel(existing.model, asset)
+      }
+    })
+  }, [active, assets, debugGarden, rerouteActive, routeProgressRatio, shouldLoadGardenAssets])
 
   return {
     report,
@@ -235,23 +257,222 @@ function orderGardenAssetsForLoading(assets: LingshanMap3DGardenAsset[]) {
     .map((item) => item.asset)
 }
 
-function clearGardenModels(models: Map<string, any>) {
-  models.forEach((model) => {
-    if (typeof model.setMap === 'function') {
-      model.setMap(null)
-      return
-    }
-
-    if (typeof model.destroy === 'function') {
-      model.destroy()
-      return
-    }
-
-    if (typeof model.remove === 'function') {
-      model.remove()
-    }
+function scheduleGardenBatch(
+  callback: () => void,
+  pendingTimersRef: MutableRefObject<number[]>,
+  pendingAnimationFramesRef: MutableRefObject<number[]>
+) {
+  const frameId = window.requestAnimationFrame(() => {
+    pendingAnimationFramesRef.current = pendingAnimationFramesRef.current.filter((id) => id !== frameId)
+    const timeoutId = window.setTimeout(() => {
+      pendingTimersRef.current = pendingTimersRef.current.filter((id) => id !== timeoutId)
+      callback()
+    }, 24)
+    pendingTimersRef.current = [...pendingTimersRef.current, timeoutId]
   })
+  pendingAnimationFramesRef.current = [...pendingAnimationFramesRef.current, frameId]
+}
+
+function cancelPendingGardenLoadTasks(
+  pendingTimersRef: MutableRefObject<number[]>,
+  pendingAnimationFramesRef: MutableRefObject<number[]>
+) {
+  pendingTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+  pendingAnimationFramesRef.current.forEach((frameId) => window.cancelAnimationFrame(frameId))
+  pendingTimersRef.current = []
+  pendingAnimationFramesRef.current = []
+}
+
+function isGardenLoadGenerationActive(activeLoadGenerationRef: MutableRefObject<number>, generation: number) {
+  return activeLoadGenerationRef.current === generation
+}
+
+function createGardenModel({
+  asset,
+  batchIndex,
+  generation,
+  map,
+  overlayByIdRef,
+  perfRecorder,
+  activeLoadGenerationRef,
+  setReport
+}: {
+  asset: LingshanMap3DGardenAsset
+  batchIndex: number
+  generation: number
+  map: any
+  overlayByIdRef: MutableRefObject<Map<string, GardenOverlayHandle>>
+  perfRecorder?: Map3DPerfRecorder
+  activeLoadGenerationRef: MutableRefObject<number>
+  setReport: Dispatch<SetStateAction<GardenModelReport>>
+}) {
+  if (!isGardenLoadGenerationActive(activeLoadGenerationRef, generation)) {
+    return
+  }
+
+  const existing = overlayByIdRef.current.get(asset.id)
+
+  if (existing) {
+    updateGardenModel(existing.model, asset)
+    existing.asset = asset
+    perfRecorder?.recordGardenOverlayEvent({
+      duplicatePrevented: 1,
+      liveCount: overlayByIdRef.current.size,
+      generation
+    })
+    return
+  }
+
+  perfRecorder?.startGardenAsset({
+    id: asset.id,
+    assetUrl: asset.assetUrl,
+    priority: asset.priority,
+    batchIndex
+  })
+
+  try {
+    // Tencent GLTFModel does not expose a stable browser network timing API
+    // here, so debugPerf records overlay construction time.
+    const model = new window.TMap.model.GLTFModel({
+      id: `map-3d-guide-garden-${asset.id}`,
+      map,
+      url: asset.assetUrl,
+      position: new window.TMap.LatLng(asset.location.lat, asset.location.lng, asset.height),
+      rotation: [0, asset.yaw, 0],
+      scale: asset.scale,
+      opacity: asset.opacity
+    })
+    updateGardenModel(model, asset)
+
+    if (!isGardenLoadGenerationActive(activeLoadGenerationRef, generation)) {
+      teardownGardenModel(model)
+      return
+    }
+
+    overlayByIdRef.current.set(asset.id, {
+      asset,
+      generation,
+      model
+    })
+    perfRecorder?.finishGardenAsset(asset.id)
+    perfRecorder?.recordGardenOverlayEvent({
+      created: 1,
+      liveCount: overlayByIdRef.current.size,
+      generation
+    })
+
+    if (typeof model.on === 'function') {
+      model.on('loaded', () => {
+        if (isGardenModelHandleActive(overlayByIdRef.current, asset.id, model, activeLoadGenerationRef, generation)) {
+          setReport((current) => ({
+            ...current,
+            loadedIds: uniqueStrings([...current.loadedIds, asset.id])
+          }))
+        }
+      })
+      model.on('error', () => {
+        if (isGardenModelHandleActive(overlayByIdRef.current, asset.id, model, activeLoadGenerationRef, generation)) {
+          perfRecorder?.failGardenAsset(asset.id, 'GLTFModel error event')
+          setReport((current) => ({
+            ...current,
+            errorIds: uniqueStrings([...current.errorIds, asset.id])
+          }))
+        }
+      })
+    }
+  } catch (error) {
+    perfRecorder?.failGardenAsset(asset.id, error)
+    setReport((current) => ({
+      ...current,
+      errorIds: uniqueStrings([...current.errorIds, asset.id])
+    }))
+  }
+}
+
+function isGardenModelHandleActive(
+  handles: Map<string, GardenOverlayHandle>,
+  assetId: string,
+  model: any,
+  activeLoadGenerationRef: MutableRefObject<number>,
+  generation: number
+) {
+  const handle = handles.get(assetId)
+  return isGardenLoadGenerationActive(activeLoadGenerationRef, generation) && handle?.model === model
+}
+
+function shouldRecreateGardenOverlay(current: LingshanMap3DGardenAsset, next: LingshanMap3DGardenAsset) {
+  return (
+    current.assetUrl !== next.assetUrl ||
+    current.location.lat !== next.location.lat ||
+    current.location.lng !== next.location.lng ||
+    current.height !== next.height ||
+    current.yaw !== next.yaw ||
+    current.scale !== next.scale
+  )
+}
+
+function updateGardenModel(model: any, asset: LingshanMap3DGardenAsset) {
+  if (typeof model.setOpacity === 'function') {
+    model.setOpacity(asset.opacity)
+  }
+}
+
+function removeGardenModel(
+  id: string,
+  models: Map<string, GardenOverlayHandle>,
+  perfRecorder: Map3DPerfRecorder | undefined,
+  generation: number
+) {
+  const handle = models.get(id)
+
+  if (!handle) {
+    return
+  }
+
+  teardownGardenModel(handle.model)
+  models.delete(id)
+  perfRecorder?.recordGardenOverlayEvent({
+    removed: 1,
+    liveCount: models.size,
+    generation
+  })
+}
+
+function clearGardenModels(
+  models: Map<string, GardenOverlayHandle>,
+  perfRecorder?: Map3DPerfRecorder,
+  generation = 0
+) {
+  const removed = models.size
+  models.forEach((handle) => teardownGardenModel(handle.model))
   models.clear()
+
+  if (removed > 0) {
+    perfRecorder?.recordGardenOverlayEvent({
+      removed,
+      liveCount: 0,
+      generation
+    })
+  } else {
+    perfRecorder?.recordGardenOverlayEvent({
+      liveCount: 0,
+      generation
+    })
+  }
+}
+
+function teardownGardenModel(model: any) {
+  if (typeof model.setMap === 'function') {
+    model.setMap(null)
+  }
+
+  if (typeof model.destroy === 'function') {
+    model.destroy()
+  }
+
+  if (typeof model.remove === 'function') {
+    model.remove()
+  }
 }
 
 function getVisibleGardenAssets(
