@@ -110,6 +110,19 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           <dd>{snapshot.latestCameraEvent?.cameraPreset ?? '-'}</dd>
         </div>
         <div>
+          <dt>Zoom</dt>
+          <dd>
+            {snapshot.currentZoom !== undefined ? snapshot.currentZoom.toFixed(2) : '-'}
+            {snapshot.mapInteracting ? ` · ${snapshot.mapInteractionKind ?? 'move'}` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Garden LOD</dt>
+          <dd>
+            {snapshot.gardenLodTier} · {Math.round(snapshot.gardenOpacity * 100)}%
+          </dd>
+        </div>
+        <div>
           <dt>Tour</dt>
           <dd>{snapshot.latestTourEvent?.type ?? '-'}</dd>
         </div>
@@ -168,6 +181,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                 <span>Live garden overlays</span>
                 <small>
                   live {snapshot.gardenOverlayLiveCount} · created {snapshot.gardenOverlayCreated} · removed {snapshot.gardenOverlayRemoved} · duplicate prevented {snapshot.gardenOverlayDuplicatePrevented} · generation {snapshot.gardenLoadGeneration}
+                  {' · '}
+                  LOD {snapshot.gardenLodTier} · opacity {Math.round(snapshot.gardenOpacity * 100)}%
+                  {snapshot.mapInteracting ? ` · interacting ${snapshot.mapInteractionKind ?? 'move'}` : ''}
+                  {snapshot.currentZoom !== undefined ? ` · zoom ${snapshot.currentZoom.toFixed(2)}` : ''}
                 </small>
               </li>
             </ol>

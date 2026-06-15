@@ -20,13 +20,14 @@ import {
   type LingshanMapModelOverlay
 } from '../data/lingshanMapModelOverlays'
 import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
-import { useGardenAssetOverlays, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
+import { useGardenAssetOverlays, type GardenLodState, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
 import {
   BUDDHA_REALM_TOUR_CONFIG,
   flyMap3DCamera,
   MAP_3D_GUIDE_CAMERA_PRESETS,
+  SCENIC_CAMERA_BOUNDS,
   startBuddhaRealmTour,
   startBuddhaRealmTimelineTour,
   startRoutePreview,
@@ -51,6 +52,7 @@ type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
+type MapInteractionKind = 'zoom' | 'drag' | 'move'
 
 const MAP_3D_GUIDE_MIN_BASEMAP_READY_MS = 1050
 const MAP_3D_GUIDE_SLOW_READY_MS = 4800
@@ -366,6 +368,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const mapRoutePoiShownRef = useRef(false)
   const mapGardenLoadStartedRef = useRef(false)
   const mapLoadingCurtainShownAtRef = useRef<number | null>(null)
+  const mapInteractionRef = useRef<{
+    isInteracting: boolean
+    kind?: MapInteractionKind
+    exitTimerId?: number
+    lastInteractionAt: number
+  }>({
+    isInteracting: false,
+    lastInteractionAt: 0
+  })
+  const currentZoomRef = useRef(SCENIC_CAMERA_BOUNDS.defaultZoom)
+  const gardenLodSignatureRef = useRef('')
   const entryCameraPlayedRef = useRef(false)
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
@@ -379,6 +392,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [mapReadyTimedOut, setMapReadyTimedOut] = useState(false)
   const [loadingCurtainVisible, setLoadingCurtainVisible] = useState(true)
   const [startupStage, setStartupStage] = useState<Map3DStartupStage>('loadingSdk')
+  const [mapInteractionSnapshot, setMapInteractionSnapshot] = useState<{
+    isInteracting: boolean
+    kind?: MapInteractionKind
+    currentZoom: number
+  }>({
+    isInteracting: false,
+    currentZoom: SCENIC_CAMERA_BOUNDS.defaultZoom
+  })
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
   const [routePathIndex, setRoutePathIndex] = useState(0)
@@ -466,6 +487,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const mapVisualReadyForOverlays = mapStatus === 'ready' && isMapVisualReady
   const canUseMapInteractions = mapVisualReadyForOverlays && !mapReadyTimedOut
   const shouldLoadGardenAssets = visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays
+  const gardenLodState = useMemo(
+    () =>
+      getGardenLodState({
+        currentZoom: mapInteractionSnapshot.currentZoom,
+        debugGarden,
+        isInteracting: mapInteractionSnapshot.isInteracting
+      }),
+    [debugGarden, mapInteractionSnapshot.currentZoom, mapInteractionSnapshot.isInteracting]
+  )
   const tourStateLabel =
     tourMode === 'buddhaRealmTour'
       ? `佛境巡游中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
@@ -534,6 +564,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     assets: gardenAssets,
     debugPerf,
     debugGarden,
+    gardenLodState,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
     perfRecorder,
@@ -546,6 +577,24 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     patchCount: gardenPatchReport.patchCount,
     patchFallback: gardenPatchReport.patchFallback
   }
+
+  useEffect(() => {
+    const signature = `${gardenLodState.visibleTier}:${gardenLodState.opacity}:${gardenLodState.isInteracting}:${gardenLodState.currentZoom ?? 'unknown'}`
+
+    if (gardenLodSignatureRef.current === signature) {
+      return
+    }
+
+    gardenLodSignatureRef.current = signature
+    perfRecorder.recordMapVisualEvent({
+      type: 'gardenLodChanged',
+      currentZoom: gardenLodState.currentZoom,
+      gardenLodTier: gardenLodState.visibleTier,
+      gardenOpacity: gardenLodState.opacity,
+      liveGardenOverlayCount: gardenOverlayReport.createdCount,
+      reason: gardenLodState.isInteracting ? 'interaction-lite' : 'zoom-lod'
+    })
+  }, [gardenLodState, gardenOverlayReport.createdCount, perfRecorder])
 
   useEffect(() => {
     if (!shouldLoadGardenAssets || mapGardenLoadStartedRef.current) {
@@ -727,6 +776,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     let visualReadyScheduled = false
     let mapCreatedAt = 0
     const mapVisualEventCleanups: Array<() => void> = []
+    const mapInteractionEventCleanups: Array<() => void> = []
 
     const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
       setStartupStage(stage)
@@ -869,7 +919,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(routeCenter.lat, routeCenter.lng),
-          zoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom - 0.35,
+          zoom: SCENIC_CAMERA_BOUNDS.defaultZoom,
+          minZoom: SCENIC_CAMERA_BOUNDS.minZoom,
+          maxZoom: SCENIC_CAMERA_BOUNDS.maxZoom,
           pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
           rotation: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
@@ -896,6 +948,40 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           const handler = () => scheduleMapVisualReady(eventName)
           map.on?.(eventName, handler)
           mapVisualEventCleanups.push(() => map.off?.(eventName, handler))
+        })
+
+        const mapElement = mapElementRef.current
+
+        if (mapElement) {
+          const handleWheel = () => startMapInteractionLiteMode('zoom')
+          const handlePointerDown = () => startMapInteractionLiteMode('drag')
+          const handleTouchStart = () => startMapInteractionLiteMode('move')
+          const handlePointerUp = () => scheduleMapInteractionLiteExit('drag', 'pointerup')
+          const handleTouchEnd = () => scheduleMapInteractionLiteExit('move', 'touchend')
+
+          mapElement.addEventListener('wheel', handleWheel, { passive: true })
+          mapElement.addEventListener('pointerdown', handlePointerDown, { passive: true })
+          mapElement.addEventListener('touchstart', handleTouchStart, { passive: true })
+          window.addEventListener('pointerup', handlePointerUp)
+          window.addEventListener('touchend', handleTouchEnd)
+          mapInteractionEventCleanups.push(() => {
+            mapElement.removeEventListener('wheel', handleWheel)
+            mapElement.removeEventListener('pointerdown', handlePointerDown)
+            mapElement.removeEventListener('touchstart', handleTouchStart)
+            window.removeEventListener('pointerup', handlePointerUp)
+            window.removeEventListener('touchend', handleTouchEnd)
+          })
+        }
+
+        const interactionEndEventNames = ['zoomend', 'dragend', 'moveend', 'idle']
+        interactionEndEventNames.forEach((eventName) => {
+          const handler = () => {
+            updateCurrentMapZoomSnapshot()
+            scheduleMapInteractionLiteExit(eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move', eventName)
+            clampScenicCameraBounds(eventName)
+          }
+          map.on?.(eventName, handler)
+          mapInteractionEventCleanups.push(() => map.off?.(eventName, handler))
         })
       } catch (error) {
         perfRecorder.markStageEnd('mapInit')
@@ -935,6 +1021,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }
       visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
       mapVisualEventCleanups.forEach((cleanup) => cleanup())
+      mapInteractionEventCleanups.forEach((cleanup) => cleanup())
+      if (mapInteractionRef.current.exitTimerId !== undefined) {
+        window.clearTimeout(mapInteractionRef.current.exitTimerId)
+        mapInteractionRef.current.exitTimerId = undefined
+      }
       routeLayerRef.current?.setMap?.(null)
       tourRouteProgressLayerRef.current?.setMap?.(null)
       poiMarkerLayerRef.current?.setMap?.(null)
@@ -2347,6 +2438,188 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       setActiveTourStepId(undefined)
       setRoutePreviewProgressIndex(null)
       clearActiveLandmarkHighlight()
+    }
+  }
+
+  function startMapInteractionLiteMode(kind: MapInteractionKind) {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const zoom = readCurrentMapZoom() ?? currentZoomRef.current
+
+    currentZoomRef.current = zoom
+
+    if (mapInteractionRef.current.exitTimerId !== undefined) {
+      window.clearTimeout(mapInteractionRef.current.exitTimerId)
+      mapInteractionRef.current.exitTimerId = undefined
+    }
+
+    const wasInteracting = mapInteractionRef.current.isInteracting
+    mapInteractionRef.current = {
+      isInteracting: true,
+      kind,
+      lastInteractionAt: now
+    }
+
+    if (!wasInteracting) {
+      stopActiveTour('interrupted')
+      if (buddhaTourRouteProgressRef.current.isActive) {
+        resetTourRouteProgressOverlay(true)
+      }
+      setRoutePreviewProgressIndex(null)
+      clearActiveLandmarkHighlight()
+      perfRecorder.recordMapVisualEvent({
+        type: 'mapInteractionStarted',
+        interactionKind: kind,
+        currentZoom: zoom
+      })
+    }
+
+    setMapInteractionSnapshot((current) =>
+      current.isInteracting === true && current.kind === kind && Math.abs(current.currentZoom - zoom) < 0.02
+        ? current
+        : {
+            isInteracting: true,
+            kind,
+            currentZoom: zoom
+          }
+    )
+
+    scheduleMapInteractionLiteExit(kind, 'debounced')
+  }
+
+  function scheduleMapInteractionLiteExit(kind: MapInteractionKind, reason: string) {
+    if (mapInteractionRef.current.exitTimerId !== undefined) {
+      window.clearTimeout(mapInteractionRef.current.exitTimerId)
+    }
+
+    mapInteractionRef.current.exitTimerId = window.setTimeout(() => {
+      const zoom = updateCurrentMapZoomSnapshot()
+      const wasInteracting = mapInteractionRef.current.isInteracting
+      mapInteractionRef.current = {
+        isInteracting: false,
+        lastInteractionAt: typeof performance !== 'undefined' ? performance.now() : Date.now()
+      }
+      setMapInteractionSnapshot((current) =>
+        !current.isInteracting && Math.abs(current.currentZoom - zoom) < 0.02
+          ? current
+          : {
+              isInteracting: false,
+              currentZoom: zoom
+            }
+      )
+
+      if (wasInteracting) {
+        perfRecorder.recordMapVisualEvent({
+          type: 'mapInteractionEnded',
+          interactionKind: kind,
+          currentZoom: zoom,
+          reason
+        })
+      }
+
+      clampScenicCameraBounds(reason)
+    }, SCENIC_CAMERA_BOUNDS.interactionIdleDelayMs)
+  }
+
+  function updateCurrentMapZoomSnapshot() {
+    const zoom = readCurrentMapZoom() ?? currentZoomRef.current
+    currentZoomRef.current = zoom
+    setMapInteractionSnapshot((current) =>
+      Math.abs(current.currentZoom - zoom) < 0.02
+        ? current
+        : {
+            ...current,
+            currentZoom: zoom
+          }
+    )
+    return zoom
+  }
+
+  function readCurrentMapZoom() {
+    const map = mapRef.current
+    const zoom = typeof map?.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+    return Number.isFinite(zoom) ? zoom : undefined
+  }
+
+  function readCurrentMapCenter(): LatLngPoint | undefined {
+    const map = mapRef.current
+    const center = typeof map?.getCenter === 'function' ? map.getCenter() : undefined
+
+    if (!center) {
+      return undefined
+    }
+
+    const lat = typeof center.getLat === 'function' ? Number(center.getLat()) : Number(center.lat)
+    const lng = typeof center.getLng === 'function' ? Number(center.getLng()) : Number(center.lng)
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return undefined
+    }
+
+    return { lat, lng }
+  }
+
+  function clampScenicCameraBounds(reason: string) {
+    const map = mapRef.current
+
+    if (!map || !window.TMap) {
+      return
+    }
+
+    const requestedZoom = readCurrentMapZoom()
+    const currentCenter = readCurrentMapCenter()
+    const clampedZoom =
+      requestedZoom !== undefined
+        ? clampNumber(requestedZoom, SCENIC_CAMERA_BOUNDS.minZoom, SCENIC_CAMERA_BOUNDS.maxZoom)
+        : undefined
+    const clampedCenter = currentCenter ? clampScenicCenter(currentCenter) : undefined
+    const zoomChanged = requestedZoom !== undefined && clampedZoom !== undefined && Math.abs(requestedZoom - clampedZoom) > 0.01
+    const centerChanged = currentCenter && clampedCenter && haversineDistanceMeters(currentCenter, clampedCenter) > 2
+
+    if (!zoomChanged && !centerChanged) {
+      return
+    }
+
+    const nextCenter = clampedCenter ?? currentCenter
+    const nextZoom = clampedZoom ?? requestedZoom
+
+    if (nextZoom !== undefined) {
+      currentZoomRef.current = nextZoom
+      setMapInteractionSnapshot((current) => ({
+        ...current,
+        currentZoom: nextZoom
+      }))
+    }
+
+    perfRecorder.recordMapVisualEvent({
+      type: 'zoomClamped',
+      currentZoom: nextZoom,
+      requestedZoom,
+      clampedZoom: nextZoom,
+      reason
+    })
+
+    if (typeof map.easeTo === 'function' && nextCenter) {
+      const cameraOptions: { center: any; zoom?: number } = {
+        center: new window.TMap.LatLng(nextCenter.lat, nextCenter.lng)
+      }
+
+      if (nextZoom !== undefined) {
+        cameraOptions.zoom = nextZoom
+      }
+
+      map.easeTo(
+        cameraOptions,
+        { duration: SCENIC_CAMERA_BOUNDS.clampDurationMs }
+      )
+      return
+    }
+
+    if (nextCenter && typeof map.setCenter === 'function') {
+      map.setCenter(new window.TMap.LatLng(nextCenter.lat, nextCenter.lng))
+    }
+
+    if (nextZoom !== undefined && typeof map.setZoom === 'function') {
+      map.setZoom(nextZoom)
     }
   }
 
@@ -5246,6 +5519,68 @@ function matchesGardenFilters(asset: LingshanMap3DGardenAsset, filters: GardenAs
   }
 
   return true
+}
+
+function getGardenLodState({
+  currentZoom,
+  debugGarden,
+  isInteracting
+}: {
+  currentZoom: number
+  debugGarden: boolean
+  isInteracting: boolean
+}): GardenLodState {
+  const zoom = Number.isFinite(currentZoom) ? currentZoom : SCENIC_CAMERA_BOUNDS.defaultZoom
+  const lod = SCENIC_CAMERA_BOUNDS.lod
+
+  if (zoom <= lod.farZoom) {
+    return {
+      opacity: debugGarden ? lod.farDebugGardenOpacity : lod.farOpacity,
+      visibleTier: 'none',
+      isInteracting,
+      currentZoom: roundNumber(zoom, 2)
+    }
+  }
+
+  if (isInteracting) {
+    return {
+      opacity: debugGarden ? lod.interactionDebugGardenOpacity : lod.interactionOpacity,
+      visibleTier: 'reduced',
+      isInteracting,
+      currentZoom: roundNumber(zoom, 2)
+    }
+  }
+
+  if (zoom <= lod.reducedZoom) {
+    return {
+      opacity: debugGarden ? lod.reducedDebugGardenOpacity : lod.reducedOpacity,
+      visibleTier: 'reduced',
+      isInteracting,
+      currentZoom: roundNumber(zoom, 2)
+    }
+  }
+
+  return {
+    opacity: lod.normalOpacity,
+    visibleTier: 'full',
+    isInteracting,
+    currentZoom: roundNumber(zoom, 2)
+  }
+}
+
+function clampScenicCenter(center: LatLngPoint) {
+  const distance = haversineDistanceMeters(routeCenter, center)
+
+  if (!Number.isFinite(distance) || distance <= SCENIC_CAMERA_BOUNDS.maxCenterDistanceMeters) {
+    return center
+  }
+
+  const ratio = SCENIC_CAMERA_BOUNDS.maxCenterDistanceMeters / distance
+
+  return {
+    lat: roundNumber(routeCenter.lat + (center.lat - routeCenter.lat) * ratio, 6),
+    lng: roundNumber(routeCenter.lng + (center.lng - routeCenter.lng) * ratio, 6)
+  }
 }
 
 function clampNumber(value: number, min: number, max: number) {

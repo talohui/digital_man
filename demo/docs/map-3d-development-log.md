@@ -10291,3 +10291,32 @@ mode: 'none'
 ### 约束
 
 本轮只重排启动时序、加载慢提示和首屏黑底暴露问题。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、GLB 文件、模型压缩、树群生成算法、POI 语义、地标 scale / height / rotationY / offset、梵宫 footprint mask、游客端 raw GLB 策略、佛境巡游相机逻辑或路线预演逻辑。
+
+## 2026-06-14｜阶段：沙盘视野边界与交互轻量模式
+
+### 本次目标
+
+优化 `/map-3d-guide-c` 手动缩放 / 拖动流畅性，避免用户缩得太远或拖得太偏导致景区主体变小、落到屏幕角落。本轮同时增加树群 zoom LOD，降低交互期 199 个 GLB overlay 带来的视觉和渲染压力。
+
+### 修改文件
+
+- `src/lib/map3dCamera.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/hooks/useGardenAssetOverlays.ts`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增 `SCENIC_CAMERA_BOUNDS`，集中管理沙盘最远 / 最近 zoom、中心点最大偏移距离、交互恢复延迟和 garden LOD 参数。
+- 地图初始化增加 `minZoom` / `maxZoom`，并在交互结束后做低频边界回弹。
+- 新增 interaction lite mode：用户 wheel / pointer / touch 交互开始时停止巡游 / 预演，清理临时 route progress 和地标高亮。
+- 树群 GLB 新增 zoom / interaction LOD，远景或交互中仅降低现有 overlay opacity，不销毁、不重建。
+- debugPerf 显示当前 zoom、interaction 状态、garden LOD、garden opacity 和 live overlay count。
+
+### 约束
+
+本轮只优化手动交互流畅性和沙盘视野边界。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、路线数据、POI 语义、地标 scale / height / rotationY / offset、GLB 文件、模型压缩、树群生成算法、默认 vegetation zones、keepout zones 或 assets 数据。

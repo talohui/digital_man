@@ -869,3 +869,49 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - loading curtain duration
 
 这些事件只在阶段变化时记录，不参与逐帧采样，不会放大运行时开销。
+
+## 27. 手动交互轻量模式与树群 LOD
+
+### 问题修正
+
+`/map-3d-guide-c` 当前约有 199 个 GLB 树群 overlay。手动缩放 / 拖动时，如果所有树群保持完整不变，同时路线、POI、地标和编辑 overlay 继续渲染，会增加交互期压力。缩得过远时，单棵树在视觉上也不再有意义，反而形成噪声。
+
+### 沙盘边界
+
+新增集中配置 `SCENIC_CAMERA_BOUNDS`：
+
+- 限制最远 / 最近 zoom，避免退回普通城市大地图或无限近看。
+- 限制地图中心离路线中心的最大距离，避免景区主体被拖到画面角落。
+- 对超出边界的情况在 `zoomend` / `moveend` / `idle` 后温和回弹，避免缩放过程中持续拉扯用户。
+
+### 交互轻量模式
+
+用户 wheel / pointer / touch 交互开始时进入 interaction lite mode：
+
+- 停止佛境巡游 / 路线预演。
+- 清理巡游 route progress 和地标 active highlight。
+- 只用 ref 记录高频运行态，React state 只做低频快照。
+- 交互结束后约 460ms 恢复普通视觉。
+
+### Garden LOD
+
+`useGardenAssetOverlays` 新增 `gardenLodState`：
+
+- overlay 生命周期仍只依赖 map ready、资产列表、enabled 等稳定输入。
+- zoom / interaction 不触发 remove / recreate。
+- LOD 只对已存在的 GLTFModel 调用 `setOpacity`。
+- normal scenic zoom：opacity 1。
+- interacting：opacity 约 0.36，debugGarden 约 0.58。
+- far zoom：opacity 约 0.08，debugGarden 约 0.22。
+
+### debugPerf
+
+面板新增：
+
+- current zoom
+- interaction kind / active
+- garden LOD tier
+- garden opacity
+- live garden overlay count
+
+相关事件只在交互状态或 LOD tier 变化时记录，不逐帧记录，不应造成诊断面板卡顿。

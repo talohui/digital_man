@@ -971,3 +971,34 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 本轮只重排启动阶段时序和首屏 gating。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、GLB 文件、模型压缩、树群生成算法、POI 语义、地标 transform、菩提大道、梵宫 footprint mask、佛境巡游相机逻辑或路线预演逻辑。
+
+## 阶段：沙盘视野边界与交互轻量模式
+
+### 背景问题
+
+手动缩放 / 拖动时，199 个 GLB 树群和多层 route / POI overlay 同时参与渲染，容易造成缩放手感不够流畅。用户缩得过远时，灵山核心景区会缩到画面角落或变得过小，削弱 3D 沙盘导览感。
+
+### 改动摘要
+
+- 新增 `SCENIC_CAMERA_BOUNDS`，集中配置沙盘 zoom 范围、中心点最大偏移距离、交互恢复延迟和 garden LOD 参数。
+- 地图初始化增加 `minZoom` / `maxZoom`，并在 `zoomend` / `moveend` / `idle` 后做温和兜底回弹。
+- 新增用户交互轻量模式：wheel / pointer / touch 开始时停止佛境巡游和路线预演，清理临时 progress 与地标高亮。
+- 交互结束后延迟约 460ms 恢复普通视觉层级，避免缩放过程中频繁切换。
+- 新增树群 zoom LOD：远景或交互中只降低现有 GLB overlay opacity，不销毁、不重建。
+- debugGarden 下保留更高可见度，避免编辑时完全看不见树群。
+
+### debugPerf
+
+新增诊断事件 / 字段：
+
+- `mapInteractionStarted`
+- `mapInteractionEnded`
+- `zoomClamped`
+- `gardenLodChanged`
+- `gardenInteractionLiteMode`
+- `gardenOpacityUpdated`
+- 当前 zoom、interaction 状态、garden LOD tier、garden opacity、live garden overlay count
+
+### 边界
+
+本轮只优化手动缩放 / 拖动流畅性、沙盘视野边界和树群显示策略。未修改 Tencent key、`mapStyleId: 'style1'`、底图、路线数据、POI 语义、地标 transform、GLB 文件、模型压缩、树群生成算法或默认资产数据。

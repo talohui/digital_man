@@ -14,11 +14,19 @@ export type GardenModelReport = {
   errorIds: string[]
 }
 
+export type GardenLodState = {
+  opacity: number
+  visibleTier: 'none' | 'reduced' | 'full'
+  isInteracting: boolean
+  currentZoom?: number
+}
+
 type UseGardenAssetOverlaysOptions = {
   active: boolean
   assets: LingshanMap3DGardenAsset[]
   debugPerf?: boolean
   debugGarden: boolean
+  gardenLodState?: GardenLodState
   map: any
   mapReady: boolean
   perfRecorder?: Map3DPerfRecorder
@@ -34,6 +42,12 @@ type GardenOverlayHandle = {
 }
 
 const GARDEN_ASSET_BATCH_SIZE = 16
+
+const defaultGardenLodState: GardenLodState = {
+  opacity: 1,
+  visibleTier: 'full',
+  isInteracting: false
+}
 
 const emptyGardenModelReport: GardenModelReport = {
   createdCount: 0,
@@ -51,6 +65,7 @@ export function useGardenAssetOverlays({
   assets,
   debugPerf = false,
   debugGarden,
+  gardenLodState = defaultGardenLodState,
   map,
   mapReady,
   perfRecorder,
@@ -63,12 +78,18 @@ export function useGardenAssetOverlays({
   const pendingTimersRef = useRef<number[]>([])
   const pendingAnimationFramesRef = useRef<number[]>([])
   const gardenTotalSignatureRef = useRef('')
+  const gardenLodSignatureRef = useRef('')
+  const gardenLodStateRef = useRef<GardenLodState>(gardenLodState)
   const perfRecorderRef = useRef<Map3DPerfRecorder | undefined>(perfRecorder)
   const [report, setReport] = useState<GardenModelReport>(emptyGardenModelReport)
 
   useEffect(() => {
     perfRecorderRef.current = perfRecorder
   }, [perfRecorder])
+
+  useEffect(() => {
+    gardenLodStateRef.current = gardenLodState
+  }, [gardenLodState])
 
   const visibleAssets = useMemo(
     () =>
@@ -149,7 +170,7 @@ export function useGardenAssetOverlays({
       const existing = overlayByIdRef.current.get(asset.id)
 
       if (existing) {
-        updateGardenModel(existing.model, asset)
+        updateGardenModel(existing.model, applyGardenLodToAsset(asset, gardenLodStateRef.current))
         existing.asset = asset
       }
     })
@@ -201,6 +222,7 @@ export function useGardenAssetOverlays({
           overlayByIdRef,
           perfRecorder,
           activeLoadGenerationRef,
+          gardenLodStateRef,
           setReport
         })
       })
@@ -232,10 +254,34 @@ export function useGardenAssetOverlays({
       const existing = overlayByIdRef.current.get(asset.id)
 
       if (existing) {
-        updateGardenModel(existing.model, asset)
+        updateGardenModel(existing.model, applyGardenLodToAsset(asset, gardenLodStateRef.current))
       }
     })
   }, [active, assets, debugGarden, rerouteActive, routeProgressRatio, shouldLoadGardenAssets])
+
+  useEffect(() => {
+    const signature = `${gardenLodState.visibleTier}:${gardenLodState.opacity}:${gardenLodState.isInteracting}:${gardenLodState.currentZoom ?? 'unknown'}`
+
+    if (gardenLodSignatureRef.current === signature) {
+      return
+    }
+
+    gardenLodSignatureRef.current = signature
+    gardenLodStateRef.current = gardenLodState
+
+    overlayByIdRef.current.forEach((handle) => {
+      updateGardenModel(handle.model, applyGardenLodToAsset(handle.asset, gardenLodState))
+    })
+
+    perfRecorder?.recordMapVisualEvent({
+      type: gardenLodState.isInteracting ? 'gardenInteractionLiteMode' : 'gardenOpacityUpdated',
+      currentZoom: gardenLodState.currentZoom,
+      gardenLodTier: gardenLodState.visibleTier,
+      gardenOpacity: gardenLodState.opacity,
+      liveGardenOverlayCount: overlayByIdRef.current.size,
+      reason: gardenLodState.isInteracting ? 'interaction-lite' : 'zoom-lod'
+    })
+  }, [gardenLodState, perfRecorder])
 
   return {
     report,
@@ -295,6 +341,7 @@ function createGardenModel({
   overlayByIdRef,
   perfRecorder,
   activeLoadGenerationRef,
+  gardenLodStateRef,
   setReport
 }: {
   asset: LingshanMap3DGardenAsset
@@ -304,6 +351,7 @@ function createGardenModel({
   overlayByIdRef: MutableRefObject<Map<string, GardenOverlayHandle>>
   perfRecorder?: Map3DPerfRecorder
   activeLoadGenerationRef: MutableRefObject<number>
+  gardenLodStateRef: MutableRefObject<GardenLodState>
   setReport: Dispatch<SetStateAction<GardenModelReport>>
 }) {
   if (!isGardenLoadGenerationActive(activeLoadGenerationRef, generation)) {
@@ -313,7 +361,7 @@ function createGardenModel({
   const existing = overlayByIdRef.current.get(asset.id)
 
   if (existing) {
-    updateGardenModel(existing.model, asset)
+    updateGardenModel(existing.model, applyGardenLodToAsset(asset, gardenLodStateRef.current))
     existing.asset = asset
     perfRecorder?.recordGardenOverlayEvent({
       duplicatePrevented: 1,
@@ -340,9 +388,9 @@ function createGardenModel({
       position: new window.TMap.LatLng(asset.location.lat, asset.location.lng, asset.height),
       rotation: [0, asset.yaw, 0],
       scale: asset.scale,
-      opacity: asset.opacity
+      opacity: applyGardenLodToAsset(asset, gardenLodStateRef.current).opacity
     })
-    updateGardenModel(model, asset)
+    updateGardenModel(model, applyGardenLodToAsset(asset, gardenLodStateRef.current))
 
     if (!isGardenLoadGenerationActive(activeLoadGenerationRef, generation)) {
       teardownGardenModel(model)
@@ -414,6 +462,13 @@ function shouldRecreateGardenOverlay(current: LingshanMap3DGardenAsset, next: Li
 function updateGardenModel(model: any, asset: LingshanMap3DGardenAsset) {
   if (typeof model.setOpacity === 'function') {
     model.setOpacity(asset.opacity)
+  }
+}
+
+function applyGardenLodToAsset(asset: LingshanMap3DGardenAsset, lodState: GardenLodState) {
+  return {
+    ...asset,
+    opacity: Number(Math.max(0, Math.min(1, asset.opacity * lodState.opacity)).toFixed(3))
   }
 }
 

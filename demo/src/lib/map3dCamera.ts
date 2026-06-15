@@ -237,6 +237,26 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
   }
 }
 
+export const SCENIC_CAMERA_BOUNDS = {
+  minZoom: 16.72,
+  maxZoom: 19.78,
+  defaultZoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom,
+  maxCenterDistanceMeters: 1050,
+  clampDurationMs: 620,
+  interactionIdleDelayMs: 460,
+  lod: {
+    farZoom: 16.74,
+    reducedZoom: 16.82,
+    normalOpacity: 1,
+    interactionOpacity: 0.36,
+    interactionDebugGardenOpacity: 0.58,
+    farOpacity: 0.08,
+    farDebugGardenOpacity: 0.22,
+    reducedOpacity: 0.18,
+    reducedDebugGardenOpacity: 0.4
+  }
+} as const
+
 export type FlyMap3DCameraOptions = {
   map: any
   TMap: any

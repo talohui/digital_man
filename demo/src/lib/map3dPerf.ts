@@ -101,6 +101,12 @@ export type Map3DPerfMapVisualEventType =
   | 'gardenLoadStartedAfterMapReady'
   | 'loadingCurtainShown'
   | 'loadingCurtainHidden'
+  | 'mapInteractionStarted'
+  | 'mapInteractionEnded'
+  | 'zoomClamped'
+  | 'gardenLodChanged'
+  | 'gardenInteractionLiteMode'
+  | 'gardenOpacityUpdated'
 
 export type Map3DStartupStage =
   | 'loadingSdk'
@@ -120,6 +126,13 @@ export type Map3DPerfMapVisualEvent = {
   curtainDurationMs?: number
   reason?: string
   startupStage?: Map3DStartupStage
+  interactionKind?: 'zoom' | 'drag' | 'move'
+  currentZoom?: number
+  requestedZoom?: number
+  clampedZoom?: number
+  gardenLodTier?: 'none' | 'reduced' | 'full'
+  gardenOpacity?: number
+  liveGardenOverlayCount?: number
 }
 
 export type Map3DPerfSnapshot = {
@@ -149,6 +162,11 @@ export type Map3DPerfSnapshot = {
   gardenOverlayDuplicatePrevented: number
   gardenOverlayLiveCount: number
   gardenLoadGeneration: number
+  currentZoom?: number
+  mapInteracting: boolean
+  mapInteractionKind?: 'zoom' | 'drag' | 'move'
+  gardenLodTier: 'none' | 'reduced' | 'full'
+  gardenOpacity: number
   landmarkTotal: number
   landmarkLoaded: number
   landmarkFailed: number
@@ -264,6 +282,11 @@ type MutableMap3DPerfState = {
   gardenOverlayDuplicatePrevented: number
   gardenOverlayLiveCount: number
   gardenLoadGeneration: number
+  currentZoom?: number
+  mapInteracting: boolean
+  mapInteractionKind?: 'zoom' | 'drag' | 'move'
+  gardenLodTier: 'none' | 'reduced' | 'full'
+  gardenOpacity: number
   landmarkStartedAt?: number
   landmarkTotal: number
   landmarkLoaded: number
@@ -607,6 +630,26 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         state.loadingCurtainDurationMs =
           event.curtainDurationMs ??
           (state.loadingCurtainShownMs !== undefined ? roundDuration(elapsedMs - state.loadingCurtainShownMs) : undefined)
+      } else if (event.type === 'mapInteractionStarted') {
+        state.mapInteracting = true
+        state.mapInteractionKind = event.interactionKind
+      } else if (event.type === 'mapInteractionEnded') {
+        state.mapInteracting = false
+        state.mapInteractionKind = undefined
+      } else if (event.type === 'gardenLodChanged' || event.type === 'gardenInteractionLiteMode' || event.type === 'gardenOpacityUpdated') {
+        if (event.gardenLodTier) {
+          state.gardenLodTier = event.gardenLodTier
+        }
+        if (event.gardenOpacity !== undefined) {
+          state.gardenOpacity = event.gardenOpacity
+        }
+      }
+
+      if (event.currentZoom !== undefined) {
+        state.currentZoom = event.currentZoom
+      }
+      if (event.liveGardenOverlayCount !== undefined) {
+        state.gardenOverlayLiveCount = event.liveGardenOverlayCount
       }
 
       notify()
@@ -659,6 +702,9 @@ function createInitialState(): MutableMap3DPerfState {
     gardenOverlayDuplicatePrevented: 0,
     gardenOverlayLiveCount: 0,
     gardenLoadGeneration: 0,
+    mapInteracting: false,
+    gardenLodTier: 'full',
+    gardenOpacity: 1,
     landmarkTotal: 0,
     landmarkLoaded: 0,
     landmarkFailed: 0,
@@ -712,6 +758,11 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     gardenOverlayDuplicatePrevented: state.gardenOverlayDuplicatePrevented,
     gardenOverlayLiveCount: state.gardenOverlayLiveCount,
     gardenLoadGeneration: state.gardenLoadGeneration,
+    currentZoom: state.currentZoom,
+    mapInteracting: state.mapInteracting,
+    mapInteractionKind: state.mapInteractionKind,
+    gardenLodTier: state.gardenLodTier,
+    gardenOpacity: state.gardenOpacity,
     landmarkTotal: state.landmarkTotal,
     landmarkLoaded: state.landmarkLoaded,
     landmarkFailed: state.landmarkFailed,
