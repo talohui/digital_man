@@ -16,6 +16,7 @@ import {
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
 import {
   getMapModelOverlayByPoiId,
+  getMapModelOverlayInspectorId,
   getVisibleMapModelOverlays,
   type LingshanMapModelOverlay
 } from '../data/lingshanMapModelOverlays'
@@ -232,6 +233,21 @@ const MAP_3D_GUIDE_BASE_MAP = {
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
 const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v7-forest-patches'
 const MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY = 'lingshan-map-3d-guide-garden-editor-v1'
+const coreLandmarkReferenceIds = [
+  'giant_buddha',
+  'fan_gong',
+  'puti_avenue',
+  'jiulong_guanyu',
+  'lingshan_dazhaobi',
+  'wuyin_tancheng',
+  'foshou_square',
+  'foqian_square',
+  'xiangfu_temple',
+  'sansheng_hall',
+  'baizi_mile',
+  'manlong_flying_tower',
+  'shengjing_square'
+]
 const defaultGardenFilters: GardenAssetFilterState = {
   zoneId: 'all',
   kind: 'all',
@@ -384,7 +400,18 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
-  const landmarkModelOverlays = useMemo(() => orderMapModelOverlaysForLoading(getVisibleMapModelOverlays()), [])
+  const landmarkModelOverlays = useMemo(() => {
+    const overlays = getVisibleMapModelOverlays()
+
+    if (!debugGarden) {
+      return orderMapModelOverlaysForLoading(overlays)
+    }
+
+    const coreIds = new Set(coreLandmarkReferenceIds)
+    return orderMapModelOverlaysForLoading(
+      overlays.filter((overlay) => coreIds.has(getMapModelOverlayInspectorId(overlay)))
+    )
+  }, [debugGarden])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [isMapCreated, setIsMapCreated] = useState(false)
   const [isMapIdle, setIsMapIdle] = useState(false)
@@ -446,7 +473,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
   const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
   const landmarkInspector = useLandmarkModelInspector({
-    active: debugPerf,
+    active: debugPerf || debugGarden,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
     overlays: landmarkModelOverlays,

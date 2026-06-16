@@ -915,3 +915,39 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - live garden overlay count
 
 相关事件只在交互状态或 LOD tier 变化时记录，不逐帧记录，不应造成诊断面板卡顿。
+
+## 28. 三处新增 runtime-v1 地标 GLB 接入边界
+
+### 本轮接入
+
+新增或切换 3 个核心景点 GLB runtime 配置：
+
+- 菩提大道 `puti_avenue`：`/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`，约 23 MB。
+- 九龙灌浴 `jiulong_guanyu`：`/models/lingshan/optimized/jiulong-guanyu.runtime-v1.glb`，约 44 MB。
+- 灵山大照壁 `lingshan_dazhaobi` / POI `lingshan_wall`：`/models/lingshan/optimized/lingshan-dazhaobi.runtime-v1.glb`，约 28 MB。
+
+### 加载策略
+
+- GLB 仍通过 public URL 字符串配置，不进入 TypeScript / Vite JS chunk。
+- 普通 `/map-3d-guide-c` 不默认加载 raw GLB。
+- `/map-3d-guide-c?debugPerf=1` 的 Landmark Inspector 可单体加载、卸载、聚焦和校准这 3 个模型，并记录耗时和错误。
+- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 的核心地标参照层可加载这 3 个 runtime-v1 地标。
+- 旧 464M `bodhi-avenue.glb` 不再被正式 `modelUrl` 引用，本轮不处理、不压缩、不提交。
+
+## 29. 三处新增地标校准固化
+
+### 固化结果
+
+三处新增 runtime-v1 模型已完成人工校准并写入默认 overlay 配置：
+
+- 灵山大照壁：scale 150、height 6、rotationY 28、lngOffset -0.00005、latOffset 0。
+- 菩提大道 runtime-v1：scale 180、height 11、rotationY 30、lngOffset 0.00009、latOffset 0.00005。
+- 九龙灌浴：scale 240、height 51、rotationY 0、lngOffset 0.00003、latOffset 0。
+
+### 加载与诊断边界
+
+- 三个模型仍通过 public URL 加载，不进入 JS chunk。
+- 三个模型已进入 Landmark Inspector，可继续单独加载、卸载、聚焦和校准。
+- debugGarden 核心地标参照层包含这三处地标。
+- debugPerf 本地 calibration draft 仍可覆盖默认 transform，便于后续微调。
+- 旧 464M 菩提大道 raw 文件仍不处理、不提交、不作为运行时引用。

@@ -10320,3 +10320,33 @@ mode: 'none'
 ### 约束
 
 本轮只优化手动交互流畅性和沙盘视野边界。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、路线数据、POI 语义、地标 scale / height / rotationY / offset、GLB 文件、模型压缩、树群生成算法、默认 vegetation zones、keepout zones 或 assets 数据。
+
+## 2026-06-16｜阶段：三处新增核心景点校准 patch 固化
+
+### 本次目标
+
+固化灵山大照壁、菩提大道 runtime-v1、九龙灌浴三处新增核心地标的人工校准 patch，并提交对应配置、文档和 runtime-v1 GLB。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/lingshan-glb-optimization-trial.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+- `public/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`
+- `public/models/lingshan/optimized/jiulong-guanyu.runtime-v1.glb`
+- `public/models/lingshan/optimized/lingshan-dazhaobi.runtime-v1.glb`
+
+### 功能结果
+
+- 灵山大照壁 `lingshan_dazhaobi` 固化：scale 150、height 6、rotationY 28、lngOffset -0.00005、latOffset 0。
+- 菩提大道 `puti_avenue` runtime-v1 固化：scale 180、height 11、rotationY 30、lngOffset 0.00009、latOffset 0.00005。
+- 九龙灌浴 `jiulong_guanyu` 固化：scale 240、height 51、rotationY 0、lngOffset 0.00003、latOffset 0。
+- 三个模型继续支持 Landmark Inspector 加载、卸载、聚焦、校准和复制 patch。
+- debugGarden 核心地标参照层继续包含三处新增地标。
+
+### 约束
+
+旧 464M `bodhi-avenue.glb` 仍不处理、不提交、不引用。未提交 raw / safe-v1 / draco，未修改 Tree Candidate Lab、树群算法、默认树群数据、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'` 或 `fan_gong.footprintMask`。

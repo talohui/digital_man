@@ -1002,3 +1002,24 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 本轮只优化手动缩放 / 拖动流畅性、沙盘视野边界和树群显示策略。未修改 Tencent key、`mapStyleId: 'style1'`、底图、路线数据、POI 语义、地标 transform、GLB 文件、模型压缩、树群生成算法或默认资产数据。
+
+## 阶段：新增三处核心景点人工校准 patch 固化
+
+### 改动摘要
+
+- 灵山大照壁 `lingshan_dazhaobi` 固化人工校准：scale 150、height 6、rotationY 28、lngOffset -0.00005、latOffset 0。
+- 菩提大道 `puti_avenue` runtime-v1 固化人工校准：scale 180、height 11、rotationY 30、lngOffset 0.00009、latOffset 0.00005。
+- 九龙灌浴 `jiulong_guanyu` 固化人工校准：scale 240、height 51、rotationY 0、lngOffset 0.00003、latOffset 0。
+- 三处模型继续使用 runtime-v1 路径，并已进入 Landmark Inspector 与 debugGarden 核心地标参照层。
+
+### 资产边界
+
+- 菩提大道 runtime-v1 约 23M。
+- 九龙灌浴 runtime-v1 约 44M。
+- 灵山大照壁 runtime-v1 约 28M。
+- 旧 464M 菩提大道 raw 文件仍不处理、不提交、不作为运行时引用。
+- debugPerf 本地 calibration draft 仍可覆盖默认配置，方便后续微调。
+
+### 边界
+
+本轮只固化三处新增地标 transform 和对应文档 / runtime-v1 资产。未修改 Tree Candidate Lab、树群算法、默认树群数据、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'`，也未重新启用 `fan_gong.footprintMask`。
