@@ -10292,6 +10292,40 @@ mode: 'none'
 
 本轮只重排启动时序、加载慢提示和首屏黑底暴露问题。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、GLB 文件、模型压缩、树群生成算法、POI 语义、地标 scale / height / rotationY / offset、梵宫 footprint mask、游客端 raw GLB 策略、佛境巡游相机逻辑或路线预演逻辑。
 
+## 2026-06-14｜阶段：debugGarden 毛茸茸树木候选资产池
+
+### 本次目标
+
+为 `/map-3d-guide-c?debugGarden=1` 接入 3-5 个更圆冠、更蓬松、更有灌木感的开源树木 GLB 候选，用于后续人工测试“佛境沙盘 / 青绿园林 / 林团式树群”方向。本轮只做候选池，不替换默认树群。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `docs/lingshan-tree-asset-candidates.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+- `public/models/lingshan/tree-candidates/*.glb`
+
+### 功能结果
+
+- 新增 5 个 debugGarden 候选类型：`fluffy_round_tree`、`bushy_canopy_tree`、`dense_shrub_cluster`、`soft_forest_clump`、`fluffy_tree_mix`。
+- 候选 GLB 放入 `public/models/lingshan/tree-candidates/`，采用英文 kebab-case 文件名。
+- debugGarden 资产选择中可选这些候选树，单点添加时使用保守默认 scale / height。
+- 默认树群池、默认资产比例、vegetation zones、keepout zones 和默认 assets 不变。
+- 新增 `docs/lingshan-tree-asset-candidates.md`，记录候选来源、许可证、原始路径、转换后路径、体积和接入状态。
+
+### 资产与许可
+
+- 本轮实际接入资源来自 Kenney Nature Kit 官方 CC0 源包，许可明确、无需署名。
+- Quaternius Stylized Nature MegaKit 已评估为 CC0 候选，但官方下载走 itch.io 流程，没有稳定直接下载链接，因此未导入。
+- 候选 GLB 未使用 Draco、Meshopt、KTX2、WebP 或 AVIF；仅移除 `KHR_materials_unlit` 扩展标记。
+
+### 约束
+
+本轮未替换现有 Kenney 树群，未修改默认 199 个树群资产、树群生成算法、路线逻辑、POI 语义、地标模型配置、Tencent key、`mapStyleId: 'style1'`、底图、菩提大道或游客端默认加载策略。
+
 ## 2026-06-14｜阶段：沙盘视野边界与交互轻量模式
 
 ### 本次目标
@@ -10321,16 +10355,76 @@ mode: 'none'
 
 本轮只优化手动交互流畅性和沙盘视野边界。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、路线数据、POI 语义、地标 scale / height / rotationY / offset、GLB 文件、模型压缩、树群生成算法、默认 vegetation zones、keepout zones 或 assets 数据。
 
-## 2026-06-16｜阶段：三处新增核心景点校准 patch 固化
+## 2026-06-15｜阶段：debugGarden 空白园林试验场
 
 ### 本次目标
 
-固化灵山大照壁、菩提大道 runtime-v1、九龙灌浴三处新增核心地标的人工校准 patch，并提交对应配置、文档和 runtime-v1 GLB。
+把 `/map-3d-guide-c?debugGarden=1&debugPerf=1` 改成候选树人工比选环境：默认隐藏现有 199 个树群，自动加载核心地标参照，并提供毛茸茸 / 圆冠树候选的单株、林团和横向对比生成能力。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/components/map3d/GardenDebugWizard.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/lingshan-tree-asset-candidates.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- debugGarden 默认隐藏默认 199 个树群 overlay，但不删除、不修改默认资产数据。
+- 新增默认树群显示 / 隐藏开关，普通 `/map-3d-guide-c` 不受影响。
+- 地图 visual ready 后自动加载 10 个核心地标参照，使用现有 safe-v2 runtime modelUrl。
+- 新增 Tree Candidate Lab：候选树类型、林团模式、数量、半径、最小间距、scale、height 和 seed 可调。
+- 支持点击地图添加测试林团、一键生成 5 种候选对比、清空 / 删除测试树、复制测试树 assets、保存 / 清空测试草稿。
+- 测试树草稿使用 `lingshan_tree_candidate_lab_draft_v1`，与默认 garden 编辑草稿分离。
+- debugPerf 展示 Tree Candidate Lab 状态、默认 / 测试树 live overlay count 和候选生成事件。
+
+### 约束
+
+本轮未修改 Tencent key、`mapStyleId: 'style1'`、路线逻辑、POI 语义、地标模型配置、GLB 文件、模型压缩、菩提大道、树群生成算法、默认 vegetation zones、keepout zones 或默认 199 个 assets 数据。
+
+## 2026-06-15｜阶段：三处新增核心景点 runtime-v1 GLB 接入
+
+### 本次目标
+
+接入用户已放入 `public/models/lingshan/optimized/` 的新版菩提大道、九龙灌浴、灵山大照壁 runtime-v1 GLB。本轮只做模型配置、POI / anchor 绑定、Landmark Inspector 支持和文档记录。
 
 ### 修改文件
 
 - `src/data/lingshanMapModelOverlays.ts`
 - `src/pages/Map3DGuidePage.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+- `docs/lingshan-glb-optimization-trial.md`
+
+### 功能结果
+
+- 菩提大道沿用现有 POI id `puti_avenue`，modelUrl 切换到 `/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`，不再引用旧 464M raw `bodhi-avenue.glb`。
+- 九龙灌浴沿用现有 POI id `jiulong_guanyu`，接入 `/models/lingshan/optimized/jiulong-guanyu.runtime-v1.glb`。
+- 灵山大照壁使用现有 POI anchor `lingshan_wall`，Inspector id 为 `lingshan_dazhaobi`，接入 `/models/lingshan/optimized/lingshan-dazhaobi.runtime-v1.glb`。
+- 三个模型进入 Landmark Inspector，可单独加载、卸载、聚焦、校准和复制 patch。
+- debugGarden 核心地标参照层加入这三处 runtime-v1 地标。
+
+### 后续校准
+
+三处模型的初始 transform 仅用于调试入口，不代表最终校准。后续需要人工确认 scale、height、rotationY、lngOffset 和 latOffset。树候选方向暂时暂停，后续树木可考虑用 Meshy AI 统一生成更明亮、更毛茸茸的树团资产。
+
+### 约束
+
+本轮未修改 GLB 文件、未压缩模型、未处理旧 464M `bodhi-avenue.glb`、未修改 Tree Candidate Lab、未删除树候选、未替换默认树群、未修改树群生成算法、POI 语义、路线逻辑、Tencent key、`mapStyleId: 'style1'`、底图配色或相机巡游。
+
+## 2026-06-16｜阶段：三处新增核心景点校准 patch 固化
+
+### 本次目标
+
+固化灵山大照壁、菩提大道 runtime-v1、九龙灌浴三处新增核心地标的人工校准 patch，并准备提交对应配置、文档和 runtime-v1 GLB。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
 - `docs/lingshan-glb-optimization-trial.md`
 - `docs/map-3d-guide-c-optimization-log.md`
 - `docs/map-3d-guide-performance-notes.md`
@@ -10350,3 +10444,90 @@ mode: 'none'
 ### 约束
 
 旧 464M `bodhi-avenue.glb` 仍不处理、不提交、不引用。未提交 raw / safe-v1 / draco，未修改 Tree Candidate Lab、树群算法、默认树群数据、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'` 或 `fan_gong.footprintMask`。
+
+## 2026-06-16｜阶段：祥符禅寺 3D 底座实验入口
+
+### 本次目标
+
+为 `xiangfu_temple` 增加真正 3D 场地底座 / 低矮石台的调试机制，解决建筑 GLB 与腾讯白模穿插、缺少场地承托的问题。底座不使用 polygon footprint mask，先作为 debugPerf Inspector 实验功能。
+
+### 修改文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- `xiangfu_temple` 新增 companion model：`xiangfu_temple_base`。
+- 底座模型路径约定为 `/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+- 底座默认关闭，不进入普通游客页默认加载。
+- Landmark Inspector 在选择祥符禅寺时显示“祥符禅寺 3D 底座实验”，支持加载 / 卸载 / 聚焦 / 校准 / 保存草稿 / 复制 patch。
+- 底座校准草稿进入 `lingshan_landmark_calibration_draft_v1` 的 companion 分支，不覆盖主模型校准。
+- debugPerf 记录 companion model 加载、失败、卸载和校准保存事件。
+
+### 约束
+
+本轮未生成或修改底座 GLB。若 `xiangfu-temple-base.runtime-v1.glb` 尚未存在，Inspector 会提示文件缺失，主模型不受影响。未修改树群、Tree Candidate Lab、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'`，未重新启用 `fan_gong.footprintMask`，未提交或 push。
+
+## 2026-06-16｜阶段：祥符禅寺轻量 3D 底座 GLB 生成
+
+### 本次目标
+
+生成一个非常轻量的祥符禅寺低矮石台 / 院落铺装 GLB，用于配合上一阶段的 companion/base model Inspector 入口，快速验证建筑承托感和腾讯白模穿插缓解效果。
+
+### 修改 / 新增文件
+
+- `scripts/create-xiangfu-temple-base.mjs`
+- `public/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 使用 Three.js + GLTFExporter 生成二进制 GLB，无新增 npm 依赖。
+- 模型为纯几何低矮石台：主 slab、顶面铺装线、四周边框、前侧浅台阶。
+- 材质为浅米灰石材纯色，不含贴图、不含文字、不含建筑、树、人或屋顶。
+- 文件大小约 35KB，适合 debugPerf Inspector 快速加载测试。
+- 目标路径与 `xiangfu_temple_base` companion model 配置一致：`/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+
+### 约束
+
+本轮未修改祥符禅寺主模型 transform，未修改游客页默认加载策略，未使用 polygon footprint mask 或 TMap polygon mask，未修改树群、路线数据、POI 语义、Tencent key、`mapStyleId: 'style1'`，未提交或 push。后续可根据页面调参结果决定是否用 Meshy / Blender 制作精细版。
+
+## 2026-06-16｜阶段：祥符禅寺主模型与 3D 底座校准固化
+
+### 本次目标
+
+固化祥符禅寺主模型与 `xiangfu_temple_base` 3D 底座的人工校准结果，并提交底座 GLB、生成脚本、配置和文档。
+
+### 修改 / 新增文件
+
+- `src/data/lingshanMapModelOverlays.ts`
+- `src/hooks/useLandmarkModelInspector.ts`
+- `src/components/map3d/LandmarkGLBInspector.tsx`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `scripts/create-xiangfu-temple-base.mjs`
+- `public/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 祥符禅寺主模型固化：scale 670、height 23、rotationY 31、lngOffset 0.00001、latOffset -0.00001。
+- 祥符禅寺底座固化并默认启用：scale 120、height -2、rotationY 31、lngOffset -0.00005、latOffset 0.00007。
+- 底座继续作为 `xiangfu_temple` 的 companion model，不合并进主模型。
+- 底座 GLB 为 Three.js 纯几何生成的轻量低矮石台 / 院落铺装，约 35KB。
+- 底座用于增强祥符禅寺落地感、弱化腾讯白模穿插。
+
+### 约束
+
+本轮未修改其它地标 transform，未修改树群算法、路线数据、POI 语义、Tencent key、`mapStyleId: 'style1'`，未处理菩提大道，未提交 raw / safe-v1 / draco / 旧 464M 菩提大道 GLB。仍不采用 polygon mask 方案，`fan_gong.footprintMask` 保持默认关闭。

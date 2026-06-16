@@ -870,7 +870,37 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 
 这些事件只在阶段变化时记录，不参与逐帧采样，不会放大运行时开销。
 
-## 27. 手动交互轻量模式与树群 LOD
+## 27. debugGarden 树木候选池性能边界
+
+### 本轮接入
+
+为 debugGarden 新增 5 个毛茸茸 / 圆冠 / 灌木感更强的树木候选 GLB：
+
+- `fluffy_round_tree`
+- `bushy_canopy_tree`
+- `dense_shrub_cluster`
+- `soft_forest_clump`
+- `fluffy_tree_mix`
+
+候选文件位于 `public/models/lingshan/tree-candidates/`，单体体积约 4.5 KB 到 31 KB，均未使用 Draco、Meshopt、KTX2、WebP 或 AVIF。
+
+### 加载边界
+
+- 候选只加入 debugGarden 的资产候选池。
+- `defaultEditorAssetPool`、默认 vegetation zones、默认 assets 和游客端默认树群不使用这些候选。
+- 普通 `/map-3d-guide-c` 不会因为候选池存在而自动加载新 GLB。
+- 只有在 debugGarden 中手动选择并添加候选资产，或将候选加入草稿资产池后，才会触发对应 GLB 加载。
+
+### 后续观察
+
+后续如果把候选升级为默认树群，应重新评估：
+
+- 首屏 GLB 总请求数。
+- `useGardenAssetOverlays` live overlay count。
+- 树群 batch 加载耗时。
+- debugGarden 草稿保存后对普通 prototype-c 页面加载的影响。
+
+## 28. 手动交互轻量模式与树群 LOD
 
 ### 问题修正
 
@@ -916,7 +946,7 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 
 相关事件只在交互状态或 LOD tier 变化时记录，不逐帧记录，不应造成诊断面板卡顿。
 
-## 28. 三处新增 runtime-v1 地标 GLB 接入边界
+## 29. 三处新增 runtime-v1 地标 GLB 接入边界
 
 ### 本轮接入
 
@@ -934,7 +964,11 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - `/map-3d-guide-c?debugGarden=1&debugPerf=1` 的核心地标参照层可加载这 3 个 runtime-v1 地标。
 - 旧 464M `bodhi-avenue.glb` 不再被正式 `modelUrl` 引用，本轮不处理、不压缩、不提交。
 
-## 29. 三处新增地标校准固化
+### 后续观察
+
+三处模型仍是初始 transform，后续应在 Landmark Inspector 中逐个校准 scale / height / rotation / offset。菩提大道为线性场景资产，加载时尤其需要关注遮挡、模型跨度和与路线 / POI / 树群的视觉关系。
+
+## 30. 三处新增地标校准固化
 
 ### 固化结果
 
@@ -951,3 +985,72 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - debugGarden 核心地标参照层包含这三处地标。
 - debugPerf 本地 calibration draft 仍可覆盖默认 transform，便于后续微调。
 - 旧 464M 菩提大道 raw 文件仍不处理、不提交、不作为运行时引用。
+
+## 31. 祥符禅寺 3D 底座实验机制
+
+### 目标
+
+祥符禅寺主模型已完成第一轮校准，但建筑类 GLB 与腾讯白模仍可能出现穿插。后续不再使用 polygon footprint mask 作为祥符禅寺底座，改为真正 3D 低矮场地底座 / 低模场景。
+
+### 加载策略
+
+- 约定底座 runtime 路径：`/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+- `xiangfu_temple_base` 作为 `xiangfu_temple` 的 companion/base model 存在，不是独立 POI。
+- 默认 `enabled: false`，普通 `/map-3d-guide-c` 不加载底座。
+- `/map-3d-guide-c?debugPerf=1` 的 Landmark Inspector 可手动加载、卸载、聚焦和校准底座。
+- 如果 GLB 文件缺失，只记录失败并显示“待放入”提示，不影响祥符禅寺主模型加载。
+
+### 诊断
+
+debugPerf 新增 companion model 事件：
+
+- `companionModelLoadStarted`
+- `companionModelLoaded`
+- `companionModelFailed`
+- `companionModelUnloaded`
+- `companionModelCalibrationSaved`
+
+事件记录 parent landmark、companion id、modelUrl、duration、错误和校准参数；不逐帧记录。
+
+## 32. 祥符禅寺轻量底座 GLB
+
+### 资产结果
+
+- 输出路径：`/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+- 文件大小约 35KB。
+- 生成方式：`scripts/create-xiangfu-temple-base.mjs` 使用 Three.js 盒体几何和 GLTFExporter 输出二进制 GLB。
+- 几何内容：低矮石台、顶面铺装分隔线、四周边框、前侧三阶浅台阶。
+- 材质内容：浅米灰 / 米石色 / 暗石缝纯色材质，无贴图、无压缩扩展。
+
+### 使用边界
+
+该 GLB 是验证用低模底座，不是精细 Meshy / Blender 资产。它用于在 Landmark Inspector 中快速测试祥符禅寺落地感与白模穿插缓解效果，后续仍需在页面内通过 scale、height、rotationY 和 offset 做人工校准。
+
+## 33. 祥符禅寺与底座校准固化
+
+### 固化值
+
+祥符禅寺主模型：
+
+- scale 670
+- height 23
+- rotationY 31
+- lngOffset 0.00001
+- latOffset -0.00001
+
+祥符禅寺 companion 底座：
+
+- enabled true
+- scale 120
+- height -2
+- rotationY 31
+- lngOffset -0.00005
+- latOffset 0.00007
+
+### 加载边界
+
+- 主模型继续使用 `/models/lingshan/optimized/xiangfu-temple.safe-v2.glb`。
+- 底座继续使用 `/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+- 底座为约 35KB 的 Three.js 纯几何 GLB，用于增强建筑落地感、弱化白模穿插。
+- 仍不采用 polygon mask，不启用 TMap polygon mask。
+- debugPerf 本地 calibration draft 仍可覆盖默认值，便于后续微调。

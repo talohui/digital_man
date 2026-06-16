@@ -39,6 +39,23 @@ export type MapModelFootprintMask = {
   opacity: number
 }
 
+export type MapModelCompanionModelType = 'base'
+
+export type MapModelCompanionModel = {
+  id: string
+  type: MapModelCompanionModelType
+  name: string
+  modelUrl: string
+  fileSizeLabel?: string
+  enabled: boolean
+  scale: number
+  height: number
+  rotationY: number
+  lngOffset: number
+  latOffset: number
+  note?: string
+}
+
 export type LingshanMapModelOverlay = {
   poiId: string
   inspectorId?: string
@@ -52,6 +69,7 @@ export type LingshanMapModelOverlay = {
   lngOffset?: number
   latOffset?: number
   footprintMask?: MapModelFootprintMask
+  companionModels?: MapModelCompanionModel[]
   status: MapModelOverlayStatus
   enabledInDebug: boolean
   visible: boolean
@@ -165,16 +183,32 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v2.glb',
     fileSizeLabel: '108.73 MB',
     positionSource: 'navLocation',
-    height: 12,
-    scale: 618,
+    height: 23,
+    scale: 670,
     rotation: [0, 31, 0],
-    lngOffset: -0.00006,
-    latOffset: 0.00009,
+    lngOffset: 0.00001,
+    latOffset: -0.00001,
+    companionModels: [
+      {
+        id: 'xiangfu_temple_base',
+        type: 'base',
+        name: '祥符禅寺 3D 底座',
+        modelUrl: '/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb',
+        fileSizeLabel: '35 KB',
+        enabled: true,
+        scale: 120,
+        height: -2,
+        rotationY: 31,
+        lngOffset: -0.00005,
+        latOffset: 0.00007,
+        note: '真实 3D 低矮石台 / 院落铺装底座；用于替代 polygon mask，增强祥符禅寺落地感并弱化腾讯白模穿插。Three.js 纯几何 runtime-v1 约 35KB，已随祥符禅寺主模型默认启用，后续仍可在 debugPerf Landmark Inspector 中微调。'
+      }
+    ],
     status: 'model_ready',
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '第二批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/xiangfu-temple.safe-v2.glb；raw 路径 /models/lingshan/landmarks/xiangfu-temple.glb 仍保留在本地用于 debugPerf 对比和回退。祥符禅寺属于建筑类核心地标，仍存在与梵宫类似的腾讯 3D 白模建筑重叠风险；不新增 polygon footprint mask，后续需要真正 3D 场地底座 / 低模底座，或将底座整合进 GLB。'
+    note: '祥符禅寺主模型重新人工校准 patch 已固化：scale 670、height 23、rotationY 31、lngOffset 0.00001、latOffset -0.00001；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 继续使用 /models/lingshan/optimized/xiangfu-temple.safe-v2.glb；raw 路径 /models/lingshan/landmarks/xiangfu-temple.glb 仍保留在本地用于 debugPerf 对比和回退。祥符禅寺底座采用 companion 3D base model，不新增 polygon footprint mask。'
   },
   {
     poiId: 'foqian_square',

@@ -127,6 +127,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           <dd>{snapshot.latestTourEvent?.type ?? '-'}</dd>
         </div>
         <div>
+          <dt>Companion</dt>
+          <dd>{snapshot.latestCompanionModelEvent?.type ?? '-'}</dd>
+        </div>
+        <div>
           <dt>Failed</dt>
           <dd>{snapshot.gardenFailed + snapshot.landmarkFailed}</dd>
         </div>
@@ -187,7 +191,42 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   {snapshot.currentZoom !== undefined ? ` · zoom ${snapshot.currentZoom.toFixed(2)}` : ''}
                 </small>
               </li>
+              {snapshot.treeCandidateLabEnabled ? (
+                <li>
+                  <span>Tree candidate lab</span>
+                  <small>
+                    default {snapshot.defaultGardenHidden ? 'hidden' : 'visible'} · refs {snapshot.landmarkReferenceLoaded ? 'loaded' : 'off'} · test trees {snapshot.testTreeCount} · live default {snapshot.liveDefaultGardenOverlayCount} · live test {snapshot.liveTestTreeOverlayCount}
+                    {snapshot.candidateType ? ` · ${snapshot.candidateType}` : ''}
+                    {snapshot.clusterMode ? ` · ${snapshot.clusterMode}` : ''}
+                  </small>
+                </li>
+              ) : null}
             </ol>
+          </section>
+
+          <section>
+            <h3>Companion / 底座模型事件</h3>
+            {snapshot.companionModelEvents.length ? (
+              <ol>
+                {snapshot.companionModelEvents.slice(-10).map((event, index) => (
+                  <li key={`${event.recordedAt}-${index}`}>
+                    <span>{event.type}</span>
+                    <small>
+                      {event.parentLandmarkId} · {event.companionId}
+                      {event.status ? ` · ${event.status}` : ''}
+                      {event.durationMs !== undefined ? ` · ${formatMs(event.durationMs)}` : ''}
+                      {event.scale !== undefined ? ` · scale ${event.scale}` : ''}
+                      {event.height !== undefined ? ` · h ${event.height}` : ''}
+                      {event.rotationY !== undefined ? ` · rotY ${event.rotationY}` : ''}
+                      {event.error ? ` · ${event.error}` : ''}
+                    </small>
+                    {event.modelUrl ? <code>{event.modelUrl}</code> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>暂无 companion / 底座模型事件</p>
+            )}
           </section>
 
           <section>

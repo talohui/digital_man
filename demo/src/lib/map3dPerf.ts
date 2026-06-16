@@ -107,6 +107,11 @@ export type Map3DPerfMapVisualEventType =
   | 'gardenLodChanged'
   | 'gardenInteractionLiteMode'
   | 'gardenOpacityUpdated'
+  | 'treeCandidateLabEnabled'
+  | 'defaultGardenHidden'
+  | 'landmarkReferenceLoaded'
+  | 'treeCandidateClusterGenerated'
+  | 'treeCandidateCompareSetGenerated'
 
 export type Map3DStartupStage =
   | 'loadingSdk'
@@ -133,6 +138,41 @@ export type Map3DPerfMapVisualEvent = {
   gardenLodTier?: 'none' | 'reduced' | 'full'
   gardenOpacity?: number
   liveGardenOverlayCount?: number
+  treeCandidateLabEnabled?: boolean
+  defaultGardenHidden?: boolean
+  landmarkReferenceLoaded?: boolean
+  testTreeCount?: number
+  candidateType?: string
+  clusterMode?: string
+  clusterGeneratedCount?: number
+  compareSetGenerated?: boolean
+  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
+  liveDefaultGardenOverlayCount?: number
+  liveTestTreeOverlayCount?: number
+}
+
+export type Map3DPerfCompanionModelEventType =
+  | 'companionModelLoadStarted'
+  | 'companionModelLoaded'
+  | 'companionModelFailed'
+  | 'companionModelUnloaded'
+  | 'companionModelCalibrationSaved'
+
+export type Map3DPerfCompanionModelEvent = {
+  type: Map3DPerfCompanionModelEventType
+  recordedAt: string
+  parentLandmarkId: string
+  companionId: string
+  modelUrl?: string
+  status?: 'loading' | 'loaded' | 'failed' | 'unloaded'
+  durationMs?: number
+  error?: string
+  enabled?: boolean
+  scale?: number
+  height?: number
+  rotationY?: number
+  lngOffset?: number
+  latOffset?: number
 }
 
 export type Map3DPerfSnapshot = {
@@ -167,6 +207,15 @@ export type Map3DPerfSnapshot = {
   mapInteractionKind?: 'zoom' | 'drag' | 'move'
   gardenLodTier: 'none' | 'reduced' | 'full'
   gardenOpacity: number
+  treeCandidateLabEnabled: boolean
+  defaultGardenHidden: boolean
+  landmarkReferenceLoaded: boolean
+  testTreeCount: number
+  candidateType?: string
+  clusterMode?: string
+  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
+  liveDefaultGardenOverlayCount: number
+  liveTestTreeOverlayCount: number
   landmarkTotal: number
   landmarkLoaded: number
   landmarkFailed: number
@@ -194,6 +243,8 @@ export type Map3DPerfSnapshot = {
   latestMapVisualEvent?: Map3DPerfMapVisualEvent
   tourEvents: Map3DPerfTourEvent[]
   latestTourEvent?: Map3DPerfTourEvent
+  companionModelEvents: Map3DPerfCompanionModelEvent[]
+  latestCompanionModelEvent?: Map3DPerfCompanionModelEvent
 }
 
 export type Map3DPerfRecorder = {
@@ -243,6 +294,9 @@ export type Map3DPerfRecorder = {
   }) => void
   recordCameraEvent: (event: Map3DCameraEvent) => void
   recordTourEvent: (event: Omit<Map3DPerfTourEvent, 'recordedAt'> & { recordedAt?: string }) => void
+  recordCompanionModelEvent: (
+    event: Omit<Map3DPerfCompanionModelEvent, 'recordedAt'> & { recordedAt?: string }
+  ) => void
   recordGardenOverlayEvent: (event: {
     created?: number
     removed?: number
@@ -287,6 +341,15 @@ type MutableMap3DPerfState = {
   mapInteractionKind?: 'zoom' | 'drag' | 'move'
   gardenLodTier: 'none' | 'reduced' | 'full'
   gardenOpacity: number
+  treeCandidateLabEnabled: boolean
+  defaultGardenHidden: boolean
+  landmarkReferenceLoaded: boolean
+  testTreeCount: number
+  candidateType?: string
+  clusterMode?: string
+  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
+  liveDefaultGardenOverlayCount: number
+  liveTestTreeOverlayCount: number
   landmarkStartedAt?: number
   landmarkTotal: number
   landmarkLoaded: number
@@ -309,6 +372,7 @@ type MutableMap3DPerfState = {
   cameraEvents: Map3DCameraEvent[]
   mapVisualEvents: Map3DPerfMapVisualEvent[]
   tourEvents: Map3DPerfTourEvent[]
+  companionModelEvents: Map3DPerfCompanionModelEvent[]
 }
 
 export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
@@ -571,6 +635,19 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       ].slice(-48)
       notify()
     },
+    recordCompanionModelEvent: (event) => {
+      if (!enabled) {
+        return
+      }
+      state.companionModelEvents = [
+        ...state.companionModelEvents,
+        {
+          ...event,
+          recordedAt: event.recordedAt ?? new Date().toISOString()
+        }
+      ].slice(-24)
+      notify()
+    },
     recordGardenOverlayEvent: ({ created = 0, removed = 0, duplicatePrevented = 0, liveCount, generation }) => {
       if (!enabled) {
         return
@@ -643,6 +720,14 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         if (event.gardenOpacity !== undefined) {
           state.gardenOpacity = event.gardenOpacity
         }
+      } else if (
+        event.type === 'treeCandidateLabEnabled' ||
+        event.type === 'defaultGardenHidden' ||
+        event.type === 'landmarkReferenceLoaded' ||
+        event.type === 'treeCandidateClusterGenerated' ||
+        event.type === 'treeCandidateCompareSetGenerated'
+      ) {
+        state.treeCandidateLabEnabled = true
       }
 
       if (event.currentZoom !== undefined) {
@@ -650,6 +735,33 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       }
       if (event.liveGardenOverlayCount !== undefined) {
         state.gardenOverlayLiveCount = event.liveGardenOverlayCount
+      }
+      if (event.treeCandidateLabEnabled !== undefined) {
+        state.treeCandidateLabEnabled = event.treeCandidateLabEnabled
+      }
+      if (event.defaultGardenHidden !== undefined) {
+        state.defaultGardenHidden = event.defaultGardenHidden
+      }
+      if (event.landmarkReferenceLoaded !== undefined) {
+        state.landmarkReferenceLoaded = event.landmarkReferenceLoaded
+      }
+      if (event.testTreeCount !== undefined) {
+        state.testTreeCount = event.testTreeCount
+      }
+      if (event.candidateType !== undefined) {
+        state.candidateType = event.candidateType
+      }
+      if (event.clusterMode !== undefined) {
+        state.clusterMode = event.clusterMode
+      }
+      if (event.gardenReferenceMode !== undefined) {
+        state.gardenReferenceMode = event.gardenReferenceMode
+      }
+      if (event.liveDefaultGardenOverlayCount !== undefined) {
+        state.liveDefaultGardenOverlayCount = event.liveDefaultGardenOverlayCount
+      }
+      if (event.liveTestTreeOverlayCount !== undefined) {
+        state.liveTestTreeOverlayCount = event.liveTestTreeOverlayCount
       }
 
       notify()
@@ -705,6 +817,12 @@ function createInitialState(): MutableMap3DPerfState {
     mapInteracting: false,
     gardenLodTier: 'full',
     gardenOpacity: 1,
+    treeCandidateLabEnabled: false,
+    defaultGardenHidden: false,
+    landmarkReferenceLoaded: false,
+    testTreeCount: 0,
+    liveDefaultGardenOverlayCount: 0,
+    liveTestTreeOverlayCount: 0,
     landmarkTotal: 0,
     landmarkLoaded: 0,
     landmarkFailed: 0,
@@ -715,7 +833,8 @@ function createInitialState(): MutableMap3DPerfState {
     stageStarts: new Map(),
     cameraEvents: [],
     mapVisualEvents: [],
-    tourEvents: []
+    tourEvents: [],
+    companionModelEvents: []
   }
 }
 
@@ -763,6 +882,15 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     mapInteractionKind: state.mapInteractionKind,
     gardenLodTier: state.gardenLodTier,
     gardenOpacity: state.gardenOpacity,
+    treeCandidateLabEnabled: state.treeCandidateLabEnabled,
+    defaultGardenHidden: state.defaultGardenHidden,
+    landmarkReferenceLoaded: state.landmarkReferenceLoaded,
+    testTreeCount: state.testTreeCount,
+    candidateType: state.candidateType,
+    clusterMode: state.clusterMode,
+    gardenReferenceMode: state.gardenReferenceMode,
+    liveDefaultGardenOverlayCount: state.liveDefaultGardenOverlayCount,
+    liveTestTreeOverlayCount: state.liveTestTreeOverlayCount,
     landmarkTotal: state.landmarkTotal,
     landmarkLoaded: state.landmarkLoaded,
     landmarkFailed: state.landmarkFailed,
@@ -780,7 +908,9 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     mapVisualEvents: state.mapVisualEvents,
     latestMapVisualEvent: state.mapVisualEvents[state.mapVisualEvents.length - 1],
     tourEvents: state.tourEvents,
-    latestTourEvent: state.tourEvents[state.tourEvents.length - 1]
+    latestTourEvent: state.tourEvents[state.tourEvents.length - 1],
+    companionModelEvents: state.companionModelEvents,
+    latestCompanionModelEvent: state.companionModelEvents[state.companionModelEvents.length - 1]
   }
 }
 

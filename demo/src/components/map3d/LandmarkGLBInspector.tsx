@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import type {
   LandmarkCalibrationValues,
+  LandmarkCompanionItem,
   LandmarkFootprintMaskValues,
   LandmarkInspectorItem,
   LandmarkModelInspector
@@ -46,6 +47,16 @@ export function LandmarkGLBInspector({ inspector }: LandmarkGLBInspectorProps) {
     }
     const ok = await copyText(formatFootprintMaskPatch(activeItem))
     setCopyStatus(ok ? '已复制梵宫 footprint mask patch' : '剪贴板不可用，复制失败')
+  }
+
+  const copyCompanionPatch = async (companion: LandmarkCompanionItem) => {
+    if (!activeItem) {
+      setCopyStatus('请先选择一个地标进入校准')
+      return
+    }
+    const patch = inspector.getCompanionCalibrationPatch(activeItem.id, companion.id)
+    const ok = await copyText(formatCompanionPatch(patch))
+    setCopyStatus(ok ? `已复制 ${companion.name} patch` : '剪贴板不可用，复制失败')
   }
 
   const loadedCount = inspector.items.filter((item) => item.status === 'loaded').length
@@ -350,6 +361,127 @@ export function LandmarkGLBInspector({ inspector }: LandmarkGLBInspectorProps) {
             </details>
           ) : null}
 
+          {activeItem.poiId === 'xiangfu_temple' && activeItem.companions.length ? (
+            <details className="map-3d-guide-landmark-calibration__section">
+              <summary>祥符禅寺 3D 底座实验</summary>
+              <p>
+                实验功能：使用真正 3D 低矮场地底座替代 polygon footprint mask。默认不进入游客页，需在
+                Inspector 中手动加载、校准并保存草稿。
+              </p>
+              {activeItem.companions.map((companion) => {
+                const loading = companion.status === 'loading'
+                const loaded = companion.status === 'loaded'
+                const canLoad = Boolean(companion.modelUrl) && !loading && !loaded
+                const canUnload = loaded || companion.status === 'failed' || companion.status === 'loading'
+
+                return (
+                  <article className={`map-3d-guide-landmark-inspector__item is-${companion.status}`} key={companion.id}>
+                    <div>
+                      <strong>{companion.name}</strong>
+                      <small>
+                        {statusLabel[companion.status]} · {companion.fileSizeLabel ?? 'size ?'} · parent: {companion.parentLandmarkId}
+                        {companion.hasSavedDraft ? ' · local draft' : ''}
+                        {companion.isDirty ? ' · unsaved' : ''}
+                      </small>
+                      <code>{companion.modelUrl}</code>
+                      {companion.note ? <small>{companion.note}</small> : null}
+                      {companion.error ? <small className="is-error">{companion.error}</small> : null}
+                      <small>
+                        enabled {companion.calibration.enabled ? 'true' : 'false'} · scale {companion.calibration.scale} · h {companion.calibration.height} · rotY {companion.calibration.rotationY} · offset {formatOffset(companion.calibration)}
+                      </small>
+                    </div>
+                    <div className="map-3d-guide-landmark-inspector__actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, {
+                            enabled: !companion.calibration.enabled
+                          })}
+                      >
+                        {companion.calibration.enabled ? '关闭底座' : '启用底座'}
+                      </button>
+                      <button type="button" disabled={!canLoad} onClick={() => inspector.loadCompanionModel(activeItem.id, companion.id)}>
+                        {loading ? '加载中' : '加载底座'}
+                      </button>
+                      <button type="button" disabled={!canUnload} onClick={() => inspector.unloadCompanionModel(activeItem.id, companion.id)}>
+                        卸载底座
+                      </button>
+                      <button type="button" onClick={() => inspector.focusCompanionModel(activeItem.id, companion.id)}>
+                        聚焦底座
+                      </button>
+                    </div>
+                    <div className="map-3d-guide-landmark-calibration__grid">
+                      <label>
+                        <span>enabled</span>
+                        <input
+                          type="checkbox"
+                          checked={companion.calibration.enabled}
+                          onChange={(event) =>
+                            inspector.updateCompanionCalibration(activeItem.id, companion.id, {
+                              enabled: event.target.checked
+                            })}
+                        />
+                      </label>
+                      <CalibrationNumberField
+                        label="base scale"
+                        step={1}
+                        value={companion.calibration.scale}
+                        onChange={(value) =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, { scale: value })}
+                      />
+                      <CalibrationNumberField
+                        label="base height"
+                        step={1}
+                        value={companion.calibration.height}
+                        onChange={(value) =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, { height: value })}
+                      />
+                      <CalibrationNumberField
+                        label="base rotationY"
+                        step={1}
+                        value={companion.calibration.rotationY}
+                        onChange={(value) =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, { rotationY: value })}
+                      />
+                      <CalibrationNumberField
+                        label="base lngOffset"
+                        step={0.00001}
+                        value={companion.calibration.lngOffset}
+                        onChange={(value) =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, { lngOffset: value })}
+                      />
+                      <CalibrationNumberField
+                        label="base latOffset"
+                        step={0.00001}
+                        value={companion.calibration.latOffset}
+                        onChange={(value) =>
+                          inspector.updateCompanionCalibration(activeItem.id, companion.id, { latOffset: value })}
+                      />
+                    </div>
+                    <div className="map-3d-guide-landmark-calibration__actions">
+                      <button type="button" onClick={() => inspector.saveCompanionCalibrationDraft(activeItem.id, companion.id)}>
+                        保存底座草稿
+                      </button>
+                      <button type="button" onClick={() => copyCompanionPatch(companion)}>
+                        复制底座 patch
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm('确认重置祥符禅寺底座草稿？')) {
+                            inspector.resetCompanionCalibration(activeItem.id, companion.id)
+                          }
+                        }}
+                      >
+                        重置底座草稿
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </details>
+          ) : null}
+
           <div className="map-3d-guide-landmark-calibration__actions">
             <button type="button" onClick={() => inspector.saveCalibrationDraft(activeItem.id)}>
               保存当前校准到本地草稿
@@ -462,6 +594,12 @@ function formatCalibrationPatch(patch: ReturnType<LandmarkModelInspector['getCal
     opacity: ${patch.footprintMask.opacity}
   }`
     : ''
+  const companions = patch.companions?.length
+    ? `,
+  companionModels: [
+${patch.companions.map((companion) => `    ${formatCompanionPatch(companion).replace(/\n/g, '\n    ')}`).join(',\n')}
+  ]`
+    : ''
 
   return `{
   id: '${patch.id}',
@@ -469,7 +607,24 @@ function formatCalibrationPatch(patch: ReturnType<LandmarkModelInspector['getCal
   height: ${patch.height},
   rotationY: ${patch.rotationY},
   lngOffset: ${patch.lngOffset},
-  latOffset: ${patch.latOffset}${footprintMask}
+  latOffset: ${patch.latOffset}${footprintMask}${companions}
+}`
+}
+
+function formatCompanionPatch(patch: ReturnType<LandmarkModelInspector['getCompanionCalibrationPatch']>) {
+  if (!patch) {
+    return '// no companion patch selected'
+  }
+
+  return `{
+  parentLandmarkId: '${patch.parentLandmarkId}',
+  id: '${patch.id}',
+  enabled: ${patch.enabled},
+  scale: ${patch.scale},
+  height: ${patch.height},
+  rotationY: ${patch.rotationY},
+  lngOffset: ${patch.lngOffset},
+  latOffset: ${patch.latOffset}
 }`
 }
 

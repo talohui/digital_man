@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import {
   getMapModelOverlayInspectorId,
   type LingshanMapModelOverlay,
+  type MapModelCompanionModel,
   type MapModelFootprintMask
 } from '../data/lingshanMapModelOverlays'
 import {
@@ -28,13 +29,52 @@ export type LandmarkCalibrationValues = {
 
 export type LandmarkFootprintMaskValues = MapModelFootprintMask
 
+export type LandmarkCompanionCalibrationValues = {
+  enabled: boolean
+  scale: number
+  height: number
+  rotationY: number
+  lngOffset: number
+  latOffset: number
+}
+
+export type LandmarkCompanionCalibrationDraft = Partial<LandmarkCompanionCalibrationValues> & {
+  updatedAt?: string
+}
+
+export type LandmarkCompanionCalibrationPatch = LandmarkCompanionCalibrationValues & {
+  parentLandmarkId: string
+  id: string
+}
+
 export type LandmarkCalibrationDraft = Partial<Omit<LandmarkCalibrationValues, 'footprintMask'>> & {
   footprintMask?: Partial<LandmarkFootprintMaskValues>
+  companions?: Record<string, LandmarkCompanionCalibrationDraft>
   updatedAt: string
 }
 
 export type LandmarkCalibrationPatch = LandmarkCalibrationValues & {
   id: string
+  companions?: LandmarkCompanionCalibrationPatch[]
+}
+
+export type LandmarkCompanionItem = {
+  parentLandmarkId: string
+  parentPoiId: string
+  id: string
+  type: MapModelCompanionModel['type']
+  name: string
+  modelUrl: string
+  fileSizeLabel?: string
+  note?: string
+  calibration: LandmarkCompanionCalibrationValues
+  status: LandmarkInspectorStatus
+  durationMs?: number
+  error?: string
+  loadCount: number
+  unloadCount: number
+  hasSavedDraft: boolean
+  isDirty: boolean
 }
 
 export type LandmarkInspectorItem = {
@@ -56,6 +96,7 @@ export type LandmarkInspectorItem = {
   unloadCount: number
   calibration: LandmarkCalibrationValues
   supportsFootprintMask: boolean
+  companions: LandmarkCompanionItem[]
   hasSavedDraft: boolean
   isDirty: boolean
 }
@@ -72,6 +113,20 @@ export type LandmarkModelInspector = {
   updateCalibration: (id: string, patch: Partial<LandmarkCalibrationValues>) => void
   updateFootprintMask: (id: string, patch: Partial<LandmarkFootprintMaskValues>) => void
   resetFootprintMask: (id: string) => void
+  loadCompanionModel: (parentId: string, companionId: string) => void
+  unloadCompanionModel: (parentId: string, companionId: string) => void
+  focusCompanionModel: (parentId: string, companionId: string) => void
+  updateCompanionCalibration: (
+    parentId: string,
+    companionId: string,
+    patch: Partial<LandmarkCompanionCalibrationValues>
+  ) => void
+  saveCompanionCalibrationDraft: (parentId: string, companionId: string) => void
+  resetCompanionCalibration: (parentId: string, companionId: string) => void
+  getCompanionCalibrationPatch: (
+    parentId: string,
+    companionId: string
+  ) => LandmarkCompanionCalibrationPatch | null
   setModelVariant: (id: string, variant: LandmarkModelVariant) => void
   saveCalibrationDraft: (id: string) => void
   resetCalibration: (id: string) => void
@@ -81,6 +136,17 @@ export type LandmarkModelInspector = {
 }
 
 type LandmarkInspectorState = Record<
+  string,
+  {
+    status: LandmarkInspectorStatus
+    durationMs?: number
+    error?: string
+    loadCount: number
+    unloadCount: number
+  }
+>
+
+type LandmarkCompanionInspectorState = Record<
   string,
   {
     status: LandmarkInspectorStatus
@@ -111,17 +177,26 @@ export function useLandmarkModelInspector({
   onFocusLandmark
 }: UseLandmarkModelInspectorOptions): LandmarkModelInspector {
   const modelsRef = useRef<Map<string, any>>(new Map())
+  const companionModelsRef = useRef<Map<string, any>>(new Map())
   const footprintMaskLayerRef = useRef<any>(null)
   const versionsRef = useRef<Map<string, number>>(new Map())
+  const companionVersionsRef = useRef<Map<string, number>>(new Map())
   const calibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
+  const companionCalibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
   const overlayLookup = useMemo(() => buildOverlayLookup(overlays), [overlays])
   const [state, setState] = useState<LandmarkInspectorState>(() => buildInitialState(overlays))
+  const [companionState, setCompanionState] = useState<LandmarkCompanionInspectorState>(() =>
+    buildInitialCompanionState(overlays)
+  )
   const [savedDrafts, setSavedDrafts] = useState<Record<string, LandmarkCalibrationDraft>>(() =>
     active ? loadCalibrationDrafts() : {}
   )
   const [calibrationEdits, setCalibrationEdits] = useState<Record<string, LandmarkCalibrationValues>>(() =>
     buildInitialCalibrationEdits(overlays, active ? loadCalibrationDrafts() : {})
   )
+  const [companionCalibrationEdits, setCompanionCalibrationEdits] = useState<
+    Record<string, LandmarkCompanionCalibrationValues>
+  >(() => buildInitialCompanionCalibrationEdits(overlays, active ? loadCalibrationDrafts() : {}))
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
   const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
 
@@ -129,14 +204,18 @@ export function useLandmarkModelInspector({
     if (!active) {
       clearLandmarkModels(modelsRef.current)
       modelsRef.current = new Map()
+      clearLandmarkModels(companionModelsRef.current)
+      companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
+      clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
       return
     }
 
     const drafts = loadCalibrationDrafts()
     setSavedDrafts(drafts)
     setCalibrationEdits(buildInitialCalibrationEdits(overlays, drafts))
+    setCompanionCalibrationEdits(buildInitialCompanionCalibrationEdits(overlays, drafts))
     perfRecorder.setLandmarkTotal(overlays.length)
   }, [active, overlays, perfRecorder])
 
@@ -162,6 +241,39 @@ export function useLandmarkModelInspector({
         if (!next[id]) {
           next[id] = mergeCalibration(buildDefaultCalibration(overlay), savedDrafts[id])
         }
+      })
+      return next
+    })
+    setCompanionState((current) => {
+      const next = { ...current }
+      overlays.forEach((overlay) => {
+        const parentId = getMapModelOverlayInspectorId(overlay)
+        overlay.companionModels?.forEach((companion) => {
+          const key = getCompanionKey(parentId, companion.id)
+          if (!next[key]) {
+            next[key] = {
+              status: 'idle',
+              loadCount: 0,
+              unloadCount: 0
+            }
+          }
+        })
+      })
+      return next
+    })
+    setCompanionCalibrationEdits((current) => {
+      const next = { ...current }
+      overlays.forEach((overlay) => {
+        const parentId = getMapModelOverlayInspectorId(overlay)
+        overlay.companionModels?.forEach((companion) => {
+          const key = getCompanionKey(parentId, companion.id)
+          if (!next[key]) {
+            next[key] = mergeCompanionCalibration(
+              buildDefaultCompanionCalibration(companion),
+              savedDrafts[parentId]?.companions?.[companion.id]
+            )
+          }
+        })
       })
       return next
     })
@@ -207,8 +319,11 @@ export function useLandmarkModelInspector({
     return () => {
       clearLandmarkModels(modelsRef.current)
       modelsRef.current = new Map()
+      clearLandmarkModels(companionModelsRef.current)
+      companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
+      clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
     }
   }, [])
 
@@ -227,6 +342,37 @@ export function useLandmarkModelInspector({
         const savedCalibration = savedDraft
           ? mergeCalibration(buildDefaultCalibration(overlay), savedDraft)
           : undefined
+        const companions = (overlay.companionModels ?? []).map((companion) => {
+          const key = getCompanionKey(id, companion.id)
+          const itemState = companionState[key] ?? {
+            status: 'idle',
+            loadCount: 0,
+            unloadCount: 0
+          }
+          const calibration =
+            companionCalibrationEdits[key] ??
+            mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDraft?.companions?.[companion.id])
+          const savedCompanion = savedDraft?.companions?.[companion.id]
+            ? mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDraft.companions[companion.id])
+            : undefined
+
+          return {
+            parentLandmarkId: id,
+            parentPoiId: overlay.poiId,
+            id: companion.id,
+            type: companion.type,
+            name: companion.name,
+            modelUrl: companion.modelUrl,
+            fileSizeLabel: companion.fileSizeLabel,
+            note: companion.note,
+            calibration,
+            hasSavedDraft: Boolean(savedCompanion),
+            isDirty: savedCompanion
+              ? !areCompanionCalibrationValuesEqual(calibration, savedCompanion)
+              : !areCompanionCalibrationValuesEqual(calibration, buildDefaultCompanionCalibration(companion)),
+            ...itemState
+          }
+        })
 
         return {
           id,
@@ -242,6 +388,7 @@ export function useLandmarkModelInspector({
           anchorId: overlay.poiId,
           calibration,
           supportsFootprintMask: Boolean(overlay.footprintMask),
+          companions,
           hasSavedDraft: Boolean(savedDraft),
           isDirty: savedCalibration
             ? !areCalibrationValuesEqual(calibration, savedCalibration)
@@ -249,7 +396,7 @@ export function useLandmarkModelInspector({
           ...itemState
         }
       }),
-    [calibrationEdits, overlays, savedDrafts, selectedVariants, state]
+    [calibrationEdits, companionCalibrationEdits, companionState, overlays, savedDrafts, selectedVariants, state]
   )
 
   const updateItemState = (
@@ -266,6 +413,24 @@ export function useLandmarkModelInspector({
       return {
         ...current,
         [id]: updater(previous)
+      }
+    })
+  }
+
+  const updateCompanionState = (
+    key: string,
+    updater: (current: LandmarkCompanionInspectorState[string]) => LandmarkCompanionInspectorState[string]
+  ) => {
+    setCompanionState((current) => {
+      const previous = current[key] ?? {
+        status: 'idle',
+        loadCount: 0,
+        unloadCount: 0
+      }
+
+      return {
+        ...current,
+        [key]: updater(previous)
       }
     })
   }
@@ -437,6 +602,187 @@ export function useLandmarkModelInspector({
     })
   }
 
+  const loadCompanionModel = async (parentId: string, companionId: string) => {
+    const { overlay, companion, key } = resolveCompanion(parentId, companionId)
+
+    if (!overlay || !companion || !key) {
+      return
+    }
+
+    const calibration =
+      companionCalibrationEdits[key] ??
+      mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
+
+    await createCompanionModel(parentId, companionId, {
+      trackLoad: true,
+      calibration
+    })
+  }
+
+  const unloadCompanionModel = (parentId: string, companionId: string) => {
+    const key = getCompanionKey(parentId, companionId)
+    const model = companionModelsRef.current.get(key)
+
+    if (model) {
+      clearLandmarkModel(model)
+      companionModelsRef.current.delete(key)
+    }
+
+    companionVersionsRef.current.set(key, (companionVersionsRef.current.get(key) ?? 0) + 1)
+    clearCalibrationTimer(companionCalibrationApplyTimersRef.current, key)
+    updateCompanionState(key, (current) => ({
+      ...current,
+      status: 'unloaded',
+      unloadCount: current.unloadCount + 1
+    }))
+    perfRecorder.recordCompanionModelEvent({
+      type: 'companionModelUnloaded',
+      parentLandmarkId: parentId,
+      companionId,
+      status: 'unloaded'
+    })
+  }
+
+  const focusCompanionModel = (parentId: string, companionId: string) => {
+    const { overlay, companion, key } = resolveCompanion(parentId, companionId)
+    const anchor = overlay ? resolveLocation(overlay) : null
+    const calibration =
+      key && companion
+        ? companionCalibrationEdits[key] ??
+          mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
+        : undefined
+
+    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
+      return
+    }
+
+    const center = new window.TMap.LatLng(anchor.lat + calibration.latOffset, anchor.lng + calibration.lngOffset)
+
+    if (typeof map.easeTo === 'function') {
+      map.easeTo({ center, zoom: 18.8, pitch: 65, rotation: -28 }, { duration: 500 })
+      return
+    }
+
+    map.setCenter?.(center)
+    map.setZoom?.(18.8)
+    map.setPitch?.(65)
+    map.setRotation?.(-28)
+  }
+
+  const updateCompanionCalibration = (
+    parentId: string,
+    companionId: string,
+    patch: Partial<LandmarkCompanionCalibrationValues>
+  ) => {
+    const { companion, key } = resolveCompanion(parentId, companionId)
+
+    if (!companion || !key) {
+      return
+    }
+
+    setActiveCalibrationId(parentId)
+    setCompanionCalibrationEdits((current) => {
+      const previous =
+        current[key] ??
+        mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
+      const next = normalizeCompanionCalibration({
+        ...previous,
+        ...patch
+      })
+      scheduleCompanionCalibrationApply(parentId, companionId, next)
+      return {
+        ...current,
+        [key]: next
+      }
+    })
+  }
+
+  const saveCompanionCalibrationDraft = (parentId: string, companionId: string) => {
+    const key = getCompanionKey(parentId, companionId)
+    const values = companionCalibrationEdits[key]
+
+    if (!values) {
+      return
+    }
+
+    const nextDrafts = {
+      ...savedDrafts,
+      [parentId]: {
+        ...(savedDrafts[parentId] ?? { updatedAt: new Date().toISOString() }),
+        companions: {
+          ...(savedDrafts[parentId]?.companions ?? {}),
+          [companionId]: {
+            ...values,
+            updatedAt: new Date().toISOString()
+          }
+        },
+        updatedAt: new Date().toISOString()
+      }
+    }
+    setSavedDrafts(nextDrafts)
+    saveCalibrationDrafts(nextDrafts)
+    perfRecorder.recordCompanionModelEvent({
+      type: 'companionModelCalibrationSaved',
+      parentLandmarkId: parentId,
+      companionId,
+      status: 'loaded',
+      ...values
+    })
+  }
+
+  const resetCompanionCalibration = (parentId: string, companionId: string) => {
+    const { companion, key } = resolveCompanion(parentId, companionId)
+
+    if (!companion || !key) {
+      return
+    }
+
+    const nextDrafts = { ...savedDrafts }
+    const currentDraft = nextDrafts[parentId]
+    if (currentDraft?.companions?.[companionId]) {
+      const nextCompanions = { ...currentDraft.companions }
+      delete nextCompanions[companionId]
+      nextDrafts[parentId] = {
+        ...currentDraft,
+        companions: Object.keys(nextCompanions).length ? nextCompanions : undefined,
+        updatedAt: new Date().toISOString()
+      }
+      setSavedDrafts(nextDrafts)
+      saveCalibrationDrafts(nextDrafts)
+    }
+
+    const nextCalibration = buildDefaultCompanionCalibration(companion)
+    setCompanionCalibrationEdits((current) => ({
+      ...current,
+      [key]: nextCalibration
+    }))
+    scheduleCompanionCalibrationApply(parentId, companionId, nextCalibration)
+  }
+
+  const getCompanionCalibrationPatch = (parentId: string, companionId: string) => {
+    const key = getCompanionKey(parentId, companionId)
+    const calibration = companionCalibrationEdits[key]
+
+    if (!calibration) {
+      return null
+    }
+
+    return {
+      parentLandmarkId: parentId,
+      id: companionId,
+      ...calibration
+    }
+  }
+
+  const getCompanionPatchesForLandmark = (parentId: string) => {
+    const overlay = overlayLookup.get(parentId)
+    const patches = (overlay?.companionModels ?? [])
+      .map((companion) => getCompanionCalibrationPatch(parentId, companion.id))
+      .filter((patch): patch is LandmarkCompanionCalibrationPatch => Boolean(patch))
+
+    return patches.length ? patches : undefined
+  }
+
   const saveCalibrationDraft = (id: string) => {
     const values = calibrationEdits[id]
 
@@ -448,6 +794,7 @@ export function useLandmarkModelInspector({
       ...savedDrafts,
       [id]: {
         ...values,
+        companions: savedDrafts[id]?.companions,
         updatedAt: new Date().toISOString()
       }
     }
@@ -464,6 +811,13 @@ export function useLandmarkModelInspector({
 
     const nextDrafts = { ...savedDrafts }
     delete nextDrafts[id]
+    const existingCompanions = savedDrafts[id]?.companions
+    if (existingCompanions && Object.keys(existingCompanions).length) {
+      nextDrafts[id] = {
+        companions: existingCompanions,
+        updatedAt: new Date().toISOString()
+      }
+    }
     const nextCalibration = buildDefaultCalibration(overlay)
     setSavedDrafts(nextDrafts)
     saveCalibrationDrafts(nextDrafts)
@@ -476,28 +830,37 @@ export function useLandmarkModelInspector({
 
   const clearAllCalibrationDrafts = () => {
     const nextEdits = buildInitialCalibrationEdits(overlays, {})
+    const nextCompanionEdits = buildInitialCompanionCalibrationEdits(overlays, {})
     setSavedDrafts({})
     saveCalibrationDrafts({})
     setCalibrationEdits(nextEdits)
+    setCompanionCalibrationEdits(nextCompanionEdits)
     Object.entries(nextEdits).forEach(([id, calibration]) => {
       scheduleCalibrationApply(id, calibration)
     })
+    Object.entries(nextCompanionEdits).forEach(([key, calibration]) => {
+      const [parentId, companionId] = splitCompanionKey(key)
+      scheduleCompanionCalibrationApply(parentId, companionId, calibration)
+    })
   }
 
-  const getCalibrationPatch = (id: string) => {
+  const getCalibrationPatch = (id: string): LandmarkCalibrationPatch | null => {
     const calibration = calibrationEdits[id]
 
     if (!calibration) {
       return null
     }
 
+    const companions = getCompanionPatchesForLandmark(id)
+
     return {
       id,
-      ...calibration
+      ...calibration,
+      ...(companions ? { companions } : {})
     }
   }
 
-  const getAllCalibrationPatches = () =>
+  const getAllCalibrationPatches = (): LandmarkCalibrationPatch[] =>
     Object.entries(savedDrafts)
       .map(([id]) => getCalibrationPatch(id))
       .filter((patch): patch is LandmarkCalibrationPatch => Boolean(patch))
@@ -643,6 +1006,185 @@ export function useLandmarkModelInspector({
     }
   }
 
+  const createCompanionModel = async (
+    parentId: string,
+    companionId: string,
+    options: {
+      trackLoad: boolean
+      calibration?: LandmarkCompanionCalibrationValues
+    }
+  ) => {
+    const { overlay, companion, key } = resolveCompanion(parentId, companionId)
+
+    if (!key || !overlay || !companion) {
+      return false
+    }
+
+    if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
+      updateCompanionState(key, (current) => ({
+        ...current,
+        status: 'failed',
+        error: '地图或 GLTFModel 尚未就绪'
+      }))
+      return false
+    }
+
+    const anchor = resolveLocation(overlay)
+
+    if (!anchor) {
+      updateCompanionState(key, (current) => ({
+        ...current,
+        status: 'failed',
+        error: 'POI / anchor 坐标缺失',
+        loadCount: options.trackLoad ? current.loadCount + 1 : current.loadCount
+      }))
+      perfRecorder.recordCompanionModelEvent({
+        type: 'companionModelFailed',
+        parentLandmarkId: parentId,
+        companionId,
+        modelUrl: companion.modelUrl,
+        status: 'failed',
+        error: 'POI / anchor 坐标缺失'
+      })
+      return false
+    }
+
+    const calibration =
+      options.calibration ??
+      companionCalibrationEdits[key] ??
+      mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
+    const currentState = companionState[key]
+
+    if (options.trackLoad && (currentState?.status === 'loading' || companionModelsRef.current.has(key))) {
+      return true
+    }
+
+    clearLandmarkModel(companionModelsRef.current.get(key))
+    companionModelsRef.current.delete(key)
+
+    const version = (companionVersionsRef.current.get(key) ?? 0) + 1
+    companionVersionsRef.current.set(key, version)
+    const startedAt = performance.now()
+
+    updateCompanionState(key, (current) => ({
+      ...current,
+      status: 'loading',
+      error: undefined,
+      durationMs: undefined,
+      loadCount: options.trackLoad ? current.loadCount + 1 : current.loadCount
+    }))
+
+    if (options.trackLoad) {
+      perfRecorder.recordCompanionModelEvent({
+        type: 'companionModelLoadStarted',
+        parentLandmarkId: parentId,
+        companionId,
+        modelUrl: companion.modelUrl,
+        status: 'loading',
+        ...calibration
+      })
+    }
+
+    if (options.trackLoad) {
+      const exists = await modelUrlLooksAvailable(companion.modelUrl)
+      if (!exists) {
+        const errorMessage = `底座模型文件缺失，待放入 ${companion.modelUrl.replace('/models/lingshan/optimized/', '')}`
+        updateCompanionState(key, (current) => ({
+          ...current,
+          status: 'failed',
+          durationMs: Math.round(performance.now() - startedAt),
+          error: errorMessage
+        }))
+        perfRecorder.recordCompanionModelEvent({
+          type: 'companionModelFailed',
+          parentLandmarkId: parentId,
+          companionId,
+          modelUrl: companion.modelUrl,
+          status: 'failed',
+          durationMs: Math.round(performance.now() - startedAt),
+          error: errorMessage,
+          ...calibration
+        })
+        return false
+      }
+    }
+
+    try {
+      const model = new window.TMap.model.GLTFModel({
+        id: `map-3d-guide-landmark-inspector-${parentId}-${companionId}`,
+        map,
+        url: companion.modelUrl,
+        position: toTMapCompanionPosition(anchor, calibration),
+        rotation: toTMapCompanionRotation(calibration),
+        scale: calibration.scale
+      })
+
+      companionModelsRef.current.set(key, model)
+      const durationMs = Math.round(performance.now() - startedAt)
+      updateCompanionState(key, (current) => ({
+        ...current,
+        status: 'loaded',
+        durationMs,
+        error: undefined
+      }))
+
+      if (options.trackLoad) {
+        perfRecorder.recordCompanionModelEvent({
+          type: 'companionModelLoaded',
+          parentLandmarkId: parentId,
+          companionId,
+          modelUrl: companion.modelUrl,
+          status: 'loaded',
+          durationMs,
+          ...calibration
+        })
+      }
+
+      if (typeof model.on === 'function') {
+        model.on('error', (error: unknown) => {
+          if (companionVersionsRef.current.get(key) !== version) {
+            return
+          }
+          const errorMessage = normalizeError(error)
+          updateCompanionState(key, (current) => ({
+            ...current,
+            status: 'failed',
+            error: errorMessage
+          }))
+          perfRecorder.recordCompanionModelEvent({
+            type: 'companionModelFailed',
+            parentLandmarkId: parentId,
+            companionId,
+            modelUrl: companion.modelUrl,
+            status: 'failed',
+            error: errorMessage,
+            ...calibration
+          })
+        })
+      }
+      return true
+    } catch (error) {
+      const errorMessage = normalizeError(error)
+      updateCompanionState(key, (current) => ({
+        ...current,
+        status: 'failed',
+        durationMs: Math.round(performance.now() - startedAt),
+        error: errorMessage
+      }))
+      perfRecorder.recordCompanionModelEvent({
+        type: 'companionModelFailed',
+        parentLandmarkId: parentId,
+        companionId,
+        modelUrl: companion.modelUrl,
+        status: 'failed',
+        durationMs: Math.round(performance.now() - startedAt),
+        error: errorMessage,
+        ...calibration
+      })
+      return false
+    }
+  }
+
   const scheduleCalibrationApply = (id: string, calibration: LandmarkCalibrationValues) => {
     clearCalibrationTimer(calibrationApplyTimersRef.current, id)
     const timer = window.setTimeout(() => {
@@ -688,6 +1230,67 @@ export function useLandmarkModelInspector({
     })
   }
 
+  const scheduleCompanionCalibrationApply = (
+    parentId: string,
+    companionId: string,
+    calibration: LandmarkCompanionCalibrationValues
+  ) => {
+    const key = getCompanionKey(parentId, companionId)
+    clearCalibrationTimer(companionCalibrationApplyTimersRef.current, key)
+    const timer = window.setTimeout(() => {
+      applyCompanionCalibrationToModel(parentId, companionId, calibration)
+      companionCalibrationApplyTimersRef.current.delete(key)
+    }, 300)
+    companionCalibrationApplyTimersRef.current.set(key, timer)
+  }
+
+  const applyCompanionCalibrationToModel = (
+    parentId: string,
+    companionId: string,
+    calibration: LandmarkCompanionCalibrationValues
+  ) => {
+    const { overlay, companion, key } = resolveCompanion(parentId, companionId)
+    const model = key ? companionModelsRef.current.get(key) : undefined
+    const anchor = overlay ? resolveLocation(overlay) : null
+
+    if (!model || !overlay || !companion || !anchor || !window.TMap) {
+      return
+    }
+
+    const canUpdateDirectly =
+      typeof model.setScale === 'function' &&
+      typeof model.setRotation === 'function' &&
+      typeof model.setPosition === 'function'
+
+    if (canUpdateDirectly) {
+      try {
+        model.setScale(calibration.scale)
+        model.setRotation(toTMapCompanionRotation(calibration))
+        model.setPosition(toTMapCompanionPosition(anchor, calibration))
+        return
+      } catch {
+        // Fall back to rebuilding only this companion overlay.
+      }
+    }
+
+    void createCompanionModel(parentId, companionId, {
+      trackLoad: false,
+      calibration
+    })
+  }
+
+  const resolveCompanion = (parentId: string, companionId: string) => {
+    const overlay = overlayLookup.get(parentId)
+    const companion = overlay?.companionModels?.find((item) => item.id === companionId)
+    const key = companion ? getCompanionKey(parentId, companion.id) : undefined
+
+    return {
+      overlay,
+      companion,
+      key
+    }
+  }
+
   return {
     items,
     activeCalibrationId,
@@ -700,6 +1303,13 @@ export function useLandmarkModelInspector({
     updateCalibration,
     updateFootprintMask,
     resetFootprintMask,
+    loadCompanionModel,
+    unloadCompanionModel,
+    focusCompanionModel,
+    updateCompanionCalibration,
+    saveCompanionCalibrationDraft,
+    resetCompanionCalibration,
+    getCompanionCalibrationPatch,
     setModelVariant,
     saveCalibrationDraft,
     resetCalibration,
@@ -746,6 +1356,20 @@ function buildInitialState(overlays: LingshanMapModelOverlay[]) {
   }, {})
 }
 
+function buildInitialCompanionState(overlays: LingshanMapModelOverlay[]) {
+  return overlays.reduce<LandmarkCompanionInspectorState>((result, overlay) => {
+    const parentId = getMapModelOverlayInspectorId(overlay)
+    overlay.companionModels?.forEach((companion) => {
+      result[getCompanionKey(parentId, companion.id)] = {
+        status: 'idle',
+        loadCount: 0,
+        unloadCount: 0
+      }
+    })
+    return result
+  }, {})
+}
+
 function buildInitialCalibrationEdits(
   overlays: LingshanMapModelOverlay[],
   drafts: Record<string, LandmarkCalibrationDraft>
@@ -753,6 +1377,22 @@ function buildInitialCalibrationEdits(
   return overlays.reduce<Record<string, LandmarkCalibrationValues>>((result, overlay) => {
     const id = getMapModelOverlayInspectorId(overlay)
     result[id] = mergeCalibration(buildDefaultCalibration(overlay), drafts[id])
+    return result
+  }, {})
+}
+
+function buildInitialCompanionCalibrationEdits(
+  overlays: LingshanMapModelOverlay[],
+  drafts: Record<string, LandmarkCalibrationDraft>
+) {
+  return overlays.reduce<Record<string, LandmarkCompanionCalibrationValues>>((result, overlay) => {
+    const parentId = getMapModelOverlayInspectorId(overlay)
+    overlay.companionModels?.forEach((companion) => {
+      result[getCompanionKey(parentId, companion.id)] = mergeCompanionCalibration(
+        buildDefaultCompanionCalibration(companion),
+        drafts[parentId]?.companions?.[companion.id]
+      )
+    })
     return result
   }, {})
 }
@@ -770,6 +1410,17 @@ function buildDefaultCalibration(overlay: LingshanMapModelOverlay): LandmarkCali
   }
 }
 
+function buildDefaultCompanionCalibration(companion: MapModelCompanionModel): LandmarkCompanionCalibrationValues {
+  return normalizeCompanionCalibration({
+    enabled: companion.enabled,
+    scale: companion.scale,
+    height: companion.height,
+    rotationY: companion.rotationY,
+    lngOffset: companion.lngOffset,
+    latOffset: companion.latOffset
+  })
+}
+
 function mergeCalibration(
   defaultValues: LandmarkCalibrationValues,
   draft?: LandmarkCalibrationDraft
@@ -781,6 +1432,20 @@ function mergeCalibration(
     lngOffset: draft?.lngOffset ?? defaultValues.lngOffset,
     latOffset: draft?.latOffset ?? defaultValues.latOffset,
     footprintMask: mergeFootprintMask(defaultValues.footprintMask, draft?.footprintMask)
+  })
+}
+
+function mergeCompanionCalibration(
+  defaultValues: LandmarkCompanionCalibrationValues,
+  draft?: LandmarkCompanionCalibrationDraft
+): LandmarkCompanionCalibrationValues {
+  return normalizeCompanionCalibration({
+    enabled: draft?.enabled ?? defaultValues.enabled,
+    scale: draft?.scale ?? defaultValues.scale,
+    height: draft?.height ?? defaultValues.height,
+    rotationY: draft?.rotationY ?? defaultValues.rotationY,
+    lngOffset: draft?.lngOffset ?? defaultValues.lngOffset,
+    latOffset: draft?.latOffset ?? defaultValues.latOffset
   })
 }
 
@@ -797,9 +1462,34 @@ function normalizeCalibration(values: LandmarkCalibrationValues): LandmarkCalibr
   }
 }
 
+function normalizeCompanionCalibration(values: LandmarkCompanionCalibrationValues): LandmarkCompanionCalibrationValues {
+  return {
+    enabled: Boolean(values.enabled),
+    scale: normalizeNumber(values.scale, 1),
+    height: normalizeNumber(values.height, 0),
+    rotationY: normalizeNumber(values.rotationY, 0),
+    lngOffset: normalizeNumber(values.lngOffset, 0),
+    latOffset: normalizeNumber(values.latOffset, 0)
+  }
+}
+
 function normalizeNumber(value: number, fallback: number) {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? numberValue : fallback
+}
+
+function areCompanionCalibrationValuesEqual(
+  a: LandmarkCompanionCalibrationValues,
+  b: LandmarkCompanionCalibrationValues
+) {
+  return (
+    a.enabled === b.enabled &&
+    a.scale === b.scale &&
+    a.height === b.height &&
+    a.rotationY === b.rotationY &&
+    a.lngOffset === b.lngOffset &&
+    a.latOffset === b.latOffset
+  )
 }
 
 function areCalibrationValuesEqual(a: LandmarkCalibrationValues, b: LandmarkCalibrationValues) {
@@ -897,6 +1587,35 @@ function toTMapPosition(anchor: LatLngPoint, calibration: LandmarkCalibrationVal
 
 function toTMapRotation(overlay: LingshanMapModelOverlay, calibration: LandmarkCalibrationValues): [number, number, number] {
   return [overlay.rotation[0] ?? 0, calibration.rotationY, overlay.rotation[2] ?? 0]
+}
+
+function toTMapCompanionPosition(anchor: LatLngPoint, calibration: LandmarkCompanionCalibrationValues) {
+  return new window.TMap.LatLng(anchor.lat + calibration.latOffset, anchor.lng + calibration.lngOffset, calibration.height)
+}
+
+function toTMapCompanionRotation(calibration: LandmarkCompanionCalibrationValues): [number, number, number] {
+  return [0, calibration.rotationY, 0]
+}
+
+function getCompanionKey(parentId: string, companionId: string) {
+  return `${parentId}::${companionId}`
+}
+
+function splitCompanionKey(key: string): [string, string] {
+  const [parentId, companionId] = key.split('::')
+  return [parentId, companionId]
+}
+
+async function modelUrlLooksAvailable(modelUrl: string) {
+  try {
+    const response = await fetch(modelUrl, { method: 'HEAD' })
+    if (response.status === 404) {
+      return false
+    }
+    return response.ok || response.status === 405
+  } catch {
+    return true
+  }
 }
 
 function applyFootprintMaskLayer(options: {
