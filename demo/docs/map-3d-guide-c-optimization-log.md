@@ -1159,3 +1159,113 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 设计边界
 
 底座是 Three.js 纯几何生成的轻量 GLB，约 35KB，用于增强祥符禅寺落地感、弱化腾讯白模穿插。当前仍不采用 polygon footprint mask 方案，也不启用 TMap polygon mask；`fan_gong.footprintMask` 仍保持默认关闭。
+
+## 阶段：Meshy 毛茸茸菩提树团接入 Tree Candidate Lab
+
+### 改动摘要
+
+- 将 `fluffy-bodhi-grove.runtime-v1.glb` 接入 debugGarden 的 Tree Candidate Lab。
+- 新增候选 id：`fluffy_bodhi_grove`，显示为“毛茸茸菩提树团”。
+- Tree Candidate Lab 候选下拉分为“推荐候选”和“旧候选 / legacy”，新树团作为推荐主树团候选，原 5 个 Kenney 候选保留。
+- 一键候选对比从 5 种扩展为 6 种，包含 `fluffy_bodhi_grove`。
+- 新树团默认参数为 scaleMin 0.75、scaleMax 1.15、heightOffset 0，推荐小树团、中树团、背景林团测试。
+
+### 资产与边界
+
+- raw 输入约 9.87MiB，runtime-v1 约 1.20MiB，压缩率约 87.88%。
+- runtime-v1 `extensionsUsed` 为空，validate 无 error / warning。
+- 本轮只接入 Tree Candidate Lab 候选池，普通 `/map-3d-guide-c` 不默认加载新树团。
+- 默认 199 个树群、vegetation zones、keepout zones、路线、POI、地标配置和底图配置均保持不变。
+
+## 阶段：Tree Candidate Lab 手动摆树流程简化
+
+### 改动摘要
+
+- Tree Candidate Lab 默认改为“选树种 → 选模式 → 点击地图添加”的手动摆树模式。
+- 进入 `debugGarden=1` 后默认保持点击地图添加状态，点击地图会直接生成测试树或测试树团。
+- 添加后自动选中第一棵测试树，并保留继续点击添加的状态。
+- 新增测试树 marker：点击 marker 可选中，选中后可拖动紫色编辑点调整位置。
+- 选中测试树可直接在基础面板调整 scale、height、rotationY。
+- 删除选中树、删除选中树团、清空全部测试树均增加确认。
+
+### 高级功能边界
+
+- count、radiusMeters、minDistanceMeters、scaleMin / scaleMax、randomSeed 和一键候选对比收进“高级：树团参数 / 候选对比”。
+- 原放置区、禁放区、5 步工作台、预览、应用 GLB、导出完整配置保留在“高级：区域生成 / 禁放区 / 5 步工作台”。
+- 默认 199 个树群、默认 vegetation zones / keepout zones / assets 数据不变。
+- 普通 `/map-3d-guide-c` 不显示 Tree Candidate Lab，默认游客页表现不变。
+
+## 阶段：手动 869 树群接入为默认园林
+
+### 改动摘要
+
+- 将用户在 Tree Candidate Lab 手动摆放并导出的 869 个 tree assets 接入为 `/map-3d-guide-c` 新默认树群。
+- 新增 `src/data/lingshanMap3DManualTreeAssets.ts`，保留用户原始经纬度、scale、height、rotationY、modelUrl / assetUrl 和 cluster 信息。
+- 旧 deterministic 199 树群不删除，保留为 `DEFAULT_LINGSHAN_GARDEN_ASSETS_LEGACY` / `lingshanMap3DGardenAssetsLegacy`，debugGarden 高级区可临时切换查看。
+- 普通游客页默认读取新手动树群，不再叠加旧 199 树群。
+
+### 加载与性能
+
+- 869 个手动树群按顺序分层：tier 1/high 200 个、tier 2/medium 300 个、tier 3/low 369 个。
+- `useGardenAssetOverlays` 继续使用 id Map 去重、load generation 和 pending batch cancel，避免重影和旧 batch 残留。
+- GLB overlay 创建批次调整为每批 32 个，每批之间继续通过 requestAnimationFrame + setTimeout 让出主线程。
+- interaction / 远景 LOD 会优先压低 low/tier 3 透明度，idle 后恢复。
+- debugPerf 增加 default asset count、batch index、tier loaded、loaded count 和 live count warning。
+
+### 数据校验
+
+- 输入总数 869。
+- id 唯一：869 / 869，无重复。
+- lng / lat、modelUrl / assetUrl、scale、height、rotationY 均合法。
+- 引用的 6 个树模型路径均存在。
+- 未跳过、未重命名、未删除任何 GLB。
+
+## 阶段：默认手动树群按树种 scale 归一化
+
+### 改动摘要
+
+- 发现 869 手动树群混用了两套模型单位：Kenney legacy 树种 scale 约 78–98，Meshy `fluffy_bodhi_grove` 原始 scale 约 0.75–1.15。
+- `fluffy_bodhi_grove.runtime-v2.glb` 原始包围盒约 1.9m 量级，scale 1 在地图沙盘中容易只看到锚点而看不到树团。
+- 新增按树种的 scale 归一化：仅对 `fluffy_bodhi_grove` 的旧小数 scale 映射到 48–74 的地图显示尺度。
+- 已经是 30+ 的 scale 不会重复放大，避免 localStorage 草稿刷新后叠乘。
+- 不改经纬度点位、yaw、高度、模型文件、路线或 POI。
+
+### 覆盖范围
+
+- 新默认 869 手动树群导出时自动归一化。
+- Tree Candidate Lab 读取旧草稿时自动迁移 `fluffy_bodhi_grove` 测试树 scale。
+- 后续手动新增 `fluffy_bodhi_grove` 默认使用 48–74 scale 区间，并按 scale 自动设置贴地 height。
+
+## 阶段：毛茸茸树团替换为 Meshy runtime-v2
+
+### 改动摘要
+
+- 将用户新增的 `Meshy_AI_Create_a_stylized_low_0616093941_texture.glb` 按 safe-compatible 流程优化为 `fluffy-bodhi-grove.runtime-v2.glb`。
+- 原始文件约 11.36MiB，runtime-v2 约 1.35MiB，压缩率约 88.08%。
+- `extensionsUsed` / `extensionsRequired` 均为空，validate 无 error / warning。
+- `fluffy_bodhi_grove` 候选模型路径切换到 runtime-v2。
+- 默认 869 树群中 `fluffy_bodhi_grove` 自动引用 runtime-v2，不改任何经纬度点位。
+
+### scale / height 调整
+
+- runtime-v2 的原始包围盒仍约 1.9m 量级，但模型原点在树团中部附近。
+- `fluffy_bodhi_grove` 的旧 0.75–1.15 scale 归一化到约 48–74，比上一版放大 1.2 倍。
+- height 从上一版 `scale * 0.54` 继续降为 `scale * 0.04`，默认 869 手动树群中该树种约为 1.9–3.0，参考其它树种的贴地高度，避免毛茸茸树离地。
+- 其它树种 scale / height 保持不变。
+
+## 阶段：修复本地 127.0.0.1 腾讯底图黑屏
+
+### 现象
+
+- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 在 `127.0.0.1:5173` 下会出现腾讯 WebGL canvas 黑底。
+- 腾讯水印、指南针、路线、POI、GLB 地标和树群 overlay 均正常，说明 SDK 与 overlay 层已运行，但底图瓦片 / 3D 底图没有出图。
+- 切换到 `localhost:5173` 后底图恢复，判断与本地 Web Key 白名单 / Referer 来源有关。
+
+### 修复
+
+- 本地检测到 `127.0.0.1` 时自动切换到 `localhost`，保留 query 参数。
+- 切换前用 `window.name` 临时搬运 debugGarden / Tree Candidate Lab 草稿，避免 127 来源下的手动树群草稿丢失。
+- 腾讯 ready 事件未触发时增加本地延迟 fallback，避免底图已显示但页面一直停留在 loading curtain。
+- `loadTMap` 不再在 script `onload` 当下立刻判失败，改为轮询等待 `window.TMap` 最多 10 秒，避免腾讯 GL 脚本异步挂载全局对象时误报加载失败。
+- 关闭实验性的 `renderOptions.enableBloom`，降低腾讯 GL 后处理兼容风险。
+- 不修改 Tencent key，不修改 `mapStyleId: 'style1'`，不改底图样式、不改路线和模型。

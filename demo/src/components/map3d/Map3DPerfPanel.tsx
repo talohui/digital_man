@@ -184,7 +184,14 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
               <li>
                 <span>Live garden overlays</span>
                 <small>
-                  live {snapshot.gardenOverlayLiveCount} · created {snapshot.gardenOverlayCreated} · removed {snapshot.gardenOverlayRemoved} · duplicate prevented {snapshot.gardenOverlayDuplicatePrevented} · generation {snapshot.gardenLoadGeneration}
+                  default {snapshot.defaultGardenAssetCount} · live {snapshot.gardenOverlayLiveCount}
+                  {snapshot.gardenLiveCountWarning ? ' · live-count warning' : ''}
+                  {' · '}
+                  loaded {snapshot.gardenLoadedCount || snapshot.gardenLoaded}/{snapshot.gardenTotal}
+                  {snapshot.gardenLoadBatchIndex !== undefined ? ` · batch ${snapshot.gardenLoadBatchIndex + 1}` : ''}
+                  {snapshot.gardenTierLoaded ? ` · tier ${snapshot.gardenTierLoaded}` : ''}
+                  {' · '}
+                  created {snapshot.gardenOverlayCreated} · removed {snapshot.gardenOverlayRemoved} · duplicate prevented {snapshot.gardenOverlayDuplicatePrevented} · generation {snapshot.gardenLoadGeneration}
                   {' · '}
                   LOD {snapshot.gardenLodTier} · opacity {Math.round(snapshot.gardenOpacity * 100)}%
                   {snapshot.mapInteracting ? ` · interacting ${snapshot.mapInteractionKind ?? 'move'}` : ''}

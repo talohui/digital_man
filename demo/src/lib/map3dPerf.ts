@@ -112,6 +112,11 @@ export type Map3DPerfMapVisualEventType =
   | 'landmarkReferenceLoaded'
   | 'treeCandidateClusterGenerated'
   | 'treeCandidateCompareSetGenerated'
+  | 'manualTreeAdded'
+  | 'testTreeDeleted'
+  | 'testTreeCleared'
+  | 'gardenAssetSourceChanged'
+  | 'gardenLoadBatch'
 
 export type Map3DStartupStage =
   | 'loadingSdk'
@@ -149,6 +154,11 @@ export type Map3DPerfMapVisualEvent = {
   gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
   liveDefaultGardenOverlayCount?: number
   liveTestTreeOverlayCount?: number
+  defaultGardenAssetCount?: number
+  gardenLoadedCount?: number
+  gardenLoadBatchIndex?: number
+  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
+  gardenLiveCountWarning?: boolean
 }
 
 export type Map3DPerfCompanionModelEventType =
@@ -216,6 +226,11 @@ export type Map3DPerfSnapshot = {
   gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
   liveDefaultGardenOverlayCount: number
   liveTestTreeOverlayCount: number
+  defaultGardenAssetCount: number
+  gardenLoadedCount: number
+  gardenLoadBatchIndex?: number
+  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
+  gardenLiveCountWarning: boolean
   landmarkTotal: number
   landmarkLoaded: number
   landmarkFailed: number
@@ -350,6 +365,11 @@ type MutableMap3DPerfState = {
   gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
   liveDefaultGardenOverlayCount: number
   liveTestTreeOverlayCount: number
+  defaultGardenAssetCount: number
+  gardenLoadedCount: number
+  gardenLoadBatchIndex?: number
+  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
+  gardenLiveCountWarning: boolean
   landmarkStartedAt?: number
   landmarkTotal: number
   landmarkLoaded: number
@@ -725,7 +745,10 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         event.type === 'defaultGardenHidden' ||
         event.type === 'landmarkReferenceLoaded' ||
         event.type === 'treeCandidateClusterGenerated' ||
-        event.type === 'treeCandidateCompareSetGenerated'
+        event.type === 'treeCandidateCompareSetGenerated' ||
+        event.type === 'manualTreeAdded' ||
+        event.type === 'testTreeDeleted' ||
+        event.type === 'testTreeCleared'
       ) {
         state.treeCandidateLabEnabled = true
       }
@@ -762,6 +785,21 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       }
       if (event.liveTestTreeOverlayCount !== undefined) {
         state.liveTestTreeOverlayCount = event.liveTestTreeOverlayCount
+      }
+      if (event.defaultGardenAssetCount !== undefined) {
+        state.defaultGardenAssetCount = event.defaultGardenAssetCount
+      }
+      if (event.gardenLoadedCount !== undefined) {
+        state.gardenLoadedCount = event.gardenLoadedCount
+      }
+      if (event.gardenLoadBatchIndex !== undefined) {
+        state.gardenLoadBatchIndex = event.gardenLoadBatchIndex
+      }
+      if (event.gardenTierLoaded !== undefined) {
+        state.gardenTierLoaded = event.gardenTierLoaded
+      }
+      if (event.gardenLiveCountWarning !== undefined) {
+        state.gardenLiveCountWarning = event.gardenLiveCountWarning
       }
 
       notify()
@@ -823,6 +861,9 @@ function createInitialState(): MutableMap3DPerfState {
     testTreeCount: 0,
     liveDefaultGardenOverlayCount: 0,
     liveTestTreeOverlayCount: 0,
+    defaultGardenAssetCount: 0,
+    gardenLoadedCount: 0,
+    gardenLiveCountWarning: false,
     landmarkTotal: 0,
     landmarkLoaded: 0,
     landmarkFailed: 0,
@@ -891,6 +932,11 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     gardenReferenceMode: state.gardenReferenceMode,
     liveDefaultGardenOverlayCount: state.liveDefaultGardenOverlayCount,
     liveTestTreeOverlayCount: state.liveTestTreeOverlayCount,
+    defaultGardenAssetCount: state.defaultGardenAssetCount,
+    gardenLoadedCount: state.gardenLoadedCount,
+    gardenLoadBatchIndex: state.gardenLoadBatchIndex,
+    gardenTierLoaded: state.gardenTierLoaded,
+    gardenLiveCountWarning: state.gardenLiveCountWarning,
     landmarkTotal: state.landmarkTotal,
     landmarkLoaded: state.landmarkLoaded,
     landmarkFailed: state.landmarkFailed,

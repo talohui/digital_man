@@ -1,4 +1,5 @@
 import type { LatLngPoint } from './guideData'
+import { LINGSHAN_MANUAL_TREE_ASSETS, LINGSHAN_MANUAL_TREE_ASSET_STATS } from './lingshanMap3DManualTreeAssets'
 
 export type Map3DGardenAssetKind =
   | 'pine_cluster'
@@ -8,6 +9,12 @@ export type Map3DGardenAssetKind =
   | 'forest_edge'
   | 'rock_cluster'
   | 'stone_mass'
+  | 'fluffy_bodhi_grove'
+  | 'fluffy_round_tree'
+  | 'bushy_canopy_tree'
+  | 'dense_shrub_cluster'
+  | 'soft_forest_clump'
+  | 'fluffy_tree_mix'
 
 export type Map3DGardenAssetPriority = 'low' | 'medium' | 'high'
 
@@ -70,6 +77,7 @@ type KeepoutCircle = {
 }
 
 const vendorAssetBaseUrl = '/assets/map-3d-guide/glb-garden/vendor'
+const treeCandidateAssetBaseUrl = '/models/lingshan/tree-candidates'
 const kenneyNatureKitLicenseId = 'kenney-nature-kit-cc0'
 
 const gardenAssetUrls: Record<Map3DGardenAssetKind, string> = {
@@ -79,7 +87,13 @@ const gardenAssetUrls: Record<Map3DGardenAssetKind, string> = {
   shrub_mass: `${vendorAssetBaseUrl}/kenney_bush_detailed_sage.glb`,
   forest_edge: `${vendorAssetBaseUrl}/kenney_tree_pine_round_c_sage.glb`,
   rock_cluster: `${vendorAssetBaseUrl}/kenney_rock_large_c_sage.glb`,
-  stone_mass: `${vendorAssetBaseUrl}/kenney_rock_tall_h_sage.glb`
+  stone_mass: `${vendorAssetBaseUrl}/kenney_rock_tall_h_sage.glb`,
+  fluffy_bodhi_grove: `${treeCandidateAssetBaseUrl}/fluffy-bodhi-grove.runtime-v2.glb`,
+  fluffy_round_tree: `${treeCandidateAssetBaseUrl}/fluffy-round-tree-a.glb`,
+  bushy_canopy_tree: `${treeCandidateAssetBaseUrl}/bushy-canopy-tree-a.glb`,
+  dense_shrub_cluster: `${treeCandidateAssetBaseUrl}/dense-shrub-cluster-a.glb`,
+  soft_forest_clump: `${treeCandidateAssetBaseUrl}/soft-forest-clump-a.glb`,
+  fluffy_tree_mix: `${treeCandidateAssetBaseUrl}/fluffy-round-tree-b.glb`
 }
 
 export function getMap3DGardenAssetUrl(kind: Map3DGardenAssetKind) {
@@ -707,10 +721,20 @@ function distanceToSegmentMeters(point: LatLngPoint, start: LatLngPoint, end: La
   return Math.sqrt(dx * dx + dy * dy)
 }
 
-export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = lingshanMap3DGardenVegetationZones.flatMap(buildZoneAssets)
+export const DEFAULT_LINGSHAN_GARDEN_ASSETS_LEGACY: LingshanMap3DGardenAsset[] = lingshanMap3DGardenVegetationZones.flatMap(buildZoneAssets)
+export const lingshanMap3DGardenAssetsLegacy = DEFAULT_LINGSHAN_GARDEN_ASSETS_LEGACY
+export const lingshanMap3DGardenAssets: LingshanMap3DGardenAsset[] = LINGSHAN_MANUAL_TREE_ASSETS
+export const lingshanMap3DGardenAssetStats = LINGSHAN_MANUAL_TREE_ASSET_STATS
 
 export function getDefaultMap3DGardenAssets() {
   return lingshanMap3DGardenAssets.map((asset) => ({
+    ...asset,
+    location: { ...asset.location }
+  }))
+}
+
+export function getLegacyMap3DGardenAssets() {
+  return lingshanMap3DGardenAssetsLegacy.map((asset) => ({
     ...asset,
     location: { ...asset.location }
   }))

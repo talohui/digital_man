@@ -5,6 +5,7 @@ import { Map3DPerfPanel } from '../components/map3d/Map3DPerfPanel'
 import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
 import {
   getDefaultMap3DGardenAssets,
+  getLegacyMap3DGardenAssets,
   getMap3DGardenAssetUrl,
   getMap3DGardenLicenseId,
   lingshanMap3DForestPatches,
@@ -14,6 +15,7 @@ import {
   type LingshanMap3DGardenAsset
 } from '../data/lingshanMap3DGardenAssets'
 import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
+import { normalizeLingshanTreeAssetScale, normalizeLingshanTreeScaleRange } from '../data/lingshanTreeScaleNormalization'
 import {
   getMapModelOverlayByPoiId,
   getMapModelOverlayInspectorId,
@@ -56,6 +58,7 @@ type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
 
 const MAP_3D_GUIDE_MIN_BASEMAP_READY_MS = 1050
+const MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS = 3200
 const MAP_3D_GUIDE_SLOW_READY_MS = 4800
 const MAP_3D_GUIDE_CURTAIN_FADE_MS = 520
 
@@ -124,6 +127,35 @@ type GardenBatchAdjustState = {
 type GardenEditorZoneKind = 'forest' | 'axis_grove' | 'water_edge' | 'node_green'
 type GardenKeepoutReason = string
 type GardenEditorMode = 'inspect' | 'drawVegetation' | 'drawKeepout' | 'addAsset'
+type GardenAssetSourceMode = 'manual' | 'legacy'
+type TreeCandidateType =
+  | 'fluffy_bodhi_grove'
+  | 'fluffy_round_tree'
+  | 'fluffy_tree_mix'
+  | 'bushy_canopy_tree'
+  | 'dense_shrub_cluster'
+  | 'soft_forest_clump'
+type TreeCandidateClusterMode = 'single' | 'smallCluster' | 'mediumCluster' | 'backgroundGrove'
+type TreeCandidateLabClickMode = 'idle' | 'addCluster' | 'compareSet'
+
+type TreeCandidateLabParams = {
+  count: number
+  radiusMeters: number
+  minDistanceMeters: number
+  scaleMin: number
+  scaleMax: number
+  heightOffset: number
+  randomSeed: number
+}
+
+type TreeCandidateLabState = {
+  selectedCandidateType: TreeCandidateType
+  clusterMode: TreeCandidateClusterMode
+  params: TreeCandidateLabParams
+  testTrees: LingshanMap3DGardenAsset[]
+  defaultGardenHidden: boolean
+  landmarkReferenceLoaded: boolean
+}
 
 type GardenAssetRatios = Partial<Record<Map3DGardenAssetKind, number>>
 
@@ -223,16 +255,148 @@ const axisCruiseTarget =
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 const MAP_3D_GUIDE_STYLE_ID = 'style1'
 const MAP_3D_GUIDE_RENDER_OPTIONS = {
-  enableBloom: true
+  enableBloom: false
   // fogOptions / skyOptions need confirmed Tencent JS API GL field shapes before enabling.
 } as const
 const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
   features: ['base', 'building3d', 'label']
 } as const
+const MAP_3D_GUIDE_LOCAL_TMAP_HOST = '127.0.0.1'
+const MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST = 'localhost'
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v7-forest-patches'
+const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v8-manual-trees'
 const MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY = 'lingshan-map-3d-guide-garden-editor-v1'
+const TREE_CANDIDATE_LAB_STORAGE_KEY = 'lingshan_tree_candidate_lab_draft_v1'
+const MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX = 'lingshan-map-3d-guide-localhost-transfer:'
+const MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS = [
+  MAP_3D_GUIDE_GARDEN_STORAGE_KEY,
+  MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY,
+  TREE_CANDIDATE_LAB_STORAGE_KEY
+] as const
+const TREE_CANDIDATE_LAB_ZONE_ID = 'tree-candidate-lab'
+const recommendedTreeCandidateTypes: TreeCandidateType[] = ['fluffy_bodhi_grove']
+const legacyTreeCandidateTypes: TreeCandidateType[] = [
+  'fluffy_round_tree',
+  'fluffy_tree_mix',
+  'bushy_canopy_tree',
+  'dense_shrub_cluster',
+  'soft_forest_clump'
+]
+const treeCandidateTypes: TreeCandidateType[] = [
+  ...recommendedTreeCandidateTypes,
+  ...legacyTreeCandidateTypes
+]
+const treeCandidateLabels: Record<TreeCandidateType, string> = {
+  fluffy_bodhi_grove: '毛茸茸菩提树团',
+  fluffy_round_tree: 'fluffy_round_tree',
+  fluffy_tree_mix: 'fluffy_tree_mix',
+  bushy_canopy_tree: 'bushy_canopy_tree',
+  dense_shrub_cluster: 'dense_shrub_cluster',
+  soft_forest_clump: 'soft_forest_clump'
+}
+const treeCandidateDescriptions: Record<TreeCandidateType, string> = {
+  fluffy_bodhi_grove: '主树团候选；适合背景林、边界林、地标侧后方树群。',
+  fluffy_round_tree: 'Kenney legacy 圆冠矮树候选。',
+  fluffy_tree_mix: 'Kenney legacy 块状圆冠树候选。',
+  bushy_canopy_tree: 'Kenney legacy 深绿橡树冠候选。',
+  dense_shrub_cluster: 'Kenney legacy 大灌木候选。',
+  soft_forest_clump: 'Kenney legacy 深绿树候选。'
+}
+const treeCandidateRecommendedModes: Record<TreeCandidateType, TreeCandidateClusterMode[]> = {
+  fluffy_bodhi_grove: ['smallCluster', 'mediumCluster', 'backgroundGrove'],
+  fluffy_round_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
+  fluffy_tree_mix: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
+  bushy_canopy_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
+  dense_shrub_cluster: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
+  soft_forest_clump: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove']
+}
+const treeCandidateTypesForCompare = treeCandidateTypes
+const treeCandidateLegacyDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
+  single: {
+    count: 1,
+    radiusMeters: 0,
+    minDistanceMeters: 0,
+    scaleMin: 84,
+    scaleMax: 94,
+    heightOffset: 2.2,
+    randomSeed: 1207
+  },
+  smallCluster: {
+    count: 4,
+    radiusMeters: 10,
+    minDistanceMeters: 3,
+    scaleMin: 78,
+    scaleMax: 98,
+    heightOffset: 2.1,
+    randomSeed: 2401
+  },
+  mediumCluster: {
+    count: 8,
+    radiusMeters: 18,
+    minDistanceMeters: 4,
+    scaleMin: 74,
+    scaleMax: 106,
+    heightOffset: 2,
+    randomSeed: 3613
+  },
+  backgroundGrove: {
+    count: 14,
+    radiusMeters: 36,
+    minDistanceMeters: 6,
+    scaleMin: 66,
+    scaleMax: 116,
+    heightOffset: 1.8,
+    randomSeed: 4817
+  }
+}
+const treeCandidateBodhiGroveDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
+  single: {
+    count: 1,
+    radiusMeters: 0,
+    minDistanceMeters: 0,
+    scaleMin: 48,
+    scaleMax: 74.4,
+    heightOffset: 0,
+    randomSeed: 9201
+  },
+  smallCluster: {
+    count: 3,
+    radiusMeters: 14,
+    minDistanceMeters: 8,
+    scaleMin: 48,
+    scaleMax: 74.4,
+    heightOffset: 0,
+    randomSeed: 9301
+  },
+  mediumCluster: {
+    count: 5,
+    radiusMeters: 26,
+    minDistanceMeters: 10,
+    scaleMin: 48,
+    scaleMax: 74.4,
+    heightOffset: 0,
+    randomSeed: 9401
+  },
+  backgroundGrove: {
+    count: 8,
+    radiusMeters: 48,
+    minDistanceMeters: 14,
+    scaleMin: 48,
+    scaleMax: 74.4,
+    heightOffset: 0,
+    randomSeed: 9501
+  }
+}
+const treeCandidateRecommendedDefaults: Record<TreeCandidateType, Record<TreeCandidateClusterMode, TreeCandidateLabParams>> = {
+  fluffy_bodhi_grove: treeCandidateBodhiGroveDefaults,
+  fluffy_round_tree: treeCandidateLegacyDefaults,
+  fluffy_tree_mix: treeCandidateLegacyDefaults,
+  bushy_canopy_tree: treeCandidateLegacyDefaults,
+  dense_shrub_cluster: treeCandidateLegacyDefaults,
+  soft_forest_clump: treeCandidateLegacyDefaults
+}
+const treeCandidateClusterDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = treeCandidateBodhiGroveDefaults
 const coreLandmarkReferenceIds = [
   'giant_buddha',
   'fan_gong',
@@ -248,6 +412,12 @@ const coreLandmarkReferenceIds = [
   'manlong_flying_tower',
   'shengjing_square'
 ]
+const treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string> = {
+  single: '单棵',
+  smallCluster: '小树团',
+  mediumCluster: '中树团',
+  backgroundGrove: '背景林团'
+}
 const defaultGardenFilters: GardenAssetFilterState = {
   zoneId: 'all',
   kind: 'all',
@@ -268,7 +438,12 @@ const gardenAssetKindOptions: Map3DGardenAssetKind[] = [
   'forest_edge',
   'shrub_mass',
   'rock_cluster',
-  'stone_mass'
+  'stone_mass',
+  'fluffy_round_tree',
+  'bushy_canopy_tree',
+  'dense_shrub_cluster',
+  'soft_forest_clump',
+  'fluffy_tree_mix'
 ]
 const defaultEditorAssetPool: Map3DGardenAssetKind[] = ['pine_cluster', 'mixed_grove', 'forest_edge', 'shrub_mass', 'rock_cluster']
 const defaultEditorAssetRatios: GardenAssetRatios = {
@@ -366,6 +541,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const gardenEditorVertexLayerRef = useRef<any>(null)
   const gardenPreviewMarkerLayerRef = useRef<any>(null)
   const gardenAssetEditMarkerLayerRef = useRef<any>(null)
+  const treeCandidateMarkerLayerRef = useRef<any>(null)
+  const treeCandidateEditMarkerLayerRef = useRef<any>(null)
   const gltfModelRefs = useRef<Map<string, any>>(new Map())
   const cameraSequenceRef = useRef(0)
   const tourPlaybackRef = useRef<Map3DTourPlaybackRef['current']>(null)
@@ -399,6 +576,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
   const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
+  const shouldRedirectLocalTMapHost = useMemo(() => shouldUseCanonicalLocalhostForTMap(), [])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const landmarkModelOverlays = useMemo(() => {
     const overlays = getVisibleMapModelOverlays()
@@ -457,6 +635,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   })
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
   const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
+  const [gardenAssetSourceMode, setGardenAssetSourceMode] = useState<GardenAssetSourceMode>('manual')
   const [selectedGardenId, setSelectedGardenId] = useState(() => (debugGarden ? '' : loadStoredGardenAssets(visualVariant.id)[0]?.id ?? ''))
   const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
   const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
@@ -471,6 +650,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [gardenAssetEditDraft, setGardenAssetEditDraft] = useState<LingshanMap3DGardenAsset | null>(null)
   const [editorAddAssetKind, setEditorAddAssetKind] = useState<Map3DGardenAssetKind>('pine_cluster')
   const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
+  const [treeCandidateLabState, setTreeCandidateLabState] = useState<TreeCandidateLabState>(() => loadTreeCandidateLabDraft(debugGarden))
+  const [treeCandidateLabClickMode, setTreeCandidateLabClickMode] = useState<TreeCandidateLabClickMode>(() => (debugGarden ? 'addCluster' : 'idle'))
+  const [selectedTreeCandidateId, setSelectedTreeCandidateId] = useState('')
   const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
   const landmarkInspector = useLandmarkModelInspector({
     active: debugPerf || debugGarden,
@@ -576,19 +758,30 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
   const selectedGardenAsset = selectedGardenId ? gardenAssets.find((asset) => asset.id === selectedGardenId) : undefined
   const selectedGardenAssetDraft = selectedGardenAsset && gardenAssetEditDraft?.id === selectedGardenId ? gardenAssetEditDraft : selectedGardenAsset
+  const selectedTreeCandidateAsset = selectedTreeCandidateId
+    ? treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
+    : undefined
   const selectedEditorZone = selectedEditorZoneId ? gardenEditorState.zones.find((zone) => zone.id === selectedEditorZoneId) : undefined
   const selectedKeepoutZone = selectedKeepoutZoneId ? gardenEditorState.keepouts.find((zone) => zone.id === selectedKeepoutZoneId) : undefined
   const filteredGardenAssets = useMemo(
     () => gardenAssets.filter((asset) => matchesGardenFilters(asset, gardenFilters)),
     [gardenAssets, gardenFilters]
   )
+  const defaultGardenHidden = debugGarden ? treeCandidateLabState.defaultGardenHidden : false
+  const testTreeAssets = debugGarden ? treeCandidateLabState.testTrees : []
+  const overlayGardenAssets = useMemo(
+    () => (debugGarden ? [...(defaultGardenHidden ? [] : gardenAssets), ...testTreeAssets] : gardenAssets),
+    [debugGarden, defaultGardenHidden, gardenAssets, testTreeAssets]
+  )
+  const liveDefaultGardenOverlayCount = defaultGardenHidden ? 0 : gardenAssets.filter((asset) => asset.visible).length
+  const liveTestTreeOverlayCount = testTreeAssets.filter((asset) => asset.visible).length
   const {
     report: gardenOverlayReport,
     loading: gardenAssetLoading,
     progressText: gardenAssetProgressText
   } = useGardenAssetOverlays({
     active: visualVariant.id === 'prototype-c',
-    assets: gardenAssets,
+    assets: overlayGardenAssets,
     debugPerf,
     debugGarden,
     gardenLodState,
@@ -795,8 +988,33 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   useEffect(() => {
+    if (!shouldRedirectLocalTMapHost) {
+      return
+    }
+
+    stashLocalhostTransferDrafts()
+    setStartupStage('loadingSdk')
+    setPageMessage('正在切换到 localhost 以加载腾讯底图...')
+    perfRecorder.recordMapVisualEvent({
+      type: 'startupStageChanged',
+      startupStage: 'loadingSdk',
+      reason: 'canonical-localhost-for-tencent-map'
+    })
+
+    const nextUrl = buildCanonicalLocalhostUrl()
+    if (nextUrl) {
+      window.location.replace(nextUrl)
+    }
+  }, [perfRecorder, shouldRedirectLocalTMapHost])
+
+  useEffect(() => {
+    if (shouldRedirectLocalTMapHost) {
+      return
+    }
+
     let cancelled = false
     let visualReadyTimer: number | null = null
+    let visualReadyFallbackTimer: number | null = null
     let visualTimeoutTimer: number | null = null
     let curtainHideTimer: number | null = null
     let visualReadyRafIds: number[] = []
@@ -832,6 +1050,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       if (visualTimeoutTimer !== null) {
         window.clearTimeout(visualTimeoutTimer)
         visualTimeoutTimer = null
+      }
+      if (visualReadyFallbackTimer !== null) {
+        window.clearTimeout(visualReadyFallbackTimer)
+        visualReadyFallbackTimer = null
       }
       setIsMapVisualReady(true)
       setMapReadyTimedOut(false)
@@ -976,6 +1198,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           map.on?.(eventName, handler)
           mapVisualEventCleanups.push(() => map.off?.(eventName, handler))
         })
+        visualReadyFallbackTimer = window.setTimeout(() => {
+          scheduleMapVisualReady('fallback-localhost-ready-delay')
+        }, MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS)
 
         const mapElement = mapElementRef.current
 
@@ -1040,6 +1265,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       if (visualReadyTimer !== null) {
         window.clearTimeout(visualReadyTimer)
       }
+      if (visualReadyFallbackTimer !== null) {
+        window.clearTimeout(visualReadyFallbackTimer)
+      }
       if (visualTimeoutTimer !== null) {
         window.clearTimeout(visualTimeoutTimer)
       }
@@ -1071,7 +1299,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
-  }, [perfRecorder])
+  }, [perfRecorder, shouldRedirectLocalTMapHost])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden) {
@@ -1144,6 +1372,52 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
 
   useEffect(() => {
+    if (!debugGarden || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
+  }, [debugGarden, treeCandidateLabState])
+
+  useEffect(() => {
+    if (!debugGarden || !mapVisualReadyForOverlays || treeCandidateLabState.landmarkReferenceLoaded) {
+      return
+    }
+
+    loadCoreLandmarkReferences()
+  }, [debugGarden, mapVisualReadyForOverlays, treeCandidateLabState.landmarkReferenceLoaded])
+
+  useEffect(() => {
+    if (!debugGarden) {
+      return
+    }
+
+    perfRecorder.recordMapVisualEvent({
+      type: 'treeCandidateLabEnabled',
+      defaultGardenHidden: treeCandidateLabState.defaultGardenHidden,
+      landmarkReferenceLoaded: treeCandidateLabState.landmarkReferenceLoaded,
+      testTreeCount: treeCandidateLabState.testTrees.length,
+      candidateType: treeCandidateLabState.selectedCandidateType,
+      clusterMode: treeCandidateLabState.clusterMode,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveDefaultGardenOverlayCount,
+      liveTestTreeOverlayCount,
+      defaultGardenAssetCount: gardenAssets.length
+    })
+  }, [
+    debugGarden,
+    gardenAssets.length,
+    liveDefaultGardenOverlayCount,
+    liveTestTreeOverlayCount,
+    perfRecorder,
+    treeCandidateLabState.clusterMode,
+    treeCandidateLabState.defaultGardenHidden,
+    treeCandidateLabState.landmarkReferenceLoaded,
+    treeCandidateLabState.selectedCandidateType,
+    treeCandidateLabState.testTrees.length
+  ])
+
+  useEffect(() => {
     if (!debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !mapRef.current) {
       return
     }
@@ -1181,6 +1455,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         }))
         setSelectedGardenId('')
         setGardenCopyStatus(`已添加单个资产：${asset.name}`)
+        return
+      }
+
+      if (treeCandidateLabClickMode === 'addCluster') {
+        addTreeCandidateCluster(point)
+        return
+      }
+
+      if (treeCandidateLabClickMode === 'compareSet') {
+        addTreeCandidateCompareSet(point)
       }
     }
 
@@ -1200,7 +1484,18 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapRef.current?.off?.('click', handleMapClick)
       mapRef.current?.off?.('dblclick', handleMapDoubleClick)
     }
-  }, [completeDraftGardenPolygon, debugGarden, editorAddAssetKind, gardenEditorMode, gardenEditorState.previewAssets.length, mapVisualReadyForOverlays, visualVariant.id])
+  }, [
+    addTreeCandidateCluster,
+    addTreeCandidateCompareSet,
+    completeDraftGardenPolygon,
+    debugGarden,
+    editorAddAssetKind,
+    gardenEditorMode,
+    gardenEditorState.previewAssets.length,
+    mapVisualReadyForOverlays,
+    treeCandidateLabClickMode,
+    visualVariant.id
+  ])
 
   useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
@@ -2009,6 +2304,124 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       gardenAssetEditMarkerLayerRef.current = null
     }
   }, [debugGarden, mapVisualReadyForOverlays, selectedGardenAssetDraft, visualVariant.id])
+
+  useEffect(() => {
+    treeCandidateMarkerLayerRef.current?.setMap?.(null)
+    treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
+    treeCandidateMarkerLayerRef.current = null
+    treeCandidateEditMarkerLayerRef.current = null
+
+    if (
+      !debugGarden ||
+      visualVariant.id !== 'prototype-c' ||
+      !mapVisualReadyForOverlays ||
+      !window.TMap ||
+      !mapRef.current ||
+      !treeCandidateLabState.testTrees.length
+    ) {
+      return
+    }
+
+    const visibleTestTrees = treeCandidateLabState.testTrees.filter((asset) => asset.visible)
+
+    if (visibleTestTrees.length) {
+      treeCandidateMarkerLayerRef.current = new window.TMap.MultiMarker({
+        map: mapRef.current,
+        styles: {
+          testTree: new window.TMap.MarkerStyle({
+            width: 22,
+            height: 22,
+            anchor: { x: 11, y: 11 },
+            src: createSvgDataUrl(editorVertexSvg('#6f8e73', '#fff7d6'))
+          }),
+          selectedTestTree: new window.TMap.MarkerStyle({
+            width: 26,
+            height: 26,
+            anchor: { x: 13, y: 13 },
+            src: createSvgDataUrl(editorVertexSvg('#d6b46a', '#fff7d6'))
+          })
+        },
+        geometries: visibleTestTrees.map((asset) => ({
+          id: asset.id,
+          styleId: asset.id === selectedTreeCandidateId ? 'selectedTestTree' : 'testTree',
+          position: toTMapLatLng(asset.location),
+          rank: asset.id === selectedTreeCandidateId ? 48 : 42,
+          properties: {
+            title: asset.name
+          }
+        }))
+      })
+
+      treeCandidateMarkerLayerRef.current.on?.('click', (event: any) => {
+        event?.stopPropagation?.()
+        event?.preventDefault?.()
+        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
+        if (id) {
+          setSelectedTreeCandidateId(String(id))
+          setGardenCopyStatus('已选中测试树，可在基础摆树面板调参数或拖动紫色点')
+        }
+      })
+    }
+
+    if (selectedTreeCandidateAsset) {
+      treeCandidateEditMarkerLayerRef.current = new window.TMap.MultiMarker({
+        map: mapRef.current,
+        enableDragging: true,
+        styles: {
+          testTreeEdit: new window.TMap.MarkerStyle({
+            width: 30,
+            height: 30,
+            anchor: { x: 15, y: 15 },
+            src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
+          })
+        },
+        geometries: [
+          {
+            id: `tree-candidate:${selectedTreeCandidateAsset.id}`,
+            styleId: 'testTreeEdit',
+            position: toTMapLatLng(selectedTreeCandidateAsset.location),
+            draggable: true,
+            rank: 50,
+            properties: {
+              title: selectedTreeCandidateAsset.name
+            }
+          }
+        ]
+      })
+
+      const handleTestTreeDragEnd = (event: any) => {
+        const point = extractMapEventLatLng(event)
+
+        if (!point) {
+          return
+        }
+
+        updateSelectedTreeCandidateAsset({
+          location: {
+            lat: roundNumber(point.lat, 6),
+            lng: roundNumber(point.lng, 6)
+          }
+        })
+        setGardenCopyStatus('已移动选中测试树')
+      }
+
+      treeCandidateEditMarkerLayerRef.current.on?.('dragend', handleTestTreeDragEnd)
+    }
+
+    return () => {
+      treeCandidateMarkerLayerRef.current?.setMap?.(null)
+      treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
+      treeCandidateMarkerLayerRef.current = null
+      treeCandidateEditMarkerLayerRef.current = null
+    }
+  }, [
+    debugGarden,
+    mapVisualReadyForOverlays,
+    selectedTreeCandidateAsset,
+    selectedTreeCandidateId,
+    treeCandidateLabState.testTrees,
+    visualVariant.id
+  ])
 
   useEffect(() => {
     if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
@@ -3039,6 +3452,351 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setGardenCopyStatus(`已删除资产点：${selectedGardenAsset.name}`)
   }
 
+  function loadCoreLandmarkReferences() {
+    coreLandmarkReferenceIds.forEach((id) => {
+      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
+
+      if (item) {
+        landmarkInspector.loadLandmark(id)
+      }
+    })
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      landmarkReferenceLoaded: true
+    }))
+    perfRecorder.recordMapVisualEvent({
+      type: 'landmarkReferenceLoaded',
+      landmarkReferenceLoaded: true,
+      testTreeCount: treeCandidateLabState.testTrees.length,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus('已加载核心地标参照层')
+  }
+
+  function unloadCoreLandmarkReferences() {
+    coreLandmarkReferenceIds.forEach((id) => landmarkInspector.unloadLandmark(id))
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      landmarkReferenceLoaded: false
+    }))
+    perfRecorder.recordMapVisualEvent({
+      type: 'landmarkReferenceLoaded',
+      landmarkReferenceLoaded: false,
+      testTreeCount: treeCandidateLabState.testTrees.length,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus('已卸载核心地标参照层')
+  }
+
+  function updateTreeCandidateLab(patch: Partial<TreeCandidateLabState>) {
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      ...patch,
+      params:
+        patch.selectedCandidateType || patch.clusterMode
+          ? {
+              ...getTreeCandidateRecommendedParams(
+                patch.selectedCandidateType ?? current.selectedCandidateType,
+                patch.clusterMode ?? current.clusterMode
+              ),
+              randomSeed: current.params.randomSeed
+            }
+          : current.params
+    }))
+  }
+
+  function updateTreeCandidateLabParams(patch: Partial<TreeCandidateLabParams>) {
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      params: {
+        ...current.params,
+        ...patch
+      }
+    }))
+  }
+
+  function setTreeCandidateClusterMode(mode: TreeCandidateClusterMode) {
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      clusterMode: mode,
+      params: {
+        ...getTreeCandidateRecommendedParams(current.selectedCandidateType, mode),
+        randomSeed: current.params.randomSeed
+      }
+    }))
+  }
+
+  function setDefaultGardenHidden(hidden: boolean) {
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      defaultGardenHidden: hidden
+    }))
+    perfRecorder.recordMapVisualEvent({
+      type: 'defaultGardenHidden',
+      defaultGardenHidden: hidden,
+      testTreeCount: treeCandidateLabState.testTrees.length,
+      gardenReferenceMode: hidden ? 'blank-lab' : 'default-garden-visible',
+      liveDefaultGardenOverlayCount: hidden ? 0 : gardenAssets.filter((asset) => asset.visible).length,
+      liveTestTreeOverlayCount,
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus(hidden ? `已隐藏默认 ${gardenAssets.length} 个树群，进入空白园林试验场` : '已显示默认树群作为参照')
+  }
+
+  function setGardenAssetSource(mode: GardenAssetSourceMode) {
+    const nextAssets = mode === 'legacy' ? getLegacyMap3DGardenAssets() : getDefaultMap3DGardenAssets()
+    setGardenAssetSourceMode(mode)
+    setGardenAssets(nextAssets)
+    setSelectedGardenId('')
+    setGardenAssetEditDraft(null)
+    setGardenFilters(defaultGardenFilters)
+    perfRecorder.recordMapVisualEvent({
+      type: 'gardenAssetSourceChanged',
+      defaultGardenAssetCount: nextAssets.length,
+      liveDefaultGardenOverlayCount: treeCandidateLabState.defaultGardenHidden ? 0 : nextAssets.filter((asset) => asset.visible).length,
+      testTreeCount: treeCandidateLabState.testTrees.length,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible'
+    })
+    setGardenCopyStatus(mode === 'legacy' ? `已切换查看 legacy 旧树群 ${nextAssets.length} assets` : `已切换回新手动树群 ${nextAssets.length} assets`)
+  }
+
+  function startAddTreeCandidateCluster() {
+    setTreeCandidateLabClickMode('addCluster')
+    setGardenEditorMode('inspect')
+    setGardenDraftPolygon(null)
+    setGardenCopyStatus(`点击地图添加 ${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
+  }
+
+  function startCompareTreeCandidates() {
+    setTreeCandidateLabClickMode('compareSet')
+    setGardenEditorMode('inspect')
+    setGardenDraftPolygon(null)
+    setGardenCopyStatus(`点击地图生成 ${treeCandidateTypesForCompare.length} 种候选对比：${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}`)
+  }
+
+  function addTreeCandidateCluster(center: LatLngPoint) {
+    const clusterId = `tree-lab-${treeCandidateLabState.selectedCandidateType}-${Date.now()}`
+    const assets = buildTreeCandidateClusterAssets({
+      center,
+      candidateType: treeCandidateLabState.selectedCandidateType,
+      clusterId,
+      clusterIndex: treeCandidateLabState.testTrees.length,
+      clusterMode: treeCandidateLabState.clusterMode,
+      params: treeCandidateLabState.params
+    })
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: [...current.testTrees, ...assets],
+      params: {
+        ...current.params,
+        randomSeed: current.params.randomSeed + 17
+      }
+    }))
+    setTreeCandidateLabClickMode('addCluster')
+    setSelectedTreeCandidateId(assets[0]?.id ?? '')
+    perfRecorder.recordMapVisualEvent({
+      type: 'manualTreeAdded',
+      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
+      candidateType: treeCandidateLabState.selectedCandidateType,
+      clusterMode: treeCandidateLabState.clusterMode,
+      clusterGeneratedCount: assets.length,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus(`已添加 ${assets.length} 棵测试树：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
+  }
+
+  function addTreeCandidateCompareSet(center: LatLngPoint) {
+    const spacing = getTreeCandidateCompareSpacing(treeCandidateLabState.clusterMode)
+    const startOffset = -((treeCandidateTypesForCompare.length - 1) * spacing) / 2
+    const assets = treeCandidateTypesForCompare.flatMap((candidateType, index) => {
+      const clusterCenter = offsetLatLngMeters(center, startOffset + index * spacing, 0)
+      const params = getTreeCandidateRecommendedParams(candidateType, treeCandidateLabState.clusterMode)
+      return buildTreeCandidateClusterAssets({
+        center: clusterCenter,
+        candidateType,
+        clusterId: `tree-lab-compare-${candidateType}-${Date.now()}-${index}`,
+        clusterIndex: treeCandidateLabState.testTrees.length + index * 100,
+        clusterMode: treeCandidateLabState.clusterMode,
+        params: {
+          ...params,
+          randomSeed: treeCandidateLabState.params.randomSeed + index * 101
+        }
+      })
+    })
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: [...current.testTrees, ...assets],
+      params: {
+        ...current.params,
+        randomSeed: current.params.randomSeed + 53
+      }
+    }))
+    setTreeCandidateLabClickMode('addCluster')
+    perfRecorder.recordMapVisualEvent({
+      type: 'treeCandidateCompareSetGenerated',
+      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
+      candidateType: treeCandidateLabState.selectedCandidateType,
+      clusterMode: treeCandidateLabState.clusterMode,
+      clusterGeneratedCount: assets.length,
+      compareSetGenerated: true,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus(`已生成 ${treeCandidateTypesForCompare.length} 种候选对比，共 ${assets.length} 棵测试树`)
+  }
+
+  function updateSelectedTreeCandidateAsset(patch: Partial<LingshanMap3DGardenAsset>) {
+    if (!selectedTreeCandidateId) {
+      return
+    }
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: current.testTrees.map((asset) =>
+        asset.id === selectedTreeCandidateId
+          ? {
+              ...asset,
+              ...patch,
+              location: patch.location ? { ...patch.location } : asset.location
+            }
+          : asset
+      )
+    }))
+  }
+
+  function clearTreeCandidateTestTrees() {
+    if (treeCandidateLabState.testTrees.length && !window.confirm('确认清空全部测试树？')) {
+      return
+    }
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: []
+    }))
+    setSelectedTreeCandidateId('')
+    perfRecorder.recordMapVisualEvent({
+      type: 'testTreeCleared',
+      testTreeCount: 0,
+      candidateType: treeCandidateLabState.selectedCandidateType,
+      clusterMode: treeCandidateLabState.clusterMode,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveTestTreeOverlayCount: 0,
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus('已清空测试树')
+  }
+
+  function deleteSelectedTreeCandidate() {
+    if (!selectedTreeCandidateId) {
+      setGardenCopyStatus('请先选择一个测试树')
+      return
+    }
+
+    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
+    if (!selectedAsset || !window.confirm(`确认删除测试树“${selectedAsset.name}”？`)) {
+      return
+    }
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: current.testTrees.filter((asset) => asset.id !== selectedTreeCandidateId)
+    }))
+    setSelectedTreeCandidateId('')
+    perfRecorder.recordMapVisualEvent({
+      type: 'testTreeDeleted',
+      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
+      candidateType: selectedAsset.kind,
+      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
+      clusterGeneratedCount: 1,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus('已删除选中测试树')
+  }
+
+  function deleteSelectedTreeCandidateCluster() {
+    if (!selectedTreeCandidateId) {
+      setGardenCopyStatus('请先选择一个测试树')
+      return
+    }
+
+    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
+    const clusterId = parseTreeCandidateNote(selectedAsset?.note).clusterId
+
+    if (!selectedAsset || !clusterId) {
+      deleteSelectedTreeCandidate()
+      return
+    }
+
+    const clusterAssets = treeCandidateLabState.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId === clusterId)
+
+    if (!window.confirm(`确认删除测试树团“${clusterId}”？共 ${clusterAssets.length} 棵。`)) {
+      return
+    }
+
+    setTreeCandidateLabState((current) => ({
+      ...current,
+      testTrees: current.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId !== clusterId)
+    }))
+    setSelectedTreeCandidateId('')
+    perfRecorder.recordMapVisualEvent({
+      type: 'testTreeDeleted',
+      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
+      candidateType: selectedAsset.kind,
+      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
+      clusterGeneratedCount: clusterAssets.length,
+      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
+      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
+      defaultGardenAssetCount: gardenAssets.length
+    })
+    setGardenCopyStatus(`已删除测试树团：${clusterAssets.length} 棵`)
+  }
+
+  async function copyTreeCandidateAssets() {
+    const exported = treeCandidateLabState.testTrees.map((asset) => ({
+      id: asset.id,
+      type: 'gardenAsset',
+      assetUrl: asset.assetUrl,
+      modelUrl: asset.assetUrl,
+      lng: asset.location.lng,
+      lat: asset.location.lat,
+      scale: asset.scale,
+      height: asset.height,
+      rotationY: asset.yaw,
+      source: 'treeCandidateLab',
+      clusterId: parseTreeCandidateNote(asset.note).clusterId,
+      clusterMode: parseTreeCandidateNote(asset.note).clusterMode,
+      candidateType: asset.kind
+    }))
+    const ok = await copyText(JSON.stringify(exported, null, 2))
+    setGardenCopyStatus(ok ? `已复制 ${exported.length} 个测试树 assets` : '复制失败，请查看浏览器权限')
+  }
+
+  function saveTreeCandidateDraft() {
+    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
+    setGardenCopyStatus('已保存 Tree Candidate Lab 草稿')
+  }
+
+  function clearTreeCandidateDraft() {
+    if (!window.confirm('确认清空 Tree Candidate Lab 草稿和测试树？')) {
+      return
+    }
+
+    window.localStorage.removeItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
+    setTreeCandidateLabState(buildDefaultTreeCandidateLabState())
+    setTreeCandidateLabClickMode('addCluster')
+    setSelectedTreeCandidateId('')
+    setGardenCopyStatus('已清空 Tree Candidate Lab 草稿')
+  }
+
   const deleteSelectedEditorZone = () => {
     if (!selectedEditorZone) {
       setGardenCopyStatus('请先选择一个 vegetation zone')
@@ -3662,18 +4420,25 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             cancelDraftGardenPolygon={cancelDraftGardenPolygon}
             clearGardenLocalDraft={clearGardenLocalDraft}
             clearGardenPreviewAssets={clearGardenPreviewAssets}
+            clearTreeCandidateDraft={clearTreeCandidateDraft}
+            clearTreeCandidateTestTrees={clearTreeCandidateTestTrees}
             copyCompleteGardenSourceSnippet={copyCompleteGardenSourceSnippet}
             copyEditorAssetsConfig={copyEditorAssetsConfig}
             copyGardenSummary={copyGardenSummary}
+            copyTreeCandidateAssets={copyTreeCandidateAssets}
+            defaultGardenHidden={defaultGardenHidden}
             deleteSelectedEditorZone={deleteSelectedEditorZone}
             deleteSelectedGardenAsset={deleteSelectedGardenAsset}
             deleteSelectedKeepoutZone={deleteSelectedKeepoutZone}
+            deleteSelectedTreeCandidate={deleteSelectedTreeCandidate}
+            deleteSelectedTreeCandidateCluster={deleteSelectedTreeCandidateCluster}
             editorAddAssetKind={editorAddAssetKind}
             filteredGardenAssets={filteredGardenAssets}
             finishDraftGardenPolygon={finishDraftGardenPolygon}
             forestPatchesVisible={forestPatchesVisible}
             gardenAssetEditDraft={gardenAssetEditDraft}
             gardenAssetKindOptions={gardenAssetKindOptions}
+            gardenAssetSourceMode={gardenAssetSourceMode}
             gardenAssets={gardenAssets}
             gardenBatchAdjust={gardenBatchAdjust}
             gardenCopyStatus={gardenCopyStatus}
@@ -3684,9 +4449,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             gardenFilters={gardenFilters}
             gardenModelReport={gardenModelReport}
             generateGardenPreviewAssets={generateGardenPreviewAssets}
+            landmarkReferenceLoaded={treeCandidateLabState.landmarkReferenceLoaded}
+            liveDefaultGardenOverlayCount={liveDefaultGardenOverlayCount}
+            liveTestTreeOverlayCount={liveTestTreeOverlayCount}
+            loadCoreLandmarkReferences={loadCoreLandmarkReferences}
             resetGardenEditorState={resetGardenEditorState}
             saveGardenAssetEditDraft={saveGardenAssetEditDraft}
             saveGardenEditorStateToLocalStorage={saveGardenEditorStateToLocalStorage}
+            saveTreeCandidateDraft={saveTreeCandidateDraft}
             selectedEditorZone={selectedEditorZone}
             selectedEditorZoneId={selectedEditorZoneId}
             selectedGardenAsset={selectedGardenAsset}
@@ -3695,18 +4465,39 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             selectedGardenVertexId={selectedGardenVertexId}
             selectedKeepoutZone={selectedKeepoutZone}
             selectedKeepoutZoneId={selectedKeepoutZoneId}
+            selectedTreeCandidateAsset={selectedTreeCandidateAsset}
+            selectedTreeCandidateId={selectedTreeCandidateId}
             selectEditorZone={selectEditorZone}
             selectGardenAssetForEditing={selectGardenAssetForEditing}
             selectFirstFilteredGardenAsset={selectFirstFilteredGardenAsset}
             selectKeepoutZone={selectKeepoutZone}
+            setDefaultGardenHidden={setDefaultGardenHidden}
             setEditorAddAssetKind={setEditorAddAssetKind}
             setForestPatchesVisible={setForestPatchesVisible}
+            setGardenAssetSource={setGardenAssetSource}
             setGardenDraftPolygon={setGardenDraftPolygon}
             setGardenEditorMode={setGardenEditorMode}
             setGardenFilters={setGardenFilters}
+            setSelectedTreeCandidateId={setSelectedTreeCandidateId}
+            setTreeCandidateClusterMode={setTreeCandidateClusterMode}
+            startAddTreeCandidateCluster={startAddTreeCandidateCluster}
+            startCompareTreeCandidates={startCompareTreeCandidates}
+            treeCandidateClusterLabels={treeCandidateClusterLabels}
+            treeCandidateDescriptions={treeCandidateDescriptions}
+            treeCandidateLabClickMode={treeCandidateLabClickMode}
+            treeCandidateLabState={treeCandidateLabState}
+            treeCandidateLabels={treeCandidateLabels}
+            treeCandidateLegacyTypes={legacyTreeCandidateTypes}
+            treeCandidateRecommendedModes={treeCandidateRecommendedModes}
+            treeCandidateRecommendedTypes={recommendedTreeCandidateTypes}
+            treeCandidateTypes={treeCandidateTypes}
+            unloadCoreLandmarkReferences={unloadCoreLandmarkReferences}
             updateGardenAssetEditDraft={updateGardenAssetEditDraft}
             updateGardenBatchAdjust={updateGardenBatchAdjust}
             updateGardenFilter={updateGardenFilter}
+            updateSelectedTreeCandidateAsset={updateSelectedTreeCandidateAsset}
+            updateTreeCandidateLab={updateTreeCandidateLab}
+            updateTreeCandidateLabParams={updateTreeCandidateLabParams}
             updateSelectedEditorZone={updateSelectedEditorZone}
             updateSelectedKeepoutZone={updateSelectedKeepoutZone}
           />
@@ -4913,7 +5704,75 @@ function isQueryEnabled(name: string) {
   return value === '1' || value === 'true'
 }
 
+function shouldUseCanonicalLocalhostForTMap() {
+  return typeof window !== 'undefined' && window.location.hostname === MAP_3D_GUIDE_LOCAL_TMAP_HOST
+}
+
+function buildCanonicalLocalhostUrl() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const url = new URL(window.location.href)
+  url.hostname = MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST
+  return url.toString()
+}
+
+function stashLocalhostTransferDrafts() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    const items = MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.reduce<Record<string, string>>((drafts, key) => {
+      const value = window.localStorage.getItem(key)
+      if (value) {
+        drafts[key] = value
+      }
+      return drafts
+    }, {})
+
+    if (!Object.keys(items).length) {
+      return
+    }
+
+    window.name = `${MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX}${JSON.stringify({
+      fromHost: window.location.host,
+      transferredAt: new Date().toISOString(),
+      items
+    })}`
+  } catch {
+    // Redirect should still proceed; losing a local debug draft is better than blocking the map.
+  }
+}
+
+function restoreLocalhostTransferDrafts() {
+  if (typeof window === 'undefined' || window.location.hostname !== MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST) {
+    return
+  }
+
+  if (!window.name.startsWith(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX)) {
+    return
+  }
+
+  try {
+    const payload = JSON.parse(window.name.slice(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX.length)) as {
+      items?: Record<string, string>
+    }
+    Object.entries(payload.items ?? {}).forEach(([key, value]) => {
+      if (MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.includes(key as (typeof MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS)[number])) {
+        window.localStorage.setItem(key, value)
+      }
+    })
+  } catch {
+    // Ignore malformed transfer payloads; the page can fall back to default debugGarden state.
+  } finally {
+    window.name = ''
+  }
+}
+
 function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
+  restoreLocalhostTransferDrafts()
   const defaults = getDefaultMap3DGardenAssets()
 
   if (variant !== 'prototype-c' || typeof window === 'undefined') {
@@ -5167,9 +6026,34 @@ function createEditorKeepoutZone(vertices: LatLngPoint[], index: number): Garden
   }
 }
 
+function getEditorAssetDefaults(kind: Map3DGardenAssetKind) {
+  if (kind === 'rock_cluster' || kind === 'stone_mass') {
+    return { scale: 62, height: 0.8, opacity: 0.9 }
+  }
+
+  if (kind === 'fluffy_bodhi_grove') {
+    return { scale: 62, height: 2.5, opacity: 0.92 }
+  }
+
+  if (kind === 'dense_shrub_cluster') {
+    return { scale: 74, height: 1.2, opacity: 0.88 }
+  }
+
+  if (
+    kind === 'fluffy_round_tree' ||
+    kind === 'bushy_canopy_tree' ||
+    kind === 'soft_forest_clump' ||
+    kind === 'fluffy_tree_mix'
+  ) {
+    return { scale: 88, height: 2.2, opacity: 0.88 }
+  }
+
+  return { scale: 112, height: 3, opacity: 0.9 }
+}
+
 function createSingleEditorAsset(point: LatLngPoint, kind: Map3DGardenAssetKind, index: number): LingshanMap3DGardenAsset {
   const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
-  const isStone = kind === 'rock_cluster' || kind === 'stone_mass'
+  const assetDefaults = getEditorAssetDefaults(kind)
 
   return {
     id: `editor-single-${kind}-${Date.now()}-${index + 1}`,
@@ -5181,15 +6065,239 @@ function createSingleEditorAsset(point: LatLngPoint, kind: Map3DGardenAssetKind,
       lat: roundNumber(point.lat, 6),
       lng: roundNumber(point.lng, 6)
     },
-    scale: isStone ? 62 : 112,
-    height: isStone ? 0.8 : 3,
+    scale: assetDefaults.scale,
+    height: assetDefaults.height,
     yaw: 0,
-    opacity: 0.9,
+    opacity: assetDefaults.opacity,
     visible: true,
     priority: 'medium',
     routeFraction: roundNumber(routeProgress, 3),
     licenseId: getMap3DGardenLicenseId(),
     note: '由 debugGarden 图形化编辑器单点添加。'
+  }
+}
+
+function buildDefaultTreeCandidateLabState(): TreeCandidateLabState {
+  return {
+    selectedCandidateType: 'fluffy_bodhi_grove',
+    clusterMode: 'smallCluster',
+    params: { ...getTreeCandidateRecommendedParams('fluffy_bodhi_grove', 'smallCluster') },
+    testTrees: [],
+    defaultGardenHidden: true,
+    landmarkReferenceLoaded: false
+  }
+}
+
+function loadTreeCandidateLabDraft(enabled: boolean): TreeCandidateLabState {
+  const fallback = buildDefaultTreeCandidateLabState()
+
+  if (!enabled || typeof window === 'undefined') {
+    return fallback
+  }
+
+  try {
+    const stored = window.localStorage.getItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
+
+    if (!stored) {
+      return fallback
+    }
+
+    const parsed = JSON.parse(stored) as Partial<TreeCandidateLabState>
+    const selectedCandidateType = sanitizeTreeCandidateType(parsed.selectedCandidateType)
+    const clusterMode = sanitizeTreeCandidateClusterMode(parsed.clusterMode)
+
+    return {
+      selectedCandidateType,
+      clusterMode,
+      params: sanitizeTreeCandidateParams(parsed.params, clusterMode, selectedCandidateType),
+      testTrees: Array.isArray(parsed.testTrees) ? parsed.testTrees.filter(isTreeCandidateAsset).map(cloneGardenAsset).map(normalizeLingshanTreeAssetScale) : [],
+      defaultGardenHidden: parsed.defaultGardenHidden !== false,
+      landmarkReferenceLoaded: false
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function sanitizeTreeCandidateType(value: unknown): TreeCandidateType {
+  return treeCandidateTypes.includes(value as TreeCandidateType) ? (value as TreeCandidateType) : 'fluffy_bodhi_grove'
+}
+
+function sanitizeTreeCandidateClusterMode(value: unknown): TreeCandidateClusterMode {
+  const modes = Object.keys(treeCandidateClusterDefaults) as TreeCandidateClusterMode[]
+  return modes.includes(value as TreeCandidateClusterMode) ? (value as TreeCandidateClusterMode) : 'single'
+}
+
+function getTreeCandidateRecommendedParams(candidateType: TreeCandidateType, mode: TreeCandidateClusterMode) {
+  return treeCandidateRecommendedDefaults[candidateType]?.[mode] ?? treeCandidateClusterDefaults[mode]
+}
+
+function sanitizeTreeCandidateParams(
+  value: unknown,
+  mode: TreeCandidateClusterMode,
+  candidateType: TreeCandidateType = 'fluffy_bodhi_grove'
+): TreeCandidateLabParams {
+  const defaults = getTreeCandidateRecommendedParams(candidateType, mode)
+  const params = typeof value === 'object' && value ? (value as Partial<TreeCandidateLabParams>) : {}
+  const scaleMin = clampNumber(Number(params.scaleMin ?? defaults.scaleMin), 0.1, 220)
+  const scaleMax = clampNumber(Number(params.scaleMax ?? defaults.scaleMax), 0.1, 240)
+  const normalizedScaleRange = normalizeLingshanTreeScaleRange(candidateType, scaleMin, scaleMax)
+
+  return {
+    count: Math.round(clampNumber(Number(params.count ?? defaults.count), 1, 40)),
+    radiusMeters: clampNumber(Number(params.radiusMeters ?? defaults.radiusMeters), 0, 90),
+    minDistanceMeters: clampNumber(Number(params.minDistanceMeters ?? defaults.minDistanceMeters), 0, 28),
+    scaleMin: roundNumber(Math.min(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
+    scaleMax: roundNumber(Math.max(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
+    heightOffset: roundNumber(clampNumber(Number(params.heightOffset ?? defaults.heightOffset), -5, 16), 1),
+    randomSeed: Math.round(clampNumber(Number(params.randomSeed ?? defaults.randomSeed), 1, 999999))
+  }
+}
+
+function isTreeCandidateAsset(asset: unknown): asset is LingshanMap3DGardenAsset {
+  if (!asset || typeof asset !== 'object') {
+    return false
+  }
+
+  const candidate = asset as Partial<LingshanMap3DGardenAsset>
+  return (
+    typeof candidate.id === 'string' &&
+    sanitizeTreeCandidateType(candidate.kind) === candidate.kind &&
+    typeof candidate.assetUrl === 'string' &&
+    typeof candidate.location?.lat === 'number' &&
+    typeof candidate.location?.lng === 'number'
+  )
+}
+
+function buildTreeCandidateClusterAssets({
+  center,
+  candidateType,
+  clusterId,
+  clusterIndex,
+  clusterMode,
+  params
+}: {
+  center: LatLngPoint
+  candidateType: TreeCandidateType
+  clusterId: string
+  clusterIndex: number
+  clusterMode: TreeCandidateClusterMode
+  params: TreeCandidateLabParams
+}): LingshanMap3DGardenAsset[] {
+  const sanitizedParams = sanitizeTreeCandidateParams(params, clusterMode, candidateType)
+  const points = sampleTreeCandidateClusterPoints(center, sanitizedParams)
+
+  return points.map((point, index) => {
+    const seedIndex = clusterIndex + index + 1
+    const scale = roundNumber(lerpNumber(sanitizedParams.scaleMin, sanitizedParams.scaleMax, seeded01(sanitizedParams.randomSeed, seedIndex, 71)), 2)
+    const height = roundNumber(sanitizedParams.heightOffset + (seeded01(sanitizedParams.randomSeed, seedIndex, 73) - 0.5) * 0.8, 1)
+    const yaw = roundNumber(-180 + seeded01(sanitizedParams.randomSeed, seedIndex, 79) * 360, 0)
+    const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
+
+    return normalizeLingshanTreeAssetScale({
+      id: `${clusterId}-${index + 1}`,
+      zoneId: TREE_CANDIDATE_LAB_ZONE_ID,
+      kind: candidateType,
+      name: `候选树 ${treeCandidateLabels[candidateType]} ${treeCandidateClusterLabels[clusterMode]} ${index + 1}`,
+      assetUrl: getMap3DGardenAssetUrl(candidateType),
+      location: {
+        lat: roundNumber(point.lat, 6),
+        lng: roundNumber(point.lng, 6)
+      },
+      scale,
+      height,
+      yaw,
+      opacity: 0.92,
+      visible: true,
+      priority: 'high',
+      routeFraction: roundNumber(routeProgress, 3),
+      licenseId: getMap3DGardenLicenseId(),
+      note: buildTreeCandidateNote({ clusterId, clusterMode, candidateType })
+    })
+  })
+}
+
+function sampleTreeCandidateClusterPoints(center: LatLngPoint, params: TreeCandidateLabParams): LatLngPoint[] {
+  const count = Math.max(1, Math.round(params.count))
+
+  if (count === 1 || params.radiusMeters <= 0) {
+    return [center]
+  }
+
+  const points: LatLngPoint[] = []
+  const maxAttempts = Math.max(count * 80, 80)
+
+  for (let attempt = 0; attempt < maxAttempts && points.length < count; attempt += 1) {
+    const angle = seeded01(params.randomSeed, attempt, 83) * Math.PI * 2
+    const radius = Math.sqrt(seeded01(params.randomSeed, attempt, 89)) * params.radiusMeters
+    const point = offsetLatLngMeters(center, Math.cos(angle) * radius, Math.sin(angle) * radius)
+    const farEnough = points.every((existing) => haversineDistanceMeters(existing, point) >= params.minDistanceMeters)
+
+    if (farEnough) {
+      points.push(point)
+    }
+  }
+
+  if (!points.length) {
+    points.push(center)
+  }
+
+  return points
+}
+
+function getTreeCandidateCompareSpacing(mode: TreeCandidateClusterMode) {
+  if (mode === 'backgroundGrove') {
+    return 72
+  }
+
+  if (mode === 'mediumCluster') {
+    return 58
+  }
+
+  if (mode === 'smallCluster') {
+    return 46
+  }
+
+  return 36
+}
+
+function buildTreeCandidateNote({
+  clusterId,
+  clusterMode,
+  candidateType
+}: {
+  clusterId: string
+  clusterMode: TreeCandidateClusterMode
+  candidateType: TreeCandidateType
+}) {
+  return `treeCandidateLab|source=treeCandidateLab|clusterId=${clusterId}|clusterMode=${clusterMode}|candidateType=${candidateType}`
+}
+
+function parseTreeCandidateNote(note: string | undefined) {
+  const fallback = {
+    clusterId: '',
+    clusterMode: 'single' as TreeCandidateClusterMode,
+    candidateType: 'fluffy_bodhi_grove' as TreeCandidateType
+  }
+
+  if (!note?.startsWith('treeCandidateLab|')) {
+    return fallback
+  }
+
+  const entries = Object.fromEntries(
+    note
+      .split('|')
+      .slice(1)
+      .map((item) => {
+        const [key, value] = item.split('=')
+        return [key, value]
+      })
+  )
+
+  return {
+    clusterId: entries.clusterId ?? '',
+    clusterMode: sanitizeTreeCandidateClusterMode(entries.clusterMode),
+    candidateType: sanitizeTreeCandidateType(entries.candidateType)
   }
 }
 
@@ -5506,7 +6614,14 @@ function editorVertexSvg(fill: string, stroke: string) {
 
 function gardenPreviewPointSvg(kind: Map3DGardenAssetKind) {
   const isStone = kind === 'rock_cluster' || kind === 'stone_mass'
-  const fill = isStone ? '#7b8174' : kind === 'shrub_mass' ? '#527e5d' : '#2f6f54'
+  const isCandidateTree =
+    kind === 'fluffy_bodhi_grove' ||
+    kind === 'fluffy_round_tree' ||
+    kind === 'bushy_canopy_tree' ||
+    kind === 'dense_shrub_cluster' ||
+    kind === 'soft_forest_clump' ||
+    kind === 'fluffy_tree_mix'
+  const fill = isStone ? '#7b8174' : kind === 'shrub_mass' ? '#527e5d' : isCandidateTree ? '#6f8e73' : '#2f6f54'
   const stroke = isStone ? '#ede7d3' : '#f8efd1'
   const shape = isStone
     ? '<path d="M6 15.5 9 7.5l6-2 4 6.5-3.5 5.5H9z"/>'

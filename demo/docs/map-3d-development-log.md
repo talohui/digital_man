@@ -10531,3 +10531,167 @@ mode: 'none'
 ### 约束
 
 本轮未修改其它地标 transform，未修改树群算法、路线数据、POI 语义、Tencent key、`mapStyleId: 'style1'`，未处理菩提大道，未提交 raw / safe-v1 / draco / 旧 464M 菩提大道 GLB。仍不采用 polygon mask 方案，`fan_gong.footprintMask` 保持默认关闭。
+
+## 2026-06-16｜阶段：Meshy 毛茸茸菩提树团 Tree Candidate Lab 接入
+
+### 本次目标
+
+把已压缩通过的 `fluffy-bodhi-grove.runtime-v1.glb` 作为新的主树团候选接入 Tree Candidate Lab，供 `/map-3d-guide-c?debugGarden=1` 人工测试。
+
+### 修改文件
+
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/components/map3d/GardenDebugWizard.tsx`
+- `docs/lingshan-tree-asset-candidates.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- 新增候选类型 `fluffy_bodhi_grove`，模型路径为 `/models/lingshan/tree-candidates/fluffy-bodhi-grove.runtime-v1.glb`。
+- Tree Candidate Lab 默认选中“毛茸茸菩提树团”，并推荐小树团 / 中树团 / 背景林团测试。
+- 候选下拉分组为“推荐候选”和“旧候选 / legacy”，原 Kenney 5 个候选继续保留。
+- 一键候选对比包含新树团，当前共 6 种候选。
+- 新树团使用 0.75-1.15 的保守 scale 范围，不沿用 Kenney 候选的大比例参数。
+
+### 约束
+
+本轮未替换默认树群，未修改默认 199 个树群、vegetation zones、Tree Candidate Lab 以外的园林布局、路线、POI、地标配置、Tencent key 或 `mapStyleId: 'style1'`。普通 `/map-3d-guide-c` 不默认加载新树团。
+
+## 2026-06-16｜阶段：Tree Candidate Lab 手动摆树流程简化
+
+### 本次目标
+
+把 debugGarden 的 Tree Candidate Lab 从参数驱动的复杂试验面板，改成默认可直接使用的手动摆树流程：选择树种和添加模式后，点击地图直接添加测试树。
+
+### 修改文件
+
+- `src/pages/Map3DGuidePage.tsx`
+- `src/components/map3d/GardenDebugWizard.tsx`
+- `src/lib/map3dPerf.ts`
+- `docs/lingshan-tree-asset-candidates.md`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-development-log.md`
+
+### 功能结果
+
+- `debugGarden=1` 默认进入 `addCluster` 点击添加状态。
+- Tree Candidate Lab 主界面只保留树种、添加模式、选中测试树、常用复制 / 保存 / 删除 / 清空操作。
+- 测试树添加后自动选中第一棵，并继续保持点击地图添加。
+- 新增测试树 marker，支持点击选中；选中树显示可拖动编辑点。
+- 选中树可编辑经纬度、scale、height、rotationY。
+- 删除选中测试树、删除选中树团、清空测试树均有确认。
+- debugPerf 新增 `manualTreeAdded`、`testTreeDeleted`、`testTreeCleared` 事件类型。
+
+### 约束
+
+本轮未修改普通游客页默认表现，未改默认树群数据，未删除 vegetation zones / keepout zones / assets，未修改 GLB、路线、POI、Tencent key、`mapStyleId: 'style1'` 或地标 transform。区域生成、禁放区、批量参数、一键候选对比和 5 步工作台仍保留在高级折叠区。
+
+## 2026-06-16｜阶段：手动 869 树群固化为默认园林
+
+### 本次目标
+
+把用户手动摆好的 869 个 tree assets 固化为 `/map-3d-guide-c` 的新默认树群，替换旧 199 默认树群的默认引用，同时保留旧数据作为 legacy 回退。
+
+### 修改 / 新增文件
+
+- `src/data/lingshanMap3DManualTreeAssets.ts`
+- `src/data/lingshanMap3DGardenAssets.ts`
+- `src/pages/Map3DGuidePage.tsx`
+- `src/hooks/useGardenAssetOverlays.ts`
+- `src/lib/map3dPerf.ts`
+- `src/components/map3d/Map3DPerfPanel.tsx`
+- `src/components/map3d/GardenDebugWizard.tsx`
+- `docs/map-3d-guide-c-optimization-log.md`
+- `docs/map-3d-guide-performance-notes.md`
+- `docs/map-3d-development-log.md`
+- `docs/lingshan-tree-asset-candidates.md`
+
+### 功能结果
+
+- 新默认树群为 869 个手动 assets。
+- 旧 199 树群保留为 `DEFAULT_LINGSHAN_GARDEN_ASSETS_LEGACY` 和 `lingshanMap3DGardenAssetsLegacy`。
+- `getDefaultMap3DGardenAssets()` 现在返回新手动树群。
+- debugGarden 高级区可在“新手动树群 869 assets”和“legacy 旧 199 树群”之间临时切换查看。
+- 普通游客页默认使用新树群，不显示 Tree Candidate Lab 测试草稿。
+
+### 加载与诊断
+
+- 手动树群分为 high 200、medium 300、low 369 三层，按优先级加载。
+- GLB overlay 创建批次为 32 个。
+- 继续使用 id Map 去重、load generation、batch cancel 和 interaction LOD。
+- debugPerf 显示 defaultGardenAssetCount、gardenLoadedCount、gardenLoadBatchIndex、gardenTierLoaded 和 live count warning。
+
+### 校验结果
+
+- 输入 assets：869。
+- 重复 id：0。
+- 非法 lng / lat、modelUrl / assetUrl、scale、height、rotationY：0。
+- 引用模型路径缺失：0。
+
+### 约束
+
+本轮未修改 Tencent key、`mapStyleId: 'style1'`、路线数据、POI 语义、核心地标 transform，也未删除任何 GLB 文件，未处理 raw GLB / safe-v1 / draco / 旧 464M 菩提大道。
+
+## 2026-06-16｜阶段：手动树群 scale 归一化
+
+### 背景
+
+用户检查 869 手动树群时发现部分白色锚点没有对应明显树模型。debugPerf 显示 overlay live count 正常，说明不是数据未接入，而是不同树种的模型单位和 scale 区间不一致。
+
+### 修改
+
+- 新增 `src/data/lingshanTreeScaleNormalization.ts`。
+- 对 `fluffy_bodhi_grove` 做幂等 scale 归一化：旧 0.75–1.15 映射到 48–74，并按 scale 设置贴地 height。
+- `src/data/lingshanMap3DManualTreeAssets.ts` 保留 raw 手摆数据，导出默认树群时应用归一化。
+- Tree Candidate Lab 默认参数同步改为归一化后的 scale 区间。
+- 读取旧 `lingshan_tree_candidate_lab_draft_v1` 草稿时自动迁移测试树 scale。
+
+### 边界
+
+本轮只改树模型显示尺寸，不改经纬度点位、不改 height / yaw、不改模型文件、不改路线 / POI / 地标 transform。
+
+## 2026-06-16｜阶段：Meshy 毛茸茸树团 runtime-v2 替换
+
+### 本次目标
+
+将用户新增的 `Meshy_AI_Create_a_stylized_low_0616093941_texture.glb` 先按 safe-compatible 方式压缩，再替换当前 `fluffy_bodhi_grove` 毛茸茸树团候选，并调整 scale / height。
+
+### 结果
+
+- 新增 `public/models/lingshan/tree-candidates/fluffy-bodhi-grove.runtime-v2.glb`。
+- 原始 GLB 约 11.36MiB，runtime-v2 约 1.35MiB。
+- 压缩流程沿用 prune / dedup / weld / simplify / resize / jpeg / tangents。
+- validate 无 error / warning，未引入 Draco / Meshopt / KTX2 / WebP / AVIF。
+- `fluffy_bodhi_grove` 模型路径切到 runtime-v2。
+
+### scale / height
+
+- 旧 0.75–1.15 scale 迁移为 48–74 地图显示尺度，比上一版放大 1.2 倍。
+- height 从上一版偏高状态继续回落，按 `scale * 0.04` 设置，默认 869 手动树群中该树种约为 1.9–3.0，参考其它树种的贴地高度。
+- 只修显示尺寸和模型路径，不改用户手摆点位。
+
+## 2026-06-17｜阶段：修复本地腾讯底图黑屏
+
+### 背景
+
+用户在 `/map-3d-guide-c?debugGarden=1&debugPerf=1` 看到地图区域为黑底，但路线、POI、核心地标和 896 个树群 overlay 均正常显示。浏览器日志没有 TMap SDK 主脚本错误。
+
+### 诊断
+
+- 黑色来自腾讯地图 WebGL canvas，不是项目自己的 loading curtain 或浅色兜底背景。
+- 同一页面切换到 `localhost:5173` 后底图可正常显示。
+- 判断主要与本地 `127.0.0.1` 来源下腾讯底图服务 / Key 白名单 Referer 不匹配有关。
+
+### 修改
+
+- 对本地 `127.0.0.1` 自动跳转到 `localhost`，保留 pathname / query / hash。
+- 跳转前通过 `window.name` 临时转移 debugGarden / Tree Candidate Lab localStorage 草稿，跳转后写回 `localhost` 来源并清空 transfer payload。
+- 增加 3.2s fallback visual ready：如果腾讯 ready 事件未触发，但本地已切到 `localhost`，页面不再无限停留在 loading curtain。
+- `loadTMap` 在脚本 load 后轮询等待 `window.TMap`，避免腾讯 GL 脚本异步挂载全局对象时误报“地图底图加载失败”。
+- 关闭 `renderOptions.enableBloom` 实验项，减少腾讯 GL 后处理兼容变量。
+
+### 边界
+
+未修改 Tencent key、`mapStyleId: 'style1'`、路线数据、POI 语义、模型配置、树群点位或 GLB 文件。

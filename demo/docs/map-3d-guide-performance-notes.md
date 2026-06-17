@@ -1054,3 +1054,86 @@ debugPerf 新增 companion model 事件：
 - 底座为约 35KB 的 Three.js 纯几何 GLB，用于增强建筑落地感、弱化白模穿插。
 - 仍不采用 polygon mask，不启用 TMap polygon mask。
 - debugPerf 本地 calibration draft 仍可覆盖默认值，便于后续微调。
+
+## 34. 手动 869 树群默认加载策略
+
+### 数据来源
+
+- 用户在 Tree Candidate Lab 中手动摆放并导出的 869 个 tree assets 已成为 `/map-3d-guide-c` 默认树群。
+- 旧 deterministic 199 树群保留为 legacy，不删除数据文件、不删除 GLB。
+- 普通游客页不读取 Tree Candidate Lab 草稿，只读取固化后的手动树群数据。
+
+### 加载策略
+
+- 新默认树群按 priority 分层加载：
+  - high / tier 1：前 200 个核心树群。
+  - medium / tier 2：中间 300 个普通树群。
+  - low / tier 3：剩余 369 个背景补景。
+- `useGardenAssetOverlays` 每批创建 32 个 GLB overlay。
+- 每批之间使用 requestAnimationFrame + setTimeout，避免一次性同步创建 869 个 overlay。
+- 继续依赖 asset id Map 去重、load generation 和 batch cancel，防止 StrictMode、刷新、巡游、缩放或路线预演导致重复创建。
+
+### LOD 与交互
+
+- interactionLiteMode / 远景 LOD 不删除树群、不重建树群，只通过 opacity 降低渲染压力。
+- reduced tier 时优先压低 low/tier 3，medium 次之，high 保留更高可见度。
+- debugPerf 显示 defaultGardenAssetCount、gardenLoadedCount、gardenLoadBatchIndex、gardenTierLoaded、gardenDuplicatePrevented、gardenLoadGeneration、gardenLodState 和 live count warning。
+
+### 后续风险
+
+869 个独立 GLB overlay 仍然比旧 199 树群重。若真机或比赛机型压力较高，后续优先考虑将部分背景树团合并为 cluster GLB，而不是继续增加单树 overlay 数量。
+
+## 35. 手动树群 scale 归一化
+
+### 问题
+
+- debugGarden 中部分树点只显示锚点，树模型不明显。
+- 根因不是 asset 未导入：live overlay count 已接近 / 等于资产数。
+- 主要原因是新 869 数据混用了不同模型单位，`fluffy_bodhi_grove` 使用 0.75–1.15，而其它候选树多为 78–98。
+
+### 策略
+
+- 新增 per-kind scale normalization，只处理 `fluffy_bodhi_grove` 的旧小数尺度。
+- 旧 0.75–1.15 映射到 48–74，比上一版放大 1.2 倍；height 改为 `scale * 0.04`，参考其它树种的低位贴地高度，避免 Meshy 毛茸茸树团离地。
+- 归一化是幂等的：超过 rawScaleMax 的 scale 不再重复放大。
+- 点位、height、yaw、模型文件和加载批次不变。
+
+### 影响
+
+- 普通 `/map-3d-guide-c` 使用归一化后的 869 默认树群。
+- `/map-3d-guide-c?debugGarden=1` 会在读取旧本地测试树草稿时自动迁移 scale。
+- 后续新建 `fluffy_bodhi_grove` 测试树团默认使用归一化后的 scale 区间。
+
+## 36. Meshy 毛茸茸树团 runtime-v2
+
+### 压缩结果
+
+- 输入：`Meshy_AI_Create_a_stylized_low_0616093941_texture.glb`，约 11.36MiB。
+- 输出：`fluffy-bodhi-grove.runtime-v2.glb`，约 1.35MiB。
+- 压缩率约 88.08%。
+- 流程：prune、dedup、weld、simplify、resize、jpeg、tangents。
+- 未引入 Draco、Meshopt、KTX2、WebP 或 AVIF，`extensionsUsed` 为空。
+- validate 无 error / warning。
+
+### 显示策略
+
+- `fluffy_bodhi_grove` 当前引用 runtime-v2。
+- 旧 runtime-v1 保留文件但不再作为当前候选路径。
+- 新默认 869 树群的 `fluffy_bodhi_grove` 不改点位，scale 归一化后约 48–72，height 约 1.9–3.0。
+- 由于 runtime-v2 在 26–39 高度下出现离地漂浮，height 改为参考其它树种的低位贴地值，只做轻微抬高。
+
+## 37. 本地腾讯底图黑屏修复
+
+### 诊断
+
+- 黑屏时 Tencent 控件、水印、路线和 GLB overlay 均正常，说明不是 React 页面或 TMap SDK 主脚本失败。
+- 黑色来自腾讯 WebGL canvas；页面自身的浅色兜底背景在 canvas 下方。
+- `127.0.0.1:5173` 复现黑底，`localhost:5173` 可正常显示底图，符合本地 Key 白名单 / Referer 来源差异。
+
+### 处理
+
+- `/map-3d-guide-c` 在本地 `127.0.0.1` 下自动 canonicalize 到 `localhost`，避免腾讯底图服务黑屏。
+- 切换前通过 `window.name` 转移 debugGarden 的 garden assets、editor state 和 Tree Candidate Lab 草稿，降低来源切换导致的本地草稿丢失风险。
+- 地图创建后增加 3.2s fallback visual ready，防止腾讯 ready 事件缺失导致底图已可见但 overlay 一直不加载。
+- `loadTMap` 增加 `window.TMap` 轮询等待，避免 script load 先于 TMap 全局对象挂载时直接进入 failed。
+- `renderOptions.enableBloom` 改为关闭，避免实验性后处理参与首屏黑屏排查。

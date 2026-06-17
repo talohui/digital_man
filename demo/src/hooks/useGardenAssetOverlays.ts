@@ -41,7 +41,7 @@ type GardenOverlayHandle = {
   model: any
 }
 
-const GARDEN_ASSET_BATCH_SIZE = 16
+const GARDEN_ASSET_BATCH_SIZE = 32
 
 const defaultGardenLodState: GardenLodState = {
   opacity: 1,
@@ -209,6 +209,7 @@ export function useGardenAssetOverlays({
 
       const batch = assetsToCreate.slice(cursor, cursor + GARDEN_ASSET_BATCH_SIZE)
       const currentBatchIndex = batchIndex
+      const batchTier = getGardenBatchTier(batch)
       batchIndex += 1
       cursor += batch.length
       perfRecorder?.startGardenBatch(currentBatchIndex, batch.length)
@@ -227,6 +228,15 @@ export function useGardenAssetOverlays({
         })
       })
       perfRecorder?.finishGardenBatch(currentBatchIndex)
+      perfRecorder?.recordMapVisualEvent({
+        type: 'gardenLoadBatch',
+        gardenLoadedCount: overlayByIdRef.current.size,
+        gardenLoadBatchIndex: currentBatchIndex,
+        gardenTierLoaded: batchTier,
+        liveGardenOverlayCount: overlayByIdRef.current.size,
+        gardenLiveCountWarning: overlayByIdRef.current.size > orderedAssets.length,
+        reason: `batch-size-${batch.length}`
+      })
 
       setReport((current) => ({
         ...current,
@@ -301,6 +311,16 @@ function orderGardenAssetsForLoading(assets: LingshanMap3DGardenAsset[]) {
     .map((asset, index) => ({ asset, index }))
     .sort((a, b) => priorityWeight[a.asset.priority] - priorityWeight[b.asset.priority] || a.index - b.index)
     .map((item) => item.asset)
+}
+
+function getGardenBatchTier(assets: LingshanMap3DGardenAsset[]) {
+  const priorities = new Set(assets.map((asset) => asset.priority))
+
+  if (priorities.size === 1) {
+    return assets[0]?.priority ?? 'mixed'
+  }
+
+  return 'mixed'
 }
 
 function scheduleGardenBatch(
@@ -466,9 +486,20 @@ function updateGardenModel(model: any, asset: LingshanMap3DGardenAsset) {
 }
 
 function applyGardenLodToAsset(asset: LingshanMap3DGardenAsset, lodState: GardenLodState) {
+  const tierOpacity =
+    lodState.visibleTier === 'none'
+      ? 0.04
+      : lodState.visibleTier === 'reduced'
+        ? asset.priority === 'low'
+          ? 0.08
+          : asset.priority === 'medium'
+            ? 0.38
+            : 0.72
+        : 1
+
   return {
     ...asset,
-    opacity: Number(Math.max(0, Math.min(1, asset.opacity * lodState.opacity)).toFixed(3))
+    opacity: Number(Math.max(0, Math.min(1, asset.opacity * lodState.opacity * tierOpacity)).toFixed(3))
   }
 }
 
@@ -560,7 +591,7 @@ function getVisibleGardenAssets(
       return {
         ...asset,
         opacity,
-        scale: Math.round(asset.scale * scaleBoost)
+        scale: Number((asset.scale * scaleBoost).toFixed(2))
       }
     })
 }

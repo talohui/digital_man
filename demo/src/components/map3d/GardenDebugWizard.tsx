@@ -66,6 +66,36 @@ type GardenBatchAdjustState = {
   latOffset: number
   lngOffset: number
 }
+type GardenAssetSourceMode = 'manual' | 'legacy'
+
+type TreeCandidateType =
+  | 'fluffy_bodhi_grove'
+  | 'fluffy_round_tree'
+  | 'fluffy_tree_mix'
+  | 'bushy_canopy_tree'
+  | 'dense_shrub_cluster'
+  | 'soft_forest_clump'
+type TreeCandidateClusterMode = 'single' | 'smallCluster' | 'mediumCluster' | 'backgroundGrove'
+type TreeCandidateLabClickMode = 'idle' | 'addCluster' | 'compareSet'
+
+type TreeCandidateLabParams = {
+  count: number
+  radiusMeters: number
+  minDistanceMeters: number
+  scaleMin: number
+  scaleMax: number
+  heightOffset: number
+  randomSeed: number
+}
+
+type TreeCandidateLabState = {
+  selectedCandidateType: TreeCandidateType
+  clusterMode: TreeCandidateClusterMode
+  params: TreeCandidateLabParams
+  testTrees: LingshanMap3DGardenAsset[]
+  defaultGardenHidden: boolean
+  landmarkReferenceLoaded: boolean
+}
 
 type GardenEditorPanelPosition = {
   x: number
@@ -84,18 +114,25 @@ type GardenDebugWizardProps = {
   cancelDraftGardenPolygon: () => void
   clearGardenLocalDraft: () => void
   clearGardenPreviewAssets: () => void
+  clearTreeCandidateDraft: () => void
+  clearTreeCandidateTestTrees: () => void
   copyCompleteGardenSourceSnippet: () => void
   copyEditorAssetsConfig: () => void
   copyGardenSummary: () => void
+  copyTreeCandidateAssets: () => void
+  defaultGardenHidden: boolean
   deleteSelectedEditorZone: () => void
   deleteSelectedGardenAsset: () => void
   deleteSelectedKeepoutZone: () => void
+  deleteSelectedTreeCandidate: () => void
+  deleteSelectedTreeCandidateCluster: () => void
   editorAddAssetKind: Map3DGardenAssetKind
   filteredGardenAssets: LingshanMap3DGardenAsset[]
   finishDraftGardenPolygon: () => void
   forestPatchesVisible: boolean
   gardenAssetEditDraft: LingshanMap3DGardenAsset | null
   gardenAssetKindOptions: Map3DGardenAssetKind[]
+  gardenAssetSourceMode: GardenAssetSourceMode
   gardenAssets: LingshanMap3DGardenAsset[]
   gardenBatchAdjust: GardenBatchAdjustState
   gardenCopyStatus: string
@@ -106,9 +143,14 @@ type GardenDebugWizardProps = {
   gardenFilters: GardenAssetFilterState
   gardenModelReport: GardenModelReport
   generateGardenPreviewAssets: () => void
+  landmarkReferenceLoaded: boolean
+  liveDefaultGardenOverlayCount: number
+  liveTestTreeOverlayCount: number
+  loadCoreLandmarkReferences: () => void
   resetGardenEditorState: () => void
   saveGardenAssetEditDraft: () => void
   saveGardenEditorStateToLocalStorage: () => void
+  saveTreeCandidateDraft: () => void
   selectedEditorZone?: GardenEditorVegetationZone
   selectedEditorZoneId: string
   selectedGardenAsset?: LingshanMap3DGardenAsset
@@ -117,18 +159,39 @@ type GardenDebugWizardProps = {
   selectedGardenVertexId: string
   selectedKeepoutZone?: GardenEditorKeepoutZone
   selectedKeepoutZoneId: string
+  selectedTreeCandidateAsset?: LingshanMap3DGardenAsset
+  selectedTreeCandidateId: string
   selectEditorZone: (zoneId: string) => void
   selectGardenAssetForEditing: (assetId: string) => void
   selectKeepoutZone: (zoneId: string) => void
   selectFirstFilteredGardenAsset: () => void
+  setDefaultGardenHidden: (hidden: boolean) => void
   setEditorAddAssetKind: Dispatch<SetStateAction<Map3DGardenAssetKind>>
   setForestPatchesVisible: Dispatch<SetStateAction<boolean>>
+  setGardenAssetSource: (mode: GardenAssetSourceMode) => void
   setGardenDraftPolygon: Dispatch<SetStateAction<GardenDraftPolygon>>
   setGardenEditorMode: Dispatch<SetStateAction<GardenEditorMode>>
   setGardenFilters: Dispatch<SetStateAction<GardenAssetFilterState>>
+  setSelectedTreeCandidateId: Dispatch<SetStateAction<string>>
+  setTreeCandidateClusterMode: (mode: TreeCandidateClusterMode) => void
+  startAddTreeCandidateCluster: () => void
+  startCompareTreeCandidates: () => void
+  treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string>
+  treeCandidateDescriptions: Record<TreeCandidateType, string>
+  treeCandidateLabClickMode: TreeCandidateLabClickMode
+  treeCandidateLabState: TreeCandidateLabState
+  treeCandidateLabels: Record<TreeCandidateType, string>
+  treeCandidateLegacyTypes: TreeCandidateType[]
+  treeCandidateRecommendedModes: Record<TreeCandidateType, TreeCandidateClusterMode[]>
+  treeCandidateRecommendedTypes: TreeCandidateType[]
+  treeCandidateTypes: TreeCandidateType[]
+  unloadCoreLandmarkReferences: () => void
   updateGardenAssetEditDraft: (patch: Partial<LingshanMap3DGardenAsset>) => void
   updateGardenBatchAdjust: (patch: Partial<GardenBatchAdjustState>) => void
   updateGardenFilter: (patch: Partial<GardenAssetFilterState>) => void
+  updateSelectedTreeCandidateAsset: (patch: Partial<LingshanMap3DGardenAsset>) => void
+  updateTreeCandidateLab: (patch: Partial<TreeCandidateLabState>) => void
+  updateTreeCandidateLabParams: (patch: Partial<TreeCandidateLabParams>) => void
   updateSelectedEditorZone: (patch: Partial<GardenEditorVegetationZone>) => void
   updateSelectedKeepoutZone: (patch: Partial<GardenEditorKeepoutZone>) => void
 }
@@ -153,17 +216,24 @@ function GardenDebugWizard({
   cancelDraftGardenPolygon,
   clearGardenLocalDraft,
   clearGardenPreviewAssets,
+  clearTreeCandidateDraft,
+  clearTreeCandidateTestTrees,
   copyCompleteGardenSourceSnippet,
   copyEditorAssetsConfig,
   copyGardenSummary,
+  copyTreeCandidateAssets,
+  defaultGardenHidden,
   deleteSelectedEditorZone,
   deleteSelectedGardenAsset,
   deleteSelectedKeepoutZone,
+  deleteSelectedTreeCandidate,
+  deleteSelectedTreeCandidateCluster,
   editorAddAssetKind,
   filteredGardenAssets,
   finishDraftGardenPolygon,
   forestPatchesVisible,
   gardenAssetKindOptions,
+  gardenAssetSourceMode,
   gardenAssets,
   gardenBatchAdjust,
   gardenCopyStatus,
@@ -174,9 +244,14 @@ function GardenDebugWizard({
   gardenFilters,
   gardenModelReport,
   generateGardenPreviewAssets,
+  landmarkReferenceLoaded,
+  liveDefaultGardenOverlayCount,
+  liveTestTreeOverlayCount,
+  loadCoreLandmarkReferences,
   resetGardenEditorState,
   saveGardenAssetEditDraft,
   saveGardenEditorStateToLocalStorage,
+  saveTreeCandidateDraft,
   selectedEditorZone,
   selectedEditorZoneId,
   selectedGardenAssetDraft,
@@ -184,24 +259,49 @@ function GardenDebugWizard({
   selectedGardenVertexId,
   selectedKeepoutZone,
   selectedKeepoutZoneId,
+  selectedTreeCandidateAsset,
+  selectedTreeCandidateId,
   selectEditorZone,
   selectGardenAssetForEditing,
   selectFirstFilteredGardenAsset,
   selectKeepoutZone,
+  setDefaultGardenHidden,
   setEditorAddAssetKind,
   setForestPatchesVisible,
+  setGardenAssetSource,
   setGardenDraftPolygon,
   setGardenEditorMode,
   setGardenFilters,
+  setSelectedTreeCandidateId,
+  setTreeCandidateClusterMode,
+  startAddTreeCandidateCluster,
+  startCompareTreeCandidates,
+  treeCandidateClusterLabels,
+  treeCandidateDescriptions,
+  treeCandidateLabClickMode,
+  treeCandidateLabState,
+  treeCandidateLabels,
+  treeCandidateLegacyTypes,
+  treeCandidateRecommendedModes,
+  treeCandidateRecommendedTypes,
+  treeCandidateTypes,
+  unloadCoreLandmarkReferences,
   updateGardenAssetEditDraft,
   updateGardenBatchAdjust,
   updateGardenFilter,
+  updateSelectedTreeCandidateAsset,
+  updateTreeCandidateLab,
+  updateTreeCandidateLabParams,
   updateSelectedEditorZone,
   updateSelectedKeepoutZone
 }: GardenDebugWizardProps) {
   const [gardenEditorStep, setGardenEditorStep] = useState<GardenEditorStep>('keepout')
   const [gardenEditorPanelPosition, setGardenEditorPanelPosition] = useState<GardenEditorPanelPosition>({ x: 18, y: 76 })
   const [gardenEditorDragOffset, setGardenEditorDragOffset] = useState<GardenEditorPanelPosition | null>(null)
+  const selectedTreeCandidateDescription = treeCandidateDescriptions[treeCandidateLabState.selectedCandidateType]
+  const selectedTreeCandidateModeLabels = treeCandidateRecommendedModes[treeCandidateLabState.selectedCandidateType]
+    .map((mode) => treeCandidateClusterLabels[mode])
+    .join(' / ')
 
   useEffect(() => {
     if (!gardenEditorDragOffset) {
@@ -916,32 +1016,299 @@ function GardenDebugWizard({
         }}
       >
         <div>
-          <strong>5 步园林配置工作台</strong>
+          <strong>园林试验场</strong>
           <span>
-            {gardenEditorUsesStoredDraft ? 'localStorage 草稿' : '默认航拍参考布局'} · preview {gardenEditorState.previewAssets.length} · GLB {gardenModelReport.createdCount}/{gardenModelReport.visibleCount}
+            手动摆树 · {gardenEditorUsesStoredDraft ? 'localStorage 草稿' : '默认航拍参考布局'} · preview {gardenEditorState.previewAssets.length} · GLB {gardenModelReport.createdCount}/{gardenModelReport.visibleCount}
           </span>
         </div>
       </div>
 
-      <div className="map-3d-guide-garden-debug__steps" aria-label="debugGarden 配置步骤">
-        {gardenEditorSteps.map((step) => (
-          <button
-            key={step.id}
-            type="button"
-            className={gardenEditorStep === step.id ? 'is-active' : ''}
-            onClick={() => {
-              setGardenEditorStep(step.id)
-              setGardenEditorMode('inspect')
-              setGardenDraftPolygon(null)
-            }}
-          >
-            {step.label}
-          </button>
-        ))}
-      </div>
+      <details className="map-3d-guide-garden-debug__advanced" open>
+        <summary>树群候选试验场</summary>
+        <div className="map-3d-guide-garden-debug__stat-row">
+          <span>{defaultGardenHidden ? '默认树群隐藏' : '默认树群显示'}</span>
+          <span>{landmarkReferenceLoaded ? '核心地标参照已加载' : '核心地标参照未加载'}</span>
+          <span>测试树 {treeCandidateLabState.testTrees.length}</span>
+          <span>live 默认 {liveDefaultGardenOverlayCount}</span>
+          <span>live 测试 {liveTestTreeOverlayCount}</span>
+          <span>{treeCandidateLabClickMode === 'addCluster' ? '点击地图添加' : `点击模式 ${treeCandidateLabClickMode}`}</span>
+        </div>
 
-      {renderGardenObjectLists()}
-      {renderGardenStepContent()}
+        <div className="map-3d-guide-decor-debug__grid">
+          <label>
+            候选树种
+            <select
+              value={treeCandidateLabState.selectedCandidateType}
+              onChange={(event) => updateTreeCandidateLab({ selectedCandidateType: event.target.value as TreeCandidateType })}
+            >
+              <optgroup label="推荐候选">
+                {treeCandidateRecommendedTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {treeCandidateLabels[type]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="旧候选 / legacy">
+                {treeCandidateLegacyTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {treeCandidateLabels[type]}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </label>
+          <small>
+            {selectedTreeCandidateDescription} · 推荐模式 {selectedTreeCandidateModeLabels}
+          </small>
+          <label>
+            林团模式
+            <select
+              value={treeCandidateLabState.clusterMode}
+              onChange={(event) => setTreeCandidateClusterMode(event.target.value as TreeCandidateClusterMode)}
+            >
+              {Object.entries(treeCandidateClusterLabels).map(([mode, label]) => (
+                <option key={mode} value={mode}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            选中测试树
+            <select value={selectedTreeCandidateId} onChange={(event) => setSelectedTreeCandidateId(event.target.value)}>
+              <option value="">未选择</option>
+              {treeCandidateLabState.testTrees.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {selectedTreeCandidateAsset ? (
+          <div className="map-3d-guide-garden-debug__subsection">
+            <div className="map-3d-guide-garden-debug__section-head">
+              <strong>选中树编辑</strong>
+              <span>{selectedTreeCandidateAsset.name}</span>
+            </div>
+            <div className="map-3d-guide-decor-debug__grid">
+              <label>
+                纬度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedTreeCandidateAsset.location.lat}
+                  onChange={(event) =>
+                    updateSelectedTreeCandidateAsset({
+                      location: {
+                        ...selectedTreeCandidateAsset.location,
+                        lat: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                经度
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={selectedTreeCandidateAsset.location.lng}
+                  onChange={(event) =>
+                    updateSelectedTreeCandidateAsset({
+                      location: {
+                        ...selectedTreeCandidateAsset.location,
+                        lng: Number(event.target.value)
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label>
+                scale
+                <input
+                  type="number"
+                  min="0.1"
+                  max="2000"
+                  step="0.01"
+                  value={selectedTreeCandidateAsset.scale}
+                  onChange={(event) => updateSelectedTreeCandidateAsset({ scale: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                height
+                <input
+                  type="number"
+                  min="-50"
+                  max="300"
+                  step="0.1"
+                  value={selectedTreeCandidateAsset.height}
+                  onChange={(event) => updateSelectedTreeCandidateAsset({ height: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                rotationY
+                <input
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={selectedTreeCandidateAsset.yaw}
+                  onChange={(event) => updateSelectedTreeCandidateAsset({ yaw: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="map-3d-guide-decor-debug__actions">
+          <button type="button" className="map-3d-guide-garden-debug__primary" onClick={startAddTreeCandidateCluster}>
+            {treeCandidateLabClickMode === 'addCluster' ? '正在点击地图添加' : '点击地图添加'}
+          </button>
+          <button type="button" onClick={copyTreeCandidateAssets}>
+            复制测试树 assets
+          </button>
+          <button type="button" onClick={saveTreeCandidateDraft}>
+            保存测试草稿
+          </button>
+          <button type="button" className="map-3d-guide-garden-debug__danger" onClick={deleteSelectedTreeCandidate} disabled={!selectedTreeCandidateId}>
+            删除选中测试树
+          </button>
+          <button type="button" className="map-3d-guide-garden-debug__danger" onClick={deleteSelectedTreeCandidateCluster} disabled={!selectedTreeCandidateId}>
+            删除选中树团
+          </button>
+          <button type="button" className="map-3d-guide-garden-debug__danger" onClick={clearTreeCandidateTestTrees} disabled={!treeCandidateLabState.testTrees.length}>
+            清空测试树
+          </button>
+        </div>
+
+        <details className="map-3d-guide-garden-debug__advanced">
+          <summary>高级：树团参数 / 候选对比</summary>
+          <div className="map-3d-guide-decor-debug__grid">
+            <label>
+              默认树群来源
+              <select value={gardenAssetSourceMode} onChange={(event) => setGardenAssetSource(event.target.value as GardenAssetSourceMode)}>
+                <option value="manual">新手动树群 869 assets</option>
+                <option value="legacy">legacy 旧 199 树群</option>
+              </select>
+            </label>
+            <label>
+              count
+              <input
+                type="number"
+                min="1"
+                max="40"
+                value={treeCandidateLabState.params.count}
+                onChange={(event) => updateTreeCandidateLabParams({ count: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              radiusMeters
+              <input
+                type="number"
+                min="0"
+                max="90"
+                step="1"
+                value={treeCandidateLabState.params.radiusMeters}
+                onChange={(event) => updateTreeCandidateLabParams({ radiusMeters: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              minDistanceMeters
+              <input
+                type="number"
+                min="0"
+                max="28"
+                step="1"
+                value={treeCandidateLabState.params.minDistanceMeters}
+                onChange={(event) => updateTreeCandidateLabParams({ minDistanceMeters: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              scaleMin
+              <input
+                type="number"
+                min="0.1"
+                max="220"
+                step="0.01"
+                value={treeCandidateLabState.params.scaleMin}
+                onChange={(event) => updateTreeCandidateLabParams({ scaleMin: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              scaleMax
+              <input
+                type="number"
+                min="0.1"
+                max="240"
+                step="0.01"
+                value={treeCandidateLabState.params.scaleMax}
+                onChange={(event) => updateTreeCandidateLabParams({ scaleMax: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              heightOffset
+              <input
+                type="number"
+                min="-5"
+                max="16"
+                step="0.1"
+                value={treeCandidateLabState.params.heightOffset}
+                onChange={(event) => updateTreeCandidateLabParams({ heightOffset: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              randomSeed
+              <input
+                type="number"
+                min="1"
+                max="999999"
+                step="1"
+                value={treeCandidateLabState.params.randomSeed}
+                onChange={(event) => updateTreeCandidateLabParams({ randomSeed: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+          <div className="map-3d-guide-decor-debug__actions">
+            <button type="button" className="map-3d-guide-garden-debug__primary" onClick={startCompareTreeCandidates}>
+              一键生成 {treeCandidateTypes.length} 种候选对比
+            </button>
+            <button type="button" onClick={() => setDefaultGardenHidden(!defaultGardenHidden)}>
+              {defaultGardenHidden ? '显示默认树群' : '隐藏默认树群'}
+            </button>
+            <button type="button" onClick={landmarkReferenceLoaded ? unloadCoreLandmarkReferences : loadCoreLandmarkReferences}>
+              {landmarkReferenceLoaded ? '卸载核心地标参照' : '加载核心地标参照'}
+            </button>
+            <button type="button" className="map-3d-guide-garden-debug__danger" onClick={clearTreeCandidateDraft}>
+              清空测试草稿
+            </button>
+          </div>
+        </details>
+      </details>
+
+      <details className="map-3d-guide-garden-debug__advanced">
+        <summary>高级：区域生成 / 禁放区 / 5 步工作台</summary>
+        <div className="map-3d-guide-garden-debug__steps" aria-label="debugGarden 配置步骤">
+          {gardenEditorSteps.map((step) => (
+            <button
+              key={step.id}
+              type="button"
+              className={gardenEditorStep === step.id ? 'is-active' : ''}
+              onClick={() => {
+                setGardenEditorStep(step.id)
+                setGardenEditorMode('inspect')
+                setGardenDraftPolygon(null)
+              }}
+            >
+              {step.label}
+            </button>
+          ))}
+        </div>
+
+        {renderGardenObjectLists()}
+        {renderGardenStepContent()}
+      </details>
 
       <small className="map-3d-guide-garden-debug__status">{gardenCopyStatus}</small>
     </section>
