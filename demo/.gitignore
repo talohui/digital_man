@@ -39,3 +39,8 @@ public/models/lingshan/optimized/wuyin-mandala.safe.glb
 public/models/lingshan/optimized/wuyin-mandala.draco.glb
 public/models/lingshan/optimized/fan-gong.safe.glb
 public/models/lingshan/optimized/fan-gong.draco.glb
+
+# Local tree candidate leftovers, not used by runtime.
+public/models/lingshan/tree-candidates/Meshy_AI_Create_a_stylized_low_0616093941_texture.glb
+public/models/lingshan/tree-candidates/fluffy-bodhi-grove.raw.glb
+public/models/lingshan/tree-candidates/fluffy-bodhi-grove.runtime-v1.glb
