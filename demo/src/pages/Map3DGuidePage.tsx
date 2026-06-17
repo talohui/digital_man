@@ -412,6 +412,12 @@ const coreLandmarkReferenceIds = [
   'manlong_flying_tower',
   'shengjing_square'
 ]
+const LANDMARK_RUNTIME_BATCH_DELAY_MS = 520
+const LANDMARK_RUNTIME_LOAD_BATCHES = [
+  ['giant_buddha', 'fan_gong', 'wuyin_tancheng'],
+  ['foshou_square', 'foqian_square', 'xiangfu_temple', 'jiulong_guanyu'],
+  ['sansheng_hall', 'baizi_mile', 'manlong_flying_tower', 'shengjing_square', 'lingshan_dazhaobi', 'puti_avenue']
+] as const
 const treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string> = {
   single: '单棵',
   smallCluster: '小树团',
@@ -655,7 +661,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [selectedTreeCandidateId, setSelectedTreeCandidateId] = useState('')
   const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
   const landmarkInspector = useLandmarkModelInspector({
-    active: debugPerf || debugGarden,
+    active: visualVariant.id === 'prototype-c' || debugPerf || debugGarden,
+    useLocalDrafts: debugPerf || debugGarden,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
     overlays: landmarkModelOverlays,
@@ -663,6 +670,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     resolveLocation: getModelOverlayLocation,
     onFocusLandmark: ({ id, location }) => focusLandmarkCamera(id, location, true)
   })
+  const landmarkInspectorRef = useRef(landmarkInspector)
+  const landmarkRuntimeLoadGenerationRef = useRef(0)
+  const landmarkRuntimeLoadTimersRef = useRef<number[]>([])
 
   const routeStops = demoGuideRoute.stops
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
@@ -705,6 +715,80 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }),
     [debugGarden, mapInteractionSnapshot.currentZoom, mapInteractionSnapshot.isInteracting]
   )
+
+  useEffect(() => {
+    landmarkInspectorRef.current = landmarkInspector
+  }, [landmarkInspector])
+
+  useEffect(() => {
+    landmarkRuntimeLoadTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    landmarkRuntimeLoadTimersRef.current = []
+    landmarkRuntimeLoadGenerationRef.current += 1
+
+    if (visualVariant.id !== 'prototype-c' || debugGarden) {
+      return
+    }
+
+    if (!mapVisualReadyForOverlays) {
+      setModelStatus('正式 3D 地标等待地图底图就绪')
+      return
+    }
+
+    const generation = landmarkRuntimeLoadGenerationRef.current
+    setModelStatus('正在分批加载正式 3D 地标')
+    perfRecorder.recordMapVisualEvent({
+      type: 'landmarkRuntimeLoadStarted',
+      landmarkRuntimeBatchCount: LANDMARK_RUNTIME_LOAD_BATCHES.length
+    })
+
+    LANDMARK_RUNTIME_LOAD_BATCHES.forEach((batch, batchIndex) => {
+      const timer = window.setTimeout(() => {
+        if (generation !== landmarkRuntimeLoadGenerationRef.current) {
+          return
+        }
+
+        const inspector = landmarkInspectorRef.current
+        perfRecorder.recordMapVisualEvent({
+          type: 'landmarkRuntimeLoadBatch',
+          landmarkRuntimeBatchIndex: batchIndex,
+          landmarkRuntimeBatchCount: LANDMARK_RUNTIME_LOAD_BATCHES.length,
+          landmarkRuntimeIds: [...batch]
+        })
+        batch.forEach((id) => {
+          const item = inspector.items.find((inspectorItem) => inspectorItem.id === id)
+
+          if (!item) {
+            return
+          }
+
+          if (item.status !== 'loaded' && item.status !== 'loading') {
+            inspector.loadLandmark(id)
+          }
+
+          item.companions.forEach((companion) => {
+            if (!companion.enabled || companion.status === 'loaded' || companion.status === 'loading') {
+              return
+            }
+
+            inspector.loadCompanionModel(id, companion.id)
+          })
+        })
+
+        if (batchIndex === LANDMARK_RUNTIME_LOAD_BATCHES.length - 1) {
+          setModelStatus('正式 3D 地标已进入分批加载')
+        }
+      }, batchIndex * LANDMARK_RUNTIME_BATCH_DELAY_MS)
+
+      landmarkRuntimeLoadTimersRef.current.push(timer)
+    })
+
+    return () => {
+      landmarkRuntimeLoadGenerationRef.current += 1
+      landmarkRuntimeLoadTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      landmarkRuntimeLoadTimersRef.current = []
+    }
+  }, [debugGarden, mapVisualReadyForOverlays, perfRecorder, visualVariant.id])
+
   const tourStateLabel =
     tourMode === 'buddhaRealmTour'
       ? `佛境巡游中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
@@ -2638,17 +2722,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     clearGltfModels(gltfModelRefs.current)
     gltfModelRefs.current = new Map()
 
-    if (!showModelBeta) {
-      setModelStatus('未开启')
+    if (visualVariant.id === 'prototype-c') {
+      if (debugPerf && showModelBeta) {
+        setModelStatus('正式 runtime 地标已自动加载；候选切换请使用运行时诊断面板')
+      }
       return
     }
 
-    if (visualVariant.id === 'prototype-c') {
-      setModelStatus(
-        debugPerf
-          ? '已进入单体加载模式，请在运行时诊断面板中逐个加载地标 GLB'
-          : 'raw 地标 GLB 约 1.1GB；请使用 ?debugPerf=1 逐个检查，不在游客端批量加载'
-      )
+    if (!showModelBeta) {
+      setModelStatus('未开启')
       return
     }
 
@@ -3457,7 +3539,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
 
       if (item) {
-        landmarkInspector.loadLandmark(id)
+        if (item.status !== 'loaded' && item.status !== 'loading') {
+          landmarkInspector.loadLandmark(id)
+        }
+
+        item.companions.forEach((companion) => {
+          if (!companion.enabled || companion.status === 'loaded' || companion.status === 'loading') {
+            return
+          }
+
+          landmarkInspector.loadCompanionModel(id, companion.id)
+        })
       }
     })
     setTreeCandidateLabState((current) => ({
@@ -3475,7 +3567,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   function unloadCoreLandmarkReferences() {
-    coreLandmarkReferenceIds.forEach((id) => landmarkInspector.unloadLandmark(id))
+    coreLandmarkReferenceIds.forEach((id) => {
+      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
+
+      item?.companions.forEach((companion) => landmarkInspector.unloadCompanionModel(id, companion.id))
+      landmarkInspector.unloadLandmark(id)
+    })
     setTreeCandidateLabState((current) => ({
       ...current,
       landmarkReferenceLoaded: false
@@ -4551,14 +4648,18 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           ) : null}
         </div>
 
-        <label className="map-3d-guide-model-toggle">
-          <input
-            type="checkbox"
-            checked={showModelBeta}
-            onChange={(event) => setShowModelBeta(event.target.checked)}
-          />
-          <span>显示 3D 景点模型 Beta</span>
-        </label>
+        {debugPerf ? (
+          <label className="map-3d-guide-model-toggle">
+            <input
+              type="checkbox"
+              checked={showModelBeta}
+              onChange={(event) => setShowModelBeta(event.target.checked)}
+            />
+            <span>地标调试入口</span>
+          </label>
+        ) : (
+          <p className="map-3d-guide-model-state">正式 3D 地标自动加载</p>
+        )}
         <p className="map-3d-guide-model-state">{modelStatus}</p>
 
         <details className="map-3d-guide-dev-diagnostics">

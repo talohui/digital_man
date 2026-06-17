@@ -110,6 +110,8 @@ export type Map3DPerfMapVisualEventType =
   | 'treeCandidateLabEnabled'
   | 'defaultGardenHidden'
   | 'landmarkReferenceLoaded'
+  | 'landmarkRuntimeLoadStarted'
+  | 'landmarkRuntimeLoadBatch'
   | 'treeCandidateClusterGenerated'
   | 'treeCandidateCompareSetGenerated'
   | 'manualTreeAdded'
@@ -159,6 +161,9 @@ export type Map3DPerfMapVisualEvent = {
   gardenLoadBatchIndex?: number
   gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
   gardenLiveCountWarning?: boolean
+  landmarkRuntimeBatchIndex?: number
+  landmarkRuntimeBatchCount?: number
+  landmarkRuntimeIds?: string[]
 }
 
 export type Map3DPerfCompanionModelEventType =
@@ -693,7 +698,7 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         elapsedMs,
         recordedAt: event.recordedAt ?? new Date().toISOString()
       }
-      state.mapVisualEvents = [...state.mapVisualEvents, normalizedEvent].slice(-16)
+      state.mapVisualEvents = [...state.mapVisualEvents, normalizedEvent].slice(-48)
 
       if (event.type === 'startupStageChanged' && event.startupStage) {
         state.startupStage = event.startupStage

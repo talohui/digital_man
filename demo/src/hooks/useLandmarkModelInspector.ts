@@ -66,6 +66,7 @@ export type LandmarkCompanionItem = {
   name: string
   modelUrl: string
   fileSizeLabel?: string
+  enabled: boolean
   note?: string
   calibration: LandmarkCompanionCalibrationValues
   status: LandmarkInspectorStatus
@@ -159,6 +160,7 @@ type LandmarkCompanionInspectorState = Record<
 
 type UseLandmarkModelInspectorOptions = {
   active: boolean
+  useLocalDrafts?: boolean
   map: any
   mapReady: boolean
   overlays: LingshanMapModelOverlay[]
@@ -169,6 +171,7 @@ type UseLandmarkModelInspectorOptions = {
 
 export function useLandmarkModelInspector({
   active,
+  useLocalDrafts = true,
   map,
   mapReady,
   overlays,
@@ -189,14 +192,14 @@ export function useLandmarkModelInspector({
     buildInitialCompanionState(overlays)
   )
   const [savedDrafts, setSavedDrafts] = useState<Record<string, LandmarkCalibrationDraft>>(() =>
-    active ? loadCalibrationDrafts() : {}
+    active && useLocalDrafts ? loadCalibrationDrafts() : {}
   )
   const [calibrationEdits, setCalibrationEdits] = useState<Record<string, LandmarkCalibrationValues>>(() =>
-    buildInitialCalibrationEdits(overlays, active ? loadCalibrationDrafts() : {})
+    buildInitialCalibrationEdits(overlays, active && useLocalDrafts ? loadCalibrationDrafts() : {})
   )
   const [companionCalibrationEdits, setCompanionCalibrationEdits] = useState<
     Record<string, LandmarkCompanionCalibrationValues>
-  >(() => buildInitialCompanionCalibrationEdits(overlays, active ? loadCalibrationDrafts() : {}))
+  >(() => buildInitialCompanionCalibrationEdits(overlays, active && useLocalDrafts ? loadCalibrationDrafts() : {}))
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
   const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
 
@@ -212,12 +215,12 @@ export function useLandmarkModelInspector({
       return
     }
 
-    const drafts = loadCalibrationDrafts()
+    const drafts = useLocalDrafts ? loadCalibrationDrafts() : {}
     setSavedDrafts(drafts)
     setCalibrationEdits(buildInitialCalibrationEdits(overlays, drafts))
     setCompanionCalibrationEdits(buildInitialCompanionCalibrationEdits(overlays, drafts))
     perfRecorder.setLandmarkTotal(overlays.length)
-  }, [active, overlays, perfRecorder])
+  }, [active, overlays, perfRecorder, useLocalDrafts])
 
   useEffect(() => {
     setState((current) => {
@@ -364,6 +367,7 @@ export function useLandmarkModelInspector({
             name: companion.name,
             modelUrl: companion.modelUrl,
             fileSizeLabel: companion.fileSizeLabel,
+            enabled: companion.enabled,
             note: companion.note,
             calibration,
             hasSavedDraft: Boolean(savedCompanion),

@@ -10695,3 +10695,25 @@ mode: 'none'
 ### 边界
 
 未修改 Tencent key、`mapStyleId: 'style1'`、路线数据、POI 语义、模型配置、树群点位或 GLB 文件。
+
+## 2026-06-17｜阶段：普通页核心建筑 GLB 默认显示
+
+### 背景
+
+普通 `/map-3d-guide-c` 已经能显示新 869 手动树群、路线和 POI，但核心建筑 GLB 仍需要 debugPerf / Inspector 或旧 Beta 入口才会出现，游客页第一眼缺少正式沙盘建筑。
+
+### 修改
+
+- 将 C 版页面的 Landmark Inspector hook 改为普通页也可用，UI 仍只在 debugPerf / debugGarden 中显示。
+- 普通页自动加载使用正式固化 transform，不读取 localStorage calibration draft；debugPerf / debugGarden 继续保留本地草稿覆盖能力。
+- 新增普通 runtime 自动加载时序：map visual ready 后分三批加载正式地标 GLB。
+- 第一批加载灵山大佛、梵宫、五印坛城；第二批加载佛手广场、佛前广场、祥符禅寺、九龙灌浴；第三批加载三圣殿、百子戏弥勒、曼龙飞塔、胜境广场、灵山大照壁、菩提大道。
+- 祥符禅寺 3D 底座 companion 按 `enabled=true` 跟随主模型加载。
+- debugGarden 核心地标参照层补充 companion 加载 / 卸载，并避免对已加载地标重复创建 overlay。
+- debugPerf map visual event 增加 runtime 地标加载开始和批次记录，显示 batch index 与本批地标 id。
+
+### 边界
+
+- 正式游客页使用 safe-v2 / runtime modelUrl，不使用 raw、safe-v1、draco 或旧 464M `bodhi-avenue.glb`。
+- Landmark Inspector 的手动加载、卸载、聚焦、校准、候选切换继续保留。
+- 未修改 GLB 文件、树群数据、路线数据、POI 语义、地标 transform、Tencent key 或 `mapStyleId: 'style1'`。

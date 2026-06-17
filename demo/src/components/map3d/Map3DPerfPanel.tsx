@@ -52,6 +52,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
     return null
   }
 
+  const landmarkRuntimeEvents = snapshot.mapVisualEvents
+    .filter((event) => event.type === 'landmarkRuntimeLoadStarted' || event.type === 'landmarkRuntimeLoadBatch')
+    .slice(-6)
+
   return (
     <section className={`map-3d-guide-perf-panel ${expanded ? 'is-expanded' : ''}`}>
       <div className="map-3d-guide-perf-panel__header">
@@ -172,9 +176,27 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                     {event.startupStage ? ` · ${event.startupStage}` : ''}
                     {event.curtainDurationMs !== undefined ? ` · curtain ${formatMs(event.curtainDurationMs)}` : ''}
                     {event.reason ? ` · ${event.reason}` : ''}
+                    {event.landmarkRuntimeBatchIndex !== undefined
+                      ? ` · runtime batch ${event.landmarkRuntimeBatchIndex + 1}/${event.landmarkRuntimeBatchCount ?? '-'}`
+                      : ''}
+                    {event.landmarkRuntimeIds?.length ? ` · ${event.landmarkRuntimeIds.join(', ')}` : ''}
                   </small>
                 </li>
               ))}
+              {landmarkRuntimeEvents.length ? (
+                <li>
+                  <span>landmark runtime batches</span>
+                  <small>
+                    {landmarkRuntimeEvents
+                      .map((event) =>
+                        event.landmarkRuntimeBatchIndex !== undefined
+                          ? `batch ${event.landmarkRuntimeBatchIndex + 1}/${event.landmarkRuntimeBatchCount ?? '-'}: ${(event.landmarkRuntimeIds ?? []).join(', ')}`
+                          : `${event.type}: ${event.landmarkRuntimeBatchCount ?? 0} batches`
+                      )
+                      .join(' · ')}
+                  </small>
+                </li>
+              ) : null}
             </ol>
           </section>
 

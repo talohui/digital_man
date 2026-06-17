@@ -1137,3 +1137,25 @@ debugPerf 新增 companion model 事件：
 - 地图创建后增加 3.2s fallback visual ready，防止腾讯 ready 事件缺失导致底图已可见但 overlay 一直不加载。
 - `loadTMap` 增加 `window.TMap` 轮询等待，避免 script load 先于 TMap 全局对象挂载时直接进入 failed。
 - `renderOptions.enableBloom` 改为关闭，避免实验性后处理参与首屏黑屏排查。
+
+## 38. 普通页核心地标 runtime 加载
+
+### 诊断
+
+- 普通 `/map-3d-guide-c` 没有自动创建核心建筑 GLB overlay，地标加载实际只挂在 GLB Beta / debugPerf Inspector 入口下。
+- debugGarden 里的核心地标参照层正常，是因为 Tree Candidate Lab 显式调用 Inspector 加载，不是普通游客页的默认路径。
+
+### 策略
+
+- 复用 `useLandmarkModelInspector` 的 overlay Map 管理、generation / status 和 debugPerf 计数，避免普通页和 Inspector 各自创建一套 GLB。
+- 普通页 runtime 自动加载禁用 localStorage calibration draft，避免游客页被调试草稿污染；debugPerf / debugGarden 仍按原逻辑读取草稿用于校准。
+- C 版地图 visual ready 后自动分三批加载正式 runtime / safe-v2 地标，每批间隔约 520ms。
+- `xiangfu_temple_base` companion 只在配置 `enabled=true` 时跟随祥符禅寺加载。
+- debugGarden 继续使用核心地标参照层；普通 runtime 自动加载在 debugGarden 下不重复执行。
+- debugPerf 的 map visual event 记录 `landmarkRuntimeLoadStarted` 和 `landmarkRuntimeLoadBatch`，包含 batch index 和本批地标 id。
+
+### 性能与安全
+
+- 地标加载不阻塞地图 visual ready，也不要求等待全部地标加载完成后才显示树群。
+- debugPerf 的 Landmark GLB 计数继续显示 live / total 状态，companion 事件仍记录在 Companion 诊断中。
+- 普通页正式加载只读 `lingshanMapModelOverlays.ts` 的 `modelUrl`，不使用 raw、safe-v1、draco 或旧 464M 菩提大道路径。

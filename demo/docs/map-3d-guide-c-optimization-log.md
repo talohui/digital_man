@@ -1269,3 +1269,30 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - `loadTMap` 不再在 script `onload` 当下立刻判失败，改为轮询等待 `window.TMap` 最多 10 秒，避免腾讯 GL 脚本异步挂载全局对象时误报加载失败。
 - 关闭实验性的 `renderOptions.enableBloom`，降低腾讯 GL 后处理兼容风险。
 - 不修改 Tencent key，不修改 `mapStyleId: 'style1'`，不改底图样式、不改路线和模型。
+
+## 阶段：普通页正式核心地标 runtime 自动加载
+
+### 问题
+
+- `/map-3d-guide-c` 普通游客页只显示路线、POI 和树群，核心建筑 GLB 没有默认出现。
+- 根因是地标 GLB 创建路径仍被旧的 “3D 景点模型 Beta” / debugPerf Inspector 入口控制，普通页没有在地图视觉 ready 后启动正式 runtime 地标加载。
+- debugGarden 的核心地标参照层能加载，是因为它显式调用 Landmark Inspector，不代表普通页有默认加载逻辑。
+
+### 修复
+
+- C 版页面复用现有 Landmark Inspector 的 overlay 生命周期管理，普通页不显示 Inspector UI，但使用同一套 id Map、加载状态和 debugPerf 计数。
+- 普通页自动加载不读取本地 calibration draft，确保游客页使用正式固化 transform；debugPerf / debugGarden 继续允许本地草稿覆盖。
+- 地图 visual ready 后按批次加载正式配置中的核心地标：
+  - 第一批：灵山大佛、梵宫、五印坛城。
+  - 第二批：佛手广场、佛前广场、祥符禅寺、九龙灌浴。
+  - 第三批：三圣殿、百子戏弥勒、曼龙飞塔、胜境广场、灵山大照壁、菩提大道。
+- 祥符禅寺 companion 3D 底座跟随主模型加载，仍使用 `/models/lingshan/optimized/xiangfu-temple-base.runtime-v1.glb`。
+- GLB Beta 控件不再决定普通页正式地标是否显示，debugPerf / Landmark Inspector 仍保留手动加载、卸载、候选切换和校准能力。
+- debugPerf 新增 `landmarkRuntimeLoadStarted` / `landmarkRuntimeLoadBatch` map visual 事件，面板中可看到 runtime 批次和对应地标 id。
+
+### 边界
+
+- 正式游客页只使用 `src/data/lingshanMapModelOverlays.ts` 中的 runtime / safe-v2 路径。
+- 菩提大道继续使用 `/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`，不引用旧 464M raw 文件。
+- raw / safe-v1 / draco 仍只作为 debugPerf Inspector 的本地候选，不进入普通页自动加载。
+- 未修改任何地标 scale、height、rotationY、offset、POI 语义、路线数据、树群数据或 `fan_gong.footprintMask`。
