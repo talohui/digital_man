@@ -1,6 +1,5 @@
 import {
   BarChartOutlined,
-  CompassOutlined,
   ClockCircleOutlined,
   EnvironmentOutlined,
   HeartOutlined,
@@ -11,20 +10,16 @@ import {
 } from '@ant-design/icons'
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
+import { getGuideSpotById } from '../data/guideData'
 import { useGuideStore } from '../store/useGuideStore'
 import {
-  purchaseCategoryLabels,
   ticketTypeOptions,
-  useTicketStore,
-  type PurchaseCategory
+  useTicketStore
 } from '../store/useTicketStore'
 
 function MobileProfilePage() {
   const navigate = useNavigate()
   const selectedTags = useGuideStore((state) => state.selectedTags)
-  const candidateRoutes = useGuideStore((state) => state.candidateRoutes)
-  const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const userProfile = useGuideStore((state) => state.userProfile)
   const visitedStops = useGuideStore((state) => state.visitedStops)
   const listenedStops = useGuideStore((state) => state.listenedStops)
@@ -35,17 +30,6 @@ function MobileProfilePage() {
   // 这里只订阅 purchases，再用 useMemo 派生，保证引用稳定且随消费更新。
   const totalSpend = useMemo(
     () => purchases.reduce((sum, item) => sum + item.amount, 0),
-    [purchases]
-  )
-  const spendByCategory = useMemo(
-    () =>
-      purchases.reduce<Record<PurchaseCategory, number>>(
-        (acc, item) => {
-          acc[item.category] += item.amount
-          return acc
-        },
-        { food: 0, shopping: 0, transport: 0, entertainment: 0 }
-      ),
     [purchases]
   )
   // 今日行程回顾：把已走/已听站点聚合成一条当日轨迹（仅展示，不参与推荐计算）
@@ -59,20 +43,13 @@ function MobileProfilePage() {
   )
   const hasJourney = visitedSpotList.length > 0
 
-  const activeRoute = getGuideRouteById(activeRouteId)
-  const primaryRoute = candidateRoutes[0] ?? activeRoute
   const personaLabel = userProfile?.primaryPersonaLabel || '偏好逐步形成中'
   const ticketTypeLabel = ticketTypeOptions.find((item) => item.id === ticket?.ticketType)?.label ?? ticket?.ticketType
-  const secondary = userProfile?.secondaryPreferences?.length
-    ? userProfile.secondaryPreferences.slice(0, 3)
-    : selectedTags
 
   return (
     <div className="mobile-profile-page">
       <section className="mobile-profile-card">
-        <div className="mobile-profile-card__avatar">
-          <HeartOutlined />
-        </div>
+        <img className="mobile-illus mobile-illus--avatar" src="/icons/icon-profile.png" alt="" />
         <div>
           <span className="mobile-section-kicker">当前画像</span>
           <h2>{personaLabel}</h2>
@@ -159,71 +136,25 @@ function MobileProfilePage() {
           <ShoppingCartOutlined />
         </div>
         {ticket ? (
-          <>
-            <div className="mobile-profile-ticket__facts">
-              <div>
-                <span>同行人数</span>
-                <strong>{ticket.groupSize} 人</strong>
-              </div>
-              <div>
-                <span>票型</span>
-                <strong>{ticketTypeLabel}</strong>
-              </div>
-              <div>
-                <span>累计消费</span>
-                <strong>¥{Math.round(totalSpend)}</strong>
-              </div>
+          <div className="mobile-profile-ticket__facts">
+            <div>
+              <span>同行人数</span>
+              <strong>{ticket.groupSize} 人</strong>
             </div>
-            <div className="mobile-consume-breakdown">
-              {Object.entries(spendByCategory).map(([category, amount]) => (
-                <div key={category}>
-                  <span>{purchaseCategoryLabels[category as keyof typeof purchaseCategoryLabels]}</span>
-                  <strong>¥{Math.round(amount)}</strong>
-                </div>
-              ))}
+            <div>
+              <span>票型</span>
+              <strong>{ticketTypeLabel}</strong>
             </div>
-            <div className="mobile-purchase-list">
-              {purchases.length ? purchases.slice(0, 3).map((item) => (
-                <div key={item.id}>
-                  <span>{purchaseCategoryLabels[item.category]}</span>
-                  <strong>¥{Math.round(item.amount)}</strong>
-                </div>
-              )) : <p className="mobile-muted">购票后可去消费页模拟餐饮、文创、交通和演艺消费。</p>}
-            </div>
-          </>
+          </div>
         ) : (
-          <p className="mobile-muted">购票后会在这里展示游览日期、同行人数、累计消费和最近消费记录。</p>
+          <p className="mobile-muted">购票后会在这里展示游览日期、同行人数和票型，消费明细请看「消费」页。</p>
         )}
         <div className="mobile-profile-ticket__actions">
-          <button type="button" onClick={() => navigate('/ticket')}>{ticket ? '更新票务' : '购票入园'}</button>
-          <button type="button" onClick={() => navigate('/consume')} disabled={!ticket}>去消费页</button>
-        </div>
-      </section>
-
-      <section className="mobile-panel">
-        <div className="mobile-panel__head">
-          <div>
-            <span className="mobile-section-kicker">最近推荐</span>
-            <h3>{primaryRoute.name}</h3>
-          </div>
-          <CompassOutlined />
-        </div>
-        <p className="mobile-profile-page__route">{primaryRoute.description}</p>
-        <button className="mobile-primary-action" type="button" onClick={() => navigate('/map')}>
-          继续这条路线
-        </button>
-      </section>
-
-      <section className="mobile-profile-grid">
-        <div>
-          <StarOutlined />
-          <strong>{secondary.length || selectedTags.length}</strong>
-          <span>偏好依据</span>
-        </div>
-        <div>
-          <CompassOutlined />
-          <strong>{candidateRoutes.length || 3}</strong>
-          <span>候选路线</span>
+          {ticket ? (
+            <button type="button" onClick={() => navigate('/consume')}>去消费页</button>
+          ) : (
+            <button type="button" onClick={() => navigate('/ticket')}>购票入园</button>
+          )}
         </div>
       </section>
 

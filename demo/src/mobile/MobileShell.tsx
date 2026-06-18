@@ -1,22 +1,25 @@
-import {
-  CompassOutlined,
-  EnvironmentOutlined,
-  HomeOutlined,
-  MessageOutlined,
-  UserOutlined
-} from '@ant-design/icons'
-import { useMemo, type ReactNode } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
-import { useGuideStore } from '../store/useGuideStore'
-import MobileGuidePage from './MobileGuidePage'
-import MobileHomePage from './MobileHomePage'
-import MobileMapPage from './MobileMapPage'
-import MobileConsumePage from './MobileConsumePage'
-import MobileProfilePage from './MobileProfilePage'
-import MobileTicketPage from './MobileTicketPage'
+import { CompassOutlined } from '@ant-design/icons'
 
-type MobileTabKey = 'home' | 'map' | 'guide' | 'profile'
+// 精美彩色图标(东方禅意,切自官方风格九宫格),放在 public/icons/
+const tabIcon = (name: string) => (
+  <img src={`/icons/${name}.png`} className="mobile-shell__tab-icon" alt="" />
+)
+import { lazy, Suspense, useMemo, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { getDefaultSpotId, getGuideRouteById, getGuideSpotById } from '../data/guideData'
+import { useGuideStore } from '../store/useGuideStore'
+import RouteSkeleton from '../components/RouteSkeleton'
+import MobileHomePage from './MobileHomePage'
+// 首屏只 eager 默认 tab(导览页),其余 5 页懒加载;
+// prefetchHeavyTabs 会在 home 空闲帧预热,切 tab 仍秒开
+const MobileGuidePage = lazy(() => import('./MobileGuidePage'))
+const MobileMapPage = lazy(() => import('./MobileMapPage'))
+const MobileConsumePage = lazy(() => import('./MobileConsumePage'))
+const MobileProfilePage = lazy(() => import('./MobileProfilePage'))
+const MobileTicketPage = lazy(() => import('./MobileTicketPage'))
+const MobileRoutePlanPage = lazy(() => import('./MobileRoutePlanPage'))
+
+type MobileTabKey = 'home' | 'map' | 'guide' | 'consume' | 'profile'
 
 const tabs: Array<{
   key: MobileTabKey
@@ -24,10 +27,11 @@ const tabs: Array<{
   path: string
   icon: ReactNode
 }> = [
-  { key: 'home', label: '导览', path: '/', icon: <HomeOutlined /> },
-  { key: 'map', label: '地图', path: '/map', icon: <EnvironmentOutlined /> },
-  { key: 'guide', label: '小灵', path: '/guide', icon: <MessageOutlined /> },
-  { key: 'profile', label: '我的', path: '/me', icon: <UserOutlined /> }
+  { key: 'home', label: '导览', path: '/', icon: tabIcon('tab-home') },
+  { key: 'map', label: '地图', path: '/map', icon: tabIcon('tab-map') },
+  { key: 'guide', label: '小灵', path: '/guide', icon: tabIcon('tab-guide') },
+  { key: 'consume', label: '消费', path: '/consume', icon: tabIcon('tab-shop') },
+  { key: 'profile', label: '我的', path: '/me', icon: tabIcon('tab-me') }
 ]
 
 function getSpotIdFromPath(pathname: string) {
@@ -37,7 +41,8 @@ function getSpotIdFromPath(pathname: string) {
 
 function getActiveTab(pathname: string): MobileTabKey {
   if (pathname === '/map') return 'map'
-  if (pathname === '/me' || pathname === '/consume') return 'profile'
+  if (pathname === '/consume') return 'consume'
+  if (pathname === '/me') return 'profile'
   if (pathname === '/guide' || pathname.startsWith('/spot/')) return 'guide'
   return 'home'
 }
@@ -46,12 +51,20 @@ function MobileShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
+  const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
   const activeTab = getActiveTab(location.pathname)
   const route = getGuideRouteById(activeRouteId)
   const spotId = getSpotIdFromPath(location.pathname)
   const spot = spotId ? getGuideSpotById(spotId) : null
+  const routeHasSelectedSpot = Boolean(
+    selectedSpotId && route.stops.some((stop) => stop.spotId === selectedSpotId)
+  )
+  const guideSpot = spot ?? getGuideSpotById(
+    routeHasSelectedSpot ? selectedSpotId : getDefaultSpotId(route.id)
+  )
 
   const pageTitle = useMemo(() => {
+    if (location.pathname === '/plan') return '行程规划'
     if (location.pathname === '/ticket') return '购票入园'
     if (location.pathname === '/consume') return '景区消费'
     if (activeTab === 'map') return '地图导览'
@@ -61,13 +74,14 @@ function MobileShell() {
   }, [activeTab, location.pathname, spot])
 
   const pageSubtitle = useMemo(() => {
+    if (location.pathname === '/plan') return '选期待 · 智能推荐路线'
     if (location.pathname === '/ticket') return '生成本次游客画像'
     if (location.pathname === '/consume') return '餐饮、文创、交通、演艺'
     if (activeTab === 'home') return '选择期待，生成今日路线'
     if (activeTab === 'map') return `${route.name} · ${route.durationLabel}`
-    if (activeTab === 'guide') return spot ? `${route.name} · 当前景点` : `${route.name} · 路线场景`
+    if (activeTab === 'guide') return spot ? `${route.name} · 当前景点` : `${route.name} · ${guideSpot.name}`
     return '偏好、推荐与互动记录'
-  }, [activeTab, location.pathname, route.durationLabel, route.name, spot])
+  }, [activeTab, guideSpot.name, location.pathname, route.durationLabel, route.name, spot])
 
   const handleTabClick = (tab: (typeof tabs)[number]) => {
     if (tab.key === 'guide') {
@@ -83,6 +97,7 @@ function MobileShell() {
   if (activeTab === 'profile') page = <MobileProfilePage />
   if (location.pathname === '/ticket') page = <MobileTicketPage />
   if (location.pathname === '/consume') page = <MobileConsumePage />
+  if (location.pathname === '/plan') page = <MobileRoutePlanPage />
 
   // 地图页让出全部空间给地图本身:隐藏 shell 顶栏 + 内容区零 padding
   // 顶栏冗余信息(路线名、时长)由 MobileMapPage 自己的浮动 header 承担
@@ -109,7 +124,9 @@ function MobileShell() {
         </header>
       )}
 
-      <main className="mobile-shell__content">{page}</main>
+      <main className="mobile-shell__content">
+        <Suspense fallback={<RouteSkeleton />}>{page}</Suspense>
+      </main>
 
       <nav className="mobile-shell__tabbar" aria-label="移动端主导航">
         {tabs.map((tab) => (

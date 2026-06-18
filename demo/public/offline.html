@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1b5e20" />
+    <title>灵山胜境 · 离线</title>
+    <style>
+      :root { color-scheme: light; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 32px;
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: linear-gradient(160deg, #f3f8f3 0%, #e6f0e6 100%);
+        color: #1b5e20;
+        text-align: center;
+      }
+      .logo {
+        width: 72px; height: 72px;
+        border-radius: 20px;
+        background: #1b5e20;
+        color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 34px; font-weight: 700;
+      }
+      h1 { font-size: 20px; font-weight: 600; }
+      p { font-size: 14px; color: #4a6a4a; line-height: 1.6; max-width: 280px; }
+      button {
+        margin-top: 6px;
+        padding: 11px 28px;
+        border: none; border-radius: 999px;
+        background: #1b5e20; color: #fff;
+        font-size: 15px; font-weight: 500;
+        cursor: pointer;
+      }
+      button:active { opacity: 0.85; }
+    </style>
+  </head>
+  <body>
+    <div class="logo">灵</div>
+    <h1>暂时无法连接网络</h1>
+    <p>灵山小灵需要联网才能为您讲解。请检查网络后重试，已缓存的内容仍可正常浏览。</p>
+    <button onclick="location.reload()">重新加载</button>
+    <script>
+      // 网络恢复后自动刷新回到应用
+      window.addEventListener('online', () => location.reload())
+    </script>
+  </body>
+</html>

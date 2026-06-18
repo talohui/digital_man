@@ -1,18 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Card, Col, ConfigProvider, Progress, Row, Segmented, Statistic, Tag, Typography, theme } from 'antd'
+import { Button, Card, Col, ConfigProvider, Progress, Row, Segmented, Statistic, Tag, Typography, theme } from 'antd'
 import { Bar, Line, Pie } from '@ant-design/charts'
+import { Link } from 'react-router-dom'
 import {
   AlertOutlined,
   AudioOutlined,
   ClockCircleOutlined,
+  DatabaseOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
   FireOutlined,
   LikeOutlined,
   MessageOutlined,
   RadarChartOutlined,
+  SkinOutlined,
   SmileOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { exportDashboardExcel, exportDashboardPdf } from '../lib/reportExport'
 import { getAnalyticsApiBase } from '../lib/runtimeConfig'
 
 const { Title, Text } = Typography
@@ -644,6 +650,13 @@ function AdminDashboard() {
   const visitorCostMixPie = data.visitorBehavior.consumption.costMix.map((item) => ({ type: item.label, value: item.amount }))
   const visitorTrendLines = data.visitorBehavior.consumption.trend.map((item) => ({ bucket: item.bucket?.slice(-5) || item.bucket, amount: item.amount }))
 
+  // FR-B3.4 导出运营报告:基于驾驶舱当前数据生成 Excel(多 Sheet)/ PDF
+  const buildReportMeta = () => ({
+    title: '灵山胜境 AI 导览 · 运营报告',
+    generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+    visitorModeLabel: visitorMode === 'realtime' ? '实时' : '历史',
+  })
+
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
       <main style={{ minHeight: '100vh', background: `radial-gradient(circle at top left, #183457 0, ${palette.bg} 38%, #050b14 100%)`, color: palette.text, padding: 22 }}>
@@ -652,7 +665,69 @@ function AdminDashboard() {
             <Text style={{ color: palette.gold, letterSpacing: 0, fontWeight: 700 }}>AI GUIDE OPERATIONS</Text>
             <Title level={2} style={{ color: palette.text, margin: '4px 0 0', fontSize: 30 }}>灵山胜境 · AI 导览运营驾驶舱</Title>
           </div>
-          <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'grid', justifyItems: 'end', gap: 8, textAlign: 'right' }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button
+                size="large"
+                icon={<FileExcelOutlined />}
+                onClick={() => exportDashboardExcel(data, buildReportMeta())}
+                style={{ color: palette.green, fontWeight: 700, borderColor: palette.green, background: 'rgba(94, 230, 168, 0.1)' }}
+              >
+                导出 Excel
+              </Button>
+              <Button
+                size="large"
+                icon={<FilePdfOutlined />}
+                onClick={() => exportDashboardPdf(data, buildReportMeta())}
+                style={{ color: palette.red, fontWeight: 700, borderColor: palette.red, background: 'rgba(255, 123, 123, 0.1)' }}
+              >
+                导出 PDF
+              </Button>
+              <Link to="/admin/kb">
+                <Button
+                  size="large"
+                  icon={<DatabaseOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  知识库管理
+                </Button>
+              </Link>
+              <Link to="/admin/avatar">
+                <Button
+                  size="large"
+                  icon={<SkinOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  数字人形象
+                </Button>
+              </Link>
+              <Link to="/admin/heatmap">
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<FireOutlined />}
+                  style={{
+                    color: '#1a1208',
+                    fontWeight: 800,
+                    borderColor: palette.gold,
+                    background: 'linear-gradient(135deg, #f3da80, #d4af37)',
+                    boxShadow: '0 6px 22px rgba(212, 175, 55, 0.5)',
+                  }}
+                >
+                  客流热力图
+                </Button>
+              </Link>
+            </div>
             <Text style={{ color: palette.muted }}>实时刷新 · 15s</Text>
             <div style={{ color: palette.cyan, fontFamily: 'monospace', fontSize: 20 }}>{currentTime}</div>
           </div>
@@ -875,6 +950,8 @@ function AdminDashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Tag color={visitorMode === 'history' ? 'gold' : 'green'}>{data.visitorBehavior.timeRangeLabel}</Tag>
               <Segmented
+                size="large"
+                className="dash-source-toggle"
                 value={visitorMode}
                 options={[
                   { label: '实时游客数据', value: 'realtime' },

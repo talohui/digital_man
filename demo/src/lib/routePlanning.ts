@@ -26,6 +26,38 @@ const ROUTE_CACHE_PREFIX = 'lingshan-guide-route-cache:v1:'
 const ROUTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const memoryRouteCache = new Map<string, PlannedRoute>()
 
+export function buildPlannedRouteFromPath(
+  path: LatLngPoint[],
+  options?: {
+    fallbackReason?: string
+  }
+): PlannedRoute {
+  if (path.length < 2) {
+    return {
+      path,
+      distanceMeters: 0,
+      durationMinutes: 0,
+      usedFallback: true,
+      fallbackReason: options?.fallbackReason ?? '预设路线点位不足，无法绘制完整路线。'
+    }
+  }
+
+  let distanceMeters = 0
+  let durationMinutes = 0
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    distanceMeters += estimateSegmentDistance(path[index], path[index + 1])
+    durationMinutes += estimateWalkDurationMinutes(path[index], path[index + 1])
+  }
+
+  return {
+    path,
+    distanceMeters,
+    durationMinutes,
+    usedFallback: false
+  }
+}
+
 export async function buildWalkingRoute(points: LatLngPoint[]) {
   if (points.length < 2) {
     return {

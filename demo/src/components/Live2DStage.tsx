@@ -14,6 +14,8 @@ import {
 import {
   playMotionForState,
   registerModel,
+  setMouthForm,
+  setMouthFormActive,
   setMouthOpen,
   type Live2DLikeModel,
   type RobotState
@@ -71,9 +73,9 @@ function Live2DStage({
   const [loadError, setLoadError] = useState('')
   const activeSceneId = useChatStore((s) => s.activeSceneId)
   const resolvedSceneId = sceneId ?? activeSceneId
-  const session = useChatStore((s) => getSession(s.sessions, resolvedSceneId))
-  const robotState = session.robotState
-  const mouthOpen = session.mouthOpen
+  // 只订阅低频的 robotState;mouthOpen(口型)TTS 播放时每帧都变,
+  // 走下面的 transient subscription 直接驱动模型,不触发 React 重渲
+  const robotState = useChatStore((s) => getSession(s.sessions, resolvedSceneId).robotState)
   const visibleHighlights = highlightsOverride ?? highlights
 
   useEffect(() => {
@@ -108,12 +110,18 @@ function Live2DStage({
     setIsLoading(true)
     setLoadError('')
 
+    // 按设备像素比渲染,否则 retina 屏上 1x 渲染被 CSS 拉伸会糊。
+    // 手机限 2x、桌面限 3x,兼顾清晰度与 GPU 开销。
+    const renderResolution = Math.min(window.devicePixelRatio || 1, preferReducedGpu ? 2 : 3)
+
     const app = new PIXI.Application({
       view: canvas,
       autoStart: true,
       resizeTo: canvas.parentElement ?? undefined,
       backgroundAlpha: 0,
-      antialias: !preferReducedGpu
+      antialias: !preferReducedGpu,
+      resolution: renderResolution,
+      autoDensity: true
     })
     appRef.current = app
 
@@ -143,8 +151,10 @@ function Live2DStage({
 
         const fit = () => {
           const parent = canvas.parentElement
-          let w = app.renderer.width
-          let h = app.renderer.height
+          // 用逻辑尺寸(app.screen),不是 renderer.width(autoDensity+resolution 下是物理像素,
+          // 会让模型放大数倍并按物理尺寸算居中而偏到右下)
+          let w = app.screen.width
+          let h = app.screen.height
           if ((!w || !h) && parent) {
             const r = parent.getBoundingClientRect()
             w = r.width
@@ -209,12 +219,47 @@ function Live2DStage({
   }, [isInView])
 
   useEffect(() => {
-    setMouthOpen(mouthOpen, resolvedSceneId)
-  }, [mouthOpen, resolvedSceneId])
+    const init = getSession(useChatStore.getState().sessions, resolvedSceneId)
+    let lastOpen = init.mouthOpen
+    let lastForm = init.mouthForm
+    setMouthOpen(lastOpen, resolvedSceneId)
+    setMouthForm(lastForm, resolvedSceneId)
+    // transient subscription:口型(张开度+嘴形)每帧更新直接驱动模型,绕过 React 重渲
+    return useChatStore.subscribe((state) => {
+      const session = getSession(state.sessions, resolvedSceneId)
+      if (session.mouthOpen !== lastOpen) {
+        lastOpen = session.mouthOpen
+        setMouthOpen(lastOpen, resolvedSceneId)
+      }
+      if (session.mouthForm !== lastForm) {
+        lastForm = session.mouthForm
+        setMouthForm(lastForm, resolvedSceneId)
+      }
+    })
+  }, [resolvedSceneId])
 
   useEffect(() => {
     playMotionForState(robotState, resolvedSceneId)
+    // 仅讲解时让口型接管嘴形(元音塑形);其余状态交还表情控制 ParamMouthForm
+    setMouthFormActive(robotState === 'speaking', resolvedSceneId)
   }, [robotState, resolvedSceneId])
+
+  // 切后台暂停渲染循环(省电省发热),回前台恢复。
+  // PIXI.Ticker.shared 驱动模型参数,app.ticker 驱动渲染,两个都停
+  useEffect(() => {
+    const onVisibility = () => {
+      const app = appRef.current
+      if (document.hidden) {
+        app?.ticker?.stop()
+        PIXI.Ticker.shared.stop()
+      } else {
+        app?.ticker?.start()
+        PIXI.Ticker.shared.start()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   const showPlaceholder = !isInView || (isLoading && !loadError)
   const placeholderText = !isInView
