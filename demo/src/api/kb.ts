@@ -2,6 +2,13 @@ import { getKbApiBase } from '../lib/runtimeConfig'
 
 const BASE = getKbApiBase()
 
+export type KbDocument = {
+  name: string
+  category: string
+  chunkCount: number
+  uploadedAt: string
+}
+
 export type KbStats = {
   documentCount: number
   chunkCount: number
@@ -10,6 +17,7 @@ export type KbStats = {
   faqUpdatedAt: string
   collection: string
   embedModel: string
+  documents?: KbDocument[]
 }
 
 export type FaqItem = {
@@ -44,9 +52,12 @@ export async function fetchKbStats(): Promise<KbStats> {
   return asJson<KbStats>(await fetch(`${BASE}/kb/stats`))
 }
 
-export async function uploadKbDocument(file: File): Promise<UploadResult> {
+export async function uploadKbDocument(file: File, category?: string): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file)
+  if (category && category.trim()) {
+    form.append('category', category.trim())
+  }
   return asJson<UploadResult>(
     await fetch(`${BASE}/kb/upload`, { method: 'POST', body: form })
   )

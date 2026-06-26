@@ -53,6 +53,7 @@ function KnowledgeInner() {
   const [stats, setStats] = useState<KbStats | null>(null)
   const [faqs, setFaqs] = useState<FaqItem[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadCategory, setUploadCategory] = useState('')
   const [loading, setLoading] = useState(false)
   const [serviceError, setServiceError] = useState<string | null>(null)
 
@@ -90,8 +91,9 @@ function KnowledgeInner() {
     beforeUpload: async (file) => {
       setUploading(true)
       try {
-        const res = await uploadKbDocument(file as File)
-        message.success(`「${res.docName}」已入库，新增 ${res.chunkCount} 个切片`)
+        const res = await uploadKbDocument(file as File, uploadCategory)
+        const catTip = uploadCategory.trim() ? `（分类：${uploadCategory.trim()}）` : ''
+        message.success(`「${res.docName}」已入库${catTip}，新增 ${res.chunkCount} 个切片`)
         setStats(res.stats)
         await refresh()
       } catch (err) {
@@ -223,8 +225,19 @@ function KnowledgeInner() {
         </Col>
       </Row>
 
-      {/* 上传（B1.1 + B1.3） */}
+      {/* 上传（B1.1 + B1.3 + B1.2 分类打标签） */}
       <Card title="上传景区资料（PDF / Word / TXT / Markdown）" style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 12 }}>
+          <Text style={{ color: palette.muted, fontSize: 13 }}>景点 / 主题分类（可选，将随文档一起入库便于归类检索）</Text>
+          <Input
+            value={uploadCategory}
+            onChange={(e) => setUploadCategory(e.target.value.slice(0, 40))}
+            placeholder="例如：灵山大佛 / 梵宫 / 交通服务 / 历史文化"
+            allowClear
+            maxLength={40}
+            style={{ marginTop: 6, maxWidth: 420 }}
+          />
+        </div>
         <Upload.Dragger {...uploadProps} disabled={uploading}>
           <p style={{ fontSize: 40, color: palette.gold, margin: 0 }}><CloudUploadOutlined /></p>
           <p style={{ color: palette.text, fontSize: 16 }}>
@@ -234,6 +247,37 @@ function KnowledgeInner() {
             上传后自动完成「切块 → 向量化 → 写入知识库」，数字人随即可检索到新内容。单文件 ≤ 20MB。
           </p>
         </Upload.Dragger>
+      </Card>
+
+      {/* 已入库文档列表（B1.2 分类 / B1.6 统计） */}
+      <Card title="已入库文档" style={{ marginBottom: 16 }}>
+        <Table
+          rowKey="name"
+          size="middle"
+          loading={loading}
+          dataSource={stats?.documents ?? []}
+          pagination={false}
+          locale={{ emptyText: '暂无已入库文档' }}
+          columns={[
+            { title: '文档', dataIndex: 'name', key: 'name', ellipsis: true },
+            {
+              title: '分类',
+              dataIndex: 'category',
+              key: 'category',
+              width: 180,
+              render: (c: string) =>
+                c ? <Tag color="cyan">{c}</Tag> : <Text style={{ color: palette.muted }}>未分类</Text>
+            },
+            { title: '切片数', dataIndex: 'chunkCount', key: 'chunkCount', width: 100 },
+            {
+              title: '上传时间',
+              dataIndex: 'uploadedAt',
+              key: 'uploadedAt',
+              width: 180,
+              render: (t: string) => <Text style={{ color: palette.muted }}>{t || '—'}</Text>
+            }
+          ]}
+        />
       </Card>
 
       {/* FAQ 在线编辑（B1.4） */}

@@ -971,6 +971,25 @@ class FeiFei:
                 except Exception:
                     break
 
+    def __send_human_audio_frame(self, content):
+        sent_count = 0
+        for get_server in (wsa_server.get_instance, wsa_server.get_web_instance):
+            try:
+                server = get_server()
+                if server is not None:
+                    server.add_cmd(content)
+                    sent_count += 1
+            except Exception:
+                pass
+        return sent_count
+
+    def __has_web_audio_client(self, username):
+        try:
+            web_server = wsa_server.get_web_instance()
+            return bool(web_server and web_server.get_client_output(username))
+        except Exception:
+            return False
+
     def __send_human_audio_ordered(self, content, username, conversation_id, conversation_msg_no, is_end=False):
         now = time.time()
         sent_messages = []
@@ -989,8 +1008,7 @@ class FeiFei:
         if (not conversation_id) or (seq is None):
             if is_end_marker_only:
                 return 0
-            wsa_server.get_instance().add_cmd(content)
-            return 1
+            return self.__send_human_audio_frame(content)
 
         key = (username or "User", conversation_id)
         with self.human_audio_order_lock:
@@ -1083,9 +1101,10 @@ class FeiFei:
             if (end_seq is not None) and (state.get("next_seq") is not None) and (state["next_seq"] > end_seq) and (not state["buffer"]):
                 self.human_audio_order_map.pop(key, None)
 
+        sent_count = 0
         for message in sent_messages:
-            wsa_server.get_instance().add_cmd(message)
-        return len(sent_messages)
+            sent_count += self.__send_human_audio_frame(message)
+        return sent_count
 
     def say(self, interact, text, type = ""):
 
@@ -2209,7 +2228,7 @@ class FeiFei:
             #发送音频给数字人接口
 
 
-            if wsa_server.get_instance().get_client_output(interact.data.get("user")):
+            if wsa_server.get_instance().get_client_output(interact.data.get("user")) or self.__has_web_audio_client(interact.data.get("user")):
 
 
                 # 使用 (username, conversation_id) 作为 key 获取会话信息

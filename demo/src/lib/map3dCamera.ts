@@ -244,16 +244,21 @@ export const SCENIC_CAMERA_BOUNDS = {
   maxCenterDistanceMeters: 1050,
   clampDurationMs: 620,
   interactionIdleDelayMs: 460,
+  // LOD 阈值必须落在可用 zoom 区间 [minZoom 16.72, maxZoom 19.78] 之下,
+  // 否则默认/总览视角(16.85,且可被相机回退到 minZoom)会落进 'none' 档,
+  // 869 个园林模型被压到 ~0.04 透明度 = 肉眼看不见(此前"地图上没有模型"的真因)。
+  // 这里把 far/reduced 阈值下移到 minZoom 以下,保证默认视角即 'full' 可见;
+  // 交互态透明度同步提高,拖动时模型不再闪没。LOD 仍保留,用于真正拉远时降载。
   lod: {
-    farZoom: 16.74,
-    reducedZoom: 16.82,
+    farZoom: 16.0,
+    reducedZoom: 16.7,
     normalOpacity: 1,
-    interactionOpacity: 0.36,
-    interactionDebugGardenOpacity: 0.58,
+    interactionOpacity: 0.82,
+    interactionDebugGardenOpacity: 0.9,
     farOpacity: 0.08,
     farDebugGardenOpacity: 0.22,
-    reducedOpacity: 0.18,
-    reducedDebugGardenOpacity: 0.4
+    reducedOpacity: 0.6,
+    reducedDebugGardenOpacity: 0.7
   }
 } as const
 

@@ -24,6 +24,7 @@ import {
 } from '../data/lingshanMapModelOverlays'
 import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
 import { useGardenAssetOverlays, type GardenLodState, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
+import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
 import {
@@ -267,6 +268,12 @@ const MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST = 'localhost'
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
 const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v8-manual-trees'
 const MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY = 'lingshan-map-3d-guide-garden-editor-v1'
+const MOBILE_GARDEN_ASSET_LIMIT = 168
+const MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT: Record<Map3DGardenAssetPriority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2
+}
 const TREE_CANDIDATE_LAB_STORAGE_KEY = 'lingshan_tree_candidate_lab_draft_v1'
 const MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX = 'lingshan-map-3d-guide-localhost-transfer:'
 const MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS = [
@@ -532,7 +539,10 @@ const guideCameraPresets: Map3DCameraPreset[] = [
 
 export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DGuideVariant }) {
   const navigate = useNavigate()
+  // 移动端:导览面板收进底部抽屉,默认收起,只露把手,保证 3D 地图全屏可见
+  const [dockOpen, setDockOpen] = useState(false)
   const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
+  const isMobileViewport = useIsMobileViewport()
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
@@ -829,9 +839,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       ? 'Prototype A 已启用'
       : visualVariant.id === 'prototype-b'
         ? 'Prototype B 已启用'
-        : visualVariant.id === 'prototype-c'
-          ? 'Prototype C 已启用'
-        : ''
+        : // prototype-c 已作为正式实景地图变体上线,不再显示开发角标
+        ''
   const prototypeName =
     visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : visualVariant.id === 'prototype-c' ? 'C' : '默认'
   const configuredAssetUrls = useMemo(
@@ -857,6 +866,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     () => (debugGarden ? [...(defaultGardenHidden ? [] : gardenAssets), ...testTreeAssets] : gardenAssets),
     [debugGarden, defaultGardenHidden, gardenAssets, testTreeAssets]
   )
+  const runtimeGardenOverlayAssets = useMemo(
+    () =>
+      isMobileViewport && visualVariant.id === 'prototype-c'
+        ? selectMobileGardenOverlayAssets(overlayGardenAssets)
+        : overlayGardenAssets,
+    [isMobileViewport, overlayGardenAssets, visualVariant.id]
+  )
   const liveDefaultGardenOverlayCount = defaultGardenHidden ? 0 : gardenAssets.filter((asset) => asset.visible).length
   const liveTestTreeOverlayCount = testTreeAssets.filter((asset) => asset.visible).length
   const {
@@ -865,7 +881,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     progressText: gardenAssetProgressText
   } = useGardenAssetOverlays({
     active: visualVariant.id === 'prototype-c',
-    assets: overlayGardenAssets,
+    assets: runtimeGardenOverlayAssets,
     debugPerf,
     debugGarden,
     gardenLodState,
@@ -1262,6 +1278,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
         })
         mapRef.current = map
+        // prototype-c 会为数百个 GLTFModel 各绑定一个 zoom_changed 监听,
+        // 超过 EventEmitter 默认上限触发"内存泄漏"误报并产生重复告警开销;
+        // 按已知模型规模上调上限(SDK 已暴露 setMaxListeners),消除噪音。
+        try {
+          ;(map as { setMaxListeners?: (n: number) => void }).setMaxListeners?.(4000)
+        } catch {
+          /* 旧版 SDK 未暴露该方法则忽略 */
+        }
         setIsMapCreated(true)
         perfRecorder.recordMapVisualEvent({
           type: 'mapCreated'
@@ -2077,7 +2101,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     forestPatchLayerRef.current?.setMap?.(null)
     forestPatchLayerRef.current = null
 
-    if (visualVariant.id !== 'prototype-c' || !debugGarden || !forestPatchesVisible) {
+    if (visualVariant.id !== 'prototype-c' || isMobileViewport || !debugGarden || !forestPatchesVisible) {
       setGardenPatchReport({
         patchCount: 0,
         patchFallback: false
@@ -2178,7 +2202,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       forestPatchLayerRef.current?.setMap?.(null)
       forestPatchLayerRef.current = null
     }
-  }, [debugGarden, forestPatchesVisible, mapVisualReadyForOverlays, rerouteStatus, routeProgressRatio, visualVariant.id])
+  }, [debugGarden, forestPatchesVisible, isMobileViewport, mapVisualReadyForOverlays, rerouteStatus, routeProgressRatio, visualVariant.id])
 
   useEffect(() => {
     gardenEditorPolygonLayerRef.current?.setMap?.(null)
@@ -4246,12 +4270,21 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         debugPerf ? 'map-3d-guide-shell--debug-perf' : ''
       } ${isMapVisualReady ? 'is-map-visual-ready' : 'is-map-visual-loading'} ${
         loadingCurtainVisible ? 'is-loading-curtain-visible' : ''
-      } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''}`}
+      } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''} ${dockOpen ? 'is-dock-open' : ''}`}
     >
       <div ref={mapElementRef} className="map-3d-guide-map" />
       <div className="map-3d-guide-skin" aria-hidden="true" />
       <div className="map-3d-guide-mist" aria-hidden="true" />
       <div className="map-3d-guide-paperedge" aria-hidden="true" />
+      {/* 移动端进入全屏地图后 MobileShell 底部导航不在,补一个返回首页入口避免被困在地图页 */}
+      <button
+        type="button"
+        className="map-3d-guide-home-btn"
+        onClick={() => navigate('/')}
+        aria-label="返回首页"
+      >
+        ‹ 首页
+      </button>
       {loadingCurtainVisible ? (
         <div className={`map-3d-guide-loading-curtain ${isMapVisualReady ? 'is-hiding' : ''}`} aria-live="polite">
           <div>
@@ -4303,6 +4336,24 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </div>
       ) : null}
 
+      {/* 移动端底部抽屉:把所有导览面板收进来。桌面端 dock 为 display:contents,等于不存在,
+          子面板照旧浮在四角;移动端 dock 变成可收起的底部 sheet,默认只露把手,地图全屏可见 */}
+      <div className="map-3d-guide-mobile-dock">
+        <button
+          type="button"
+          className="map-3d-guide-dock-handle"
+          onClick={() => setDockOpen((open) => !open)}
+          aria-expanded={dockOpen}
+          aria-label={dockOpen ? '收起导览面板' : '展开导览面板'}
+        >
+          <span className="map-3d-guide-dock-handle__bar" aria-hidden="true" />
+          <span className="map-3d-guide-dock-handle__label">
+            {dockOpen ? '收起导览面板' : `导览面板 · 下一站 ${nextStopPoi?.name ?? '路线终点'}`}
+          </span>
+          <span className="map-3d-guide-dock-handle__chevron" aria-hidden="true">
+            {dockOpen ? '▾' : '▴'}
+          </span>
+        </button>
       {!debugGarden ? (
         <section className="map-3d-guide-hero">
           <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
@@ -4857,6 +4908,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </div>
       </footer>
       ) : null}
+      </div>
 
       <style>{map3DGuideCss}</style>
     </main>
@@ -6764,6 +6816,62 @@ function matchesGardenFilters(asset: LingshanMap3DGardenAsset, filters: GardenAs
   return true
 }
 
+function selectMobileGardenOverlayAssets(assets: LingshanMap3DGardenAsset[]) {
+  const visibleAssets = assets.filter((asset) => asset.visible)
+
+  if (visibleAssets.length <= MOBILE_GARDEN_ASSET_LIMIT) {
+    return assets
+  }
+
+  const selectedIds = new Set(
+    visibleAssets
+      .map((asset, index) => ({ asset, index }))
+      .sort((a, b) => {
+        const priorityDelta =
+          MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT[a.asset.priority] - MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT[b.asset.priority]
+
+        if (priorityDelta) {
+          return priorityDelta
+        }
+
+        const distanceDelta = getMobileGardenAssetDistanceScore(a.asset) - getMobileGardenAssetDistanceScore(b.asset)
+
+        if (Math.abs(distanceDelta) > 0.1) {
+          return distanceDelta
+        }
+
+        const routeDelta = getMobileGardenAssetRouteScore(a.asset) - getMobileGardenAssetRouteScore(b.asset)
+
+        if (Math.abs(routeDelta) > 0.0001) {
+          return routeDelta
+        }
+
+        return a.index - b.index
+      })
+      .slice(0, MOBILE_GARDEN_ASSET_LIMIT)
+      .map(({ asset }) => asset.id)
+  )
+
+  return assets.map((asset) => {
+    if (!asset.visible || selectedIds.has(asset.id)) {
+      return asset
+    }
+
+    return {
+      ...asset,
+      visible: false
+    }
+  })
+}
+
+function getMobileGardenAssetDistanceScore(asset: LingshanMap3DGardenAsset) {
+  return haversineDistanceMeters(asset.location, routeCenter)
+}
+
+function getMobileGardenAssetRouteScore(asset: LingshanMap3DGardenAsset) {
+  return Number.isFinite(asset.routeFraction) ? Math.abs(asset.routeFraction - 0.5) : 1
+}
+
 function getGardenLodState({
   currentZoom,
   debugGarden,
@@ -7529,6 +7637,41 @@ const map3DGuideCss = `
   background: #e8eadf;
   color: #19372f;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.map-3d-guide-home-btn {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #19372f;
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 4px 14px rgba(25, 55, 47, .18), inset 0 0 0 1px rgba(255, 255, 255, .6);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+
+.map-3d-guide-home-btn:active {
+  background: rgba(255, 255, 255, .95);
+}
+
+/* 桌面端:dock 为 display:contents,布局上等于不存在,子面板照旧浮在四角;把手隐藏。
+   仅移动端 media query 内把 dock 变成底部抽屉。 */
+.map-3d-guide-mobile-dock {
+  display: contents;
+}
+
+.map-3d-guide-dock-handle {
+  display: none;
 }
 
 .map-3d-guide-map {
@@ -9017,34 +9160,93 @@ const map3DGuideCss = `
 }
 
 @media (max-width: 880px) {
-  .map-3d-guide-hero,
-  .map-3d-guide-camera,
-  .map-3d-guide-status,
-  .map-3d-guide-pois,
-  .map-3d-guide-controlbar {
-    left: 12px;
-    right: 12px;
+  /* 移动端:3D 地图全屏可见,所有导览面板收进底部抽屉(默认收起,只露 56px 把手) */
+  .map-3d-guide-mobile-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    max-height: 82vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(180deg, rgba(245, 249, 239, 0) 0, rgba(245, 249, 239, .97) 56px);
+    transform: translateY(calc(100% - 56px - env(safe-area-inset-bottom, 0px)));
+    transition: transform .34s cubic-bezier(.22, .61, .36, 1);
+  }
+
+  .map-3d-guide-shell.is-dock-open .map-3d-guide-mobile-dock {
+    transform: translateY(0);
+  }
+
+  /* 把手:吸顶常驻,收起态即这 56px;展开后仍可点击回收 */
+  .map-3d-guide-dock-handle {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 56px;
+    padding: 14px 18px 10px;
+    border: none;
+    border-radius: 18px 18px 0 0;
+    background: linear-gradient(180deg, rgba(252, 250, 240, .98), rgba(244, 248, 238, .98));
+    box-shadow: 0 -14px 40px rgba(20, 45, 36, .18);
+    color: #19372f;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .map-3d-guide-dock-handle__bar {
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(25, 55, 47, .26);
+  }
+
+  .map-3d-guide-dock-handle__label {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-align: left;
+  }
+
+  .map-3d-guide-dock-handle__chevron {
+    font-size: 12px;
+    opacity: .7;
+  }
+
+  /* 抽屉内面板回归普通流:纵向堆叠、占满宽度,不再绝对定位盖住地图 */
+  .map-3d-guide-mobile-dock > .map-3d-guide-hero,
+  .map-3d-guide-mobile-dock > .map-3d-guide-camera,
+  .map-3d-guide-mobile-dock > .map-3d-guide-status,
+  .map-3d-guide-mobile-dock > .map-3d-guide-pois,
+  .map-3d-guide-mobile-dock > .map-3d-guide-controlbar {
+    position: static;
+    inset: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
     width: auto;
     max-width: none;
-  }
-
-  .map-3d-guide-status {
-    top: 266px;
-  }
-
-  .map-3d-guide-camera {
-    top: 172px;
+    margin: 0 12px;
   }
 
   .map-3d-guide-camera__buttons {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .map-3d-guide-pois {
-    display: block;
-    bottom: 206px;
-    max-height: 124px;
-    overflow: auto;
   }
 
   .map-3d-guide-pois div {
@@ -9057,24 +9259,21 @@ const map3DGuideCss = `
     flex: 0 0 auto;
   }
 
-  .map-3d-guide-controlbar {
-    grid-template-columns: 1fr;
-    max-height: 42vh;
-    overflow: auto;
-  }
-
   .map-3d-guide-console-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .map-3d-guide-controlbar__actions {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 `
 
 function Map3DGuidePage() {
-  return <Map3DGuideExperience />
+  // prototype-c 是唯一会加载自制 GLB 园林资产(殿顶/树/莲台/法轮等)的变体;
+  // 之前接的是 default,导致实景地图上看不到任何 3D 资产。
+  return <Map3DGuideExperience variant="prototype-c" />
 }
 
 export default Map3DGuidePage

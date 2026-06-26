@@ -4211,6 +4211,20 @@ body::before {
   color: #8a9a8f;
   font-size: 12px;
   line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-card__hint > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-card__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: #b08a3a;
 }
 
 /* QuickAsks 卡片(代替原 antd Card+Space) */

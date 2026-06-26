@@ -1,0 +1,2 @@
+demo/public/models/lingshan/optimized/*.glb filter=lfs diff=lfs merge=lfs -text
+demo/public/**/*.glb filter=lfs diff=lfs merge=lfs -text

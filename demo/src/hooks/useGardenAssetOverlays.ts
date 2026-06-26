@@ -270,7 +270,12 @@ export function useGardenAssetOverlays({
   }, [active, assets, debugGarden, rerouteActive, routeProgressRatio, shouldLoadGardenAssets])
 
   useEffect(() => {
-    const signature = `${gardenLodState.visibleTier}:${gardenLodState.opacity}:${gardenLodState.isInteracting}:${gardenLodState.currentZoom ?? 'unknown'}`
+    // 交互中 tier 固定为 'reduced'、透明度恒定,与具体 zoom 无关;
+    // 此时把 currentZoom 排除出签名,避免每个缩放微步都重刷数百个模型的透明度
+    // (把"逐帧 N 次 setOpacity"压成"整段交互 1 次")。非交互态仍按最终 zoom 精确生效。
+    const signature = gardenLodState.isInteracting
+      ? `interacting:${gardenLodState.visibleTier}:${gardenLodState.opacity}`
+      : `${gardenLodState.visibleTier}:${gardenLodState.opacity}:${gardenLodState.currentZoom ?? 'unknown'}`
 
     if (gardenLodSignatureRef.current === signature) {
       return

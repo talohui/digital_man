@@ -356,10 +356,11 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
           <textarea
             ref={textareaRef}
             rows={1}
+            maxLength={500}
             className="chat-card__textarea"
             placeholder={isRecording ? '正在听您说话…' : '输入您的问题...'}
             value={inputText}
-            onChange={(event) => setInputText(event.target.value, resolvedSceneId)}
+            onChange={(event) => setInputText(event.target.value.slice(0, 500), resolvedSceneId)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
               event.preventDefault()
@@ -380,7 +381,10 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         </div>
 
         <p className="chat-card__hint">
-          回车发送，Shift+回车换行。按住麦克风说话，在页面任意位置松手即发送。
+          <span>回车发送，Shift+回车换行。按住麦克风说话，在页面任意位置松手即发送。</span>
+          {inputText.length >= 400 ? (
+            <span className="chat-card__count">{inputText.length}/500</span>
+          ) : null}
         </p>
       </div>
     </section>
