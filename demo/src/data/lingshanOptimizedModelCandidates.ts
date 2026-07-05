@@ -1,11 +1,12 @@
 // Debug-only optimized GLB candidates for Landmark GLB Inspector.
 // These public URLs are not used by normal /map-3d-guide-c visitor mode.
-// safe-v2 is the current validated runtime direction for Tencent GLTFModel.
-// The listed core landmarks are formally switched to safe-v2 after manual verification.
+// safe-v2 is the current validated runtime direction for most Tencent GLTFModel assets.
+// safe-v3 is used only where non-Draco recompression was needed to stay below GitHub's 100 MB limit.
+// The listed core landmarks are formally switched after manual verification.
 // raw is kept for local debug/rollback comparison, and safe-v1 is kept only where earlier trial files exist.
 // Draco candidates are intentionally excluded because current manual Tencent GLTFModel testing cannot open them.
 
-export type LandmarkModelVariant = 'raw' | 'safe-v1' | 'safe-v2'
+export type LandmarkModelVariant = 'raw' | 'safe-v1' | 'safe-v2' | 'safe-v3'
 
 export type LandmarkOptimizedModelCandidate = {
   variant: LandmarkModelVariant
@@ -69,9 +70,9 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       sizeLabel: '148.85 MB'
     },
     {
-      variant: 'safe-v2',
-      modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v2.glb',
-      sizeLabel: '107.75 MB'
+      variant: 'safe-v3',
+      modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v3.glb',
+      sizeLabel: '90.62 MB'
     }
   ],
   xiangfu_temple: [
@@ -81,9 +82,9 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       sizeLabel: '150.72 MB'
     },
     {
-      variant: 'safe-v2',
-      modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v2.glb',
-      sizeLabel: '108.73 MB'
+      variant: 'safe-v3',
+      modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v3.glb',
+      sizeLabel: '91.29 MB'
     }
   ],
   manlong_flying_tower: [

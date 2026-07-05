@@ -180,8 +180,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'xiangfu_temple',
     name: '祥符禅寺',
-    modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v2.glb',
-    fileSizeLabel: '108.73 MB',
+    modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v3.glb',
+    fileSizeLabel: '91.29 MB',
     positionSource: 'navLocation',
     height: 23,
     scale: 670,
@@ -208,7 +208,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'high',
-    note: '祥符禅寺主模型重新人工校准 patch 已固化：scale 670、height 23、rotationY 31、lngOffset 0.00001、latOffset -0.00001；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 继续使用 /models/lingshan/optimized/xiangfu-temple.safe-v2.glb；raw 路径 /models/lingshan/landmarks/xiangfu-temple.glb 仍保留在本地用于 debugPerf 对比和回退。祥符禅寺底座采用 companion 3D base model，不新增 polygon footprint mask。'
+    note: '祥符禅寺主模型重新人工校准 patch 已固化：scale 670、height 23、rotationY 31、lngOffset 0.00001、latOffset -0.00001；正式 runtime 已切换到 non-Draco safe-v3：/models/lingshan/optimized/xiangfu-temple.safe-v3.glb；raw 路径 /models/lingshan/landmarks/xiangfu-temple.glb 与 safe-v2 仍保留在本地用于 debugPerf 对比和回退。祥符禅寺底座采用 companion 3D base model，不新增 polygon footprint mask。'
   },
   {
     poiId: 'foqian_square',
@@ -299,8 +299,8 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
   {
     poiId: 'sansheng_hall',
     name: '三圣殿',
-    modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v2.glb',
-    fileSizeLabel: '107.75 MB',
+    modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v3.glb',
+    fileSizeLabel: '90.62 MB',
     positionSource: 'navLocation',
     height: 46,
     scale: 763,
@@ -311,7 +311,7 @@ export const lingshanMapModelOverlays: LingshanMapModelOverlay[] = [
     enabledInDebug: true,
     visible: true,
     priority: 'medium',
-    note: '第三批人工校准 patch 已固化；safe-v2 已人工验证可正常加载、显示和卸载，正式 runtime 已切换到 /models/lingshan/optimized/sansheng-hall.safe-v2.glb；raw 路径 /models/lingshan/landmarks/sansheng-hall.glb 仍保留在本地用于 debugPerf 对比和回退。现有 POI 名称为三圣殿；safe-v2 输出仍超过 100 MB，后续仍建议二次优化或低模化。'
+    note: '第三批人工校准 patch 已固化；正式 runtime 已切换到 non-Draco safe-v3：/models/lingshan/optimized/sansheng-hall.safe-v3.glb；raw 路径 /models/lingshan/landmarks/sansheng-hall.glb 与 safe-v2 仍保留在本地用于 debugPerf 对比和回退。现有 POI 名称为三圣殿；safe-v3 已压到 95 MB 以下，后续如需更轻仍建议低模化。'
   },
   {
     poiId: 'manfeilong_tower',

@@ -4,6 +4,12 @@
 
 本文记录 `/map-3d-guide-c` 最近几轮加载优化的工程策略、构建结果和后续注意事项。目标是确保 C 版在继续接入核心景点 GLB 之前，先具备清晰的首屏拆包边界和运行时诊断能力。
 
+### 当前状态提示（2026-06-19）
+
+- 当前正式页面默认启用本地水墨瓦片，并通过沙盘视野限制和边缘雾幕控制外部腾讯底图露出。
+- 当前沉浸播放入口只保留佛境巡游；早期章节中的路线预演 / `routePreview` 为历史性能记录，已不再作为现行功能、UI 或 debugPerf 字段存在。
+- 当前性能关注点为水墨瓦片 z20 fallback、869 树群稳定分批加载、核心地标 runtime 加载和佛境巡游相机收紧。
+
 ## 2. 背景问题
 
 优化前，应用入口包约 `2.72 MB`。该入口包过大时，普通 `/map-3d-guide-c` 容易被无关模块拖慢，包括后台、AntD、Live2D、Cubism、ScenicModel、Scenic3DMapPage、debugGarden 编辑器等。
@@ -1159,3 +1165,327 @@ debugPerf 新增 companion model 事件：
 - 地标加载不阻塞地图 visual ready，也不要求等待全部地标加载完成后才显示树群。
 - debugPerf 的 Landmark GLB 计数继续显示 live / total 状态，companion 事件仍记录在 Companion 诊断中。
 - 普通页正式加载只读 `lingshanMapModelOverlays.ts` 的 `modelUrl`，不使用 raw、safe-v1、draco 或旧 464M 菩提大道路径。
+
+## 39. 佛境氛围层与 POI 立牌
+
+### 氛围层
+
+- 第一版氛围层采用纯 CSS overlay，不引入 canvas 粒子、视频或新依赖。
+- 叠层包括 sky haze、edge mist、route mist、soft glow 和轻 vignette，用于压住远处白色天际、增强沙盘舞台感和路线巡游雾感。
+- 氛围 mode 为 intro / normal / tour / focus：
+  - intro：首屏与 loading 阶段更明显。
+  - normal：地图 ready 后常驻但降低强度。
+  - tour：佛境巡游 / 路线预演时 route mist 增强。
+  - focus：地标聚焦时 soft glow 增强。
+- overlay 使用 `pointer-events: none`，不参与地图交互，不影响拖动、缩放、巡游或 Tree Candidate Lab 面板。
+
+### POI 立牌
+
+- 新增 13 个核心 / 次核心 POI 的分层立牌，使用 TMap MultiMarker + SVG，不增加 GLB overlay 数量。
+- 远景显示 dot，中景显示短标签，近景 / 聚焦 / 巡游显示“景点名 + 极短介绍”卡片。
+- active POI 始终升到 card 级别，并在佛境巡游 / 路线预演经过时跟随高亮。
+- debugPerf 显示 atmosphereMode、atmosphereVisible、poiBillboardCount、poiBillboardLevel 和 activePoiBillboardId。
+
+### 性能边界
+
+- 立牌数量固定为 13 个，不随 869 树群分批加载重建。
+- 本轮不修改腾讯 `style1`、路线数据、树群数据、GLB 文件或核心地标 transform。
+
+## 40. 佛境氛围与 POI 题签第二轮视觉修正
+
+### POI 策略
+
+- POI marker 仍使用 TMap MultiMarker + SVG，但从横向卡片改为竖向水墨题签。
+- `poiBillboardMode` 调整为 `dot` / `titleTag` / `activeTag`：
+  - `dot`：远景小墨点 / 小圆章。
+  - `titleTag`：竖向景点名题签。
+  - `activeTag`：当前站题签，包含景点名和极短副标题。
+- 巡游 / 预演时启用 `tourPoiSuppressionEnabled`，非当前 / 下一站 POI 降级为低透明小点，避免 POI 抢模型和路线镜头。
+
+### 氛围策略
+
+- CSS atmosphere 层增加 `ink-horizon`、`forest`、`water` 和 `gold-dust` 子层。
+- `ink-horizon` 使用模糊渐变和 clip-path 模拟远山水墨天际，用于缓解顶部白色割裂。
+- `forest` 是边缘青绿林影，不创建真实树 GLB。
+- `water` 是浅青水纹提示，只作为佛境通透感的视觉氛围，不改变地理语义。
+- debugPerf 记录 horizon mask 强度、active / muted POI 数量、water hint 数量和 tour POI suppression 状态。
+
+### 性能边界
+
+- 未引入 canvas 粒子、视频、大图片或新 GLB。
+- POI 数量仍固定为 13 个，氛围层为单个 DOM overlay，不参与 869 树群的生命周期。
+
+## 41. 原生 sky/fog 与 POI lift
+
+### Tencent 原生渲染配置
+
+- 本轮不使用 `TMap.ImageTileLayer`，因为它需要提前准备完整 `z/x/y` 栅格瓦片资源。
+- `renderOptions` 增加：
+  - `enableBloom: true`
+  - `skyOptions.color: #EAF0E6`
+  - `skyOptions.brightness: 0.82`
+  - `skyOptions.animated: true`
+  - `fogOptions.color: #DDE8DF`
+- 地图创建后兼容调用 `setSkyOptions` / `setFogOptions`，并在 debugPerf 记录 `nativeSkyConfigured`。
+
+### CSS 氛围职责调整
+
+- CSS 氛围层不再硬盖整个天空，改为辅助远山、边缘雾、林影和水纹。
+- 中央核心建筑区域增加 core clear mask，减少大佛、梵宫、五印坛城、祥符禅寺等模型被雾蒙住的概率。
+- debugPerf 显示 native sky/fog、core clear mask、water hints 与 horizon intensity。
+
+### POI 题签
+
+- `ScenicPoiBillboards` 为题签 marker 增加底部透明 spacer，通过 marker anchor 抬高 screen y 位置。
+- dot 保持低位；titleTag / activeTag 抬到建筑头顶上方。
+- 每个 POI 使用 `visualLiftPx` 控制抬升，建筑类高于广场类。
+- 巡游 / 预演保持非当前 POI 降级策略，避免题签抢景点主体。
+
+## 42. AI 水墨单图 overlay 验证
+
+### 覆盖策略
+
+- `inkOverlay=1` 才启用第一版 AI 水墨底图覆盖，普通 `/map-3d-guide-c` 默认不加载该图片。
+- 覆盖图路径为 `/map/ink/lingshan-ink-map-gpt-v1.png`，使用 `LINGSHAN_INK_MAP_BOUNDS` 进行四角贴合。
+- 当前实现是单图验证层，用于确认道路、水体、建筑平面和 GLB 景点坐标是否对齐；不是正式 `ImageTileLayer` 瓦片方案。
+- `inkOpacity` 默认 `0.68`，可通过 URL 参数快速调整，避免遮住 GLB、路线和 POI 题签。
+- `showInkBounds=1` 可叠加正式边界框和四角点，仅用于检查贴图范围。
+- DOM overlay 仅作为正北俯视验证工具：pitch `0-8°` 使用目标透明度，`8-32°` 自动降到不高于 `0.28`，超过 `32°` 自动隐藏。
+- 图片 load/error 状态使用 ref 稳定保存，不随地图 move / zoom / pitch 事件反复清空，避免造成疑似自动刷新。
+- debugPerf 同时显示 target opacity、effective opacity、camera mode 和 suppression reason，便于确认 3D 视角是否已降级。
+- `inkSource=ai|base|jimeng` 复用同一个 DOM overlay 生命周期，只切换图片 URL；`base` 用于贴回腾讯原始底图判断投影 / bounds 是否正确，`jimeng` 用于验证结构更稳的即梦候选。
+- `inkOffsetX/Y` 与 `inkScaleX/Y` 在 DOM 层中心缩放 / 平移，不修改正式边界，也不影响 exportInkBase / debugInkBounds。
+- `inkCompare=1` 默认 opacity `0.45`，用于保留腾讯底图可见度进行人工叠图校验。
+- GPT 版水墨感更强但可能局部道路漂移；即梦版作为当前优先候选加入同一对齐诊断流程。若即梦版对齐更好，再进入 GroundOverlay / ImageTileLayer 切片验证。
+
+### 性能边界
+
+- 水墨图是单个 DOM overlay，不参与 869 树群、核心地标 GLB 或路线 overlay 生命周期。
+- debugPerf 只记录 overlay ready / error、opacity、bounds 和实现模式，不做高频日志。
+- 后续若要正式上线水墨底图，应切片为少量 zoom 层级并改用 `ImageTileLayer`，本阶段不做。
+
+## 43. 多路线导览状态与性能边界
+
+### 状态扩展
+
+- debugPerf 新增多路线快照字段：
+  - `currentRouteId`
+  - `currentRouteName`
+  - `routeStopCount`
+  - `currentStopId`
+  - `nextStopId`
+  - `routeGeometryPointCount`
+  - `routePreviewStatus`
+  - `tourStatus`
+  - `routeSwitchCount`
+  - `routeGeometryMode`
+  - `guideDataRouteSource`
+  - `unmappedGuideStopCount`
+- `routeGeometryMode` 当前取值：
+  - `candidate`：腾讯 walking candidate 或 `lingshanRoadNetwork` candidate 拼接。
+  - `poi-polyline`：仅在缺少候选路网段时作为兜底。
+  - `real`：预留给后续人工验证或正式 walking route 几何。
+- 路线切换只更新当前路线相关 overlay 和状态，不重建 869 树群，不修改核心 GLB transform。
+
+### 路线来源
+
+- 路线、站点、标签和文案以 `src/data/guideData.ts` 为主数据源。
+- 已接入路线：
+  - 历史文化路线：腾讯 walking candidate。
+  - 祈福静心路线：路网 candidate 拼接。
+  - 精华打卡路线：路网 candidate 拼接。
+  - 自然风光路线：腾讯 walking candidate。
+  - 亲子路线：腾讯 walking candidate。
+- POI 题签从固定核心 POI 扩展为固定核心 + 当前路线站点补齐，巡游 / 预演时非当前 POI 继续降级。
+
+### 水墨底图边界
+
+- 本轮不改变 ImageTileLayer、inkOverlay、inkTiles、exportInkBase、debugInkBounds 的实现入口。
+- 路线 polyline、POI 题签和 GLB 地标仍是底图之上的独立层；水墨底图默认开启后不应把路线写入水墨图片。
+- 后续性能优化重点是批量替换 candidate geometry 为腾讯 walking route 采样结果，而不是增加路线渲染层数量。
+
+## 44. 本地水墨 ImageTileLayer 验证
+
+### 切片与加载
+
+- 新增 `npm run slice:ink-map`，基于 `public/map/ink/lingshan-ink-map-v3.png` 与 `LINGSHAN_INK_MAP_BOUNDS` 生成本地 Web Mercator XYZ 配准瓦片。
+- 当前 v3 源图为 `1254×1254` 方图，用户确认继续用于工程验证；脚本允许非 `4096×4096` 正方形源图继续切片，只打印清晰度 warning。
+- 输出目录为 `public/map/ink/tiles/v3/{z}/{x}/{y}.png`，其中 `{x}/{y}` 是真实地图 tile 坐标，不是局部 0/0 网格。
+- 范围外请求返回公共透明兜底 `public/map/ink/tiles/empty.png`。
+- 当前验证层级：
+  - z15：4 tiles
+  - z16：9 tiles
+  - z17：36 tiles
+  - z18：132 tiles
+- 如果后续近景清晰度不足，再生成 v4 高清源后重新切片；当前不再因为 v3 不是 4096 而阻塞。
+
+### 页面策略
+
+- `inkTiles=1` 才启用 `TMap.ImageTileLayer`，普通 `/map-3d-guide-c` 默认不启用。
+- `inkTileOpacity` 默认 `0.68`，可用 URL 参数调整。
+- `showInkBounds=1` 可显示正式水墨边界，辅助检查瓦片范围。
+- 瓦片 URL 通过 `getTileUrl` 直接使用腾讯 SDK 请求的真实 x/y/z；仅当 z 不在支持层级或 x/y 超出正式边界覆盖范围时，返回透明 `empty.png`。
+- 启用 `inkTiles=1` 后增加基于中心点的软边界 clamp，减少用户拖出大量水墨图范围后看到原腾讯底图断层。
+- DOM 单图 overlay 仍保留为俯视诊断工具；它不参与正式瓦片层生命周期。
+
+### 性能边界
+
+- 本地水墨瓦片由腾讯 `ImageTileLayer` 管理，不重建 GLB、869 树群、路线或 POI 题签。
+- debugPerf 只记录瓦片层启用、透明度、URL 模板、zoom levels、ready / error 和 boundary 状态，不做高频事件记录。
+- 路线、POI 题签和 GLB 地标继续在瓦片层之上显示，避免水墨底图压住导览主体。
+
+## 45. 水墨瓦片方向变体
+
+### 切片参数
+
+- `scripts/slice-lingshan-ink-tiles.mjs` 支持 `--flipX`、`--flipY`、`--rotate=0|90|180|270` 和 `--variant`。
+- 方向变换发生在单个 tile 像素映射到源图采样坐标之前，不改变 `LINGSHAN_INK_MAP_BOUNDS` 或真实 Web Mercator tile x/y。
+- 最终确认正确方向等效为 `flipY`，默认 `v3` 目录已按 `flipY` 重切。
+- 仅保留 `v3-rotate-270-flip-x-ccw90` 作为确认用对照目录；其它临时角度目录已删除。
+
+### 页面诊断
+
+- 默认 `inkTileSource=v3` 会请求已校正的 `/map/ink/tiles/v3/{z}/{x}/{y}.png`。
+- `inkTileVariant=v3-rotate-270-flip-x-ccw90` 会请求保留的确认对照目录。
+- debugPerf 展示当前 `inkTileVariant`、`tileDir`、`sourceTransform`、`flipX`、`flipY`、`rotate`，方便确认当前加载的是哪个方向变体。
+- 方向变体不触发 869 树群、核心 GLB、路线或 POI 题签重建。
+
+## 46. 水墨瓦片正式性能方案
+
+### 正式资源
+
+- `/map-3d-guide-c` 默认启用 `public/map/ink/tiles/v3/{z}/{x}/{y}.png`。
+- 正式源图为 `public/map/ink/lingshan-ink-map-v3.png`，当前为 `1254×1254` 工程验证源；后续如需高清近景，可用同一脚本替换为 v4。
+- 仅保留 `public/map/ink/tiles/empty.png` 作为范围外透明瓦片，避免 404 和错误重复贴图。
+
+### 层级与 fallback
+
+- 正式切片层级：`z15 / z16 / z17 / z18 / z19 / z20`。
+- 当前切片数量：
+  - z15：4 tiles
+  - z16：9 tiles
+  - z17：36 tiles
+  - z18：132 tiles
+  - z19：484 tiles
+  - z20：1892 tiles
+- 当腾讯请求 `z21+` 时，前端将请求坐标折算到 `z20`：`fallbackX = floor(x / 2 ** (z - 20))`，`fallbackY = floor(y / 2 ** (z - 20))`。
+- `z21` 透明度系数为 `0.85`，`z22+` 为 `0.7`；默认基础透明度为 `1`，可用 `inkTileOpacity` 临时调试。
+
+### 运行边界
+
+- `TMap.ImageTileLayer` 管理瓦片生命周期，不重建 GLB、869 树群、路线或 POI 题签。
+- `noInkTiles=1` 可关闭水墨瓦片用于开发对比；普通用户入口不暴露该开关。
+- debugPerf 仅显示正式瓦片状态：默认启用、基础 / 实际透明度、zoom fade、层级、z20 fallback、URL 模板、empty tile、ready / error 和 boundary 状态。
+- 历史 DOM 单图 overlay、source / variant 切换、offset / scale 微调不再作为正式运行路径展示。
+
+## 47. 水墨沙盘视野限制
+
+### 交互策略
+
+- 正式 `/map-3d-guide-c` 在水墨瓦片默认开启后启用视野限制，避免拖动 / 缩远时露出大面积腾讯原底图。
+- 限制分两层：
+  - 中心点范围使用正式水墨 bounds 的内缩区域，防止用户把边缘拖到屏幕中央。
+  - 视觉缓冲使用正式 bounds 的轻微外扩区域，允许边缘有少量过渡但不形成明显断层。
+- 回正只在 `dragend`、`moveend`、`zoomend`、`idle` 后触发，并使用 Tencent `easeTo` 优先，避免拖动中高频 `setCenter` 造成卡顿。
+- `debugGarden=1` 不启用正式范围限制，保证树群和候选点位编辑自由。
+- `debugPerf=1&noMapBounds=1` 可临时关闭范围限制排查；普通 `noMapBounds=1` 不关闭限制。
+
+### 相机与雾幕
+
+- `overviewEstate`、`axisCruise`、`routeOverview` 已拉近，减少总览和巡游时把水墨范围看成纸片的概率。
+- 近景相机不收紧，继续支持大佛、梵宫、祥符禅寺等模型和 POI 细看。
+- 边缘雾幕随缩远和接近 bounds 边缘增强，中心 clear mask 保持核心景区、路线、POI、GLB 清楚。
+- debugPerf 显示 map bounds、zoom range、edgeMistLevel、禁用原因和 lastBoundsCorrection，便于确认 live 状态而不刷高频日志。
+
+## 48. 水墨沙盘视野二次收口与播放入口精简
+
+### 视野限制
+
+- 正式页中心点限制比例继续收紧到 `0.72`，视觉缓冲比例收紧到 `1.03`，减少画面边缘露出腾讯原底图。
+- 最远 zoom 提高到更接近景区总览的位置，避免缩远后看到完整水墨方图；最近 zoom 仅轻微约束，继续允许查看核心模型和 POI。
+- 边界回正仍只在 `dragend`、`moveend`、`zoomend`、`idle` 后触发，不做逐帧强制回拉，避免交互卡顿。
+- `debugGarden=1` 不启用正式范围限制；`debugPerf=1&noMapBounds=1` 仍可临时关闭限制排查，普通 `noMapBounds=1` 不生效。
+
+### 氛围与相机
+
+- 边缘雾幕和青绿山影强度提高，中心 clear mask 保持核心景区清晰；缩远或靠近边界时 edgeMist 进入 strong 状态。
+- `overviewEstate`、`axisCruise`、`routeOverview` 进一步拉近，降低总览视角看到水墨范围外部底图的概率。
+- 佛境巡游增加 `tourCameraTightenMode`：中段自动收紧镜头，开头 / 结尾保留少量开阔感。
+
+### 路线预演移除
+
+- 路线预演不再作为当前功能存在，相关 UI、状态、事件、计时器、相机逻辑、临时高亮和 debugPerf 字段已移除。
+- 保留佛境巡游作为唯一沉浸播放入口；路线切换、当前 / 下一站、金色路线、POI 高亮和多路线系统不受影响。
+- debugPerf 不再显示 routePreview 字段，只显示 tour、route、bounds、zoom、edgeMist 和 camera tighten 状态。
+
+## 49. 强雾遮边与清晰区诊断
+
+### 视野参数
+
+- 正式中心点限制比例进一步收紧到 `0.66`，视觉缓冲比例收紧到 `0.98`，减少水墨瓦片外腾讯原底图进入主视野。
+- 正式最远 zoom 提高到 `17.72`，最大 zoom 略收紧到 `19.58`；debugGarden 和 debug override 仍使用宽松范围。
+- 边缘强雾触发更敏感：远景阈值提高到 `18.08`，靠近中心限制边界约 `26%` 内进入 strong 状态。
+
+### 雾层与清晰区
+
+- `BuddhaRealmAtmosphere` 增加 `clearMaskShape` 和 `clearMaskSize` class，普通浏览使用圆形清晰区，佛境巡游使用路线椭圆清晰区。
+- 强雾状态下边缘米白雾、青绿山影和顶部远山雾幕更重，中心 clear mask 保持核心景区、路线、核心 POI 和 GLB 清楚。
+- debugPerf 显示 `edgeMistStrength`、`nearInkBoundary`、`distanceToInkBoundary`、`clearMaskMode`、`clearMaskSize`、`clearMaskCenter` 和 `clearMaskShape`。
+
+### 巡游相机
+
+- 佛境巡游中段继续拉近，减少横向偏移，并记录 `tourCameraTightenStrength`。
+- 本轮只处理视野和雾气问题；路线与水墨底图道路局部不重合暂不处理。
+
+## 50. 动态水墨云雾性能策略
+
+### 启动策略
+
+- Tencent `skyOptions.animated` 作为正式天空 / 远处动效，保持米白、青绿灰方向。
+- canvas 动态雾等地图 visual ready 后启动，不阻塞 SDK、底图、GLB、树群或路线加载。
+- loading / 入场阶段使用静态雾层营造更强氛围，ready 后 canvas 动态雾轻微常驻。
+
+### 绘制策略
+
+- 动态雾位于 `BuddhaRealmAtmosphere` 内，使用固定分辨率 canvas，默认 `768`。
+- 每帧不写 React state；canvas 内部用 ref 管理，约 1 秒向 debugPerf 汇报一次状态。
+- 视觉覆盖四周边缘、顶部远处和角落山影，中心区域通过 clear mask 保持清楚。
+
+### 降级策略
+
+- 如果检测到连续慢帧，先降级到 `512`。
+- 如果降级后仍明显卡顿，则关闭 canvas 动态雾。
+- 降级后静态边缘雾、青绿山影和 Tencent sky animation 继续保留，页面不会突然失去佛境氛围。
+- 帧间隔恢复稳定后，canvas 自动恢复到 `768`。
+- `debugGarden=1` 默认关闭 canvas 动态雾；`debugPerf=1&enableDynamicMist=1` 可在 debugGarden 中临时开启观察。
+
+### 诊断字段
+
+- debugPerf 显示 `dynamicMistEnabled`、`dynamicMistCanvasActive`、`dynamicMistQuality`、`dynamicMistDegraded`、`dynamicMistDegradeReason`、`dynamicMistFpsEstimate`、`dynamicMistFrameMs`、`dynamicMistRecoveryState`、`skyOptionsAnimated` 和 debugGarden override 状态。
+
+### 可见度微调
+
+- 当前动态雾速度参数为 `1.35x`，比第一版提高约 35%。
+- 当前雾纹对比参数为 `1.25x`，比第一版提高约 25%。
+- 覆盖范围、中心 clear mask、默认质量、慢帧降级和自动恢复策略保持不变。
+- debugPerf 会显示 speed / contrast scale，确认没有误用旧参数。
+
+## 51. 大体积地标 GLB safe-v3 策略
+
+### 背景
+
+- `sansheng-hall.safe-v2.glb` 约 107.75 MB，`xiangfu-temple.safe-v2.glb` 约 108.73 MB，超过 GitHub 普通 Git 单文件 100MB 限制。
+- 两个 safe-v2 已恢复为真实 `glTF` 二进制；如果文件内容是 Git LFS pointer，腾讯 `GLTFModel` 会解析失败并出现 `version https://git-lfs.github.com/spec/v1` 相关错误。
+
+### safe-v3 输出
+
+- `sansheng-hall.safe-v3.glb`：约 90.62 MB。
+- `xiangfu-temple.safe-v3.glb`：约 91.29 MB。
+- 压缩策略为 non-Draco：`gltf-transform optimize --compress false --texture-compress false --texture-size 1024 --simplify true --simplify-ratio 0.80 --simplify-error 0.0002 --simplify-lock-border true`。
+- `gltf-transform inspect` 显示 `extensionsUsed: none`，未引入 Draco / Meshopt / KTX2 / WebP / AVIF。
+
+### 加载诊断
+
+- 正式配置和 Landmark Inspector 当前指向 safe-v3，transform 不变。
+- debugPerf / Inspector 加载前会读取 GLB 头部，遇到 LFS pointer 或非法 GLB 头会记录 failed，避免把构造成功误认为模型已可解析。
+- Git 历史中超过 100MB 的 safe-v2 对象仍需后续单独处理；本阶段不做历史清理。

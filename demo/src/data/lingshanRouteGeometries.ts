@@ -1,7 +1,12 @@
+import { guideRoutes, guideSpots, type LatLngPoint } from './guideData'
+import { getRoadNetworkSegments, type RoadNetworkSegment } from './lingshanRoadNetwork'
+
 export type RouteGeometrySource =
   | 'tencent_walking_runtime'
   | 'manual_verified'
   | 'hybrid_corrected'
+  | 'road_network_candidate'
+  | 'poi_polyline_candidate'
 
 export type RouteGeometryStatus =
   | 'candidate'
@@ -27,6 +32,13 @@ export type LingshanRouteGeometry = {
   fallbackReason?: string | null
   path: RouteGeometryPoint[]
   note: string
+}
+
+type StitchedRoutePath = {
+  path: LatLngPoint[]
+  source: Extract<RouteGeometrySource, 'road_network_candidate' | 'poi_polyline_candidate'>
+  usedFallback: boolean
+  fallbackCount: number
 }
 
 // 候选路线几何来自腾讯 walking route 运行时导出，尚未人工核对园区步道贴合情况。
@@ -1066,7 +1078,22 @@ export function getLingshanRouteGeometryBySceneRouteId(sceneRouteId?: string | n
     return undefined
   }
 
-  return lingshanRouteGeometries.find((geometry) => geometry.sceneRouteId === sceneRouteId)
+  const staticGeometry = lingshanRouteGeometries.find((geometry) => geometry.sceneRouteId === sceneRouteId)
+
+  if (staticGeometry) {
+    return staticGeometry
+  }
+
+  const sceneRouteGuideRouteMap: Record<string, string> = {
+    classic_3d_scene: 'historical_culture',
+    historical_3d_scene: 'historical_culture',
+    prayer_3d_scene: 'prayer_meditation',
+    highlights_3d_scene: 'highlights_checkin',
+    natural_3d_scene: 'natural_scenery',
+    family_3d_scene: 'family'
+  }
+
+  return getLingshanRouteGeometryByGuideRouteId(sceneRouteGuideRouteMap[sceneRouteId])
 }
 
 export function getLingshanRouteGeometryByGuideRouteId(guideRouteId?: string | null): LingshanRouteGeometry | undefined {
@@ -1074,5 +1101,228 @@ export function getLingshanRouteGeometryByGuideRouteId(guideRouteId?: string | n
     return undefined
   }
 
-  return lingshanRouteGeometries.find((geometry) => geometry.guideRouteId === guideRouteId)
+  return lingshanRouteGeometries.find((geometry) => geometry.guideRouteId === guideRouteId) ?? buildGeneratedRouteGeometry(guideRouteId)
+}
+
+const generatedRouteGeometryCache = new Map<string, LingshanRouteGeometry | undefined>()
+
+function buildGeneratedRouteGeometry(guideRouteId: string): LingshanRouteGeometry | undefined {
+  if (generatedRouteGeometryCache.has(guideRouteId)) {
+    return generatedRouteGeometryCache.get(guideRouteId)
+  }
+
+  const route = guideRoutes.find((item) => item.id === guideRouteId)
+
+  if (!route) {
+    generatedRouteGeometryCache.set(guideRouteId, undefined)
+    return undefined
+  }
+
+  const stitched = stitchRoutePathFromRoadNetwork(route.stops.map((stop) => stop.spotId))
+
+  if (stitched.path.length < 2) {
+    generatedRouteGeometryCache.set(guideRouteId, undefined)
+    return undefined
+  }
+
+  const distanceMeters = Math.round(calculatePathDistanceMeters(stitched.path))
+  const geometry: LingshanRouteGeometry = {
+    id: `${guideRouteId}_${stitched.source}`,
+    sceneRouteId: `${guideRouteId}_generated_3d_scene`,
+    guideRouteId,
+    source: stitched.source,
+    status: 'candidate',
+    pointCount: stitched.path.length,
+    distanceMeters,
+    durationMinutes: Math.max(1, Math.round(distanceMeters / 65)),
+    usedFallback: stitched.usedFallback,
+    fallbackReason: stitched.usedFallback ? `${stitched.fallbackCount} 个相邻站点缺少候选路网段，已局部回退 POI 连线。` : null,
+    path: stitched.path,
+    note:
+      stitched.source === 'road_network_candidate'
+        ? '该路线几何由 lingshanRoadNetwork 候选步道路段按 guideRoutes.stops 拼接生成，尚未人工核对，不等同已验证路线。'
+        : '该路线几何由 guideSpots POI 顺序连线生成，仅作可视化兜底，后续应替换为腾讯 walking route 或人工验证路线。'
+  }
+
+  generatedRouteGeometryCache.set(guideRouteId, geometry)
+  return geometry
+}
+
+function stitchRoutePathFromRoadNetwork(stopIds: string[]): StitchedRoutePath {
+  const path: LatLngPoint[] = []
+  let fallbackCount = 0
+  let roadSegmentCount = 0
+
+  for (let index = 1; index < stopIds.length; index += 1) {
+    const fromId = stopIds[index - 1]
+    const toId = stopIds[index]
+    const segmentPath = findShortestRoadNetworkPath(fromId, toId)
+
+    if (segmentPath.length > 1) {
+      roadSegmentCount += 1
+      appendPath(path, segmentPath)
+      continue
+    }
+
+    const from = getGuideSpotPoint(fromId)
+    const to = getGuideSpotPoint(toId)
+
+    if (from && to) {
+      fallbackCount += 1
+      appendPath(path, [from, to])
+    }
+  }
+
+  return {
+    path,
+    source: roadSegmentCount > 0 ? 'road_network_candidate' : 'poi_polyline_candidate',
+    usedFallback: fallbackCount > 0,
+    fallbackCount
+  }
+}
+
+function findShortestRoadNetworkPath(fromPoiId: string, toPoiId: string): LatLngPoint[] {
+  if (fromPoiId === toPoiId) {
+    const point = getGuideSpotPoint(fromPoiId)
+    return point ? [point] : []
+  }
+
+  const graph = buildRoadNetworkGraph(getRoadNetworkSegments())
+  const distances = new Map<string, number>([[fromPoiId, 0]])
+  const previous = new Map<string, { nodeId: string; path: LatLngPoint[] }>()
+  const visited = new Set<string>()
+  const queue = new Set<string>([fromPoiId])
+
+  while (queue.size) {
+    const currentId = Array.from(queue).sort((left, right) => (distances.get(left) ?? Infinity) - (distances.get(right) ?? Infinity))[0]
+    queue.delete(currentId)
+
+    if (currentId === toPoiId) {
+      break
+    }
+
+    if (visited.has(currentId)) {
+      continue
+    }
+
+    visited.add(currentId)
+    const currentDistance = distances.get(currentId) ?? Infinity
+    const edges = graph.get(currentId) ?? []
+
+    edges.forEach((edge) => {
+      if (visited.has(edge.toPoiId)) {
+        return
+      }
+
+      const nextDistance = currentDistance + edge.distanceMeters
+
+      if (nextDistance >= (distances.get(edge.toPoiId) ?? Infinity)) {
+        return
+      }
+
+      distances.set(edge.toPoiId, nextDistance)
+      previous.set(edge.toPoiId, {
+        nodeId: currentId,
+        path: edge.path
+      })
+      queue.add(edge.toPoiId)
+    })
+  }
+
+  if (!previous.has(toPoiId)) {
+    return []
+  }
+
+  const segmentPaths: LatLngPoint[][] = []
+  let cursor = toPoiId
+
+  while (cursor !== fromPoiId) {
+    const step = previous.get(cursor)
+
+    if (!step) {
+      return []
+    }
+
+    segmentPaths.unshift(step.path)
+    cursor = step.nodeId
+  }
+
+  return segmentPaths.reduce<LatLngPoint[]>((items, segmentPath) => {
+    appendPath(items, segmentPath)
+    return items
+  }, [])
+}
+
+function buildRoadNetworkGraph(segments: RoadNetworkSegment[]) {
+  const graph = new Map<string, Array<{ toPoiId: string; distanceMeters: number; path: LatLngPoint[] }>>()
+
+  segments.forEach((segment) => {
+    addRoadNetworkEdge(graph, segment.fromPoiId, segment.toPoiId, segment.path, segment.distanceMeters)
+    addRoadNetworkEdge(graph, segment.toPoiId, segment.fromPoiId, [...segment.path].reverse(), segment.distanceMeters)
+  })
+
+  return graph
+}
+
+function addRoadNetworkEdge(
+  graph: Map<string, Array<{ toPoiId: string; distanceMeters: number; path: LatLngPoint[] }>>,
+  fromPoiId: string,
+  toPoiId: string,
+  path: LatLngPoint[],
+  distanceMeters?: number
+) {
+  if (path.length < 2) {
+    return
+  }
+
+  const edges = graph.get(fromPoiId) ?? []
+  edges.push({
+    toPoiId,
+    distanceMeters: distanceMeters ?? calculatePathDistanceMeters(path),
+    path
+  })
+  graph.set(fromPoiId, edges)
+}
+
+function appendPath(target: LatLngPoint[], path: LatLngPoint[]) {
+  path.forEach((point) => {
+    const previous = target[target.length - 1]
+
+    if (!previous || !isSamePoint(previous, point)) {
+      target.push(point)
+    }
+  })
+}
+
+function getGuideSpotPoint(spotId: string): LatLngPoint | undefined {
+  const spot = guideSpots.find((item) => item.id === spotId)
+
+  return spot ? { lat: spot.lat, lng: spot.lng } : undefined
+}
+
+function calculatePathDistanceMeters(path: LatLngPoint[]) {
+  return path.reduce((total, point, index) => {
+    const previous = path[index - 1]
+    return previous ? total + haversineDistanceMeters(previous, point) : total
+  }, 0)
+}
+
+function haversineDistanceMeters(from: LatLngPoint, to: LatLngPoint) {
+  const radiusMeters = 6371008.8
+  const fromLat = toRadians(from.lat)
+  const toLat = toRadians(to.lat)
+  const deltaLat = toRadians(to.lat - from.lat)
+  const deltaLng = toRadians(to.lng - from.lng)
+  const sinLat = Math.sin(deltaLat / 2)
+  const sinLng = Math.sin(deltaLng / 2)
+  const a = sinLat * sinLat + Math.cos(fromLat) * Math.cos(toLat) * sinLng * sinLng
+  return radiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180
+}
+
+function isSamePoint(left: LatLngPoint, right: LatLngPoint) {
+  return Math.abs(left.lat - right.lat) < 0.000001 && Math.abs(left.lng - right.lng) < 0.000001
 }

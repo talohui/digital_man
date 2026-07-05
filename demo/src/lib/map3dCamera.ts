@@ -27,7 +27,7 @@ export type Map3DCameraEvent = {
   finishedAt: string
 }
 
-export type Map3DTourMode = 'buddhaRealmTour' | 'routePreview'
+export type Map3DTourMode = 'buddhaRealmTour'
 
 export type Map3DTourStopReason = 'manual' | 'userStop' | 'completed' | 'interrupted' | 'replaced' | 'unmount'
 
@@ -68,6 +68,8 @@ export type Map3DRouteTourFrame = {
   smoothingEnabled?: boolean
   lookAheadProgress?: number
   lateralOffsetMeters?: number
+  tourCameraTightenMode?: 'open' | 'tight' | 'pause'
+  tourCameraTightenStrength?: number
 }
 
 export type Map3DRouteTourPause = {
@@ -185,8 +187,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'overviewEstate',
     label: '总览',
     description: '酒庄航拍式斜俯总览',
-    zoom: 16.85,
-    pitch: 58,
+    zoom: 17.72,
+    pitch: 63,
     rotation: -34,
     durationMs: 1600
   },
@@ -194,8 +196,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'axisCruise',
     label: '主轴漫游',
     description: '沿中轴线慢推游览',
-    zoom: 17.85,
-    pitch: 66,
+    zoom: 18.32,
+    pitch: 68,
     rotation: -24,
     durationMs: 1450
   },
@@ -203,8 +205,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'routeOverview',
     label: '路线总览',
     description: '回看完整金色游线',
-    zoom: 17.18,
-    pitch: 56,
+    zoom: 17.9,
+    pitch: 62,
     rotation: -30,
     durationMs: 1350
   },
@@ -238,8 +240,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
 }
 
 export const SCENIC_CAMERA_BOUNDS = {
-  minZoom: 16.72,
-  maxZoom: 19.78,
+  minZoom: 17.2,
+  maxZoom: 19.65,
   defaultZoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom,
   maxCenterDistanceMeters: 1050,
   clampDurationMs: 620,
@@ -483,18 +485,6 @@ export function startBuddhaRealmTimelineTour({
   }
 
   playback.frameId = window.requestAnimationFrame(tick)
-}
-
-export function startRoutePreview(options: StartSpecificMap3DTourOptions) {
-  return startMap3DTour({
-    ...options,
-    mode: 'routePreview',
-    defaultPresetId: 'guideFollow'
-  })
-}
-
-export function stopRoutePreview(playbackRef: Map3DTourPlaybackRef, reason: Map3DTourStopReason = 'manual') {
-  stopMap3DTour(playbackRef, 'routePreview', reason)
 }
 
 export function flyTourStep({

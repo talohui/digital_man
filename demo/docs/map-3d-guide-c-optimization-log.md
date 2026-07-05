@@ -11,6 +11,12 @@
 
 本文只记录当前仓库中已经能从源码、git diff、git log 或构建输出确认的能力。
 
+### 当前状态提示（2026-06-19）
+
+- `/map-3d-guide-c` 当前正式沉浸播放入口只保留“佛境巡游”。
+- 早期章节中提到的路线预演 / `routePreview` 为历史探索记录；当前源码、UI、事件、临时 overlay、相机逻辑和 debugPerf 字段均已移除。
+- 水墨瓦片已默认启用，当前优化重点是正式水墨沙盘视野限制、边缘雾幕和佛境巡游镜头收紧。
+
 ## 2. 当前背景
 
 `/map-3d-guide-c` 是 3D 园林资产版真实地图导览原型。它以腾讯地图 Web JS API GL 为坐标底座，通过地图锚定的路线、POI、模拟定位、重规划线、GLB 模型和园林资产形成导览表达。
@@ -1296,3 +1302,300 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 菩提大道继续使用 `/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`，不引用旧 464M raw 文件。
 - raw / safe-v1 / draco 仍只作为 debugPerf Inspector 的本地候选，不进入普通页自动加载。
 - 未修改任何地标 scale、height、rotationY、offset、POI 语义、路线数据、树群数据或 `fan_gong.footprintMask`。
+
+## 阶段：佛境沙盘氛围与 POI 3D 立牌第一版
+
+### 改动摘要
+
+- 普通 `/map-3d-guide-c` 默认开启第一版佛境沙盘氛围层，用于增强开阔航拍感和仙气佛境感。
+- 新增 `BuddhaRealmAtmosphere`，通过 CSS radial / linear gradient、blur 和柔光叠层实现 sky haze、edge mist、route mist、soft vignette。
+- 氛围层按状态切换：intro、normal、tour、focus。首屏 / loading 阶段更明显，地图 ready 后变淡，佛境巡游 / 路线预演时路线雾感增强，地标聚焦时柔光增强。
+- 新增 `ScenicPoiBillboards`，用 TMap MultiMarker + SVG 生成核心 / 次核心 POI 的沙盘立牌，不新增 GLB。
+- POI 显示按层级切换：远景 dot、中景 label、近景 / 聚焦 / 巡游 card。active POI 始终显示为立牌卡片。
+
+### POI 覆盖
+
+- 核心：灵山大佛、梵宫、五印坛城、祥符禅寺、九龙灌浴、灵山大照壁。
+- 次核心：佛手广场、佛前广场、菩提大道、胜境广场、三圣殿、百子戏弥勒、曼龙飞塔。
+- 立牌文案为“景点名 + 一句极短介绍”，仅复用现有 POI id 和坐标，不改 POI 语义。
+
+### 边界
+
+- 本轮不修改 Tencent key、不修改 `mapStyleId: 'style1'`、不调整腾讯底图样式。
+- 不修改 GLB 文件、核心地标 transform、869 树群数据、路线数据或 `fan_gong.footprintMask`。
+- debugPerf 增加 atmosphere mode、POI billboard count / level / active id 诊断。
+
+## 阶段：佛境沙盘氛围与 POI 题签第二轮修正
+
+### 改动摘要
+
+- 将第一版横向 POI 立牌改为竖向“水墨题签”样式，远景为小墨点 / 圆章，中景为景点名题签，当前站为更克制的 active 题签。
+- 题签色彩收敛到深绿墨、米白、暖金和低饱和暗朱红，减少现代 UI 卡片感和大白块遮挡。
+- 佛境巡游 / 路线预演时启用 `tourPoiSuppression`：只强化当前站和下一站，其它 POI 降级为小点并降低透明度，避免抢核心模型和镜头叙事。
+- `BuddhaRealmAtmosphere` 增加远山水墨天际、边缘林影、浅青水纹和极轻金粉层，用纯 CSS 改善顶部白色割裂和地图边缘空旷感。
+- debugPerf 扩展显示 horizon mask、POI billboard mode、active / muted POI 数量、water hints 和 tour suppression 状态。
+
+### 边界
+
+- 氛围、水纹和林影均为 `pointer-events: none` 的视觉层，不新增 GLB、不增加 garden live overlay count。
+- 不修改 Tencent key、`mapStyleId: 'style1'`、GLB 文件、869 树群数据、路线数据、POI 语义或核心地标 transform。
+- 水体只是浅青水纹氛围，不新增真实湖泊或改变地理语义。
+
+## 阶段：天空雾化与 POI 题签抬高微调
+
+### 改动摘要
+
+- 本轮暂不采用 `TMap.ImageTileLayer`。该方案需要完整 Web 墨卡托 `z/x/y` 瓦片资源，更适合后续手绘水墨底图覆盖层。
+- 在 `TMap.Map` 初始化 `renderOptions` 中接入原生 `skyOptions` / `fogOptions`，并在地图创建后兼容调用 `map.setSkyOptions?.(...)` / `map.setFogOptions?.(...)`。
+- 原生天空色使用米白青绿灰 `#EAF0E6`，雾化色使用 `#DDE8DF`，避免纯白天际割裂。
+- CSS `BuddhaRealmAtmosphere` 增加 core clear mask：中部核心景点区域透明，雾气主要留在远山天际、边缘林影和路线外侧。
+- POI 题签增加 `visualLiftPx`，大型建筑题签抬到建筑头顶上方，广场类和路径节点保持较低抬升。
+- active 题签尺寸继续收敛，巡游 / 预演时非当前 POI 仍降级为低透明 dot。
+
+### 边界
+
+- 未新增 tile server、静态瓦片目录、ImageTileLayer 或大面积图片底图覆盖。
+- 未修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据、POI 语义或核心地标 transform。
+
+## 阶段：AI 水墨 ImageTileLayer 前置导出工具
+
+### 改动摘要
+
+- 新增 `/map-3d-guide-c?debugInkBounds=1` 四角拾取模式，用于依次点击 northwest、northeast、southeast、southwest 并复制 `LINGSHAN_INK_MAP_BOUNDS` 配置。
+- 新增 `/map-3d-guide-c?exportInkBase=1` 腾讯无 POI 底图导出模式：正北、俯视、隐藏项目 GLB、869 树群、路线、POI 题签和佛境氛围层。
+- export 模式使用无 label 的 Tencent vector baseMap，尽量只保留道路、水体、绿地、建筑平面轮廓。
+- 新增 `showRoadCheck=1` 道路校验占位开关，仅显示轻量网格/说明，不做 OCR、道路提取或图像识别。
+- 新增 `src/data/lingshanInkMapBounds.ts` 占位配置，后续由拾取结果替换。
+
+### 边界
+
+- 本轮不生成 AI 水墨图、不切瓦片、不接入 `TMap.ImageTileLayer`。
+- 地形 / 等高线图后续只作为 AI 深浅参考，不作为几何坐标依据；最终坐标对齐以腾讯无 POI 底图和四角经纬度为准。
+- 普通 `/map-3d-guide-c` 不受影响。
+
+## 阶段：水墨底图正式 V2 边界固化
+
+### 改动摘要
+
+- 将 `src/data/lingshanInkMapBounds.ts` 从 0 值占位替换为用户手动四角范围整理后的 V2 正方形扩展范围：
+  - northwest: `31.431918, 120.092302`
+  - northeast: `31.431918, 120.106883`
+  - southeast: `31.419471, 120.106883`
+  - southwest: `31.419471, 120.092302`
+- `/map-3d-guide-c?exportInkBase=1` 继续进入干净正北俯视导出模式，并使用 `LINGSHAN_INK_MAP_BOUNDS` 计算导出相机 center / zoom。
+- 这组边界作为后续 4096×4096 AI 水墨图、GroundOverlay 验证和 ImageTileLayer 切片的统一坐标基准。
+- `/map-3d-guide-c?debugInkBounds=1` 仍保留四角拾取和复制 TS 配置能力，但正式边界以 `lingshanInkMapBounds.ts` 为准。
+
+### 边界
+
+- 本轮只更新水墨边界配置和导出模式定位，不生成水墨图、不切瓦片、不接入 `TMap.ImageTileLayer`。
+- 未修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
+
+## 阶段：AI 水墨底图单图覆盖验证
+
+### 改动摘要
+
+- 预留第一版 AI 水墨底图路径：`public/map/ink/lingshan-ink-map-gpt-v1.png`，前端访问 `/map/ink/lingshan-ink-map-gpt-v1.png`。
+- 新增 `/map-3d-guide-c?inkOverlay=1` 验证开关，默认普通页不显示水墨图。
+- 覆盖层使用 `LINGSHAN_INK_MAP_BOUNDS` 四角坐标进行单图贴合，用于检查 4096×4096 水墨图和腾讯地图道路、水体、建筑平面与 GLB 景点位置是否对齐。
+- 支持 `inkOpacity=0.6` 等透明度调节，默认透明度为 `0.68`。
+- 支持 `showInkBounds=1` 叠加正式边界框和四角点，便于校验水墨图覆盖范围。
+- debugPerf 增加 ink overlay 状态、图片路径、透明度、边界、ready / error 诊断。
+- 修正 DOM overlay 图片 ready/error 状态循环：不再在相机事件 effect 中反复重置 ready，避免页面看起来像自动刷新。
+- 明确 DOM ink overlay 只用于正北俯视坐标验证：pitch `0-8°` 使用目标透明度，轻微倾斜自动降到低透明，明显 3D 视角自动隐藏。
+- 3D 导览视角下降低 / 隐藏水墨单图，保证 POI 题签、金色路线和 GLB 模型不被验证图压住。
+- 新增 `inkSource=ai|base`：`ai` 使用 `/map/ink/lingshan-ink-map-gpt-v1.png`，`base` 使用 `/map/ink/lingshan-ink-base-tencent.png`，用于判断错位来自贴图算法 / bounds 还是 AI 生成漂移。
+- 新增 `inkSource=jimeng`，使用 `/map/ink/lingshan-ink-map-jimeng-v1.png`。GPT 版水墨感更强，但在腾讯图层页面观察到道路 / 结构漂移更明显；即梦版结构更稳，作为当前优先候选加入对比。
+- 新增 `inkOffsetX` / `inkOffsetY` / `inkScaleX` / `inkScaleY`，只对 DOM 单图验证层做屏幕像素平移和中心缩放，不修改正式 `LINGSHAN_INK_MAP_BOUNDS`。
+- 新增 `inkCompare=1` 半透明对照模式，默认 opacity 降为 `0.45`，便于肉眼比较腾讯底图道路和 AI 水墨图道路是否重合。
+- 导出面板和 debugPerf 显示当前 source、image URL、target / effective opacity、offset、scale、compare、ready / error 与 camera mode。
+
+### 边界
+
+- 本轮是单图覆盖验证，不切瓦片、不接入正式 `TMap.ImageTileLayer` 多级瓦片方案。
+- 不删除 GPT 图和腾讯 base 图；即梦图仅作为新的候选覆盖源。
+- 未修改 `LINGSHAN_INK_MAP_BOUNDS`、Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
+
+## 阶段：多路线 3D 导览扩展
+
+### 改动摘要
+
+- `/map-3d-guide-c` 从单条“历史文化路线”扩展为多路线导览系统，运行时当前路线由统一 `ScenicRouteConfig` 驱动。
+- 路线数据优先来自 `src/data/guideData.ts`，3D 层只做 POI 映射、geometry 选择和交互状态派生。
+- 保留历史文化路线为默认路线，并新增 / 接入：
+  - 历史文化路线：南门入园、灵山大照壁、胜境广场、佛手广场、祥符禅寺、杏坛广场、佛前广场、灵山大佛、梵宫、五印坛城、三圣殿、景区出口。
+  - 祈福静心路线：南门入园、灵山大照壁、胜境广场、九龙灌浴、佛手广场、祥符禅寺、杏坛广场、佛前广场、灵山大佛、景区出口。
+  - 精华打卡路线：南门入园、灵山大照壁、胜境广场、九龙灌浴、佛手广场、祥符禅寺、佛前广场、灵山大佛、梵宫、五印坛城、景区出口。
+  - 自然风光路线：南门入园、佛足坛、九龙灌浴、菩提大道、灵山大佛、曼飞龙塔、灵山精舍、梵宫广场、景区出口。
+  - 亲子路线：南门入园、九龙灌浴、佛手广场、百子戏弥勒、梵宫、五印坛城、景区出口。
+- geometry 来源：
+  - 历史文化 / 自然风光 / 亲子：复用腾讯 walking runtime 导出的 candidate routeGeometry。
+  - 祈福静心 / 精华打卡：按 `lingshanRoadNetwork` 候选步道路段拼接，标记为 `candidate`。
+  - 若后续站点缺少路网段，接口会局部回退 POI polyline 并在 debugPerf 显示 unmapped / fallback 状态。
+- 路线切换会停止当前巡游 / 预演，清理高亮与巡游进度 overlay，并重置当前站点、下一站、距离和路线主线。
+- 佛境巡游、路线预演、POI 题签高亮和地标聚焦均改为使用当前路线。
+- debugPerf 新增 currentRouteId、currentRouteName、routeStopCount、currentStopId、nextStopId、routeGeometryPointCount、routePreviewStatus、tourStatus、routeSwitchCount、routeGeometryMode、guideDataRouteSource、unmappedGuideStopCount。
+
+### 水墨底图边界
+
+- 本轮不接入、不修改 ImageTileLayer / 水墨切片逻辑。
+- 路线 overlay 保持为独立 TMap polyline 层，并在代码中标注 route layers 必须位于可选水墨 tile layers 之上。
+- POI 题签和 3D GLB 地标仍由独立 marker / GLB 层承载，不写进水墨图。
+- 后续可用腾讯 walking route 批量采样替换祈福静心 / 精华打卡的 candidate geometry。
+
+## 阶段：本地 AI 水墨 ImageTileLayer 验证
+
+### 改动摘要
+
+- 新增 `scripts/slice-lingshan-ink-tiles.mjs` 和 `npm run slice:ink-map`，从 `public/map/ink/lingshan-ink-map-v3.png` 生成本地 Web Mercator XYZ 配准瓦片。
+- 当前 v3 源图为用户确认继续使用的 `1254×1254` 方图；脚本不再强制要求 `4096×4096`，但会输出 `non-4096 validation source` warning。
+- 源图必须保持正方形；非正方形输入会终止切片，避免错误拉伸。
+- 切片输出目录为 `public/map/ink/tiles/v3/{z}/{x}/{y}.png`，其中 `{x}/{y}` 是腾讯 / Web Mercator 真实瓦片坐标，不是局部 0/0 编号。
+- 当前切片层级为 `15 / 16 / 17 / 18`，使用 `LINGSHAN_INK_MAP_BOUNDS` 做逐像素地理配准，不依赖腾讯控制台审核或后台自定义栅格图层。
+- 范围外请求统一返回透明瓦片 `public/map/ink/tiles/empty.png`，避免 404 或重复显示局部图。
+- 新增 `/map-3d-guide-c?inkTiles=1` 本地瓦片验证入口，普通 `/map-3d-guide-c` 仍不默认开启。
+- 支持 `inkTileOpacity` 调节水墨瓦片透明度，默认 `0.68`。
+- `showInkBounds=1` 可与 `inkTiles=1` 联用，显示正式水墨边界和四角点。
+- debugPerf 增加 ink tile 状态：source、opacity、URL template、empty URL、zoom levels、x/y range、source image size、bounds、ready / error、`web-mercator-local` mode 和 map boundary。
+- DOM 单图验证工具 `inkOverlay=1`、`inkSource=ai/base/jimeng`、`inkCompare`、`inkOffsetX/Y`、`inkScaleX/Y` 全部保留，仅用于俯视对齐诊断。
+- 后续如近景清晰度不足，再生成 v4 高清源图；当前 v3 先用于工程接入和瓦片验证。
+
+### 边界
+
+- 本阶段不修改 `LINGSHAN_INK_MAP_BOUNDS`、Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
+- 本地瓦片验证层应位于路线、POI 题签和 GLB 地标下方；正式默认开启需等人工确认对齐和视觉强度。
+
+## 阶段：水墨瓦片方向校正
+
+### 改动摘要
+
+- 在 Web Mercator XYZ 切片脚本中新增 `--flipX`、`--flipY`、`--rotate=0|90|180|270` 和 `--variant` 参数，用于校正源图像素和正式边界的方向对应关系。
+- 经过顺 / 逆时针和正反镜像对比后，用户确认正确方向等效为源图 `flipY`。
+- 默认 `public/map/ink/tiles/v3/` 已按 `flipY` 重切；`inkTiles=1&inkTileSource=v3` 会直接使用校正后的方向。
+- 仅保留确认用对照目录 `public/map/ink/tiles/v3-rotate-270-flip-x-ccw90/`，其实际采样也等效为 `flipY`。
+- 删除其它临时角度目录，避免继续误选错误方向。
+- debugPerf 保留 tile variant、tile dir、source transform、flip / rotate 诊断字段，避免人工验证时看错瓦片目录。
+
+### 边界
+
+- 本轮只修复切片方向，不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
+
+## 阶段：水墨瓦片正式默认接入
+
+### 改动摘要
+
+- `/map-3d-guide-c` 默认启用本地水墨瓦片，不再需要 `inkTiles=1`。
+- 正式水墨资源收口为 `public/map/ink/lingshan-ink-map-v3.png`、`public/map/ink/tiles/v3/` 和 `public/map/ink/tiles/empty.png`。
+- v3 瓦片继续使用 `LINGSHAN_INK_MAP_BOUNDS` 做 Web Mercator XYZ 地理配准，tile x/y 为真实腾讯 / Web Mercator 瓦片坐标。
+- 正式切片层级扩展为 `z15-z20`；近景超过 `z20` 时按 `Math.floor(x / 2 ** (z - 20))` / `Math.floor(y / 2 ** (z - 20))` 复用 `z20` 瓦片，避免放大后水墨底图消失。
+- 默认水墨透明度为 `1`；仅保留 `noInkTiles=1` 用于开发对比腾讯原底图，保留 `inkTileOpacity` 用于临时调试透明度。
+- `z21` 有效透明度衰减到 `0.85`，`z22+` 衰减到 `0.7`，减轻 `1254×1254` 工程验证源图在近景下的糊感。
+- `showInkBounds`、`inkOverlay`、`inkSource`、`inkCompare`、`inkOffsetX/Y`、`inkScaleX/Y`、`debugInkBounds`、`exportInkBase`、`cleanShot`、`shotGuide`、`captureFrame` 等历史调试入口不再参与正式页面效果。
+- 清理 GPT / base / jimeng 单图验证资源、base 瓦片和方向测试瓦片目录；保留切片脚本，后续可用同一流程切 v4 高清底图。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
+- 水墨瓦片层仍位于腾讯底图之上、GLB 地标 / 金色路线 / 自定义 POI 题签之下。
+
+## 阶段：水墨沙盘正式视野限制
+
+### 改动摘要
+
+- 在水墨瓦片默认启用后，新增正式页视野限制，避免用户拖出或缩远后看到大面积腾讯原底图。
+- 限制采用两层范围：`LINGSHAN_INK_MAP_BOUNDS` 内缩为中心点可移动范围，外扩为视觉缓冲范围，边缘允许少量露出但不让水墨图像纸片。
+- 普通 `/map-3d-guide-c` 默认启用范围限制；`debugGarden=1` 禁用限制，方便继续编辑树群和点位。
+- 只有 `/map-3d-guide-c?debugPerf=1&noMapBounds=1` 可临时关闭范围限制排查；普通 `noMapBounds=1` 不关闭正式限制。
+- 最远 zoom 收紧到水墨沙盘总览仍占主体的位置，最近 zoom 保留查看模型和 POI 的能力。
+- 收紧 `overviewEstate`、`axisCruise`、`routeOverview` 三个总览 / 巡游类相机预设；`landmarkFocus` 和 `closeInspect` 近景手感不动。
+- 边缘雾幕根据缩远或靠近边界动态增强，中心景区保持清晰，路线、POI 题签和 GLB 模型不被雾遮住。
+- debugPerf 增加 map bounds、当前 center / zoom、min / max zoom、edgeMistLevel、禁用原因和最后一次边界修正状态。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
+- 本轮不重新切水墨瓦片，不重新生成水墨图，不提交或推送。
+
+## 阶段：水墨沙盘视野二次收口与路线预演移除
+
+### 改动摘要
+
+- 在正式水墨瓦片默认启用的基础上，继续收紧沙盘视野：中心可移动范围进一步内缩，视觉缓冲范围减少，减少拖动 / 缩远后露出水墨图外腾讯原底图的面积。
+- 最远 zoom 再次收紧，保留完整景区总览和少量边缘雾化，不再让水墨底图在总览中像整张纸片。
+- `overviewEstate`、`axisCruise`、`routeOverview` 进一步拉近；其中 `routeOverview` 只作为历史相机预设保留，不再对应路线预演入口。
+- `BuddhaRealmAtmosphere` 增强四周米白雾、青绿山影和顶部远山雾幕，中心 clear mask 保持核心景点、路线、POI 和 GLB 模型清晰。
+- 佛境巡游保留并加入动态相机收紧：开头 / 结尾保留开阔感，中段更贴近路线和当前景点，减少巡游时看到水墨范围外部。
+- 路线预演已从正式交互中完全移除：删除按钮、状态、事件、计时器、相机逻辑、临时高亮和 debugPerf 字段。
+- debugPerf 当前只保留佛境巡游、路线状态、地图边界、zoom、edgeMist 和 tour camera tighten 状态。
+- `debugGarden=1` 继续禁用正式视野限制和动态边缘雾增强，保证树群和点位编辑不受影响。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据语义或核心地标 transform。
+- 本轮不重新切水墨瓦片，不重新生成水墨图，不提交或推送。
+
+## 阶段：水墨沙盘视野三次收口与强雾遮边
+
+### 改动摘要
+
+- 继续收紧正式水墨沙盘视野：中心点限制范围进一步缩小，视觉缓冲从轻微外扩改为略内收，最远 zoom 提高到只保留核心景区和少量周边。
+- `overviewEstate`、`axisCruise`、`routeOverview` 再次拉近；`landmarkFocus` 和 `closeInspect` 近景不动。
+- 四周边缘雾幕显著增强：米白雾、青绿山影、水墨林影和顶部远山层更重，用于遮住水墨瓦片外部腾讯底图和方形边界感。
+- 新增清晰区状态：普通浏览使用镜头中心圆形清晰区，缩远 / 靠近边界时清晰区收紧；佛境巡游使用沿路线方向的椭圆清晰区。
+- 佛境巡游镜头继续沉浸化：中段更贴近路线和当前景点，横向偏移减少，开头 / 结尾仍保留少量开阔感。
+- debugPerf 增加 edge mist strength、near boundary、distance to boundary、clear mask mode / size / center / shape 和 tour camera tighten strength。
+- 本轮不处理路线与水墨路网局部不重合问题，后续可通过腾讯个性化图层或重制水墨底图再处理。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据语义或核心地标 transform。
+- 本轮不重新切水墨瓦片，不重新生成水墨图，不恢复路线预演，不提交或推送。
+
+## 阶段：轻量动态水墨云雾
+
+### 改动摘要
+
+- 正式页继续使用 Tencent `skyOptions.animated: true`，负责天空 / 远处的原生轻微动态。
+- 在 `BuddhaRealmAtmosphere` 内新增轻量 canvas 水墨雾纹层，覆盖四周边缘、顶部远处和少量角落山影。
+- 动态雾默认 `768` 分辨率绘制，中心 clear mask 仍保持约 70% 核心区域清楚，不遮挡核心模型、金色路线和核心 POI。
+- 动态雾只在地图 visual ready 后启动；loading / 入场阶段仍由静态 CSS 雾和远山层表现更明显的佛境氛围，避免阻塞腾讯地图和 GLB / 树群加载。
+- 性能降级策略：检测明显慢帧后先降到 `512`，持续慢帧则关闭 canvas 动态雾；静态雾和 sky animation 继续保留。
+- 恢复策略：地图空闲且帧间隔恢复稳定后自动恢复到 `768` 动态雾，避免手动开关。
+- `debugGarden=1` 默认关闭 canvas 动态雾，保证编辑树群和地图时不受影响；`debugGarden=1&debugPerf=1&enableDynamicMist=1` 可临时开启观察。
+- debugPerf 增加 dynamic mist 状态：enabled、canvas active、quality、degraded、reason、fps、frame ms、recovery state、sky animated 和 debug override。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据语义、核心地标 transform 或 `LINGSHAN_INK_MAP_BOUNDS`。
+- 本轮不重新切水墨瓦片，不重新生成水墨图，不恢复路线预演，不提交或推送。
+
+## 阶段：动态水墨云雾可见度微调
+
+### 改动摘要
+
+- 第一版 canvas 动态雾过弱，普通浏览中不容易感知流动。
+- 本轮仅调整动态雾参数：`DYNAMIC_MIST_SPEED_SCALE = 1.35`，流动速度约提升 35%；`DYNAMIC_MIST_CONTRAST_SCALE = 1.25`，雾纹对比度约提升 25%。
+- 覆盖范围、中心 clear mask、静态雾遮边策略和性能降级 / 恢复逻辑均保持不变。
+- debugPerf 显示 speed / contrast scale，便于确认当前动态雾参数。
+
+### 边界
+
+- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据语义、核心地标 transform、水墨瓦片或路线预演状态。
+
+## 阶段：三圣殿 / 祥符禅寺 safe-v3 模型压缩
+
+### 改动摘要
+
+- GitHub 普通 Git push 会拦截超过 100MB 的对象；`sansheng-hall.safe-v2.glb` 约 107.75 MB，`xiangfu-temple.safe-v2.glb` 约 108.73 MB。
+- 本轮先确认 safe-v2 已恢复为真实 `glTF` 二进制，不是 Git LFS pointer；随后跳过 `git lfs pull`，直接做 non-Draco safe-v3 压缩。
+- 使用 `gltf-transform optimize`，显式关闭 Draco / Meshopt / 纹理扩展压缩：`--compress false --texture-compress false`。
+- 输出：
+  - `/models/lingshan/optimized/sansheng-hall.safe-v3.glb`，约 90.62 MB。
+  - `/models/lingshan/optimized/xiangfu-temple.safe-v3.glb`，约 91.29 MB。
+- 两个 safe-v3 均保持 `extensionsUsed: none`，不引入 Draco、Meshopt、KTX2、WebP 或 AVIF。
+- 正式地标配置与 Landmark Inspector 候选已从 safe-v2 切换到 safe-v3；scale / height / rotation / offset / POI anchor 均未修改。
+- Landmark Inspector 加入 GLB 头部预检：若文件仍是 `version https://git-lfs.github.com/spec/v1` pointer 或 GLB 头无效，会标记 failed，避免把 pointer 构造误报为 loaded。
+
+### 后续
+
+- 本轮不处理 Git 历史；safe-v2 超过 100MB 的历史对象后续仍需单独迁移或清理后再 push。

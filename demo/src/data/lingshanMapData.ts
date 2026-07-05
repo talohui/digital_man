@@ -99,6 +99,17 @@ const POI_CATEGORY_KEYWORDS: Array<{
 
 const CORE_SPOT_KEYWORDS = ['灵山大佛', '大佛', '九龙灌浴', '梵宫', '五印坛城', '祥符禅寺']
 const CORE_3D_SPOT_IDS = ['giant_buddha', 'jiulong_guanyu', 'fan_gong', 'wuyin_tancheng']
+const GUIDE_SPOT_ALIASES: Record<string, string[]> = {
+  lingshan_wall: ['大照壁', '灵山大照壁', '华夏第一壁'],
+  jiulong_guanyu: ['九龙灌浴广场'],
+  fan_gong: ['灵山梵宫', '梵宫圣坛'],
+  wuyin_tancheng: ['五印坛城景区', '坛城'],
+  xiangfu_temple: ['祥符寺', '祥符禅院'],
+  giant_buddha: ['大佛', '灵山大佛景区'],
+  foshou_square: ['佛手', '天下第一掌'],
+  foqian_square: ['大佛前广场'],
+  manfeilong_tower: ['曼飞龙佛塔', '曼飞龙塔']
+}
 
 // scenePosition 是艺术化 3D 导览坐标，不是经纬度，也不用于真实导航。
 const LINGSHAN_SCENE_POSITIONS: Record<string, NonNullable<LingshanPoi['scenePosition']>> = {
@@ -255,7 +266,7 @@ export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
   return {
     id: spot.id,
     name: spot.name,
-    aliases: [],
+    aliases: GUIDE_SPOT_ALIASES[spot.id] ?? [],
     category,
     bindingPriority: inferBindingPriority(category, spot),
     navPointStrategy: inferNavPointStrategy(category, spot),
@@ -303,6 +314,8 @@ function getGuideRoutePoiSequence(routeId: string) {
 }
 
 const historicalCulturePoiSequence = getGuideRoutePoiSequence('historical_culture')
+const prayerMeditationPoiSequence = getGuideRoutePoiSequence('prayer_meditation')
+const highlightsCheckinPoiSequence = getGuideRoutePoiSequence('highlights_checkin')
 const naturalSceneryPoiSequence = getGuideRoutePoiSequence('natural_scenery')
 const familyPoiSequence = getGuideRoutePoiSequence('family')
 
@@ -320,6 +333,20 @@ export const lingshanSceneRoutes: LingshanSceneRoute[] = [
     guideRouteId: 'historical_culture',
     description: '基于历史文化路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达佛教历史、建筑艺术和文化轴线，不等同真实步行路径。',
     poiSequence: historicalCulturePoiSequence
+  },
+  {
+    id: 'prayer_3d_scene',
+    name: '祈福静心 3D 导览线',
+    guideRouteId: 'prayer_meditation',
+    description: '基于祈福静心路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达礼佛、祈愿和静心参访节奏，不等同真实步行路径。',
+    poiSequence: prayerMeditationPoiSequence
+  },
+  {
+    id: 'highlights_3d_scene',
+    name: '精华打卡 3D 导览线',
+    guideRouteId: 'highlights_checkin',
+    description: '基于精华打卡路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达首次游览核心地标串联，不等同真实步行路径。',
+    poiSequence: highlightsCheckinPoiSequence
   },
   {
     id: 'natural_3d_scene',
@@ -341,6 +368,8 @@ export const lingshanSceneRoutes: LingshanSceneRoute[] = [
 export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
   classic_3d_scene: 'historical_culture',
   historical_3d_scene: 'historical_culture',
+  prayer_3d_scene: 'prayer_meditation',
+  highlights_3d_scene: 'highlights_checkin',
   natural_3d_scene: 'natural_scenery',
   family_3d_scene: 'family'
 }

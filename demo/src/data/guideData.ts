@@ -250,6 +250,57 @@ export const guideRoutes: GuideRoute[] = [
     ]
   },
   {
+    id: 'prayer_meditation',
+    name: '祈福静心路线',
+    durationLabel: '4.5 小时静心游',
+    tags: ['祈福静心', '轻松漫步'],
+    description: '适合以礼佛、祈愿和安静参访为主的游客，节奏从入园礼序逐步进入大佛朝礼。',
+    stops: [
+      { spotId: 'south_gate', narrative: '从南门入园先放慢脚步，这条路线会把礼佛、祈愿和静心体验串成相对从容的一天。' },
+      { spotId: 'lingshan_wall', narrative: '灵山大照壁适合作为入境礼序的第一站，先理解景区的文化气势与祈福氛围。' },
+      { spotId: 'shengjing_square', narrative: '胜境广场是动线转换点，可在这里整理游览节奏，准备进入更具仪式感的核心区域。' },
+      { spotId: 'jiulong_guanyu', narrative: '九龙灌浴以佛诞故事和圣水祈福为核心，是这条静心线的重要仪式体验点。' },
+      { spotId: 'foshou_square', narrative: '佛手广场适合安排轻松祈愿与合影，让庄重礼佛之外也有亲近的互动体验。' },
+      { spotId: 'xiangfu_temple', narrative: '祥符禅寺氛围古朴清静，适合讲寺院传承、撞钟祈福和禅修静心的游览方式。' },
+      { spotId: 'xingtan_square', narrative: '杏坛广场承接寺院到大佛朝礼轴线，适合让游客从游览状态进入更庄重的参拜节奏。' },
+      { spotId: 'foqian_square', narrative: '佛前广场是瞻礼灵山大佛前的重要空间，可在这里讲朝礼秩序与心愿表达。' },
+      { spotId: 'giant_buddha', narrative: '灵山大佛是祈福静心路线的核心收束点，适合留足时间瞻礼、登临和远眺太湖。' },
+      { spotId: 'exit', narrative: '离园前回顾从照壁、灌浴、古寺到大佛的祈福体验，让整条路线以安定感收束。' }
+    ],
+    experiences: [
+      '在九龙灌浴观赏动态演绎，接取祈福圣水。',
+      '在祥符禅寺体验撞钟祈福，感受古寺清静氛围。',
+      '在佛前广场整理朝礼节奏，再登临灵山大佛。',
+      '把互动打卡控制在轻量节奏，让整条路线保持安静从容。'
+    ]
+  },
+  {
+    id: 'highlights_checkin',
+    name: '精华打卡路线',
+    durationLabel: '5 小时经典游',
+    tags: ['拍照打卡', '文化探秘'],
+    description: '适合第一次来灵山胜境的游客，用一条顺路动线覆盖核心地标、代表表演和标志性建筑。',
+    stops: [
+      { spotId: 'south_gate', narrative: '从南门开始建立方向感，这条路线以第一次来灵山最不该错过的核心地标为主。' },
+      { spotId: 'lingshan_wall', narrative: '灵山大照壁是入园后的第一处强记忆点，适合拍摄景区文化门面。' },
+      { spotId: 'shengjing_square', narrative: '胜境广场适合拍摄开阔空间，也方便衔接九龙灌浴和后续核心轴线。' },
+      { spotId: 'jiulong_guanyu', narrative: '九龙灌浴是经典动态表演点，适合作为精华线中最有画面感的一站。' },
+      { spotId: 'foshou_square', narrative: '佛手广场兼具祈福和互动打卡属性，适合补足轻松体验。' },
+      { spotId: 'xiangfu_temple', narrative: '祥符禅寺帮助精华线加入古寺历史脉络，让路线不只是拍照打卡。' },
+      { spotId: 'foqian_square', narrative: '佛前广场是拍摄灵山大佛和朝礼轴线的重要前景点。' },
+      { spotId: 'giant_buddha', narrative: '灵山大佛是整条精华打卡路线的核心地标，适合留足瞻礼和登高观景时间。' },
+      { spotId: 'fan_gong', narrative: '梵宫代表灵山胜境的佛教艺术空间，是精华线中最适合深度观看建筑与演艺的一站。' },
+      { spotId: 'wuyin_tancheng', narrative: '五印坛城以藏式建筑和转经祈福形成差异化记忆点，补齐精华路线的建筑层次。' },
+      { spotId: 'exit', narrative: '离园前串联大照壁、九龙灌浴、大佛、梵宫与五印坛城，形成第一次游览的完整记忆。' }
+    ],
+    experiences: [
+      '拍摄灵山大照壁、九龙灌浴、灵山大佛、梵宫和五印坛城的核心地标组合。',
+      '在九龙灌浴观看表演，把动态景观安排在路线前半段。',
+      '在灵山大佛平台俯瞰太湖，形成整条路线的高潮体验。',
+      '用梵宫和五印坛城补充建筑艺术与祈福文化体验。'
+    ]
+  },
+  {
     id: 'natural_scenery',
     name: '自然风光路线',
     durationLabel: '5 小时全景游',

@@ -51,7 +51,15 @@ function ThreePreviewRoute() {
 
 function Scenic3DMapRoute() {
   return (
-    <PlainLazyRoute label="正在加载 3D 景区地图...">
+    <PlainLazyRoute label="正在加载真实 3D 地图导览...">
+      <Map3DGuidePage />
+    </PlainLazyRoute>
+  )
+}
+
+function Scenic3DMapPrototypeRoute() {
+  return (
+    <PlainLazyRoute label="正在加载 3D 景区地图原型...">
       <Scenic3DMapPage />
     </PlainLazyRoute>
   )
@@ -147,6 +155,7 @@ function App() {
       <Routes>
         <Route path="/three-preview" element={<ThreePreviewRoute />} />
         <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
+        <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
         <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
         <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
         <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
@@ -163,6 +172,7 @@ function App() {
       <Route path="/spot/:spotId" element={<SpotGuideRoute />} />
       <Route path="/three-preview" element={<ThreePreviewRoute />} />
       <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
+      <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
       <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
       <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
       <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
