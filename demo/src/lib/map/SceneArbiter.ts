@@ -13,6 +13,7 @@ export type SceneArbiterActionContext = {
   kind?: SceneArbiterModelKind
   visible?: boolean
   protected?: boolean
+  windowManaged?: boolean
   inWindow?: boolean
   sceneState?: 'loaded' | 'visible' | 'hidden' | 'disposed' | 'cached'
   memoryState?: 'active' | 'cached' | 'disposed' | 'detached'
@@ -255,7 +256,7 @@ export class SceneArbiter {
         return this.deny(action, record.modelId, 'load-debounced')
       }
 
-      const budgetDenyReason = protectedModel ? null : this.getConvergenceBudgetDenyReason(record)
+      const budgetDenyReason = protectedModel ? null : this.getConvergenceBudgetDenyReason(record, context)
       if (budgetDenyReason) {
         this.conflictResolveCount += 1
         return this.deny(action, record.modelId, budgetDenyReason)
@@ -383,10 +384,16 @@ export class SceneArbiter {
     return this.getConvergenceBudgetDenyReason(nextRecord) === null
   }
 
-  private getConvergenceBudgetDenyReason(nextRecord: GlobalSceneState) {
+  private getConvergenceBudgetDenyReason(nextRecord: GlobalSceneState, context: SceneArbiterActionContext = {}) {
     const activeRecords = Array.from(this.globalState.values()).filter((record) => this.isActiveBudgetRecord(record))
     const activeCount = activeRecords.length
     const memoryPressure = activeRecords.reduce((total, record) => total + record.estimatedMemoryMB, 0)
+    const isWindowManagedLandmark =
+      context.windowManaged === true && (nextRecord.kind === 'landmark' || nextRecord.kind === 'companion')
+
+    if (isWindowManagedLandmark) {
+      return activeCount < this.maxActiveGLB ? null : 'active-budget-full-no-evictable'
+    }
 
     if (activeCount < this.maxActiveGLB) {
       return memoryPressure + nextRecord.estimatedMemoryMB <= this.memoryPressureThresholdMB ? null : 'memory-pressure'

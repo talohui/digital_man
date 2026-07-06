@@ -1345,9 +1345,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         type: 'dispose',
         modelId,
         context: {
-          source: 'orchestrator',
+          source: 'window',
           kind: 'landmark',
           protected: false,
+          windowManaged: true,
+          inWindow: false,
           estimatedMemoryMB: 36,
           sceneState: 'disposed',
           memoryState: 'disposed',
@@ -1380,9 +1382,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           type: 'show',
           modelId,
           context: {
-            source: 'orchestrator',
+            source: 'window',
             kind: 'landmark',
             protected: protectedModel,
+            windowManaged: true,
+            inWindow: true,
             visible: true,
             sceneState: 'visible',
             memoryState: 'active',
@@ -1402,9 +1406,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           type: 'load',
           modelId,
           context: {
-            source: 'orchestrator',
+            source: 'window',
             kind: 'landmark',
             protected: protectedModel,
+            windowManaged: true,
+            inWindow: true,
             estimatedMemoryMB: 36,
             reason: protectedModel
               ? 'tour-focus-landmark-load'
@@ -1442,9 +1448,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             type: 'show',
             modelId: companionModelId,
             context: {
-              source: 'orchestrator',
+              source: 'window',
               kind: 'companion',
               protected: protectedCompanion,
+              windowManaged: true,
+              inWindow: true,
               visible: true,
               sceneState: 'visible',
               memoryState: 'active',
@@ -1467,9 +1475,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           type: 'load',
           modelId: companionModelId,
           context: {
-            source: 'orchestrator',
+            source: 'window',
             kind: 'companion',
             protected: protectedCompanion,
+            windowManaged: true,
+            inWindow: true,
             estimatedMemoryMB: 2,
             reason: protectedCompanion ? 'tour-focus-companion-load' : 'nearby-companion-load'
           }
