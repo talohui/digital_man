@@ -11090,3 +11090,37 @@ GitHub 拒绝普通 Git 历史中超过 100MB 的 GLB。当前两个风险文件
 ### 后续
 
 safe-v2 真实文件仍保留在本地用于回退；后续需要单独清理 Git 历史中的 >100MB safe-v2 对象，才能完成 GitHub push。
+
+## 2026-06-19｜阶段：核心地标 LOD 与移动端详情页雏形
+
+### 背景
+
+树群 GLB 删除后移动端内存压力显著下降，但核心地标仍存在少量后段景点不显示的风险。用户希望后续采用远景低面数、近景高精模型，并让自定义 POI 可进入移动端景点详情页。
+
+### 修改
+
+- 新增 `/map-3d-guide-c/poi/:poiId` 移动端详情页，采用黑白原型风格。
+- 新增 `lingshanPoiDetails`，覆盖灵山大佛、梵宫、五印坛城、祥符禅寺、九龙灌浴、灵山大照壁、佛手广场、佛前广场、菩提大道、胜境广场、三圣殿、百子戏弥勒、曼飞龙塔。
+- 自定义 POI 点击优先进入详情页；未绑定详情的站点保留原地图定位 / 移动逻辑。
+- 详情页包含景点介绍、看点、移动端游览提示、照片、高清 GLB 文件入口、按需加载 3D 预览和资料来源链接；缺少专属照片的点位先使用灵山官网景区参考图兜底。
+- 新增 `scripts/create-lingshan-landmark-lod.mjs` 与 `npm run lod:landmark`，用于生成 non-Draco 远景低面数候选 GLB。
+- 生成并接入 13 个核心地标远景 LOD：
+  - `lingshan-buddha-v2.lod-far-v1.glb`：约 7.20 MB。
+  - `fan-gong.lod-far-v1.glb`：约 18.52 MB。
+  - `wuyin-mandala.lod-far-v1.glb`：约 7.85 MB。
+  - `sansheng-hall.lod-far-v1.glb`：约 34.79 MB。
+  - `xiangfu-temple.lod-far-v1.glb`：约 35.60 MB。
+  - `manlong-flying-tower.lod-far-v1.glb`：约 21.82 MB。
+  - `jiulong-guanyu.lod-far-v1.glb`：约 22.28 MB。
+  - `buddha-hand-plaza.lod-far-v1.glb`：约 11.38 MB。
+  - `buddha-front-plaza.lod-far-v1.glb`：约 7.70 MB。
+  - `baizi-milefo.lod-far-v1.glb`：约 9.75 MB。
+  - `bodhi-avenue.lod-far-v1.glb`：约 22.50 MB，当前 non-Draco 管线收益有限。
+  - `lingshan-dazhaobi.lod-far-v1.glb`：约 17.79 MB。
+  - `shengjing-plaza.lod-far-v1.glb`：约 9.46 MB。
+- 新增 `lingshanLandmarkLod.ts`，正式地标加载时按距离计算 `near / far` tier。当前没有配置 `farModelUrl` 的点位继续使用正式高精 URL，不会请求不存在的低模文件。
+- `useLandmarkModelInspector.loadLandmark` 支持运行时覆盖 URL，供正式沙盘加载链路使用；手动 Inspector 候选切换逻辑不变。已加载 URL 与目标 URL 不一致时会重载，确保远景低模靠近后可切回高精。
+
+### 边界
+
+本阶段不修改地标 transform，不恢复树群；首批 LOD 已接入但仍需要手机端人工确认视觉质量。

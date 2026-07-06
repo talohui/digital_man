@@ -200,16 +200,21 @@ function setLayerVisible(layer: any, map: any, visible: boolean) {
 }
 
 function detachLayer(layer: any, map: any) {
+  let detachedByLayer = false
+
   try {
     layer?.setMap?.(null)
+    detachedByLayer = typeof layer?.setMap === 'function'
   } catch {
     // Optional cleanup path.
   }
 
-  try {
-    map?.removeLayer?.(layer)
-  } catch {
-    // Optional cleanup path.
+  if (!detachedByLayer && typeof layer?.destroy !== 'function') {
+    try {
+      map?.removeLayer?.(layer)
+    } catch {
+      // Some Tencent layers log/throw when already removed. Cleanup remains best-effort.
+    }
   }
 
   try {

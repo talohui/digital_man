@@ -1489,3 +1489,12 @@ debugPerf 新增 companion model 事件：
 - 正式配置和 Landmark Inspector 当前指向 safe-v3，transform 不变。
 - debugPerf / Inspector 加载前会读取 GLB 头部，遇到 LFS pointer 或非法 GLB 头会记录 failed，避免把构造成功误认为模型已可解析。
 - Git 历史中超过 100MB 的 safe-v2 对象仍需后续单独处理；本阶段不做历史清理。
+
+## 52. 核心地标 LOD 运行时雏形
+
+- 新增 `npm run lod:landmark`，用于单个地标生成远景低面数 GLB 候选。脚本默认参数为 `--ratio=0.45`、`--error=0.001`、`--texture-size=768`，并显式关闭 Draco / Meshopt / 纹理运行时扩展。
+- 正式地标加载链路增加 LOD URL 覆盖入口，按地图中心距离选择 `near / far` tier；当前没有配置 `farModelUrl` 的地标继续使用正式高精 runtime URL，避免 404 造成地标缺失。
+- 13 个核心地标均已接入 `farModelUrl`，远景优先使用 non-Draco 低模，近景进入阈值后切回高精 `modelUrl`。除菩提大道当前仅减少约 0.4% 外，其余远景 LOD 大多减少约 37%–61%，用于降低移动端远景解析和常驻内存压力。
+- `loadLandmark` 会比较当前已加载 URL 与目标 URL。URL 不变时不重建；远景低模进入近景阈值后会重载为高精模型，避免低模一直常驻。
+- LOD 不改变 scale / height / rotation / offset；低模产物通过配置接入后，远景降低内存和解析压力，近景仍保留高精模型。
+- debugPerf 的 Landmark GLB Debug 显示实际加载 URL，并在 load reason 中标记 `near / far`，用于定位后续某些 GLB 不显示是否由预算、距离或 LOD 配置导致。

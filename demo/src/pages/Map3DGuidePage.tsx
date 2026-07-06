@@ -28,6 +28,8 @@ import {
   getVisibleMapModelOverlays,
   type LingshanMapModelOverlay
 } from '../data/lingshanMapModelOverlays'
+import { hasLingshanPoiDetail } from '../data/lingshanPoiDetails'
+import { resolveLandmarkLodRuntimeChoice } from '../data/lingshanLandmarkLod'
 import { LINGSHAN_INK_MAP_BOUNDS } from '../data/lingshanInkMapBounds'
 import {
   getDefaultScenicRouteId,
@@ -1216,6 +1218,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       .filter((item) => item.location)
       .sort((a, b) => a.distance - b.distance)
     const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+    const lodChoiceById = new Map(
+      candidates
+        .map((candidate) => [candidate.id, resolveLandmarkLodRuntimeChoice(candidate.overlay, candidate.distance)] as const)
+        .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof resolveLandmarkLodRuntimeChoice>>] =>
+          Boolean(entry[1])
+        )
+    )
     const desiredLandmarkIds = new Set<string>(protectedLandmarkIds)
 
     for (const candidate of candidates) {
@@ -1313,6 +1322,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const decisions = new Map<string, { allowed: boolean; reason?: string }>()
     const loadedNow: string[] = []
     const releasedNow: string[] = []
+    const getLandmarkLoadOptions = (id: string) => {
+      const lodChoice = lodChoiceById.get(id)
+      return lodChoice
+        ? {
+            modelUrl: lodChoice.modelUrl,
+            fileSizeLabel: lodChoice.sizeLabel,
+            runtimeLabel: `${lodChoice.tier}:${lodChoice.source}`
+          }
+        : undefined
+    }
 
     activeItems.forEach((item) => {
       if (!releaseIds.has(item.id)) {
@@ -1373,6 +1392,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         })
         decisions.set(id, { allowed: decision.allowed, reason: decision.allowed ? undefined : decision.reason })
         if (decision.allowed) {
+          inspector.loadLandmark(id, getLandmarkLoadOptions(id))
           sceneStateManagerRef.current?.rehydrate(modelId)
           glbSpatialController.setVisible(modelId, true)
         }
@@ -1395,10 +1415,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         })
         decisions.set(id, { allowed: decision.allowed, reason: decision.allowed ? undefined : decision.reason })
         if (decision.allowed) {
-          inspector.loadLandmark(id)
+          const lodChoice = lodChoiceById.get(id)
+          inspector.loadLandmark(id, getLandmarkLoadOptions(id))
           sceneArbiter.releaseLoad(modelId)
           loadedNow.push(id)
-          landmarkLastLoadAllowReasonRef.current.set(id, decision.reason)
+          landmarkLastLoadAllowReasonRef.current.set(
+            id,
+            `${decision.reason}${lodChoice ? `:${lodChoice.tier}` : ''}`
+          )
           landmarkLastLoadDenyReasonRef.current.delete(id)
         } else {
           landmarkLastLoadDenyReasonRef.current.set(id, decision.reason)
@@ -1472,6 +1496,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       const distance = candidateById.get(id)?.distance
       const protectedModel = protectedLandmarkIds.has(id)
       const desired = desiredLandmarkIds.has(id)
+      const lodChoice = lodChoiceById.get(id)
       const shouldRelease =
         !protectedModel &&
         (releaseIds.has(id) || (distance !== undefined && distance > LANDMARK_RELEASE_RADIUS_M))
@@ -1490,7 +1515,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return {
         id,
         displayName: overlay.name,
-        glbUrl: overlay.modelUrl,
+        glbUrl: lodChoice?.modelUrl ?? overlay.modelUrl,
         desiredState: shouldRelease ? 'should-release' : desired ? 'should-load' : 'should-hide',
         actualState,
         arbiterDecision: decision ? (decision.allowed ? 'allow' : 'deny') : 'none',
@@ -7018,6 +7043,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         onSelectPoi={(id) => {
           const stopIndex = routeStops.findIndex((stop) => stop.spotId === id)
           const poi = lingshanPois.find((item) => item.id === id)
+
+          if (hasLingshanPoiDetail(id)) {
+            stopActiveTour('manual')
+            if (poi) {
+              setActiveLandmarkId(id)
+              focusLandmarkCamera(id, getBestPoiLocation(poi), false)
+            }
+            navigate(`/map-3d-guide-c/poi/${id}`)
+            return
+          }
 
           if (stopIndex >= 0) {
             moveToStop(stopIndex)

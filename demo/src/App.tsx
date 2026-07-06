@@ -14,6 +14,7 @@ const Map3DGuidePage = lazy(() => import('./pages/Map3DGuidePage'))
 const Map3DGuidePrototypeAPage = lazy(() => import('./pages/Map3DGuidePrototypeAPage'))
 const Map3DGuidePrototypeBPage = lazy(() => import('./pages/Map3DGuidePrototypeBPage'))
 const Map3DGuidePrototypeCPage = lazy(() => import('./pages/Map3DGuidePrototypeCPage'))
+const Map3DPoiDetailPage = lazy(() => import('./pages/Map3DPoiDetailPage'))
 const MobileShell = lazy(() => import('./mobile/MobileShell'))
 const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
@@ -97,6 +98,14 @@ function Map3DGuidePrototypeCRoute() {
   )
 }
 
+function Map3DPoiDetailRoute() {
+  return (
+    <PlainLazyRoute label="正在加载景点详情...">
+      <Map3DPoiDetailPage />
+    </PlainLazyRoute>
+  )
+}
+
 function HomeRoute() {
   return (
     <AppLazyRoute label="正在加载智慧导览...">
@@ -159,6 +168,7 @@ function App() {
         <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
         <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
         <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
+        <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
         <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
         <Route path="*" element={<MobileShellRoute />} />
       </Routes>
@@ -176,6 +186,7 @@ function App() {
       <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
       <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
       <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
+      <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
       <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
       <Route path="/guide" element={<HomeRoute />} />
       <Route path="/me" element={<HomeRoute />} />

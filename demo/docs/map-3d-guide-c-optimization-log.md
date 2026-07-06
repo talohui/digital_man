@@ -1599,3 +1599,33 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 后续
 
 - 本轮不处理 Git 历史；safe-v2 超过 100MB 的历史对象后续仍需单独迁移或清理后再 push。
+
+## 阶段：核心地标 LOD 运行时雏形
+
+### 改动摘要
+
+- 新增地标 LOD 配置和运行时选择函数，正式地标加载时会根据地图中心距离判断 `near / far` tier。
+- 已生成首批 13 个 non-Draco 远景 LOD：
+  - `lingshan-buddha-v2.lod-far-v1.glb`：约 7.20 MB。
+  - `fan-gong.lod-far-v1.glb`：约 18.52 MB。
+  - `wuyin-mandala.lod-far-v1.glb`：约 7.85 MB。
+  - `sansheng-hall.lod-far-v1.glb`：约 34.79 MB。
+  - `xiangfu-temple.lod-far-v1.glb`：约 35.60 MB。
+  - `manlong-flying-tower.lod-far-v1.glb`：约 21.82 MB。
+  - `jiulong-guanyu.lod-far-v1.glb`：约 22.28 MB。
+  - `buddha-hand-plaza.lod-far-v1.glb`：约 11.38 MB。
+  - `buddha-front-plaza.lod-far-v1.glb`：约 7.70 MB。
+  - `baizi-milefo.lod-far-v1.glb`：约 9.75 MB。
+  - `bodhi-avenue.lod-far-v1.glb`：约 22.50 MB，当前 non-Draco 管线收益有限，但保持统一远景入口。
+  - `lingshan-dazhaobi.lod-far-v1.glb`：约 17.79 MB。
+  - `shengjing-plaza.lod-far-v1.glb`：约 9.46 MB。
+- 上述 13 个 `farModelUrl` 已接入运行时，正式沙盘所有核心地标都具备远景低模 / 近景高精切换入口。
+- `loadLandmark` 支持 URL 变化时重载，确保远景低模加载后，用户靠近时可以切回高精 GLB。
+- 新增 `npm run lod:landmark` 脚本，基于 `gltf-transform optimize` 生成 non-Draco LOD 候选，默认关闭 Draco / Meshopt / KTX2 / WebP / AVIF 等运行时扩展。
+- Landmark GLB Debug 中实际 `glbUrl` 会显示运行时选择后的 URL，`lastLoadAllowReason` 会带上 `near / far`，便于判断后续不显示是否和 LOD / active window 有关。
+- 13 个自定义核心 / 次核心 POI 均已绑定移动端详情页数据，包含介绍、看点、移动端提示、照片字段和高清 GLB 入口；缺少专属照片的点位先使用灵山官网景区参考图兜底。
+- 详情页加入按需加载的 Three.js 高精 GLB 预览区，默认不下载模型，用户点击后再加载 GLTFLoader 和对应 GLB，关闭时释放 renderer / geometry / material / texture。
+
+### 边界
+
+- 本轮不修改地标 transform，不切换现有高精模型，不恢复树群，不重新生成或提交 GLB。

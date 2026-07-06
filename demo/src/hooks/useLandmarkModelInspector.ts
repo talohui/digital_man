@@ -109,7 +109,7 @@ export type LandmarkModelInspector = {
   calibrationDraftCount: number
   usesLocalDraft: boolean
   startCalibration: (id: string) => void
-  loadLandmark: (id: string) => void
+  loadLandmark: (id: string, options?: LandmarkLoadOptions) => void
   unloadLandmark: (id: string) => void
   focusLandmark: (id: string) => void
   updateCalibration: (id: string, patch: Partial<LandmarkCalibrationValues>) => void
@@ -135,6 +135,12 @@ export type LandmarkModelInspector = {
   clearAllCalibrationDrafts: () => void
   getCalibrationPatch: (id: string) => LandmarkCalibrationPatch | null
   getAllCalibrationPatches: () => LandmarkCalibrationPatch[]
+}
+
+export type LandmarkLoadOptions = {
+  modelUrl?: string
+  fileSizeLabel?: string
+  runtimeLabel?: string
 }
 
 type LandmarkInspectorState = Record<
@@ -184,6 +190,7 @@ export function useLandmarkModelInspector({
 }: UseLandmarkModelInspectorOptions): LandmarkModelInspector {
   const modelsRef = useRef<Map<string, any>>(new Map())
   const companionModelsRef = useRef<Map<string, any>>(new Map())
+  const loadedModelUrlsRef = useRef<Map<string, string>>(new Map())
   const footprintMaskLayerRef = useRef<any>(null)
   const versionsRef = useRef<Map<string, number>>(new Map())
   const companionVersionsRef = useRef<Map<string, number>>(new Map())
@@ -210,6 +217,7 @@ export function useLandmarkModelInspector({
     if (!active) {
       clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName)
       modelsRef.current = new Map()
+      loadedModelUrlsRef.current = new Map()
       clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName)
       companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
@@ -325,6 +333,7 @@ export function useLandmarkModelInspector({
     return () => {
       clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName)
       modelsRef.current = new Map()
+      loadedModelUrlsRef.current = new Map()
       clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName)
       companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
@@ -442,10 +451,10 @@ export function useLandmarkModelInspector({
     })
   }
 
-  const loadLandmark = (id: string) => {
+  const loadLandmark = (id: string, options?: LandmarkLoadOptions) => {
     const overlay = overlayLookup.get(id)
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
-    void createLandmarkModel(id, { trackLoad: true, calibration })
+    void createLandmarkModel(id, { trackLoad: true, calibration, loadOptions: options })
   }
 
   const setModelVariant = (id: string, variant: LandmarkModelVariant) => {
@@ -462,6 +471,7 @@ export function useLandmarkModelInspector({
       clearLandmarkModel(model)
       layerManager?.removeLayer(getLandmarkModelLayerName(id))
       modelsRef.current.delete(id)
+      loadedModelUrlsRef.current.delete(id)
     }
 
     versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
@@ -488,6 +498,7 @@ export function useLandmarkModelInspector({
       clearLandmarkModel(model)
       layerManager?.removeLayer(getLandmarkModelLayerName(id))
       modelsRef.current.delete(id)
+      loadedModelUrlsRef.current.delete(id)
     }
 
     versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
@@ -880,6 +891,7 @@ export function useLandmarkModelInspector({
     options: {
       trackLoad: boolean
       calibration?: LandmarkCalibrationValues
+      loadOptions?: LandmarkLoadOptions
     }
   ) => {
     if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
@@ -893,8 +905,11 @@ export function useLandmarkModelInspector({
 
     const overlay = overlayLookup.get(id)
     const variantInfo = overlay ? resolveVariantInfo(id, overlay, selectedVariants[id]) : undefined
+    const runtimeModelUrl = options.loadOptions?.modelUrl ?? variantInfo?.modelUrl
+    const runtimeSizeLabel = options.loadOptions?.fileSizeLabel ?? variantInfo?.sizeLabel
+    const runtimeVariantLabel = options.loadOptions?.runtimeLabel ?? variantInfo?.variant
 
-    if (!overlay || !variantInfo?.modelUrl) {
+    if (!overlay || !runtimeModelUrl || !variantInfo) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
@@ -906,7 +921,11 @@ export function useLandmarkModelInspector({
     const calibration = options.calibration ?? calibrationEdits[id] ?? mergeCalibration(buildDefaultCalibration(overlay), savedDrafts[id])
     const currentState = state[id]
 
-    if (options.trackLoad && (currentState?.status === 'loading' || modelsRef.current.has(id))) {
+    if (options.trackLoad && currentState?.status === 'loading') {
+      return true
+    }
+
+    if (options.trackLoad && modelsRef.current.has(id) && loadedModelUrlsRef.current.get(id) === runtimeModelUrl) {
       return true
     }
 
@@ -923,13 +942,13 @@ export function useLandmarkModelInspector({
         perfRecorder.startLandmarkAsset({
           id,
           name: overlay.name,
-          modelUrl: variantInfo.modelUrl,
+          modelUrl: runtimeModelUrl,
           anchorId: overlay.poiId,
-          fileSizeLabel: variantInfo.sizeLabel,
+          fileSizeLabel: runtimeSizeLabel,
           priority: overlay.priority,
           variant: variantInfo.variant,
-          selectedModelUrl: variantInfo.modelUrl,
-          selectedSizeLabel: variantInfo.sizeLabel
+          selectedModelUrl: runtimeModelUrl,
+          selectedSizeLabel: runtimeSizeLabel ?? runtimeVariantLabel
         })
       }
       perfRecorder.failLandmarkAsset(id, 'POI / anchor 坐标缺失')
@@ -939,6 +958,7 @@ export function useLandmarkModelInspector({
     clearLandmarkModel(modelsRef.current.get(id))
     layerManager?.removeLayer(getLandmarkModelLayerName(id))
     modelsRef.current.delete(id)
+    loadedModelUrlsRef.current.delete(id)
 
     const version = (versionsRef.current.get(id) ?? 0) + 1
     versionsRef.current.set(id, version)
@@ -956,16 +976,16 @@ export function useLandmarkModelInspector({
       perfRecorder.startLandmarkAsset({
         id,
         name: overlay.name,
-        modelUrl: variantInfo.modelUrl,
+        modelUrl: runtimeModelUrl,
         anchorId: overlay.poiId,
-        fileSizeLabel: variantInfo.sizeLabel,
+        fileSizeLabel: runtimeSizeLabel,
         priority: overlay.priority,
         variant: variantInfo.variant,
-        selectedModelUrl: variantInfo.modelUrl,
-        selectedSizeLabel: variantInfo.sizeLabel
+        selectedModelUrl: runtimeModelUrl,
+        selectedSizeLabel: runtimeSizeLabel ?? runtimeVariantLabel
       })
 
-      const health = await inspectGlbModelUrl(variantInfo.modelUrl)
+      const health = await inspectGlbModelUrl(runtimeModelUrl)
       if (versionsRef.current.get(id) !== version) {
         return false
       }
@@ -986,13 +1006,14 @@ export function useLandmarkModelInspector({
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${id}`,
         map,
-        url: variantInfo.modelUrl,
+        url: runtimeModelUrl,
         position: toTMapPosition(anchor, calibration),
         rotation: toTMapRotation(overlay, calibration),
         scale: calibration.scale
       })
 
       modelsRef.current.set(id, model)
+      loadedModelUrlsRef.current.set(id, runtimeModelUrl)
       layerManager?.registerLayer(getLandmarkModelLayerName(id), model)
       const durationMs = Math.round(performance.now() - startedAt)
       updateItemState(id, (current) => ({
