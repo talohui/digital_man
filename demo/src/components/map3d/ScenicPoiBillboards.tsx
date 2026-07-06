@@ -52,15 +52,6 @@ export function ScenicPoiBillboards({
   }, [onSelectPoi])
 
   useEffect(() => {
-    if (billboardLayerRef.current) {
-      if (layerManager) {
-        layerManager.removeLayer('poi_billboards')
-      } else {
-        billboardLayerRef.current?.setMap?.(null)
-      }
-    }
-    billboardLayerRef.current = null
-
     if (!mapReady || !map || !window.TMap?.MultiMarker || !window.TMap?.MarkerStyle || !items.length) {
       return
     }

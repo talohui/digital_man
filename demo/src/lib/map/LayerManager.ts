@@ -217,15 +217,17 @@ function detachLayer(layer: any, map: any) {
     }
   }
 
-  try {
-    layer?.destroy?.()
-  } catch {
-    // Optional cleanup path.
-  }
+  if (!detachedByLayer) {
+    try {
+      layer?.destroy?.()
+    } catch {
+      // Optional cleanup path.
+    }
 
-  try {
-    layer?.remove?.()
-  } catch {
-    // Optional cleanup path.
+    try {
+      layer?.remove?.()
+    } catch {
+      // Optional cleanup path.
+    }
   }
 }

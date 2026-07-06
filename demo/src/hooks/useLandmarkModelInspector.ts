@@ -1902,9 +1902,23 @@ function colorWithOpacity(color: string, opacity: number) {
 }
 
 function clearLandmarkModel(model: any) {
-  model?.setMap?.(null)
-  model?.remove?.()
-  model?.destroy?.()
+  try {
+    model?.setMap?.(null)
+  } catch {
+    // Tencent model cleanup can throw after the map has already been destroyed.
+  }
+
+  try {
+    model?.remove?.()
+  } catch {
+    // Best-effort cleanup.
+  }
+
+  try {
+    model?.destroy?.()
+  } catch {
+    // Best-effort cleanup.
+  }
 }
 
 function clearFootprintMaskLayer(layerRef: MutableRefObject<any>) {
@@ -1921,8 +1935,11 @@ function clearLandmarkModels(
   getLayerName: (id: string) => string = getLandmarkModelLayerName
 ) {
   models.forEach((model, id) => {
-    clearLandmarkModel(model)
-    layerManager?.removeLayer(getLayerName(id))
+    if (layerManager) {
+      layerManager.removeLayer(getLayerName(id))
+    } else {
+      clearLandmarkModel(model)
+    }
   })
 }
 
