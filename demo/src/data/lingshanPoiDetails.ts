@@ -12,6 +12,7 @@ export type LingshanPoiDetail = {
   visitTips: string[]
   photo?: {
     url: string
+    fallbackUrl?: string
     alt: string
     caption: string
     sourceUrl: string
@@ -30,16 +31,16 @@ export type LingshanPoiDetail = {
 
 const OFFICIAL_HOME = 'https://www.lingshan.com.cn/'
 
-const OFFICIAL_PHOTOS = {
-  giant_buddha: 'https://www.lingshan.com.cn/static/images/index_ls/daol-1.jpg',
-  xiangfu_temple: 'https://www.lingshan.com.cn/static/images/index_ls/daol-2.jpg',
-  sansheng_hall: 'https://www.lingshan.com.cn/static/images/index_ls/daol-3.jpg',
-  fan_gong: 'https://www.lingshan.com.cn/static/images/index_ls/daol-4.jpg',
-  wuyin_tancheng: 'https://www.lingshan.com.cn/static/images/index_ls/daol-5.jpg',
-  jiulong_guanyu: 'https://www.lingshan.com.cn/static/images/index_ls/daol-6.jpg'
-} as const
+const LOCAL_SCENIC_COVER = '/assets/lingshan/poi/scenic-cover.svg'
 
-const OFFICIAL_SCENIC_REFERENCE_PHOTO = OFFICIAL_PHOTOS.giant_buddha
+const POI_PHOTOS = {
+  giant_buddha: '/assets/lingshan/poi/giant-buddha.jpg',
+  xiangfu_temple: '/assets/lingshan/poi/xiangfu-temple.jpg',
+  sansheng_hall: '/assets/lingshan/poi/sansheng-hall.jpg',
+  fan_gong: '/assets/lingshan/poi/fan-gong.jpg',
+  wuyin_tancheng: '/assets/lingshan/poi/wuyin-tancheng.jpg',
+  jiulong_guanyu: '/assets/lingshan/poi/jiulong-guanyu.jpg'
+} as const
 
 const officialSources = [
   {
@@ -73,20 +74,22 @@ function getModel(id: string): LingshanPoiDetail['model'] {
   }
 }
 
-function officialPhoto(id: keyof typeof OFFICIAL_PHOTOS, name: string, sourceUrl = OFFICIAL_HOME) {
+function officialPhoto(id: keyof typeof POI_PHOTOS, name: string, sourceUrl = OFFICIAL_HOME) {
   return {
-    url: OFFICIAL_PHOTOS[id],
+    url: POI_PHOTOS[id],
+    fallbackUrl: LOCAL_SCENIC_COVER,
     alt: `${name} 景点照片`,
-    caption: `${name} 官方导览图`,
+    caption: `${name} 本地景点照片`,
     sourceUrl
   }
 }
 
 function scenicGuidePhoto(name: string, sourceUrl = OFFICIAL_HOME) {
   return {
-    url: OFFICIAL_SCENIC_REFERENCE_PHOTO,
+    url: '/assets/lingshan/poi/scenic-overview.jpg',
+    fallbackUrl: LOCAL_SCENIC_COVER,
     alt: `${name} 灵山胜境导览图`,
-    caption: `${name} 官方景区参考图`,
+    caption: `${name} 本地景区参考图`,
     sourceUrl
   }
 }

@@ -1684,11 +1684,24 @@ function splitCompanionKey(key: string): [string, string] {
 
 type GlbModelUrlHealth = { ok: true } | { ok: false; error: string }
 
+const glbModelUrlHealthCache = new Map<string, Promise<GlbModelUrlHealth>>()
+
 async function inspectGlbModelUrl(modelUrl: string): Promise<GlbModelUrlHealth> {
   if (!modelUrl.toLowerCase().endsWith('.glb')) {
     return { ok: true }
   }
 
+  const cached = glbModelUrlHealthCache.get(modelUrl)
+  if (cached) {
+    return cached
+  }
+
+  const check = inspectGlbModelUrlUncached(modelUrl)
+  glbModelUrlHealthCache.set(modelUrl, check)
+  return check
+}
+
+async function inspectGlbModelUrlUncached(modelUrl: string): Promise<GlbModelUrlHealth> {
   try {
     const response = await fetch(modelUrl, {
       headers: {

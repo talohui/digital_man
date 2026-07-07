@@ -1629,3 +1629,30 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 - 本轮不修改地标 transform，不切换现有高精模型，不恢复树群，不重新生成或提交 GLB。
+
+## 阶段：游客页地标 GLB 中低模收口
+
+### 改动摘要
+
+- 地图页正式采用“中低模 GLB 优先，高精 GLB 留给详情页 / 调试”的策略，避免游客端进入景点时仍下载 20-90MB 级别模型。
+- 当前地图页低模配置已收口到约 5-15MB 档：
+  - 灵山大佛：`lingshan-buddha-v2.lod-far-v1.glb`，约 7.20 MB。
+  - 梵宫：`fan-gong.lod-map-v1.glb`，约 12.98 MB。
+  - 五印坛城：`wuyin-mandala.lod-far-v1.glb`，约 7.85 MB。
+  - 祥符禅寺：`xiangfu-temple.lod-map-q1.glb`，约 13.72 MB。
+  - 九龙灌浴：`jiulong-guanyu.lod-map-v1.glb`，约 14.47 MB。
+  - 佛手广场：`buddha-hand-plaza.lod-far-v1.glb`，约 11.38 MB。
+  - 佛前广场：`buddha-front-plaza.lod-far-v1.glb`，约 7.70 MB。
+  - 百子戏弥勒：`baizi-milefo.lod-far-v1.glb`，约 9.75 MB。
+  - 菩提大道：`bodhi-avenue.lod-map-v3.glb`，约 9.90 MB。
+  - 灵山大照壁：`lingshan-dazhaobi.lod-map-v2.glb`，约 13.66 MB。
+  - 胜境广场：`shengjing-plaza.lod-far-v1.glb`，约 9.46 MB。
+  - 三圣殿：`sansheng-hall.lod-map-q1.glb`，约 13.12 MB。
+  - 曼龙飞塔：`manlong-flying-tower.lod-far-v2.glb`，约 12.68 MB。
+- 祥符禅寺与三圣殿为了进入 15MB 内使用 `KHR_mesh_quantization`，不是 Draco；其它新接入低模均无 glTF 扩展。
+- 保留 `xiangfu-temple.lod-map-v3.glb` 与 `sansheng-hall.lod-map-v3.glb` 作为无扩展回退候选；其它本轮中间压缩候选已清理。
+
+### 边界
+
+- 本轮不恢复树群 GLB，不修改地标 scale / height / rotation / offset，不改路线和 POI 语义。
+- 地图页继续只加载 active window 附近核心地标，高精模型仍保留给详情页、Inspector 或后续明确聚焦场景。

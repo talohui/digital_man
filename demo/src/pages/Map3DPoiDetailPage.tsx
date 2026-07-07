@@ -39,24 +39,7 @@ function Map3DPoiDetailPage() {
       </header>
 
       <section className="map-poi-detail__hero">
-        <div className="map-poi-detail__photo">
-          {detail.photo ? (
-            <img src={detail.photo.url} alt={detail.photo.alt} loading="lazy" />
-          ) : (
-            <div className="map-poi-detail__photo-placeholder">
-              <span>{detail.shortName}</span>
-              <small>PHOTO SLOT</small>
-            </div>
-          )}
-          <div className="map-poi-detail__photo-caption">
-            <span>{detail.photo?.caption ?? '照片位：等待补充本地授权图'}</span>
-            {detail.photo ? (
-              <a href={detail.photo.sourceUrl} target="_blank" rel="noreferrer">
-                来源
-              </a>
-            ) : null}
-          </div>
-        </div>
+        <PoiDetailPhoto detail={detail} />
 
         <div className="map-poi-detail__title">
           <p className="map-poi-detail__kicker">LINGSHAN SCENIC POI</p>
@@ -129,6 +112,64 @@ function Map3DPoiDetailPage() {
         </div>
       </section>
     </main>
+  )
+}
+
+function PoiDetailPhoto({ detail }: { detail: LingshanPoiDetail }) {
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(() => new Set())
+  const photo = detail.photo
+  const photoUrl =
+    photo && !failedUrls.has(photo.url)
+      ? photo.url
+      : photo?.fallbackUrl && !failedUrls.has(photo.fallbackUrl)
+        ? photo.fallbackUrl
+        : undefined
+  const showPhoto = Boolean(photoUrl)
+  const usingFallbackPhoto = Boolean(photo?.fallbackUrl && photoUrl === photo.fallbackUrl)
+
+  useEffect(() => {
+    setFailedUrls(new Set())
+  }, [photo?.url])
+
+  return (
+    <div className="map-poi-detail__photo">
+      {showPhoto && photo ? (
+        <img
+          src={photoUrl}
+          alt={photo.alt}
+          loading="eager"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => {
+            if (!photoUrl) {
+              return
+            }
+            setFailedUrls((current) => new Set([...current, photoUrl]))
+          }}
+        />
+      ) : (
+        <div className="map-poi-detail__photo-placeholder" role="img" aria-label={`${detail.name} 本地水墨封面`}>
+          <span>{detail.shortName}</span>
+          <small>INK COVER</small>
+        </div>
+      )}
+      <div className="map-poi-detail__photo-caption">
+        <span>
+          {showPhoto && photo
+            ? usingFallbackPhoto
+              ? '本地照片待补充，已显示水墨封面'
+              : photo.caption
+            : photo
+              ? '官方图加载受限，已显示本地水墨封面'
+              : '本地水墨封面'}
+        </span>
+        {photo ? (
+          <a href={photo.sourceUrl} target="_blank" rel="noreferrer">
+            来源
+          </a>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

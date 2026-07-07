@@ -467,6 +467,10 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   {snapshot.latestTourEvent?.tourCameraTightenStrength !== undefined
                     ? ` ${Math.round(snapshot.latestTourEvent.tourCameraTightenStrength * 100)}%`
                     : ''}
+                  {snapshot.latestTourEvent?.tourProfile ? ` · ${snapshot.latestTourEvent.tourProfile}` : ''}
+                  {snapshot.latestTourEvent?.tourCameraUpdateFps ? ` · camera ${snapshot.latestTourEvent.tourCameraUpdateFps}fps` : ''}
+                  {snapshot.latestTourEvent?.tourMarkerUpdateFps ? ` · route ${snapshot.latestTourEvent.tourMarkerUpdateFps}fps` : ''}
+                  {snapshot.latestTourEvent?.tourBoundsClampPaused ? ' · bounds paused' : ''}
                 </small>
               </li>
             </ol>

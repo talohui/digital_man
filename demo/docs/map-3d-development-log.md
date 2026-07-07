@@ -11124,3 +11124,27 @@ safe-v2 真实文件仍保留在本地用于回退；后续需要单独清理 Gi
 ### 边界
 
 本阶段不修改地标 transform，不恢复树群；首批 LOD 已接入但仍需要手机端人工确认视觉质量。
+
+## 2026-07-07｜阶段：地图页统一中低模 GLB 收口
+
+### 背景
+
+手机端实测确认树群 GLB 移除后内存 reload 问题缓解，但核心地标仍需要更快的游客页加载体验。用户确认地图页优先使用中低模版本，高精模型留给详情页或调试，不再追求地图页完整高精细节。
+
+### 修改
+
+- 地图页强制使用低模地标配置，目标控制在约 5-15 MB。
+- 新生成并接入 6 个游客页中低模 GLB：
+  - `fan-gong.lod-map-v1.glb`：约 12.98 MB，`extensionsUsed: none`。
+  - `xiangfu-temple.lod-map-q1.glb`：约 13.72 MB，使用 `KHR_mesh_quantization`。
+  - `jiulong-guanyu.lod-map-v1.glb`：约 14.47 MB，`extensionsUsed: none`。
+  - `bodhi-avenue.lod-map-v3.glb`：约 9.90 MB，`extensionsUsed: none`。
+  - `lingshan-dazhaobi.lod-map-v2.glb`：约 13.66 MB，`extensionsUsed: none`。
+  - `sansheng-hall.lod-map-q1.glb`：约 13.12 MB，使用 `KHR_mesh_quantization`。
+- `manlong-flying-tower.lod-far-v2.glb` 保持作为地图页版本，约 12.68 MB。
+- 祥符禅寺与三圣殿因无扩展版本仍约 18-19 MB，保留 `xiangfu-temple.lod-map-v3.glb` 与 `sansheng-hall.lod-map-v3.glb` 作为快速回退候选。
+- 清理本轮试压产生的中间候选，只保留当前接入的 `lod-map` 文件、曼龙飞塔 v2 低模和上述两个无扩展回退候选。
+
+### 边界
+
+本阶段不修改地标 transform，不恢复树群 GLB，不修改路线或 POI 语义，不使用 Draco。`KHR_mesh_quantization` 已在用户手机端人工验证可加载；如后续发现个别设备不兼容，可回退到保留的无扩展候选。

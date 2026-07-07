@@ -96,6 +96,11 @@ export type Map3DPerfTourEvent = {
   lateralOffsetMeters?: number
   tourCameraTightenMode?: 'open' | 'tight' | 'pause'
   tourCameraTightenStrength?: number
+  tourProfile?: 'desktop-cinematic' | 'mobile-stable'
+  tourCameraUpdateFps?: number
+  tourMarkerUpdateFps?: number
+  tourCameraSmoothed?: boolean
+  tourBoundsClampPaused?: boolean
   averageFrameMs?: number
   estimatedFps?: number
   traveledPointCount?: number

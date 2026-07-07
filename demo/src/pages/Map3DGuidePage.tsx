@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -67,6 +67,7 @@ import {
   type Map3DTourStopReason
 } from '../lib/map3dCamera'
 import { createMap3DPerfRecorder, type Map3DLandmarkGlBDebugRow, type Map3DStartupStage } from '../lib/map3dPerf'
+import { preloadMap3DLandmarkAssets } from '../lib/map3dPreload'
 import { buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
 import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
@@ -381,7 +382,7 @@ const MAP_LAYER_Z_INDEX = {
 const ENABLE_INK_TILES_BY_DEFAULT = true
 const ENABLE_TENCENT_CUSTOM_LAYER = true
 const TENCENT_CUSTOM_LAYER_NAME = '我的自定义图层1'
-const TENCENT_CUSTOM_LAYER_ID = '6a3283c42271'
+const TENCENT_CUSTOM_LAYER_ID = '6a4b665a9818'
 const TENCENT_CUSTOM_LAYER_CONFIG = {
   minZoom: 15,
   maxZoom: 20,
@@ -436,7 +437,7 @@ const LINGSHAN_INK_TILE_NATIVE_REQUEST_TIMEOUT_MS = 1200
 const INK_MAP_CENTER_LIMIT_RATIO = 0.66
 const INK_MAP_VISUAL_BUFFER_RATIO = 0.98
 const INK_MAP_MIN_ZOOM = TENCENT_CUSTOM_LAYER_CONFIG.minZoom
-const INK_MAP_MAX_ZOOM = TENCENT_CUSTOM_LAYER_CONFIG.maxZoom
+const INK_MAP_MAX_ZOOM = 18.85
 const INK_MAP_DEBUG_MIN_ZOOM = 15.2
 const INK_MAP_DEBUG_MAX_ZOOM = 21.4
 const INK_MAP_EDGE_MIST_ZOOM_THRESHOLD = 18.08
@@ -627,10 +628,20 @@ const scenicPoiBillboardConfigs: Array<{
 const ENABLE_LANDMARK_GLB = true
 const LANDMARK_GLB_LOAD_MODE = 'nearby-and-tour-focus'
 const MAX_ACTIVE_LANDMARK_GLB = 4
+const MAX_OVERVIEW_ACTIVE_LANDMARK_GLB = 8
 const LANDMARK_PRELOAD_RADIUS_M = 650
+const LANDMARK_MOBILE_PRELOAD_RADIUS_M = 900
 const LANDMARK_KEEP_ALIVE_RADIUS_M = 900
 const LANDMARK_RELEASE_RADIUS_M = 1400
+const LANDMARK_OVERVIEW_ZOOM_THRESHOLD = 17.35
+const LANDMARK_OVERVIEW_PRELOAD_RADIUS_M = 2600
+const LANDMARK_OVERVIEW_KEEP_ALIVE_RADIUS_M = 2800
+const LANDMARK_OVERVIEW_RELEASE_RADIUS_M = 3600
 const PROTECT_TOUR_FOCUS_LANDMARKS = true
+const LANDMARK_FORCE_LOW_DETAIL_GLB = true
+const MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS = 34
+const MOBILE_BUDDHA_TOUR_ROUTE_FRAME_MS = 72
+const BUDDHA_TOUR_EARLY_PRELOAD_PROGRESS = 0.06
 const treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string> = {
   single: '单棵',
   smallCluster: '小树团',
@@ -987,6 +998,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('overviewEstate')
   const [tourMode, setTourMode] = useState<Map3DTourMode | 'idle'>('idle')
   const [activeTourStepId, setActiveTourStepId] = useState<string | undefined>()
+  const [tourPreloadStopIds, setTourPreloadStopIds] = useState<string[]>([])
   const [activeLandmarkId, setActiveLandmarkId] = useState<string | undefined>()
   const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
     mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
@@ -1088,19 +1100,26 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return ids
     }
 
-    const currentId = resolveLandmarkInspectorIdFromRouteId(activeTourStepId ?? selectedStopId, landmarkModelOverlays)
-    const nextId = resolveLandmarkInspectorIdFromRouteId(nextStop.nextStopId ?? undefined, landmarkModelOverlays)
+    const protectedRouteIds = [
+      activeTourStepId,
+      ...tourPreloadStopIds,
+      selectedStopId,
+      nextStop.nextStopId ?? undefined
+    ].filter((id): id is string => Boolean(id))
 
-    if (currentId) {
-      ids.add(currentId)
-    }
+    protectedRouteIds.forEach((routeId) => {
+      const landmarkId = resolveLandmarkInspectorIdFromRouteId(routeId, landmarkModelOverlays)
+      if (landmarkId) {
+        ids.add(landmarkId)
+      }
+    })
 
-    if (nextId) {
-      ids.add(nextId)
+    if (ids.size > MAX_ACTIVE_LANDMARK_GLB) {
+      return new Set(Array.from(ids).slice(0, MAX_ACTIVE_LANDMARK_GLB))
     }
 
     return ids
-  }, [activeTourStepId, landmarkModelOverlays, nextStop.nextStopId, selectedStopId, tourMode])
+  }, [activeTourStepId, landmarkModelOverlays, nextStop.nextStopId, selectedStopId, tourMode, tourPreloadStopIds])
   const protectedSceneModelIds = useMemo(() => {
     const ids = new Set<string>()
 
@@ -1203,6 +1222,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     const inspector = landmarkInspectorRef.current
     const mapCenter = mapBoundsSnapshot.center ?? currentRouteCenter
+    const landmarkOverviewMode = mapInteractionSnapshot.currentZoom <= LANDMARK_OVERVIEW_ZOOM_THRESHOLD
+    const activeBudgetBase = landmarkOverviewMode ? MAX_OVERVIEW_ACTIVE_LANDMARK_GLB : MAX_ACTIVE_LANDMARK_GLB
+    const preloadRadius = landmarkOverviewMode
+      ? LANDMARK_OVERVIEW_PRELOAD_RADIUS_M
+      : isMobileViewport
+        ? LANDMARK_MOBILE_PRELOAD_RADIUS_M
+        : LANDMARK_PRELOAD_RADIUS_M
+    const keepAliveRadius = landmarkOverviewMode ? LANDMARK_OVERVIEW_KEEP_ALIVE_RADIUS_M : LANDMARK_KEEP_ALIVE_RADIUS_M
+    const releaseRadius = landmarkOverviewMode ? LANDMARK_OVERVIEW_RELEASE_RADIUS_M : LANDMARK_RELEASE_RADIUS_M
     const candidates = landmarkModelOverlays
       .map((overlay) => {
         const id = getMapModelOverlayInspectorId(overlay)
@@ -1220,27 +1248,47 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
     const lodChoiceById = new Map(
       candidates
-        .map((candidate) => [candidate.id, resolveLandmarkLodRuntimeChoice(candidate.overlay, candidate.distance)] as const)
+        .map((candidate) => {
+          return [
+            candidate.id,
+            resolveLandmarkLodRuntimeChoice(candidate.overlay, candidate.distance, {
+              forceFar: LANDMARK_FORCE_LOW_DETAIL_GLB
+            })
+          ] as const
+        })
         .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof resolveLandmarkLodRuntimeChoice>>] =>
           Boolean(entry[1])
         )
     )
     const desiredLandmarkIds = new Set<string>(protectedLandmarkIds)
+    const primaryDesiredLandmarkIds = new Set<string>(protectedLandmarkIds)
 
     for (const candidate of candidates) {
-      if (desiredLandmarkIds.size >= MAX_ACTIVE_LANDMARK_GLB) {
+      if (desiredLandmarkIds.size >= activeBudgetBase) {
         break
       }
 
-      if (candidate.distance <= LANDMARK_PRELOAD_RADIUS_M) {
+      if (candidate.distance <= preloadRadius) {
         desiredLandmarkIds.add(candidate.id)
+        primaryDesiredLandmarkIds.add(candidate.id)
       }
+    }
+
+    const nearestCandidate = candidates[0]
+    if (
+      !landmarkOverviewMode &&
+      nearestCandidate &&
+      desiredLandmarkIds.size < activeBudgetBase &&
+      nearestCandidate.distance <= keepAliveRadius
+    ) {
+      desiredLandmarkIds.add(nearestCandidate.id)
+      primaryDesiredLandmarkIds.add(nearestCandidate.id)
     }
 
     const inspectorItemsById = new Map(inspector.items.map((item) => [item.id, item]))
     const activeItems = inspector.items.filter((item) => item.status === 'loaded' || item.status === 'loading')
     const activeItemIds = new Set(activeItems.map((item) => item.id))
-    const activeBudgetMax = Math.max(MAX_ACTIVE_LANDMARK_GLB, protectedLandmarkIds.size)
+    const activeBudgetMax = Math.max(activeBudgetBase, protectedLandmarkIds.size)
 
     for (const item of activeItems
       .filter((item) => !protectedLandmarkIds.has(item.id) && !desiredLandmarkIds.has(item.id))
@@ -1250,7 +1298,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }
 
       const distance = candidateById.get(item.id)?.distance ?? Number.POSITIVE_INFINITY
-      if (distance <= LANDMARK_KEEP_ALIVE_RADIUS_M) {
+      if (distance <= keepAliveRadius) {
         desiredLandmarkIds.add(item.id)
       }
     }
@@ -1263,16 +1311,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }
       releaseIds.add(id)
       releaseReasons.set(id, reason)
+      desiredLandmarkIds.delete(id)
     }
 
     activeItems.forEach((item) => {
       const distance = candidateById.get(item.id)?.distance ?? Number.POSITIVE_INFINITY
-      if (distance > LANDMARK_RELEASE_RADIUS_M) {
+      if (distance > releaseRadius) {
         markRelease(item.id, 'release-radius')
         return
       }
 
-      if (!desiredLandmarkIds.has(item.id) && distance > LANDMARK_KEEP_ALIVE_RADIUS_M) {
+      if (!desiredLandmarkIds.has(item.id) && distance > keepAliveRadius) {
         markRelease(item.id, 'outside-keep-alive-window')
       }
     })
@@ -1281,7 +1330,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const activeCountAfterPlannedRelease = () => activeItems.filter((item) => !releaseIds.has(item.id)).length
     const evictableActiveItems = () =>
       activeItems
-        .filter((item) => !releaseIds.has(item.id) && !protectedLandmarkIds.has(item.id) && !desiredLandmarkIds.has(item.id))
+        .filter((item) => !releaseIds.has(item.id) && !protectedLandmarkIds.has(item.id) && !primaryDesiredLandmarkIds.has(item.id))
         .sort((a, b) => (candidateById.get(b.id)?.distance ?? 0) - (candidateById.get(a.id)?.distance ?? 0))
 
     while (activeCountAfterPlannedRelease() + desiredInactiveIds().length > activeBudgetMax) {
@@ -1509,7 +1558,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       const lodChoice = lodChoiceById.get(id)
       const shouldRelease =
         !protectedModel &&
-        (releaseIds.has(id) || (distance !== undefined && distance > LANDMARK_RELEASE_RADIUS_M))
+        (releaseIds.has(id) || (distance !== undefined && distance > releaseRadius))
       const decision = decisions.get(id)
       const actualState =
         releaseIds.has(id) && decision?.allowed
@@ -1547,7 +1596,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     })
 
     setModelStatus(
-      `正式 3D 地标滚动窗口 · active ${activeBudgetUsed}/${activeBudgetMax}`
+      `正式 3D 地标滚动窗口 · ${landmarkOverviewMode ? 'overview' : 'nearby'} · active ${activeBudgetUsed}/${activeBudgetMax}`
     )
     perfRecorder.recordMapVisualEvent({
       type: 'landmarkRuntimeLoadBatch',
@@ -1555,7 +1604,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       landmarkRuntimeBatchCount: 1,
       landmarkRuntimeIds: loadedNow.length || releasedNow.length ? [...loadedNow, ...releasedNow.map((id) => `release:${id}`)] : Array.from(desiredLandmarkIds),
       landmarkGlbDebugRows: debugRows,
-      reason: `${LANDMARK_GLB_LOAD_MODE}; protected=${Array.from(protectedLandmarkIds).join(',') || '-'}`
+      reason: `${LANDMARK_GLB_LOAD_MODE}; ${landmarkOverviewMode ? 'overview-low-lod' : 'nearby-low-lod'}; protected=${Array.from(protectedLandmarkIds).join(',') || '-'}`
     })
 
     return () => {
@@ -1574,7 +1623,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     landmarkModelOverlays,
     layerManager,
     mapBoundsSnapshot.center,
+    mapInteractionSnapshot.currentZoom,
     mapVisualReadyForOverlays,
+    isMobileViewport,
     perfRecorder,
     protectedLandmarkIds,
     protectedSceneModelIds,
@@ -1585,7 +1636,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   const tourStateLabel =
     tourMode === 'buddhaRealmTour'
-      ? `佛境巡游中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
+      ? `沉浸导览中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
       : '待命'
   const visibleCameraPresets = debugPerf
     ? guideCameraPresets
@@ -3526,7 +3577,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       })
     }
 
-    const mapEvents = ['idle', 'dragend', 'moveend', 'zoomend']
+    const mapEvents = ['idle', 'dragend', 'moveend', 'zoomend', 'bounds_changed', 'center_changed']
     mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, updateSnapshot))
     updateSnapshot()
 
@@ -4283,13 +4334,32 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
 
-    if (!options.force && now - buddhaTourRouteProgressRef.current.lastRenderedAt < 34) {
+    const routeProgressFrameMs = isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34
+
+    const split = isMobileViewport
+      ? splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
+      : undefined
+
+    if (isMobileViewport && split) {
+      updateSimulatedUserMarkerPosition(split.currentPoint)
+      buddhaTourRouteProgressRef.current.latestProgress = progress
+    }
+
+    if (!options.force && now - buddhaTourRouteProgressRef.current.lastRenderedAt < routeProgressFrameMs) {
       buddhaTourRouteProgressRef.current.latestProgress = progress
       return
     }
 
-    const split = splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
-    renderTourRouteProgressOverlay(split)
+    const renderedSplit = split ?? splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
+    updateSimulatedUserMarkerPosition(renderedSplit.currentPoint)
+
+    if (isMobileViewport) {
+      tourRouteProgressLayerRef.current?.setMap?.(null)
+      tourRouteProgressLayerRef.current = null
+    } else {
+      renderTourRouteProgressOverlay(renderedSplit)
+    }
+
     buddhaTourRouteProgressRef.current.lastRenderedAt = now
     buddhaTourRouteProgressRef.current.latestProgress = progress
 
@@ -4305,10 +4375,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         type: 'routeProgressUpdate',
         mode: 'buddhaRealmTour',
         progress,
-        traveledPointCount: split.traveledPath.length,
-        remainingPointCount: split.remainingPath.length,
-        currentLat: split.currentPoint.lat,
-        currentLng: split.currentPoint.lng,
+        traveledPointCount: renderedSplit.traveledPath.length,
+        remainingPointCount: renderedSplit.remainingPath.length,
+        currentLat: renderedSplit.currentPoint.lat,
+        currentLng: renderedSplit.currentPoint.lng,
         source: 'tourProgress',
         routeHasOverlaps: currentRouteHasSequenceOverlaps
       })
@@ -4391,6 +4461,31 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       styles: buildTourRouteProgressStyles(),
       geometries
     })
+  }
+
+  function updateSimulatedUserMarkerPosition(position: LatLngPoint) {
+    const layer = userMarkerLayerRef.current
+
+    if (!layer || !window.TMap) {
+      return
+    }
+
+    const geometries = [
+      {
+        id: 'simulated-user',
+        styleId: 'user',
+        position: toTMapLatLng(position)
+      }
+    ]
+
+    if (typeof layer.setGeometries === 'function') {
+      layer.setGeometries(geometries)
+      return
+    }
+
+    if (typeof layer.updateGeometries === 'function') {
+      layer.updateGeometries(geometries)
+    }
   }
 
   function buildTourRouteProgressGeometries(split: SplitRouteByProgressResult) {
@@ -5075,6 +5170,24 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
+    const geometries = [
+      {
+        id: 'simulated-user',
+        styleId: 'user',
+        position: toTMapLatLng(simulatedPosition)
+      }
+    ]
+
+    if (userMarkerLayerRef.current && typeof userMarkerLayerRef.current.setGeometries === 'function') {
+      userMarkerLayerRef.current.setGeometries(geometries)
+      return
+    }
+
+    if (userMarkerLayerRef.current && typeof userMarkerLayerRef.current.updateGeometries === 'function') {
+      userMarkerLayerRef.current.updateGeometries(geometries)
+      return
+    }
+
     userMarkerLayerRef.current?.setMap?.(null)
     userMarkerLayerRef.current = new window.TMap.MultiMarker({
       map: mapRef.current,
@@ -5086,13 +5199,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           src: createSvgDataUrl(userLocationSvg())
         })
       },
-      geometries: [
-        {
-          id: 'simulated-user',
-          styleId: 'user',
-          position: toTMapLatLng(simulatedPosition)
-        }
-      ]
+      geometries
     })
 
     return () => {
@@ -5299,6 +5406,18 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setReroutePlan(null)
     setRerouteMessage('已回到主题路线')
     focusLandmarkCamera(stop.spotId, location)
+  }
+
+  const moveToNextImmersiveStop = () => {
+    const nextIndex = Math.min(routeStops.length - 1, selectedStopIndex + 1)
+    const preloadStops = routeStops.slice(selectedStopIndex, Math.min(routeStops.length, selectedStopIndex + 3))
+    const preloadLandmarkIds = preloadStops
+      .map((stop) => resolveLandmarkInspectorIdFromRouteId(stop.spotId, landmarkModelOverlays))
+      .filter((id): id is string => Boolean(id))
+
+    preloadMap3DLandmarkAssets(preloadLandmarkIds)
+    setTourPreloadStopIds(preloadStops.map((stop) => stop.spotId))
+    moveToStop(nextIndex)
   }
 
   const simulateForward = () => {
@@ -5606,7 +5725,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   function clampScenicCameraBounds(reason: string) {
     const map = mapRef.current
 
-    if (!map || !window.TMap || !mapBoundsEnabled) {
+    if (!map || !window.TMap || !mapBoundsEnabled || tourMode === 'buddhaRealmTour') {
       return
     }
 
@@ -5721,6 +5840,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
     setTourMode('idle')
     setActiveTourStepId(undefined)
+    setTourPreloadStopIds([])
     clearActiveLandmarkHighlight()
   }
 
@@ -5751,9 +5871,33 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       const routePoint = currentRoutePath[frameRouteIndex] ?? currentRoutePath[0]
 
       if (routePoint) {
-        setRoutePathIndex(frameRouteIndex)
-        setSimulatedPosition(routePoint)
-        setSelectedStopIndex(getNearestStopIndex(routePoint, routeStops))
+        const preloadStopCount = frame.progress < BUDDHA_TOUR_EARLY_PRELOAD_PROGRESS ? 2 : 3
+        const nextPreloadStopIds = getTourPreloadStopIdsByProgress({
+          progress: frame.progress,
+          routeStops,
+          routePath: currentRoutePath,
+          cumulative: currentRouteCumulativeDistances,
+          count: preloadStopCount
+        })
+        const nextPreloadLandmarkIds = nextPreloadStopIds
+          .map((id) => resolveLandmarkInspectorIdFromRouteId(id, landmarkModelOverlays))
+          .filter((id): id is string => Boolean(id))
+
+        preloadMap3DLandmarkAssets(nextPreloadLandmarkIds)
+
+        setTourPreloadStopIds((current) =>
+          areStringArraysEqual(current, nextPreloadStopIds) ? current : nextPreloadStopIds
+        )
+
+        const nextStopIndex = getNearestStopIndex(routePoint, routeStops)
+
+        if (isMobileViewport) {
+          updateSimulatedUserMarkerPosition(routePoint)
+        } else {
+          setRoutePathIndex(frameRouteIndex)
+          setSimulatedPosition(routePoint)
+          setSelectedStopIndex(nextStopIndex)
+        }
       }
 
       if (activeId) {
@@ -5800,6 +5944,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         lateralOffsetMeters: frame.lateralOffsetMeters,
         tourCameraTightenMode: frame.tourCameraTightenMode,
         tourCameraTightenStrength: frame.tourCameraTightenStrength,
+        tourProfile: isMobileViewport ? 'mobile-stable' : 'desktop-cinematic',
+        tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+        tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+        tourCameraSmoothed: true,
+        tourBoundsClampPaused: true,
         averageFrameMs: frameStats.averageFrameMs ? roundNumber(frameStats.averageFrameMs, 1) : undefined,
         estimatedFps: frameStats.averageFrameMs ? roundNumber(1000 / frameStats.averageFrameMs, 1) : undefined
       })
@@ -5819,14 +5968,29 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const timelineTour = buildBuddhaRealmTimelineTourConfig(currentRoutePath, routeStops)
     stopActiveTour('replaced')
     resetTourRouteProgressOverlay(false)
+    const initialPreloadStopIds = getTourPreloadStopIdsByProgress({
+      progress: 0,
+      routeStops,
+      routePath: currentRoutePath,
+      cumulative: currentRouteCumulativeDistances,
+      count: 2
+    })
+    const initialPreloadLandmarkIds = initialPreloadStopIds
+      .map((id) => resolveLandmarkInspectorIdFromRouteId(id, landmarkModelOverlays))
+      .filter((id): id is string => Boolean(id))
+
+    preloadMap3DLandmarkAssets(initialPreloadLandmarkIds)
     setTourMode('buddhaRealmTour')
     setActiveTourStepId(undefined)
+    setTourPreloadStopIds(initialPreloadStopIds)
     clearActiveLandmarkHighlight()
     buddhaTourUiFrameRef.current = 0
     buddhaTourProgressBucketRef.current = -1
     buddhaTourFrameStatsRef.current = { lastAt: 0, averageFrameMs: 0 }
 
     if (timelineTour) {
+      const tourProfile = isMobileViewport ? 'mobile-stable' : 'desktop-cinematic'
+
       startBuddhaRealmTimelineTour({
         map: mapRef.current,
         TMap: window.TMap,
@@ -5834,8 +5998,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         playbackRef: tourPlaybackRef,
         durationMs: timelineTour.durationMs,
         pauses: timelineTour.pauses,
+        minFrameMs: isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs,
         getSpeedMultiplier: (progress) => getBuddhaRealmTimelineSpeed(progress, timelineTour.pauses),
-        getFrame: createBuddhaRealmTimelineFrameSampler(timelineTour),
+        getFrame: createBuddhaRealmTimelineFrameSampler(timelineTour, tourProfile),
         onStarted: ({ durationMs, pauseCount }) => {
           startTourRouteProgressOverlay()
           setActiveCameraMode('guideFollow')
@@ -5846,7 +6011,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             durationMs,
             smoothingEnabled: true,
             lookAheadProgress: BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.cruise,
-            lateralOffsetMeters: BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise
+            lateralOffsetMeters: BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise,
+            tourProfile,
+            tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+            tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+            tourCameraSmoothed: true,
+            tourBoundsClampPaused: true
           })
         },
         onFrame: ({ frame, elapsedMs }) => handleBuddhaRealmTimelineFrame(frame, elapsedMs),
@@ -5873,6 +6043,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             lateralOffsetMeters: frame.lateralOffsetMeters,
             tourCameraTightenMode: frame.tourCameraTightenMode,
             tourCameraTightenStrength: frame.tourCameraTightenStrength,
+            tourProfile: isMobileViewport ? 'mobile-stable' : 'desktop-cinematic',
+            tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+            tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+            tourCameraSmoothed: true,
+            tourBoundsClampPaused: true,
             averageFrameMs: buddhaTourFrameStatsRef.current.averageFrameMs
               ? roundNumber(buddhaTourFrameStatsRef.current.averageFrameMs, 1)
               : undefined,
@@ -6852,8 +7027,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setInkExportUiHidden(true)
   }
 
-  const mobilePanelToggleLabel = mobilePanelsCollapsed ? '展开导览卡片' : '收起导览卡片'
-  const mobilePanelSummary = `${currentRouteConfig.name} · ${currentStop?.name ?? '路线中段'} → ${nextStopPoi?.name ?? '路线终点'}`
+  const mobilePanelToggleLabel = mobilePanelsCollapsed ? '展开' : '收起'
+  const mobilePanelSummary = `${currentStop?.name ?? '路线中段'} → ${nextStopPoi?.name ?? '路线终点'}`
+  const handleMobileGuideSummaryKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      setMobilePanelsCollapsed((collapsed) => !collapsed)
+    }
+  }
 
   useEffect(() => {
     if (!inkExportUiHidden) {
@@ -7223,15 +7404,133 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       ) : null}
       {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
       {!debugGarden ? (
-        <button
-          type="button"
-          className="map-3d-guide-mobile-panel-toggle"
-          onClick={() => setMobilePanelsCollapsed((collapsed) => !collapsed)}
-          aria-expanded={!mobilePanelsCollapsed}
-        >
-          <span>{mobilePanelToggleLabel}</span>
-          <small>{mobilePanelSummary}</small>
-        </button>
+        <header className="map-3d-guide-mobile-topbar">
+          <div>
+            <strong>灵山胜境 AI 导览</strong>
+            <span>{currentRouteConfig.name} · {tourMode === 'buddhaRealmTour' ? '沉浸导览中' : guideStateText}</span>
+          </div>
+          <button type="button" onClick={() => setMobilePanelsCollapsed((collapsed) => !collapsed)} aria-expanded={!mobilePanelsCollapsed}>
+            {mobilePanelToggleLabel}
+          </button>
+        </header>
+      ) : null}
+      {!debugGarden ? (
+        <section className={`map-3d-guide-mobile-guide ${mobilePanelsCollapsed ? 'is-collapsed' : 'is-expanded'}`}>
+          <div
+            className="map-3d-guide-mobile-guide__summary"
+            role="button"
+            tabIndex={0}
+            aria-expanded={!mobilePanelsCollapsed}
+            onClick={() => setMobilePanelsCollapsed((collapsed) => !collapsed)}
+            onKeyDown={handleMobileGuideSummaryKeyDown}
+          >
+            <div>
+              <span>当前站</span>
+              <strong>{currentStop?.name ?? '路线中段'}</strong>
+            </div>
+            <div>
+              <span>下一站</span>
+              <strong>{nextStopPoi?.name ?? '路线终点'}</strong>
+            </div>
+            <div>
+              <span>距离</span>
+              <strong>{distanceToNextStopText}</strong>
+            </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                moveToNextImmersiveStop()
+              }}
+              disabled={!canUseMapInteractions}
+            >
+              沉浸切换
+            </button>
+          </div>
+
+          {!mobilePanelsCollapsed ? (
+            <div className="map-3d-guide-mobile-guide__drawer">
+              <div className="map-3d-guide-mobile-guide__handle" aria-hidden="true" />
+              <div className="map-3d-guide-mobile-guide__section map-3d-guide-mobile-guide__route-head">
+                <div>
+                  <span>当前路线</span>
+                  <strong>{currentRouteConfig.name}</strong>
+                  <small>{currentRouteConfig.subtitle} · {currentRouteConfig.guideRoute.durationLabel}</small>
+                </div>
+                <button type="button" onClick={() => setMobilePanelsCollapsed(true)}>
+                  收起
+                </button>
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__routes" aria-label="移动端路线切换">
+                {routeOptions.map((route) => (
+                  <button
+                    key={route.id}
+                    type="button"
+                    className={route.id === currentRouteConfig.id ? 'is-active' : ''}
+                    onClick={() => switchScenicRoute(route.id)}
+                    disabled={!canUseMapInteractions && mapStatus !== 'ready'}
+                  >
+                    <strong>{route.name}</strong>
+                    <span>{route.theme}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__stations" aria-label="移动端站点切换">
+                {routeStops.map((stop, index) => {
+                  const poi = getPoiDisplay(stop.spotId)
+                  const active = index === selectedStopIndex
+                  const isNext = stop.spotId === nextStop.nextStopId
+
+                  return (
+                    <button
+                      key={stop.spotId}
+                      type="button"
+                      className={[active ? 'is-active' : '', isNext ? 'is-next' : ''].filter(Boolean).join(' ')}
+                      onClick={() => moveToStop(index)}
+                    >
+                      <span>{index + 1}</span>
+                      {poi?.name ?? stop.spotId}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__camera" aria-label="移动端相机控制">
+                {visibleCameraPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={preset.id === activeCameraMode ? 'is-active' : ''}
+                    onClick={() => applyGuideCamera(preset.id)}
+                    disabled={!canUseMapInteractions}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__status">
+                <span>{mobilePanelSummary}</span>
+                <span>进度 {routeProgressPercent}%</span>
+                <span>{isTourPlaying ? tourStateLabel : guideStateText}</span>
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__actions">
+                <button type="button" onClick={() => moveToStop(selectedStopIndex - 1)}>
+                  上一站
+                </button>
+                <button type="button" onClick={() => moveToStop(selectedStopIndex + 1)}>
+                  下一站
+                </button>
+                <button type="button" onClick={returnToRoute}>
+                  回到路线
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
       ) : null}
       {!debugGarden ? (
         <section className="map-3d-guide-hero">
@@ -7291,11 +7590,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           ))}
           <button
             type="button"
-            className={tourMode === 'buddhaRealmTour' ? 'is-active' : ''}
-            onClick={startBuddhaRealmTourPlayback}
+            onClick={moveToNextImmersiveStop}
             disabled={!canUseMapInteractions}
           >
-            {tourMode === 'buddhaRealmTour' ? '停止巡游' : '佛境巡游'}
+            沉浸切换
           </button>
         </div>
       </section>
@@ -7474,7 +7772,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <dd>{guideStateText}</dd>
           </div>
           <div>
-            <dt>巡游状态</dt>
+            <dt>导览状态</dt>
             <dd>{tourStateLabel}</dd>
           </div>
         </dl>
@@ -7536,7 +7834,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               <span>treeGlbMode：removed</span>
               <span>activeTreeGlbCount：0</span>
               <span>GardenDebugWizard / Tree Candidate Lab：已停用</span>
-              <p>树群 GLB 系统已因移动端内存压力移除；当前页面只保留水墨底图、路线、POI、核心地标 GLB 和佛境巡游。</p>
+              <p>树群 GLB 系统已因移动端内存压力移除；当前页面只保留水墨底图、路线、POI、核心地标 GLB 和景点级沉浸切换。</p>
             </div>
           ) : null}
           <div className="map-3d-guide-style-audit">
@@ -7658,7 +7956,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               {guideStateText}
             </span>
             <span>
-              <em>巡游状态</em>
+              <em>导览状态</em>
               {isTourPlaying ? tourStateLabel : '待命'}
             </span>
           </div>
@@ -7721,7 +8019,7 @@ function buildBuddhaRealmTimelineTourConfig(
     return null
   }
 
-  const path = routePath
+  const path = buildBuddhaRealmTourCameraPath(routePath)
   const cumulative = buildPathCumulativeDistances(path)
   const totalDistance = cumulative[cumulative.length - 1] ?? 0
 
@@ -7751,8 +8049,50 @@ function buildBuddhaRealmTimelineTourConfig(
   }
 }
 
-function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourConfig) {
+function buildBuddhaRealmTourCameraPath(routePath: LatLngPoint[]) {
+  const deduped = routePath.reduce<LatLngPoint[]>((points, point) => {
+    const previous = points[points.length - 1]
+    if (!previous || haversineDistanceMeters(previous, point) >= 2) {
+      points.push(point)
+    }
+    return points
+  }, [])
+
+  const cleaned: LatLngPoint[] = []
+
+  for (let index = 0; index < deduped.length; index += 1) {
+    const current = deduped[index]
+    const previous = cleaned[cleaned.length - 1]
+    const next = deduped[index + 1]
+
+    if (previous && next) {
+      const previousToCurrent = haversineDistanceMeters(previous, current)
+      const currentToNext = haversineDistanceMeters(current, next)
+      const previousToNext = haversineDistanceMeters(previous, next)
+      const isOutAndBack =
+        previousToNext <= 6 &&
+        previousToCurrent <= 95 &&
+        currentToNext <= 95 &&
+        Math.abs(previousToCurrent - currentToNext) <= Math.max(8, previousToCurrent * 0.24)
+
+      if (isOutAndBack) {
+        index += 1
+        continue
+      }
+    }
+
+    cleaned.push(current)
+  }
+
+  return cleaned.length >= 2 ? cleaned : routePath
+}
+
+function createBuddhaRealmTimelineFrameSampler(
+  config: BuddhaRealmTimelineTourConfig,
+  profile: 'desktop-cinematic' | 'mobile-stable' = 'desktop-cinematic'
+) {
   let smoothedBearing: number | undefined
+  const mobileStable = profile === 'mobile-stable'
 
   return (
     progress: number,
@@ -7790,7 +8130,7 @@ function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourCo
         : lerpAngle(
             smoothedBearing,
             targetBearing,
-            context.isPaused ? 0.032 : lerpNumber(0.082, 0.052, landmarkInfluence)
+            (context.isPaused ? 0.032 : lerpNumber(0.082, 0.052, landmarkInfluence)) * (mobileStable ? 0.78 : 1)
           )
     const baseLateralOffsetMeters = context.isPaused
       ? BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.pause
@@ -7804,34 +8144,43 @@ function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourCo
       (1 - smoothstep(0.78, 0.94, progress))
     const tourCameraTightenMode = context.isPaused ? 'pause' : midRouteTighten > 0.45 ? 'tight' : 'open'
     const lateralOffsetMeters = context.isPaused
-      ? baseLateralOffsetMeters
-      : lerpNumber(baseLateralOffsetMeters, Math.max(4, baseLateralOffsetMeters * 0.38), midRouteTighten)
+      ? mobileStable
+        ? Math.min(3.5, baseLateralOffsetMeters)
+        : baseLateralOffsetMeters
+      : mobileStable
+        ? lerpNumber(Math.min(8, baseLateralOffsetMeters * 0.52), 4, midRouteTighten)
+        : lerpNumber(baseLateralOffsetMeters, Math.max(4, baseLateralOffsetMeters * 0.38), midRouteTighten)
     const sideCenter = offsetLatLngByBearing(sample, smoothedBearing + 90, lateralOffsetMeters)
     const pausePhase = context.pauseElapsedMs / 1000
-    const pauseDriftMeters = context.isPaused
+    const pauseDriftMeters = context.isPaused && !mobileStable
       ? Math.sin(pausePhase * 0.78) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftCenterMeters
       : 0
     const cameraCenter = pauseDriftMeters
       ? offsetLatLngByBearing(sideCenter, smoothedBearing + 178 + Math.sin(pausePhase * 0.52) * 16, pauseDriftMeters)
       : sideCenter
-    const pauseDriftRotation = context.isPaused
+    const pauseDriftRotation = context.isPaused && !mobileStable
       ? Math.sin(pausePhase * 0.58) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftRotationDeg
       : 0
-    const pauseDriftZoom = context.isPaused
+    const pauseDriftZoom = context.isPaused && !mobileStable
       ? Math.sin(Math.min(Math.PI, pausePhase * Math.PI * 0.72)) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftZoom
       : 0
-    const pauseDriftPitch = context.isPaused ? Math.sin(pausePhase * 0.64) * 0.18 : 0
-    const routeBreathing = Math.sin(progress * Math.PI * 3.4) * 0.035
-    const baseZoom = lerpNumber(17.92, 18.32, midRouteTighten)
-    const basePitch = lerpNumber(59.2, 62.8, midRouteTighten)
+    const pauseDriftPitch = context.isPaused && !mobileStable ? Math.sin(pausePhase * 0.64) * 0.18 : 0
+    const routeBreathing = mobileStable ? 0 : Math.sin(progress * Math.PI * 3.4) * 0.035
+    const baseZoom = mobileStable ? lerpNumber(18.08, 18.24, midRouteTighten) : lerpNumber(17.92, 18.32, midRouteTighten)
+    const basePitch = mobileStable ? lerpNumber(58.2, 60.4, midRouteTighten) : lerpNumber(59.2, 62.8, midRouteTighten)
+    const landmarkZoomInfluence = mobileStable ? landmarkInfluence * 0.18 : landmarkInfluence * 0.48
+    const landmarkPitchInfluence = mobileStable ? landmarkInfluence * 1.35 : landmarkInfluence * 4.2
 
     return {
       t: context.elapsedMs,
       lat: cameraCenter.lat,
       lng: cameraCenter.lng,
       bearing: roundNumber(smoothedBearing, 1),
-      zoom: roundNumber(baseZoom + routeBreathing + landmarkInfluence * 0.48 + pauseDriftZoom, 3),
-      pitch: roundNumber(basePitch + Math.sin(progress * Math.PI * 2.4) * 0.35 + landmarkInfluence * 4.2 + pauseDriftPitch, 2),
+      zoom: roundNumber(baseZoom + routeBreathing + landmarkZoomInfluence + pauseDriftZoom, 3),
+      pitch: roundNumber(
+        basePitch + (mobileStable ? 0 : Math.sin(progress * Math.PI * 2.4) * 0.35) + landmarkPitchInfluence + pauseDriftPitch,
+        2
+      ),
       rotation: normalizeRotation(getRouteCameraRotation(smoothedBearing) + pauseDriftRotation),
       progress: roundNumber(progress, 4),
       routeProgressIndex: sample.pathIndex,
@@ -8680,6 +9029,45 @@ function getNearestStopIndex(position: LatLngPoint, routeStops: GuideRoute['stop
   })
 
   return nearestIndex
+}
+
+function getTourPreloadStopIdsByProgress({
+  progress,
+  routeStops,
+  routePath,
+  cumulative,
+  count
+}: {
+  progress: number
+  routeStops: GuideRoute['stops']
+  routePath: LatLngPoint[]
+  cumulative: number[]
+  count: number
+}) {
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+  const stopProgress = routeStops
+    .map((stop, index) => {
+      const location = getRouteStopLocation(stop.spotId)
+      const nearest = location ? findNearestRoutePoint(location, routePath) : null
+      const routeProgress =
+        nearest && totalDistance > 0
+          ? clampNumber((cumulative[nearest.nearestIndex] ?? 0) / totalDistance, 0, 1)
+          : index / Math.max(1, routeStops.length - 1)
+
+      return {
+        id: stop.spotId,
+        index,
+        progress: routeProgress
+      }
+    })
+    .sort((a, b) => a.progress - b.progress || a.index - b.index)
+
+  const startIndex = stopProgress.findIndex((stop) => stop.progress >= progress - 0.018)
+  const normalizedStartIndex = startIndex < 0 ? Math.max(0, stopProgress.length - count) : startIndex
+
+  return stopProgress
+    .slice(normalizedStartIndex, normalizedStartIndex + count)
+    .map((stop) => stop.id)
 }
 
 function toTMapLatLng(point: LatLngPoint) {
@@ -10292,6 +10680,14 @@ function isSameLatLngPoint(a: LatLngPoint | undefined, b: LatLngPoint | undefine
   }
 
   return Math.abs(a.lat - b.lat) < 0.000001 && Math.abs(a.lng - b.lng) < 0.000001
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
 }
 
 function buildGardenGenerationParamsSnapshot(state: GardenEditorState) {
@@ -13499,52 +13895,68 @@ const map3DGuideCss = `
   opacity: .58;
 }
 
-.map-3d-guide-mobile-panel-toggle {
+.map-3d-guide-mobile-topbar,
+.map-3d-guide-mobile-guide {
   display: none;
 }
 
 @media (max-width: 880px) {
-  .map-3d-guide-mobile-panel-toggle {
+  .map-3d-guide-mobile-topbar {
     position: absolute;
+    top: calc(10px + env(safe-area-inset-top, 0px));
     left: 12px;
     right: 12px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    z-index: 15;
-    display: grid;
-    gap: 3px;
+    z-index: 16;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     min-height: 48px;
-    padding: 9px 13px;
-    border: 1px solid rgba(201, 168, 106, .56);
-    border-radius: 999px;
+    padding: 7px 10px 7px 13px;
+    border: 1px solid rgba(201, 168, 106, .44);
+    border-radius: 12px;
     background:
-      linear-gradient(135deg, rgba(255, 250, 229, .96), rgba(231, 247, 239, .92));
-    color: #24483c;
-    text-align: left;
-    box-shadow: 0 14px 36px rgba(23, 48, 39, .18), inset 0 0 0 1px rgba(255,255,255,.62);
+      linear-gradient(135deg, rgba(31, 59, 49, .92), rgba(45, 74, 62, .84));
+    color: #f5f1e8;
+    box-shadow: 0 12px 34px rgba(18, 39, 32, .22), inset 0 0 0 1px rgba(255,255,255,.08);
     backdrop-filter: blur(14px);
   }
 
-  .map-3d-guide-mobile-panel-toggle span {
-    font-size: 13px;
-    font-weight: 900;
+  .map-3d-guide-mobile-topbar div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
   }
 
-  .map-3d-guide-mobile-panel-toggle small {
-    color: #6d756e;
-    font-size: 11px;
-    font-weight: 800;
+  .map-3d-guide-mobile-topbar strong {
     overflow: hidden;
+    color: #fff7df;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 15px;
+    line-height: 1.15;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-hero,
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-routes,
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-camera,
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-status,
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-pois,
-  .map-3d-guide-shell--mobile-panels-collapsed .map-3d-guide-controlbar {
-    display: none;
+  .map-3d-guide-mobile-topbar span {
+    overflow: hidden;
+    color: rgba(245, 241, 232, .72);
+    font-size: 11px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-topbar button {
+    flex: 0 0 auto;
+    min-height: 32px;
+    border: 1px solid rgba(201, 168, 106, .52);
+    border-radius: 9px;
+    padding: 0 11px;
+    background: rgba(255, 247, 223, .12);
+    color: #fff7df;
+    font-size: 12px;
+    font-weight: 900;
   }
 
   .map-3d-guide-hero,
@@ -13553,59 +13965,230 @@ const map3DGuideCss = `
   .map-3d-guide-status,
   .map-3d-guide-pois,
   .map-3d-guide-controlbar {
+    display: none;
+  }
+
+  .map-3d-guide-mobile-guide {
+    position: absolute;
     left: 12px;
     right: 12px;
-    width: auto;
-    max-width: none;
-  }
-
-  .map-3d-guide-status {
-    top: 492px;
-  }
-
-  .map-3d-guide-routes {
-    top: 150px;
-    max-height: 176px;
-    overflow: auto;
-  }
-
-  .map-3d-guide-camera {
-    top: 338px;
-  }
-
-  .map-3d-guide-camera__buttons {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .map-3d-guide-pois {
+    z-index: 16;
     display: block;
-    bottom: 206px;
-    max-height: 124px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    color: #1f3b31;
+  }
+
+  .map-3d-guide-mobile-guide button {
+    border: 1px solid rgba(143, 101, 28, .22);
+    border-radius: 9px;
+    background: rgba(255, 249, 229, .86);
+    color: #6f4a12;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr minmax(54px, .7fr) auto;
+    gap: 7px;
+    align-items: center;
+    min-height: 62px;
+    padding: 8px 9px;
+    border: 1px solid rgba(201, 168, 106, .58);
+    border-radius: 12px;
+    background:
+      linear-gradient(135deg, rgba(255, 250, 232, .96), rgba(229, 240, 231, .94));
+    box-shadow: 0 16px 42px rgba(18, 39, 32, .24), inset 0 0 0 1px rgba(255,255,255,.62);
+    backdrop-filter: blur(14px);
+  }
+
+  .map-3d-guide-mobile-guide__summary div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .map-3d-guide-mobile-guide__summary span {
+    color: rgba(31, 59, 49, .58);
+    font-size: 10px;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__summary strong {
+    overflow: hidden;
+    color: #1f3b31;
+    font-size: 13px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-guide__summary > button {
+    min-width: 74px;
+    min-height: 42px;
+    padding: 0 9px;
+    background: #1f3b31;
+    border-color: rgba(201, 168, 106, .46);
+    color: #fff7df;
+  }
+
+  .map-3d-guide-mobile-guide__summary > button.is-active {
+    background: #7b2f1f;
+    color: #fff7df;
+  }
+
+  .map-3d-guide-mobile-guide__drawer {
+    display: grid;
+    gap: 10px;
+    max-height: min(48vh, 420px);
+    margin-top: 8px;
     overflow: auto;
+    overscroll-behavior: contain;
+    padding: 8px 10px 12px;
+    border: 1px solid rgba(201, 168, 106, .46);
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255, 250, 232, .98), rgba(242, 238, 220, .96));
+    box-shadow: 0 20px 54px rgba(18, 39, 32, .28), inset 0 0 0 1px rgba(255,255,255,.62);
+    backdrop-filter: blur(18px);
   }
 
-  .map-3d-guide-pois div {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 4px;
+  .map-3d-guide-mobile-guide__handle {
+    justify-self: center;
+    width: 42px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(31, 59, 49, .24);
   }
 
-  .map-3d-guide-pois button {
-    flex: 0 0 auto;
+  .map-3d-guide-mobile-guide__section,
+  .map-3d-guide-mobile-guide__route-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
 
-  .map-3d-guide-controlbar {
-    grid-template-columns: 1fr;
-    max-height: 42vh;
-    overflow: auto;
+  .map-3d-guide-mobile-guide__route-head div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
   }
 
-  .map-3d-guide-console-grid {
+  .map-3d-guide-mobile-guide__route-head span,
+  .map-3d-guide-mobile-guide__route-head small {
+    color: rgba(31, 59, 49, .58);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .map-3d-guide-mobile-guide__route-head strong {
+    color: #1f3b31;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 17px;
+  }
+
+  .map-3d-guide-mobile-guide__route-head button {
+    min-height: 32px;
+    padding: 0 11px;
+  }
+
+  .map-3d-guide-mobile-guide__routes,
+  .map-3d-guide-mobile-guide__camera {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
   }
 
-  .map-3d-guide-controlbar__actions {
-    justify-content: flex-start;
+  .map-3d-guide-mobile-guide__routes button,
+  .map-3d-guide-mobile-guide__camera button {
+    display: grid;
+    gap: 2px;
+    min-height: 42px;
+    padding: 6px 8px;
+    text-align: left;
+  }
+
+  .map-3d-guide-mobile-guide__routes button span {
+    overflow: hidden;
+    color: rgba(31, 59, 49, .58);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-guide__routes button.is-active,
+  .map-3d-guide-mobile-guide__camera button.is-active,
+  .map-3d-guide-mobile-guide__stations button.is-active {
+    border-color: rgba(201, 168, 106, .72);
+    background: linear-gradient(135deg, rgba(255, 239, 181, .98), rgba(239, 247, 235, .94));
+    color: #6f4a12;
+  }
+
+  .map-3d-guide-mobile-guide__stations {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .map-3d-guide-mobile-guide__stations button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 34px;
+    padding: 0 10px 0 7px;
+    color: #24483c;
+  }
+
+  .map-3d-guide-mobile-guide__stations button span {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    background: rgba(31, 59, 49, .12);
+    font-size: 11px;
+  }
+
+  .map-3d-guide-mobile-guide__stations button.is-next {
+    border-color: rgba(20, 118, 110, .32);
+    background: rgba(229, 246, 239, .92);
+  }
+
+  .map-3d-guide-mobile-guide__status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .map-3d-guide-mobile-guide__status span {
+    padding: 5px 8px;
+    border-radius: 8px;
+    background: rgba(31, 59, 49, .08);
+    color: rgba(31, 59, 49, .68);
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .map-3d-guide-mobile-guide__actions button {
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 360px) {
+  .map-3d-guide-mobile-guide__summary {
+    grid-template-columns: 1fr 1fr auto;
+  }
+
+  .map-3d-guide-mobile-guide__summary div:nth-child(3) {
+    display: none;
   }
 }
 `

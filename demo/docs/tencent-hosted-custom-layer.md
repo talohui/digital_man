@@ -4,7 +4,7 @@
 
 - 图层来源：腾讯地图平台托管自定义图层
 - 图层名称：我的自定义图层1
-- 图层 ID：`6a3283c42271`
+- 图层 ID：`6a4b665a9818`
 - Web 接入：`TMap.ImageTileLayer.createCustomLayer`
 - 默认状态：启用
 
@@ -37,7 +37,7 @@
 配置集中在 `src/pages/Map3DGuidePage.tsx`：
 
 - `ENABLE_TENCENT_CUSTOM_LAYER = true`
-- `TENCENT_CUSTOM_LAYER_ID = '6a3283c42271'`
+- `TENCENT_CUSTOM_LAYER_ID = '6a4b665a9818'`
 - `TENCENT_CUSTOM_LAYER_CONFIG.opacity`
 - `TENCENT_CUSTOM_LAYER_CONFIG.zIndex`
 - `TENCENT_CUSTOM_LAYER_CONFIG.minZoom`

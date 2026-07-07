@@ -15,6 +15,19 @@ export type LandmarkLodConfig = {
   farSizeLabel?: string
 }
 
+export type LandmarkLodPreloadEntry = {
+  landmarkId: string
+  modelUrl: string
+  sizeLabel?: string
+}
+
+export type LandmarkLodResolveOptions = {
+  forceNear?: boolean
+  forceFar?: boolean
+  nearDistanceScale?: number
+  maxNearDistanceMeters?: number
+}
+
 const DEFAULT_NEAR_DISTANCE_METERS = 380
 
 const lingshanLandmarkLodConfig: Record<string, LandmarkLodConfig> = {
@@ -25,8 +38,8 @@ const lingshanLandmarkLodConfig: Record<string, LandmarkLodConfig> = {
   },
   fan_gong: {
     nearDistanceMeters: 520,
-    farModelUrl: '/models/lingshan/optimized/fan-gong.lod-far-v1.glb',
-    farSizeLabel: '18.52 MB'
+    farModelUrl: '/models/lingshan/optimized/fan-gong.lod-map-v1.glb',
+    farSizeLabel: '12.98 MB'
   },
   wuyin_tancheng: {
     nearDistanceMeters: 430,
@@ -35,13 +48,13 @@ const lingshanLandmarkLodConfig: Record<string, LandmarkLodConfig> = {
   },
   xiangfu_temple: {
     nearDistanceMeters: 440,
-    farModelUrl: '/models/lingshan/optimized/xiangfu-temple.lod-far-v1.glb',
-    farSizeLabel: '35.60 MB'
+    farModelUrl: '/models/lingshan/optimized/xiangfu-temple.lod-map-q1.glb',
+    farSizeLabel: '13.72 MB'
   },
   jiulong_guanyu: {
     nearDistanceMeters: 360,
-    farModelUrl: '/models/lingshan/optimized/jiulong-guanyu.lod-far-v1.glb',
-    farSizeLabel: '22.28 MB'
+    farModelUrl: '/models/lingshan/optimized/jiulong-guanyu.lod-map-v1.glb',
+    farSizeLabel: '14.47 MB'
   },
   foshou_square: {
     nearDistanceMeters: 320,
@@ -60,13 +73,13 @@ const lingshanLandmarkLodConfig: Record<string, LandmarkLodConfig> = {
   },
   puti_avenue: {
     nearDistanceMeters: 420,
-    farModelUrl: '/models/lingshan/optimized/bodhi-avenue.lod-far-v1.glb',
-    farSizeLabel: '22.50 MB'
+    farModelUrl: '/models/lingshan/optimized/bodhi-avenue.lod-map-v3.glb',
+    farSizeLabel: '9.90 MB'
   },
   lingshan_dazhaobi: {
     nearDistanceMeters: 320,
-    farModelUrl: '/models/lingshan/optimized/lingshan-dazhaobi.lod-far-v1.glb',
-    farSizeLabel: '17.79 MB'
+    farModelUrl: '/models/lingshan/optimized/lingshan-dazhaobi.lod-map-v2.glb',
+    farSizeLabel: '13.66 MB'
   },
   shengjing_square: {
     nearDistanceMeters: 320,
@@ -75,13 +88,13 @@ const lingshanLandmarkLodConfig: Record<string, LandmarkLodConfig> = {
   },
   sansheng_hall: {
     nearDistanceMeters: 460,
-    farModelUrl: '/models/lingshan/optimized/sansheng-hall.lod-far-v1.glb',
-    farSizeLabel: '34.79 MB'
+    farModelUrl: '/models/lingshan/optimized/sansheng-hall.lod-map-q1.glb',
+    farSizeLabel: '13.12 MB'
   },
   manlong_flying_tower: {
     nearDistanceMeters: 420,
-    farModelUrl: '/models/lingshan/optimized/manlong-flying-tower.lod-far-v1.glb',
-    farSizeLabel: '21.82 MB'
+    farModelUrl: '/models/lingshan/optimized/manlong-flying-tower.lod-far-v2.glb',
+    farSizeLabel: '12.68 MB'
   }
 }
 
@@ -89,9 +102,20 @@ export function getLandmarkLodConfig(landmarkId: string) {
   return lingshanLandmarkLodConfig[landmarkId]
 }
 
+export function getLandmarkLodPreloadEntries(): LandmarkLodPreloadEntry[] {
+  return Object.entries(lingshanLandmarkLodConfig)
+    .filter((entry): entry is [string, LandmarkLodConfig & { farModelUrl: string }] => Boolean(entry[1].farModelUrl))
+    .map(([landmarkId, config]) => ({
+      landmarkId,
+      modelUrl: config.farModelUrl,
+      sizeLabel: config.farSizeLabel
+    }))
+}
+
 export function resolveLandmarkLodRuntimeChoice(
   overlay: LingshanMapModelOverlay,
-  distanceMeters: number | undefined
+  distanceMeters: number | undefined,
+  options: LandmarkLodResolveOptions = {}
 ): LandmarkLodRuntimeChoice | undefined {
   const landmarkId = getMapModelOverlayInspectorId(overlay)
   const config = getLandmarkLodConfig(landmarkId)
@@ -102,7 +126,14 @@ export function resolveLandmarkLodRuntimeChoice(
   }
 
   const nearDistanceMeters = config?.nearDistanceMeters ?? DEFAULT_NEAR_DISTANCE_METERS
-  const shouldUseNear = distanceMeters === undefined || distanceMeters <= nearDistanceMeters
+  const scaledNearDistanceMeters = nearDistanceMeters * (options.nearDistanceScale ?? 1)
+  const effectiveNearDistanceMeters =
+    options.maxNearDistanceMeters === undefined
+      ? scaledNearDistanceMeters
+      : Math.min(scaledNearDistanceMeters, options.maxNearDistanceMeters)
+  const shouldUseNear =
+    options.forceNear === true ||
+    (options.forceFar !== true && (distanceMeters === undefined || distanceMeters <= effectiveNearDistanceMeters))
   const farModelUrl = config?.farModelUrl
 
   if (!shouldUseNear && farModelUrl) {

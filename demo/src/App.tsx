@@ -1,6 +1,7 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
+import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
 
 const AppProviders = lazy(() => import('./components/AppProviders'))
 const ChatConnectionManager = lazy(() => import('./components/ChatConnectionManager'))
@@ -158,6 +159,12 @@ function App() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
   const isAdminRoute = location.pathname.startsWith('/admin')
+
+  useEffect(() => {
+    if (!isAdminRoute) {
+      scheduleMap3DGuidePreload()
+    }
+  }, [isAdminRoute])
 
   if (isMobile && !isAdminRoute) {
     return (

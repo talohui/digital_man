@@ -668,16 +668,6 @@ function applyCameraStep(map: any, TMap: any, target: LatLngPoint, preset: Map3D
 function applyCameraFrame(map: any, TMap: any, frame: Map3DRouteTourFrame) {
   const center = new TMap.LatLng(frame.lat, frame.lng)
 
-  if (typeof map.setCenter === 'function') {
-    map.setCenter(center)
-    if (typeof map.setZoom === 'function') {
-      map.setZoom(frame.zoom)
-    }
-    map.setPitch?.(frame.pitch)
-    map.setRotation?.(frame.rotation)
-    return
-  }
-
   if (typeof map.easeTo === 'function') {
     map.easeTo(
       {
@@ -688,6 +678,29 @@ function applyCameraFrame(map: any, TMap: any, frame: Map3DRouteTourFrame) {
       },
       { duration: 0 }
     )
+    return
+  }
+
+  if (typeof map.setCenter === 'function') {
+    map.setCenter(center)
+    if (typeof map.setZoom === 'function') {
+      const currentZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+      if (!Number.isFinite(currentZoom) || Math.abs(currentZoom - frame.zoom) > 0.01) {
+        map.setZoom(frame.zoom)
+      }
+    }
+    if (typeof map.setPitch === 'function') {
+      const currentPitch = typeof map.getPitch === 'function' ? Number(map.getPitch()) : Number.NaN
+      if (!Number.isFinite(currentPitch) || Math.abs(currentPitch - frame.pitch) > 0.08) {
+        map.setPitch(frame.pitch)
+      }
+    }
+    if (typeof map.setRotation === 'function') {
+      const currentRotation = typeof map.getRotation === 'function' ? Number(map.getRotation()) : Number.NaN
+      if (!Number.isFinite(currentRotation) || Math.abs(normalizeRotation(currentRotation - frame.rotation)) > 0.08) {
+        map.setRotation(frame.rotation)
+      }
+    }
   }
 }
 
