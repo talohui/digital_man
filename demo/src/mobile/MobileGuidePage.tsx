@@ -161,16 +161,6 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
         </Suspense>
       </div>
 
-      <section className="mobile-guide-hero">
-        <div>
-          <span className="mobile-section-kicker">
-            {hasSpotScene ? `第 ${stopIndex + 1} 站 / 共 ${route.stops.length} 站` : '路线场景'}
-          </span>
-          <h2>{hasSpotScene ? spot.name : '和小灵聊当前路线'}</h2>
-          <p>{hasSpotScene ? spot.intro : `当前场景：${route.name} · ${spot.name}`}</p>
-        </div>
-      </section>
-
       {hasSpotScene ? (
         <section className="mobile-panel mobile-guide-context">
           <div className="mobile-panel__head">
