@@ -6228,15 +6228,23 @@ body::before {
 }
 
 .mobile-guide-page .quick-asks-card__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
-  padding-bottom: 1px;
+  overflow: visible;
+  padding-bottom: 0;
 }
 
 .mobile-guide-page .quick-asks-card__button {
-  max-width: 190px;
+  width: 100%;
+  max-width: none;
   min-height: 32px;
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.mobile-guide-page .quick-asks-card__button:nth-child(n + 3) {
+  display: none;
 }
 
 .mobile-guide-page .chat-card {
