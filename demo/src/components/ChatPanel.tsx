@@ -17,6 +17,7 @@ import {
   isVoiceAsrAvailable,
   shouldUseCloudAsr
 } from '../lib/voiceAsr'
+import ChatMarkdown from './ChatMarkdown'
 import VoiceRecorderBar from './VoiceRecorderBar'
 
 const statusClassMap = {
@@ -80,6 +81,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const asrRef = useRef<BrowserAsr | null>(null)
   const holdActiveRef = useRef(false)
+  const shouldStickToBottomRef = useRef(true)
   const releaseCleanupRef = useRef<(() => void) | null>(null)
   const [voiceDraft, setVoiceDraft] = useState('')
   const [justSent, setJustSent] = useState(false)
@@ -159,6 +161,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
           return
         }
 
+        shouldStickToBottomRef.current = true
         void sendMessage(trimmed, resolvedSceneId)
         setJustSent(true)
         window.setTimeout(() => setJustSent(false), 2000)
@@ -219,6 +222,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   useEffect(() => {
     const container = scrollRef.current
     if (!container) return
+    if (!shouldStickToBottomRef.current) return
     container.scrollTop = container.scrollHeight
   }, [messages, voiceDraft])
 
@@ -239,6 +243,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   }, [isRecording, wsStatus])
 
   const handleSend = async () => {
+    shouldStickToBottomRef.current = true
     await sendMessage(inputText, resolvedSceneId)
   }
 
@@ -246,7 +251,15 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
     if (isSending || messages.length <= 1) return
     const ok = window.confirm('确定清空当前会话吗？将开启一段新的匿名会话，历史对话不可恢复。')
     if (!ok) return
+    shouldStickToBottomRef.current = true
     clearSession(resolvedSceneId)
+  }
+
+  const handleMessagesScroll = () => {
+    const container = scrollRef.current
+    if (!container) return
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    shouldStickToBottomRef.current = distanceToBottom < 96
   }
 
   // 气泡列表 memo:打字、录音等只动 composer 的更新不再重建整个列表
@@ -263,7 +276,11 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
               {roleLabelMap[msg.role]}
             </div>
             <div className={`chat-bubble ${isUser ? 'chat-bubble--user' : ''}`}>
-              <p className="chat-bubble__content">{msg.content}</p>
+              {isUser ? (
+                <p className="chat-bubble__content chat-bubble__content--plain">{msg.content}</p>
+              ) : (
+                <ChatMarkdown content={msg.content} />
+              )}
             </div>
           </div>
         )
@@ -297,7 +314,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         <p className="chat-card__voice-env-hint">{voiceHint}</p>
       ) : null}
 
-      <div className="chat-card__messages chat-scroll" ref={scrollRef}>
+      <div className="chat-card__messages chat-scroll" ref={scrollRef} onScroll={handleMessagesScroll}>
         {messageList}
       </div>
 
@@ -320,22 +337,24 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
       ) : null}
 
       <div className="chat-card__composer-stack">
-        <div className="chat-card__session-bar">
-          <span className="chat-card__session-id" title="匿名会话 ID（无需登录），清空后将开启新会话">
-            匿名会话 · {anonSessionLabel}
-          </span>
-          <button
-            type="button"
-            className="chat-card__clear"
-            onClick={handleClear}
-            disabled={isSending || messages.length <= 1}
-            aria-label="清空当前会话"
-            title="清空当前会话"
-          >
-            <DeleteOutlined />
-            <span>清空会话</span>
-          </button>
-        </div>
+        {messages.length > 1 ? (
+          <div className="chat-card__session-bar">
+            <span className="chat-card__session-id" title="匿名会话 ID（无需登录），清空后将开启新会话">
+              匿名会话 · {anonSessionLabel}
+            </span>
+            <button
+              type="button"
+              className="chat-card__clear"
+              onClick={handleClear}
+              disabled={isSending}
+              aria-label="清空当前会话"
+              title="清空当前会话"
+            >
+              <DeleteOutlined />
+              <span>清空会话</span>
+            </button>
+          </div>
+        ) : null}
 
         <div className="chat-card__composer">
           <div className="chat-card__mic-wrap">
@@ -358,7 +377,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
             rows={1}
             maxLength={500}
             className="chat-card__textarea"
-            placeholder={isRecording ? '正在听您说话…' : '输入您的问题...'}
+            placeholder={isRecording ? '正在听您说话…' : '在这里输入您的问题'}
             value={inputText}
             onChange={(event) => setInputText(event.target.value.slice(0, 500), resolvedSceneId)}
             onKeyDown={(event) => {
@@ -381,7 +400,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         </div>
 
         <p className="chat-card__hint">
-          <span>回车发送，Shift+回车换行。按住麦克风说话，在页面任意位置松手即发送。</span>
+          <span>对话内容由 AI 生成，请以景区现场公告为准。</span>
           {inputText.length >= 400 ? (
             <span className="chat-card__count">{inputText.length}/500</span>
           ) : null}

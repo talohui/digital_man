@@ -19,6 +19,7 @@ import RouteErrorBoundary from './components/RouteErrorBoundary'
 import RouteSkeleton from './components/RouteSkeleton'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import MobileShell from './mobile/MobileShell'
+import FloatingGuide from './components/FloatingGuide'
 import { useChatStore } from './store/useChatStore'
 import { unlockAudio } from './lib/audioLipsync'
 
@@ -103,6 +104,8 @@ function App() {
             <Route path="*" element={<MobileShell />} />
           </Routes>
         </Suspense>
+        {/* 全局悬浮小灵:在所有 C 端移动页面(含全屏 3D 地图)右下角常驻,随时呼出对话 */}
+        <FloatingGuide />
       </RouteErrorBoundary>
     )
   }

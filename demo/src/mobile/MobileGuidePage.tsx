@@ -133,16 +133,6 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
 
   return (
     <div className="mobile-guide-page">
-      <section className="mobile-guide-hero">
-        <div>
-          <span className="mobile-section-kicker">
-            {hasSpotScene ? `第 ${stopIndex + 1} 站 / 共 ${route.stops.length} 站` : '路线场景'}
-          </span>
-          <h2>{hasSpotScene ? spot.name : '和小灵聊当前路线'}</h2>
-          <p>{hasSpotScene ? spot.intro : `当前场景：${route.name} · ${spot.name}`}</p>
-        </div>
-      </section>
-
       <div className="mobile-guide-avatar">
         <Suspense fallback={<RouteSkeleton variant="inline" />}>
           <Live2DStage
@@ -157,6 +147,29 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
           />
         </Suspense>
       </div>
+
+      <div className="mobile-guide-chat-stack">
+        <QuickAsks
+          sceneId={sceneId}
+          title={hasSpotScene ? '继续追问这一站' : '继续追问这条路线'}
+          subtitle="快捷问题"
+          questions={questions}
+        />
+
+        <Suspense fallback={<RouteSkeleton variant="inline" />}>
+          <ChatPanel sceneId={sceneId} />
+        </Suspense>
+      </div>
+
+      <section className="mobile-guide-hero">
+        <div>
+          <span className="mobile-section-kicker">
+            {hasSpotScene ? `第 ${stopIndex + 1} 站 / 共 ${route.stops.length} 站` : '路线场景'}
+          </span>
+          <h2>{hasSpotScene ? spot.name : '和小灵聊当前路线'}</h2>
+          <p>{hasSpotScene ? spot.intro : `当前场景：${route.name} · ${spot.name}`}</p>
+        </div>
+      </section>
 
       {hasSpotScene ? (
         <section className="mobile-panel mobile-guide-context">
@@ -196,17 +209,6 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
           </div>
         </section>
       ) : null}
-
-      <QuickAsks
-        sceneId={sceneId}
-        title={hasSpotScene ? '继续追问这一站' : '继续追问这条路线'}
-        subtitle="快捷问题"
-        questions={questions}
-      />
-
-      <Suspense fallback={<RouteSkeleton variant="inline" />}>
-        <ChatPanel sceneId={sceneId} />
-      </Suspense>
     </div>
   )
 }
