@@ -301,19 +301,6 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         </span>
       </header>
 
-      <VoiceRecorderBar
-        isRecording={isRecording}
-        isSupported={isVoiceAsrAvailable()}
-        voiceDraft={voiceDraft}
-        justSent={justSent}
-        idleHint={getVoiceAsrModeLabel()}
-        useCloudAsr={shouldUseCloudAsr()}
-      />
-
-      {voiceHint ? (
-        <p className="chat-card__voice-env-hint">{voiceHint}</p>
-      ) : null}
-
       <div className="chat-card__messages chat-scroll" ref={scrollRef} onScroll={handleMessagesScroll}>
         {messageList}
       </div>
@@ -337,6 +324,19 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
       ) : null}
 
       <div className="chat-card__composer-stack">
+        <VoiceRecorderBar
+          isRecording={isRecording}
+          isSupported={isVoiceAsrAvailable()}
+          voiceDraft={voiceDraft}
+          justSent={justSent}
+          idleHint={getVoiceAsrModeLabel()}
+          useCloudAsr={shouldUseCloudAsr()}
+        />
+
+        {voiceHint ? (
+          <p className="chat-card__voice-env-hint">{voiceHint}</p>
+        ) : null}
+
         {messages.length > 1 ? (
           <div className="chat-card__session-bar">
             <span className="chat-card__session-id" title="匿名会话 ID（无需登录），清空后将开启新会话">

@@ -5876,12 +5876,10 @@ body::before {
   display: none;
 }
 
-/* 移动端聊天统一收敛:外层已经说明身份/场景,聊天卡只保留状态、消息和输入 */
+/* 移动端聊天统一收敛:外层已经说明身份/场景,聊天卡只保留消息和输入 */
 .mobile-shell .chat-card__titlebar,
 .floating-guide__body .chat-card__titlebar {
-  justify-content: flex-end;
-  min-height: 26px;
-  margin-bottom: 6px;
+  display: none;
 }
 
 .mobile-shell .chat-card__titlebar > div,
@@ -5891,15 +5889,13 @@ body::before {
 
 .mobile-shell .chat-card__status,
 .floating-guide__body .chat-card__status {
-  margin-top: 0;
-  padding: 4px 10px;
-  font-size: 11px;
+  display: none;
 }
 
 .mobile-shell .chat-card__voice-bar,
 .floating-guide__body .chat-card__voice-bar {
   min-height: 38px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   padding: 8px 10px;
   border-radius: 12px;
   font-size: 12px;
@@ -5982,8 +5978,8 @@ body::before {
 
 .mobile-shell .chat-card__composer-stack,
 .floating-guide__body .chat-card__composer-stack {
-  gap: 7px;
-  padding-top: 8px;
+  gap: 6px;
+  padding-top: 4px;
   background:
     linear-gradient(180deg, rgba(248, 250, 242, 0), rgba(248, 250, 242, 0.96) 24%),
     rgba(248, 250, 242, 0.92);
