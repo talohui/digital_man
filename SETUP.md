@@ -164,6 +164,9 @@ VITE_TMAP_WEB_KEY=你的腾讯地图WebKey
 VITE_TMAP_ROUTE_KEY=你的腾讯地图路线规划Key
 
 # 可选。留空时前端会按当前访问 hostname 自动推导。
+# 例:你在手机上访问 http://10.0.0.5:5173/,前端自动按 10.0.0.5 找
+# Fay 5000 / Analytics 5002 / WS 10003,无需手填,只要后端监听 0.0.0.0 即可。
+# 仅当你想把后端跑在和前端不同的机器/端口上时,才需要显式设置下面三项。
 VITE_FAY_HTTP=http://127.0.0.1:5000
 VITE_FAY_WS=ws://127.0.0.1:10003
 VITE_ANALYTICS_HTTP=http://127.0.0.1:5002
@@ -445,6 +448,45 @@ taskkill /F /IM python.exe
 ```bash
 npm install --legacy-peer-deps
 ```
+
+### 9.6 改了前端代码后,浏览器还是旧版本
+
+前端在生产构建时会注册 Service Worker(`demo/public/sw.js`),它会缓存所有 `vendor-*` chunk,
+**第二次访问几乎不走网络**——这意味着你拉了新代码、`npm run build` 重新部署,但浏览器还在用上次的 SW。
+
+刷新策略:
+
+- 开发模式(`npm run dev` / `npm run dev:lan`)**不注册 SW**,改完 HMR 直接生效,无需处理。
+- 生产模式遇到"看不到新版本":
+  1. DevTools → Application → Service Workers → 点 **Unregister**
+  2. Application → Storage → 点 **Clear site data**
+  3. 强制刷新(Cmd+Shift+R / Ctrl+F5)
+
+SW 的预期行为:HTML 走 network-first(永远拿最新壳),静态资源走 cache-first(content-hash 不变就一直命中,变了自动拉新)。所以正常情况下用户**不需要手动清缓存**,只是开发联调时要懂这个套路。
+
+### 9.7 Live2D 数字人不显示 / 一直转圈
+
+主要原因是 `index.html` 顶部从官方 CDN 加载 Cubism Core:
+
+```html
+<script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+```
+
+国内某些网络环境(校园网、特定运营商)访问可能慢或失败。两个方案:
+
+- **方案 A(推荐):自托管 Cubism Core**
+
+  ```bash
+  # 一次性把 Cubism Core 拉到本地
+  curl -o demo/public/live2dcubismcore.min.js \
+    https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js
+  ```
+
+  然后改 `demo/index.html` 中的 script src 为 `/live2dcubismcore.min.js`(相对路径)。
+
+- **方案 B:开代理或换网络**。
+
+Live2D 模型文件(`demo/public/live2d/haru/*`)已经在仓库里,**不需要单独下载**,只有 Cubism Core 引擎需要走 CDN。
 
 ## 10. 提交注意事项
 

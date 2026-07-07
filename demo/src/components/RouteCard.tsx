@@ -1,5 +1,5 @@
-import { ArrowRightOutlined } from '@ant-design/icons'
-import type { GuideRecommendationCard } from '../data/guideData'
+import { ArrowRightOutlined, ClockCircleOutlined, EnvironmentOutlined } from '@ant-design/icons'
+import { getRouteItineraryMeta, type GuideRecommendationCard } from '../data/guideData'
 
 type Props = {
   route: GuideRecommendationCard
@@ -74,6 +74,7 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
   const matchScore = typeof route.matchScore === 'number' ? route.matchScore : 0
   const persona = route.routePersona ?? ''
   const why = route.whyRecommended ?? route.reason
+  const meta = getRouteItineraryMeta(route.id)
 
   if (!isMain) {
     return (
@@ -109,6 +110,12 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
 
       <h2 className="route-card__title">{route.name}</h2>
 
+      <div className="route-card__facts">
+        <span className="route-card__fact"><ClockCircleOutlined /> {meta.durationLabel}</span>
+        <span className="route-card__fact"><EnvironmentOutlined /> {meta.stopCount} 个站点</span>
+        <span className="route-card__fact route-card__fact--walk">{meta.walkIntensity}</span>
+      </div>
+
       <div className="route-card__tags">
         {route.tags.map((tag) => (
           <span key={tag} className="route-card__tag">{tag}</span>
@@ -120,6 +127,14 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
       </blockquote>
 
       <p className="route-card__desc">{route.description}</p>
+
+      {meta.highlights.length ? (
+        <ul className="route-card__highlights">
+          {meta.highlights.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
 
       <footer className="route-card__footer">
         <button className="btn-primary route-card__cta" onClick={onSelect}>

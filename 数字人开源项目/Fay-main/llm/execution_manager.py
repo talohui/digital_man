@@ -22,6 +22,58 @@ from utils import util
 import utils.config_util as cfg
 
 
+# ---------------------------------------------------------------------------
+# LLM 连接保活:每 ~45s 发一次极小请求(max_tokens=1),让百炼网关侧的
+# TCP/TLS 连接保持热态。长时间空闲后第一条问题的 TTFT 通常从 ~3s 降到 ~1.5s。
+# 失败静默重试,绝不影响主链路。
+# ---------------------------------------------------------------------------
+_KEEPALIVE_INTERVAL_SEC = 45
+_keepalive_started = False
+_keepalive_lock = threading.Lock()
+
+
+def _llm_keepalive_loop() -> None:
+    import requests  # 局部导入,避免影响主链路启动
+    session = requests.Session()
+    while True:
+        try:
+            time.sleep(_KEEPALIVE_INTERVAL_SEC)
+            cfg.load_config()
+            base_url = (cfg.gpt_base_url or "").rstrip("/")
+            api_key = cfg.key_gpt_api_key
+            model = cfg.gpt_model_engine
+            if not base_url or not api_key or not model:
+                continue
+            session.post(
+                f"{base_url}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "."}],
+                    "max_tokens": 1,
+                    "stream": False
+                },
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=(5, 10)
+            )
+            # 不读 body 不解析,保活成功即可
+        except Exception:
+            pass  # 网络抖动忽略,下一轮再试
+
+
+def _start_llm_keepalive_once() -> None:
+    global _keepalive_started
+    with _keepalive_lock:
+        if _keepalive_started:
+            return
+        _keepalive_started = True
+    t = threading.Thread(target=_llm_keepalive_loop, daemon=True, name="llm-keepalive")
+    t.start()
+    util.log(1, "[LLM保活] 后台连接保活线程已启动,间隔 45s")
+
+
 class ExecutionStatus(enum.Enum):
     IDLE = "idle"
     RUNNING = "running"
@@ -175,6 +227,7 @@ def _get_llm_instance(role: str = "small", streaming: bool = True) -> ChatOpenAI
     role="big"  → 优先用 system.conf 中的 big_model_* 配置，无配置时降级为小模型
     role="small" → 使用 system.conf 中的 gpt_* 配置
     """
+    _start_llm_keepalive_once()
     cfg.load_config()
 
     if role == "big":

@@ -228,6 +228,8 @@ type DashboardData = {
   official: OfficialBehavior
 }
 
+type OpportunityLevel = 'warning' | 'info'
+
 const officialDisclaimer = '该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。'
 
 const emptyVisitorBehavior: VisitorBehaviorDashboard = {
@@ -413,6 +415,19 @@ function formatMoney(value: number) {
   return `¥${new Intl.NumberFormat('zh-CN').format(Math.round(value || 0))}`
 }
 
+// 响应时长统一格式化，避免超长/异常毫秒数（如时间戳级 latency）撑破卡片
+// <1000ms → “xxx ms”；1s–60s → “x.x s”；>60s 或异常值 → “异常”
+function formatLatency(ms: number) {
+  const value = Math.max(0, Math.round(ms || 0))
+  if (!Number.isFinite(value)) return '异常'
+  if (value < 1000) return `${value} ms`
+  if (value <= 60000) return `${(value / 1000).toFixed(1)} s`
+  return '异常'
+}
+
+// P90 响应时长“需关注”阈值（毫秒），全局统一口径
+const LATENCY_ATTENTION_MS = 3000
+
 function asLongBar<T extends Record<string, unknown>>(data: T[], xField: keyof T, yField: keyof T) {
   return {
     data,
@@ -444,6 +459,16 @@ const Panel = ({ title, extra, children, minHeight }: { title: string; extra?: R
   >
     {children}
   </Card>
+)
+
+const SectionHeading = ({ eyebrow, title, note }: { eyebrow: string; title: string; note?: string }) => (
+  <div style={{ margin: '18px 0 10px' }}>
+    <Text style={{ color: palette.gold, letterSpacing: 0, fontWeight: 700, fontSize: 12 }}>{eyebrow}</Text>
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+      <Title level={4} style={{ color: palette.text, margin: '2px 0 0', fontSize: 18 }}>{title}</Title>
+      {note ? <Text style={{ color: palette.muted, fontSize: 12 }}>{note}</Text> : null}
+    </div>
+  </div>
 )
 
 const MetricCard = ({ title, value, suffix, icon, tone = palette.text }: { title: string; value: number | string; suffix?: string; icon: React.ReactNode; tone?: string }) => (
@@ -557,6 +582,61 @@ function AdminDashboard() {
     { hour: row.hour?.slice(-5) || row.hour, value: row.neutral, type: '中性' },
   ]), [data.sentimentTrend])
 
+  // 运营机会清单：把已有真实指标规则化成“运营该做什么”，不引入新数据源、不伪造实时。
+  const opportunities = useMemo<Array<{ level: OpportunityLevel; title: string; action: string }>>(() => {
+    const items: Array<{ level: OpportunityLevel; title: string; action: string }> = []
+
+    // 1) 推荐点击率偏低
+    const ctrPct = Math.round((data.recommendation.ctr || 0) * 100)
+    if (data.recommendation.exposureCount > 0 && data.recommendation.ctr < 0.1) {
+      items.push({
+        level: 'warning',
+        title: `首页推荐点击率偏低（${ctrPct}%）`,
+        action: '建议优化推荐卡文案与排序，突出适合人群与亮点。',
+      })
+    }
+
+    // 2) 回复延迟偏高
+    if (data.service.p90LatencyMs > LATENCY_ATTENTION_MS) {
+      items.push({
+        level: 'warning',
+        title: `回复延迟偏高（P90 ${formatLatency(data.service.p90LatencyMs)}）`,
+        action: '关注「慢回复监控」，排查高延迟会话与知识库召回耗时。',
+      })
+    }
+
+    // 3) 低满意路线/景点
+    data.behavior.lowSatisfactionItems.slice(0, 2).forEach((item) => {
+      items.push({
+        level: 'warning',
+        title: `${item.name} 满意度偏低`,
+        action: `${item.reason || '建议复核讲解内容与现场体验'}。`,
+      })
+    })
+
+    // 4) 停留时间最长的景点 —— 提示加强消费/导购引导（用真实停留排行，不伪造）
+    const topDwell = data.visitorBehavior.attractions.dwellRanking?.[0]
+    if (topDwell?.name) {
+      items.push({
+        level: 'info',
+        title: `${topDwell.name} 游客停留时间最长`,
+        action: '可在此点位增加消费/导购与拍照引导，提升停留转化。',
+      })
+    }
+
+    // 5) 高频问题 —— 提示补充知识库/快捷入口
+    const topQuestion = data.chat.topQuestions?.[0]
+    if (topQuestion?.question) {
+      items.push({
+        level: 'info',
+        title: `高频问题：${topQuestion.question}`,
+        action: '可补充对应知识库内容或设置首页快捷入口。',
+      })
+    }
+
+    return items
+  }, [data.recommendation, data.service, data.behavior.lowSatisfactionItems, data.visitorBehavior.attractions.dwellRanking, data.chat.topQuestions])
+
   const spotFeedbackBars = data.behavior.spotFeedback.map((item) => ({ name: item.name, value: item.likes - item.dislikes }))
   const visitorAgeBars = data.visitorBehavior.demographics.ageBands.map((item) => ({ name: item.label, value: item.count }))
   const visitorGroupBars = data.visitorBehavior.demographics.groupSizeDistribution.map((item) => ({ name: item.label, value: item.count }))
@@ -578,23 +658,58 @@ function AdminDashboard() {
           </div>
         </header>
 
+        <SectionHeading eyebrow="REAL-TIME OVERVIEW" title="实时态势" note="近 24 小时小程序与数字人实时采集" />
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
           <Col span={4}><MetricCard title="近24h对话" value={data.overview.totalMessages} icon={<MessageOutlined />} tone={palette.cyan} /></Col>
           <Col span={4}><MetricCard title="实时活跃" value={data.overview.activeSessions5min} icon={<FireOutlined />} tone="#ffb86b" /></Col>
           <Col span={4}><MetricCard title="正面情绪率" value={formatPct(data.overview.positiveRatio)} suffix="%" icon={<SmileOutlined />} tone={palette.green} /></Col>
-          <Col span={4}><MetricCard title="P90 响应" value={data.overview.p90LatencyMs} suffix="ms" icon={<ClockCircleOutlined />} tone={data.overview.p90LatencyMs > 5000 ? palette.red : palette.gold} /></Col>
+          <Col span={4}><MetricCard title="P90 响应" value={formatLatency(data.overview.p90LatencyMs)} icon={<ClockCircleOutlined />} tone={data.overview.p90LatencyMs > LATENCY_ATTENTION_MS ? palette.red : palette.gold} /></Col>
           <Col span={4}><MetricCard title="语音使用" value={data.overview.voiceUseCount} icon={<AudioOutlined />} tone="#b69cff" /></Col>
           <Col span={4}><MetricCard title="评分反馈" value={data.overview.feedbackCount} icon={<LikeOutlined />} tone={palette.green} /></Col>
         </Row>
 
+        <SectionHeading eyebrow="OPERATION OPPORTUNITIES" title="今天该处理什么？" note="基于实时指标自动梳理的运营机会与待办，按真实数据触发" />
+        <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+          <Col span={24}>
+            <Panel title="运营机会清单" extra={<Tag color={opportunities.some((o) => o.level === 'warning') ? 'warning' : 'success'}>{opportunities.length ? `${opportunities.length} 项待办` : '运行正常'}</Tag>}>
+              {opportunities.length ? (
+                <Row gutter={[12, 12]}>
+                  {opportunities.map((item, index) => (
+                    <Col span={8} key={`${item.title}-${index}`}>
+                      <div style={{
+                        height: '100%',
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        background: '#0d1a2f',
+                        borderLeft: `3px solid ${item.level === 'warning' ? palette.red : palette.cyan}`,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <Tag color={item.level === 'warning' ? 'error' : 'processing'} style={{ marginInlineEnd: 0 }}>
+                            {item.level === 'warning' ? '需关注' : '机会'}
+                          </Tag>
+                          <Text style={{ color: palette.text, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</Text>
+                        </div>
+                        <Text style={{ color: palette.muted, fontSize: 12, lineHeight: 1.6 }}>{item.action}</Text>
+                      </div>
+                    </Col>
+                  ))}
+                </Row>
+              ) : (
+                <EmptyState text="当前各项指标正常，暂无需要处理的运营事项" />
+              )}
+            </Panel>
+          </Col>
+        </Row>
+
+        <SectionHeading eyebrow="CHAT & SERVICE INSIGHTS" title="聊天洞察与服务质量" note="基于实时问答日志，反映小灵的回答质量与游客情绪" />
         <Row gutter={[12, 12]}>
           <Col span={6}>
             <div style={{ display: 'grid', gap: 12 }}>
-              <Panel title="AI 服务质量" minHeight={288} extra={<Tag color={data.service.p90LatencyMs > 5000 ? 'error' : 'success'}>{data.service.p90LatencyMs > 5000 ? '需关注' : '稳定'}</Tag>}>
+              <Panel title="AI 服务质量" minHeight={288} extra={<Tag color={data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? 'error' : 'success'}>{data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? '需关注' : '稳定'}</Tag>}>
                 <Row gutter={[8, 14]}>
-                  <Col span={8}><Statistic title="P50" value={data.service.p50LatencyMs} suffix="ms" valueStyle={{ color: palette.text, fontSize: 22 }} /></Col>
-                  <Col span={8}><Statistic title="P90" value={data.service.p90LatencyMs} suffix="ms" valueStyle={{ color: palette.gold, fontSize: 22 }} /></Col>
-                  <Col span={8}><Statistic title="MAX" value={data.service.maxLatencyMs} suffix="ms" valueStyle={{ color: palette.red, fontSize: 22 }} /></Col>
+                  <Col span={8}><Statistic title="P50" value={formatLatency(data.service.p50LatencyMs)} valueStyle={{ color: palette.text, fontSize: 22 }} /></Col>
+                  <Col span={8}><Statistic title="P90" value={formatLatency(data.service.p90LatencyMs)} valueStyle={{ color: palette.gold, fontSize: 22 }} /></Col>
+                  <Col span={8}><Statistic title="MAX" value={formatLatency(data.service.maxLatencyMs)} valueStyle={{ color: palette.red, fontSize: 22 }} /></Col>
                 </Row>
                 <div style={{ marginTop: 18 }}>
                   <Text style={{ color: palette.muted }}>语音完成率</Text>
@@ -672,12 +787,20 @@ function AdminDashboard() {
           </Col>
         </Row>
 
-        <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
+        <SectionHeading eyebrow="RECOMMENDATION & OPS MONITOR" title="推荐与运营监控" note="推荐曝光点击、低满意风险与慢回复实时告警" />
+        <Row gutter={[12, 12]} style={{ marginTop: 0 }}>
           <Col span={6}>
-            <Panel title="推荐效果" minHeight={190} extra={<Tag color="cyan">{Math.round(data.recommendation.ctr * 100)}% CTR</Tag>}>
-              <div style={{ display: 'flex', gap: 18, marginBottom: 10 }}>
+            <Panel title="推荐效果" minHeight={190} extra={<Tag color={data.recommendation.ctr > 0 ? (data.recommendation.ctr < 0.1 ? 'orange' : 'cyan') : 'default'}>{Math.round(data.recommendation.ctr * 100)}% CTR</Tag>}>
+              <div style={{ display: 'flex', gap: 18, marginBottom: 8 }}>
                 <Statistic title="曝光" value={data.recommendation.exposureCount} valueStyle={{ color: palette.cyan, fontSize: 20 }} />
                 <Statistic title="点击" value={data.recommendation.clickCount} valueStyle={{ color: palette.green, fontSize: 20 }} />
+              </div>
+              <div style={{ marginBottom: 10, fontSize: 12, color: palette.muted }}>
+                {data.recommendation.exposureCount === 0
+                  ? '首页推荐卡片展示后会产生曝光数据'
+                  : data.recommendation.ctr < 0.1
+                    ? '点击率偏低，建议优化推荐文案与排序'
+                    : '点击率表现正常，推荐链路健康'}
               </div>
               <div style={{ marginBottom: 10 }}>
                 {data.recommendation.engineDistribution.length ? (
@@ -714,9 +837,9 @@ function AdminDashboard() {
               {data.service.recentSlowReplies.length ? (
                 <div style={{ display: 'grid', gap: 8 }}>
                   {data.service.recentSlowReplies.map((item, index) => (
-                    <div key={index} style={{ display: 'flex', justifyContent: 'space-between', color: palette.text }}>
-                      <span>{dayjs(item.timestamp).format('HH:mm:ss')} · {item.sessionId}</span>
-                      <span style={{ color: palette.red }}>{item.latencyMs}ms</span>
+                    <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: palette.text }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dayjs(item.timestamp).format('HH:mm:ss')} · {item.sessionId}</span>
+                      <span style={{ flex: '0 0 auto', color: palette.red }}>{formatLatency(item.latencyMs)}</span>
                     </div>
                   ))}
                 </div>

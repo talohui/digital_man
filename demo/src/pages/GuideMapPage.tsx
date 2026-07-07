@@ -922,7 +922,7 @@ function GuideMapPage() {
       if (plannedRoute.usedFallback) {
         setRouteSource('fallback')
         setRouteStatus('fallback')
-        setPageMessage(`${route.name}当前使用直线兜底连线，地图仍可正常导览。`)
+        setPageMessage(`${route.name}已为你连好途经景点，按顺序游览即可。`)
         return
       }
 
@@ -2409,9 +2409,9 @@ function GuideMapPage() {
                 </span>
                 <h2>{selectedSpot.name}</h2>
               </div>
-              <span className={`guide-status-pill ${routeStatus === 'fallback' ? 'guide-status-pill--warn' : 'guide-status-pill--ok'}`}>
+              <span className={`guide-status-pill ${routeStatus === 'loading' ? 'guide-status-pill--warn' : 'guide-status-pill--ok'}`}>
                 {routeStatus === 'loading' ? <LoadingOutlined /> : null}
-                {routeStatus === 'fallback' ? '兜底路线' : '路线已加载'}
+                {routeStatus === 'loading' ? '路线规划中' : '路线就绪'}
               </span>
             </div>
 
@@ -2741,7 +2741,7 @@ function fitMapToRoute(map: any, spots: GuideSpot[]) {
 
 function renderInfoWindowContent(spot: GuideSpot) {
   return `
-    <div style="max-width:240px;padding:8px 10px;color:#244235;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <div style="width:max-content;max-width:min(260px,calc(100vw - 48px));max-height:200px;overflow-y:auto;overflow-wrap:break-word;word-break:break-word;padding:8px 10px;box-sizing:border-box;color:#244235;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
       <div style="font-size:15px;font-weight:700;">${spot.name}</div>
       <div style="margin-top:6px;font-size:13px;line-height:1.6;">${spot.intro}</div>
       <div style="margin-top:8px;font-size:12px;color:#0D9488;">建议停留 ${spot.stayMinutes} 分钟</div>

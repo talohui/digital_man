@@ -11,8 +11,8 @@ import type { Live2DLikeModel } from '../../lib/live2dManager'
 
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
-export const HARU_MODEL_URL =
-  'https://fastly.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json'
+// 本地化模型路径：随包发布到 demo/public/live2d/haru，后台预览与保存都走本机，不依赖公网 CDN。
+export const HARU_MODEL_URL = '/live2d/haru/haru_greeter_t03.model3.json'
 
 type Props = {
   costumeId?: CostumeId | string | null

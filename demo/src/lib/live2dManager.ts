@@ -11,6 +11,7 @@ export type Live2DLikeModel = {
     }
   }
   motion?: (group: string, index?: number, priority?: number) => void
+  expression?: (id?: string | number) => void
   textures?: unknown[]
 }
 
@@ -49,6 +50,7 @@ export function setMouthOpen(value: number, sceneId = 'main') {
 export type RobotState = 'normal' | 'speaking' | 'listening' | 'thinking'
 
 // 不同模型 motion group 名称不一致,这里给一个常见映射,匹配不到就忽略
+// 导游语义:thinking=查阅讲解资料 / speaking=讲解 / listening=倾听 / normal=待命
 const MOTION_GROUP_MAP: Record<RobotState, string[]> = {
   normal: ['Idle', 'idle'],
   speaking: ['TapBody', 'Tap', 'Speak', 'speaking'],
@@ -56,7 +58,29 @@ const MOTION_GROUP_MAP: Record<RobotState, string[]> = {
   thinking: ['Idle', 'idle']
 }
 
+// 表情映射(haru_greeter 提供 f00~f07):用表情区分导游不同状态,营造"会查资料、会讲解"的临场感。
+// 表情 ID 不存在时由 pixi-live2d-display 静默忽略,不阻断后续帧。
+const EXPRESSION_MAP: Record<RobotState, string> = {
+  normal: 'f00',
+  speaking: 'f01',
+  listening: 'f02',
+  thinking: 'f03'
+}
+
+export function playExpressionForState(state: RobotState, sceneId = 'main') {
+  const modelRef = getRegisteredModel(sceneId)
+  if (!modelRef || typeof modelRef.expression !== 'function') return
+  try {
+    modelRef.expression(EXPRESSION_MAP[state])
+  } catch {
+    // 表情 ID 不匹配时忽略
+  }
+}
+
 export function playMotionForState(state: RobotState, sceneId = 'main') {
+  // 表情与动作一并切换,让数字人状态在视觉上更明显
+  playExpressionForState(state, sceneId)
+
   const modelRef = getRegisteredModel(sceneId)
   if (!modelRef || typeof modelRef.motion !== 'function') return
   const candidates = MOTION_GROUP_MAP[state] ?? []

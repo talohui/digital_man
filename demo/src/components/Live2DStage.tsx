@@ -23,8 +23,9 @@ import { loadCubismCore } from '../lib/loadCubismCore'
 // pixi-live2d-display 0.4 通过全局 window.PIXI 访问 Pixi,必须在 import 之前注入
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
-const DEFAULT_MODEL_URL =
-  'https://fastly.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json'
+// 模型本地化：随包发布到 demo/public/live2d/haru，现场不再依赖公网 CDN，加载稳定。
+// 后台 avatar 配置若显式给了 live2dModelUrl 仍会覆盖此默认值。
+const DEFAULT_MODEL_URL = '/live2d/haru/haru_greeter_t03.model3.json'
 
 const highlights = [
   { title: '推荐路线', value: '1 日游', icon: <CompassOutlined /> },
@@ -36,7 +37,7 @@ const stateLabel: Record<RobotState, string> = {
   normal: '灵山小灵正在待命',
   speaking: '灵山小灵正在讲解',
   listening: '灵山小灵正在倾听',
-  thinking: '灵山小灵思考中'
+  thinking: '灵山小灵正在查阅讲解资料'
 }
 
 type StageHighlight = {
@@ -123,10 +124,12 @@ function Live2DStage({
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
         const cfg = await fetchPublicAvatarConfig()
-        const modelUrl =
-          typeof cfg?.live2dModelUrl === 'string' && cfg.live2dModelUrl
-            ? cfg.live2dModelUrl
-            : DEFAULT_MODEL_URL
+        const configuredUrl =
+          typeof cfg?.live2dModelUrl === 'string' ? cfg.live2dModelUrl.trim() : ''
+        // 历史配置可能仍指向公网 CDN（jsdelivr / githubusercontent），现场易超时白脸；
+        // 这类不可靠远程一律回退到本地随包模型，保证加载稳定。
+        const isUnreliableRemote = /jsdelivr\.net|githubusercontent\.com/i.test(configuredUrl)
+        const modelUrl = configuredUrl && !isUnreliableRemote ? configuredUrl : DEFAULT_MODEL_URL
         const costumeId = parseCostumeId(cfg?.costumeId)
         costumeIdRef.current = costumeId
 

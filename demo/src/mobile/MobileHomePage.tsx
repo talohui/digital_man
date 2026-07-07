@@ -1,10 +1,11 @@
-import { CompassOutlined, CreditCardOutlined, LoadingOutlined, MessageOutlined, RightOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, CompassOutlined, CreditCardOutlined, EnvironmentOutlined, LoadingOutlined, MessageOutlined, RightOutlined, ShoppingCartOutlined } from '@ant-design/icons'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
 import {
   GUIDE_TAGS,
   getGuideRouteById,
+  getRouteItineraryMeta,
   type GuideRecommendationCard
 } from '../data/guideData'
 import {
@@ -51,6 +52,8 @@ function MobileHomePage() {
   useEffect(() => {
     ensureUserId()
     setActiveScene(DEFAULT_SCENE_ID, null)
+    // 空闲帧预热 Live2D / ChatPanel / TMap,切 tab 秒开
+    void import('../lib/prefetch').then((m) => m.prefetchHeavyTabs())
   }, [ensureUserId, setActiveScene])
 
   useEffect(() => {
@@ -172,27 +175,42 @@ function MobileHomePage() {
         {lastError ? <p className="mobile-muted">推荐服务暂不可用，已使用本地路线规则。</p> : null}
       </section>
 
-      {mainRoute ? (
-        <section className="mobile-route-feature">
-          <div className="mobile-route-feature__top">
-            <div>
-              <span className="mobile-section-kicker">主推荐路线</span>
-              <h3>{mainRoute.name}</h3>
+      {mainRoute ? (() => {
+        const meta = getRouteItineraryMeta(mainRoute.id)
+        return (
+          <section className="mobile-route-feature">
+            <div className="mobile-route-feature__top">
+              <div>
+                <span className="mobile-section-kicker">主推荐路线</span>
+                <h3>{mainRoute.name}</h3>
+              </div>
+              <span>{scoreText(mainRoute)}</span>
             </div>
-            <span>{scoreText(mainRoute)}</span>
-          </div>
-          <p>{mainRoute.reason || mainRoute.whyRecommended || mainRoute.description}</p>
-          <div className="mobile-route-feature__tags">
-            {mainRoute.tags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-          <button className="mobile-primary-action" type="button" onClick={() => enterRoute(mainRoute.id)}>
-            开始导览
-            <RightOutlined />
-          </button>
-        </section>
-      ) : null}
+            <div className="mobile-route-feature__facts">
+              <div><ClockCircleOutlined /><span>{meta.durationLabel}</span></div>
+              <div><EnvironmentOutlined /><span>{meta.stopCount} 个站点</span></div>
+              <div><span className="mobile-route-feature__walk">{meta.walkIntensity}</span></div>
+            </div>
+            <p>{mainRoute.reason || mainRoute.whyRecommended || mainRoute.description}</p>
+            {meta.highlights.length ? (
+              <ul className="mobile-route-feature__highlights">
+                {meta.highlights.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mobile-route-feature__tags">
+              {mainRoute.tags.map((tag) => (
+                <span key={tag}>{tag}</span>
+              ))}
+            </div>
+            <button className="mobile-primary-action" type="button" onClick={() => enterRoute(mainRoute.id)}>
+              开始导览
+              <RightOutlined />
+            </button>
+          </section>
+        )
+      })() : null}
 
       <section className="mobile-home__routes">
         <div className="mobile-panel__head">
@@ -203,18 +221,21 @@ function MobileHomePage() {
           <CompassOutlined />
         </div>
         <div className="mobile-route-scroll">
-          {secondaryRoutes.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="mobile-route-card"
-              onClick={() => enterRoute(item.id)}
-            >
-              <strong>{item.name}</strong>
-              <span>{item.durationLabel}</span>
-              <p>{item.reason || item.description}</p>
-            </button>
-          ))}
+          {secondaryRoutes.map((item) => {
+            const meta = getRouteItineraryMeta(item.id)
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="mobile-route-card"
+                onClick={() => enterRoute(item.id)}
+              >
+                <strong>{item.name}</strong>
+                <span>{item.durationLabel} · {meta.stopCount} 站 · {meta.walkIntensity}</span>
+                <p>{item.reason || item.description}</p>
+              </button>
+            )
+          })}
         </div>
       </section>
 

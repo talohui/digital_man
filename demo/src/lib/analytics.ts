@@ -8,6 +8,7 @@
  * 情感分析在 analytics-server 后端完成，前端只需把 content_text 一并发过去。
  */
 
+import type { PostHog } from 'posthog-js'
 import { useGuideStore } from '../store/useGuideStore'
 import type { GuideRecommendationCard } from '../data/guideData'
 import { getAnalyticsApiBase } from './runtimeConfig'
@@ -19,8 +20,40 @@ import type { PurchaseRecord, TicketProfile } from '../store/useTicketStore'
 export const POSTHOG_KEY: string = (import.meta.env.VITE_POSTHOG_KEY as string) ?? ''
 export const POSTHOG_HOST = 'https://app.posthog.com'
 const ANALYTICS_URL = `${getAnalyticsApiBase()}/events`
-let posthogClientPromise: Promise<typeof import('posthog-js').default> | null = null
-let posthogInitialized = false
+
+// ---- PostHog 懒加载:首屏不背 180kB 包,空闲帧再加载;期间事件先入队后回放 ----
+let _phInstance: PostHog | null = null
+let _phLoading = false
+const _phQueue: Array<[string, Record<string, unknown>]> = []
+
+/** 在浏览器空闲帧动态 import posthog-js 并 init,完成后回放队列 */
+export function initPostHogIdle(): void {
+  if (!POSTHOG_KEY || _phLoading || _phInstance) return
+  _phLoading = true
+  const schedule =
+    typeof (globalThis as any).requestIdleCallback === 'function'
+      ? (cb: () => void) => (globalThis as any).requestIdleCallback(cb, { timeout: 4000 })
+      : (cb: () => void) => setTimeout(cb, 1500)
+  schedule(async () => {
+    try {
+      const mod = await import('posthog-js')
+      const ph = (mod as any).default ?? (mod as any).posthog ?? mod
+      ph.init(POSTHOG_KEY, {
+        api_host: POSTHOG_HOST,
+        capture_pageview: true,
+        capture_pageleave: true,
+        autocapture: false,
+        persistence: 'localStorage'
+      })
+      _phInstance = ph
+      for (const [name, props] of _phQueue.splice(0)) {
+        try { ph.capture(name, props) } catch { /* noop */ }
+      }
+    } catch {
+      _phLoading = false
+    }
+  })
+}
 
 // ---- 事件名常量 ----
 export const EVENT = {
@@ -64,43 +97,20 @@ function pushToServer(eventName: string, properties: Record<string, unknown>): v
   }).catch(() => {/* analytics-server 未启动时静默忽略 */})
 }
 
-function getPosthogClient() {
-  if (!POSTHOG_KEY) {
-    return null
-  }
-
-  posthogClientPromise ??= import('posthog-js').then(({ default: posthog }) => {
-    if (!posthogInitialized) {
-      posthog.init(POSTHOG_KEY, {
-        api_host: POSTHOG_HOST,
-        capture_pageview: true,
-        capture_pageleave: true,
-        autocapture: false,
-        persistence: 'localStorage',
-      })
-      posthogInitialized = true
-    }
-
-    return posthog
-  })
-
-  return posthogClientPromise
-}
-
 export function initPosthog(): void {
-  void getPosthogClient()
+  initPostHogIdle()
 }
 
 // ---- 公开：capture ----
 export function capture(eventName: string, properties: Record<string, unknown> = {}): void {
-  // PostHog（Key 非空时才启用）
-  const posthogClient = getPosthogClient()
-  if (posthogClient) {
-    void posthogClient
-      .then((posthog) => {
-        posthog.capture(eventName, properties)
-      })
-      .catch(() => {/* PostHog 加载失败时静默跳过 */})
+  // PostHog(Key 非空时才启用,SDK 未就绪先入队)
+  if (POSTHOG_KEY) {
+    if (_phInstance) {
+      try { _phInstance.capture(eventName, properties) } catch { /* noop */ }
+    } else {
+      _phQueue.push([eventName, properties])
+      if (!_phLoading) initPostHogIdle()
+    }
   }
   // 本地 analytics-server
   pushToServer(eventName, properties)

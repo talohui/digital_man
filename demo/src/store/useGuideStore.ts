@@ -18,6 +18,9 @@ type GuideState = {
   userProfile: UserProfileSnapshot | null
   activeRouteId: string
   selectedSpotId: string
+  // 轻量当日轨迹：已到达 / 已听讲解的站点（仅用于行程回顾展示，不参与推荐计算）
+  visitedStops: string[]
+  listenedStops: string[]
   isLoading: boolean
   lastError: string
   ensureUserId: () => string
@@ -26,6 +29,8 @@ type GuideState = {
   refreshRecommendations: () => Promise<void>
   setActiveRouteId: (routeId: string) => void
   setSelectedSpotId: (spotId: string) => void
+  markStopVisited: (spotId: string) => void
+  markStopListened: (spotId: string) => void
 }
 
 function createGuestUserId() {
@@ -49,6 +54,8 @@ export const useGuideStore = create<GuideState>()(
       userProfile: null,
       activeRouteId: defaultRouteId,
       selectedSpotId: getDefaultSpotId(defaultRouteId),
+      visitedStops: [],
+      listenedStops: [],
       isLoading: false,
       lastError: '',
       ensureUserId: () => {
@@ -122,7 +129,19 @@ export const useGuideStore = create<GuideState>()(
           selectedSpotId: getDefaultSpotId(route.id)
         })
       },
-      setSelectedSpotId: (spotId) => set({ selectedSpotId: spotId })
+      setSelectedSpotId: (spotId) => set({ selectedSpotId: spotId }),
+      markStopVisited: (spotId) =>
+        set((state) =>
+          !spotId || state.visitedStops.includes(spotId)
+            ? state
+            : { visitedStops: [...state.visitedStops, spotId] }
+        ),
+      markStopListened: (spotId) =>
+        set((state) =>
+          !spotId || state.listenedStops.includes(spotId)
+            ? state
+            : { listenedStops: [...state.listenedStops, spotId] }
+        )
     }),
     {
       name: 'lingshan-guide-store',
@@ -133,7 +152,9 @@ export const useGuideStore = create<GuideState>()(
         candidateRoutes: state.candidateRoutes,
         userProfile: state.userProfile,
         activeRouteId: state.activeRouteId,
-        selectedSpotId: state.selectedSpotId
+        selectedSpotId: state.selectedSpotId,
+        visitedStops: state.visitedStops,
+        listenedStops: state.listenedStops
       })
     }
   )
