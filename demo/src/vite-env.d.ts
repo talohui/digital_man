@@ -3,6 +3,7 @@
 interface Window {
   TMap?: any
   __tmapLoader?: Promise<any>
+  __tmapScriptLoader?: Promise<any>
 }
 
 interface ImportMetaEnv {

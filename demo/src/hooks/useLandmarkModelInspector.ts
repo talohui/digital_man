@@ -15,6 +15,8 @@ import type { LatLngPoint } from '../data/guideData'
 import type { Map3DPerfRecorder } from '../lib/map3dPerf'
 
 export const LANDMARK_CALIBRATION_DRAFT_STORAGE_KEY = 'lingshan_landmark_calibration_draft_v1'
+const LANDMARK_MODEL_READY_RETRY_MS = 500
+const LANDMARK_MODEL_READY_MAX_RETRIES = 12
 
 export type LandmarkInspectorStatus = 'idle' | 'loading' | 'loaded' | 'failed' | 'unloaded'
 
@@ -186,6 +188,8 @@ export function useLandmarkModelInspector({
   const companionVersionsRef = useRef<Map<string, number>>(new Map())
   const calibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
   const companionCalibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
+  const landmarkReadyRetryTimersRef = useRef<Map<string, number>>(new Map())
+  const landmarkReadyRetryCountsRef = useRef<Map<string, number>>(new Map())
   const overlayLookup = useMemo(() => buildOverlayLookup(overlays), [overlays])
   const [state, setState] = useState<LandmarkInspectorState>(() => buildInitialState(overlays))
   const [companionState, setCompanionState] = useState<LandmarkCompanionInspectorState>(() =>
@@ -212,6 +216,8 @@ export function useLandmarkModelInspector({
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
       clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
+      clearCalibrationTimers(landmarkReadyRetryTimersRef.current)
+      landmarkReadyRetryCountsRef.current.clear()
       return
     }
 
@@ -327,6 +333,8 @@ export function useLandmarkModelInspector({
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
       clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
+      clearCalibrationTimers(landmarkReadyRetryTimersRef.current)
+      landmarkReadyRetryCountsRef.current.clear()
     }
   }, [])
 
@@ -876,14 +884,46 @@ export function useLandmarkModelInspector({
       calibration?: LandmarkCalibrationValues
     }
   ) => {
-    if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
+    if (!active || !mapReady || !window.TMap || !map) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
-        error: '地图或 GLTFModel 尚未就绪'
+        error: '地图尚未就绪'
       }))
       return false
     }
+
+    if (!window.TMap.model?.GLTFModel) {
+      const retryCount = landmarkReadyRetryCountsRef.current.get(id) ?? 0
+
+      if (retryCount < LANDMARK_MODEL_READY_MAX_RETRIES) {
+        if (!landmarkReadyRetryTimersRef.current.has(id)) {
+          landmarkReadyRetryCountsRef.current.set(id, retryCount + 1)
+          const timer = window.setTimeout(() => {
+            landmarkReadyRetryTimersRef.current.delete(id)
+            createLandmarkModel(id, options)
+          }, LANDMARK_MODEL_READY_RETRY_MS)
+          landmarkReadyRetryTimersRef.current.set(id, timer)
+        }
+
+        updateItemState(id, (current) => ({
+          ...current,
+          status: 'loading',
+          error: '等待 GLTFModel 扩展就绪'
+        }))
+        return false
+      }
+
+      updateItemState(id, (current) => ({
+        ...current,
+        status: 'failed',
+        error: 'GLTFModel 扩展加载超时'
+      }))
+      return false
+    }
+
+    clearCalibrationTimer(landmarkReadyRetryTimersRef.current, id)
+    landmarkReadyRetryCountsRef.current.delete(id)
 
     const overlay = overlayLookup.get(id)
     const variantInfo = overlay ? resolveVariantInfo(id, overlay, selectedVariants[id]) : undefined
@@ -1325,15 +1365,18 @@ export function useLandmarkModelInspector({
 
 function resolveVariantInfo(id: string, overlay: LingshanMapModelOverlay, selected?: LandmarkModelVariant) {
   const candidates = getLandmarkOptimizedModelCandidates(id)
-  const fallbackRaw: LandmarkOptimizedModelCandidate = {
-    variant: 'raw',
+  // 正式 runtime 永远以 overlays 配置的 modelUrl 为准;candidates 只服务 debug 面板切换对比。
+  // overlay.modelUrl 不在 candidates 里时合成 formal 候选兜底,
+  // 不能回退 raw:raw 大文件本地缺失时 dev 会拿到 HTML fallback,整个地标静默不渲染。
+  const formalFromList = candidates.find((candidate) => candidate.modelUrl === overlay.modelUrl)
+  const formalCandidate: LandmarkOptimizedModelCandidate = formalFromList ?? {
+    variant: 'formal',
     modelUrl: overlay.modelUrl ?? '',
     sizeLabel: overlay.fileSizeLabel ?? 'size ?'
   }
-  const allCandidates = candidates.length ? candidates : [fallbackRaw]
-  const formalCandidate = allCandidates.find((candidate) => candidate.modelUrl === overlay.modelUrl)
-  const variant = selected ?? formalCandidate?.variant ?? 'raw'
-  const selectedCandidate = allCandidates.find((candidate) => candidate.variant === variant) ?? formalCandidate ?? allCandidates[0] ?? fallbackRaw
+  const allCandidates = formalFromList ? candidates : [formalCandidate, ...candidates]
+  const variant = selected ?? formalCandidate.variant
+  const selectedCandidate = allCandidates.find((candidate) => candidate.variant === variant) ?? formalCandidate
 
   return {
     variant: selectedCandidate.variant,

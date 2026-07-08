@@ -22,7 +22,9 @@ public class DashboardController {
     }
 
     @GetMapping("/overview")
-    public Map<String, Object> overview() { return service.overview(); }
+    public Map<String, Object> overview(@RequestParam(defaultValue = "5") int activeWindowMinutes) {
+        return service.overview(activeWindowMinutes);
+    }
 
     @GetMapping("/chat-insights")
     public Map<String, Object> chatInsights() { return service.chatInsights(); }
@@ -51,5 +53,7 @@ public class DashboardController {
     public Map<String, Object> recommendation() { return service.recommendation(); }
 
     @GetMapping("/realtime")
-    public Map<String, Object> realtime() { return service.realtime(); }
+    public Map<String, Object> realtime(@RequestParam(defaultValue = "5") int activeWindowMinutes) {
+        return service.realtime(activeWindowMinutes);
+    }
 }

@@ -3,7 +3,7 @@ export type Map3DPerfStage = 'mapInit' | 'routeDraw' | 'poiInit'
 
 export type Map3DPerfAssetStatus = 'loaded' | 'failed' | 'pending' | 'unloaded'
 export type Map3DPerfAssetCategory = 'garden' | 'landmark'
-export type Map3DPerfLandmarkVariant = 'raw' | 'safe-v1' | 'safe-v2'
+export type Map3DPerfLandmarkVariant = 'raw' | 'safe-v1' | 'safe-v2' | 'lite-v1' | 'formal'
 
 export type Map3DPerfBatchSnapshot = {
   batchIndex: number

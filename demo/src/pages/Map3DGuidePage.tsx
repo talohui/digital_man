@@ -263,6 +263,10 @@ const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
   features: ['base', 'building3d', 'label']
 } as const
+// 移动端起手视角:总览(overviewEstate, zoom 16.85)会一次性拉取整个景区的 building3d
+// 瓦片,手机外网 + GPU 扛不住,导致建筑出现很慢。移动端改为适度拉近,大幅减少初始可视
+// 瓦片量,建筑更快出现;真·广角总览改由用户点「总览」按钮按需触发。
+const MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM = 18
 const MAP_3D_GUIDE_LOCAL_TMAP_HOST = '127.0.0.1'
 const MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST = 'localhost'
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
@@ -595,6 +599,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const shouldRedirectLocalTMapHost = useMemo(() => shouldUseCanonicalLocalhostForTMap(), [])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const landmarkModelOverlays = useMemo(() => {
+    // 地标 GLB 采用高清核心地标 + 轻量远景资产的混合配置;
+    // 树木资产(869 个)仍在移动端关闭,二者互不相干。
     const overlays = getVisibleMapModelOverlays()
 
     if (!debugGarden) {
@@ -868,9 +874,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   )
   const runtimeGardenOverlayAssets = useMemo(
     () =>
-      isMobileViewport && visualVariant.id === 'prototype-c'
-        ? selectMobileGardenOverlayAssets(overlayGardenAssets)
-        : overlayGardenAssets,
+      // 移动端先彻底关闭园林树木资产，只保留腾讯原生 3D 建筑，验证基础底图是否卡顿。
+      // 桌面保持满密度；如需移动端少量树木，改回 selectMobileGardenOverlayAssets(overlayGardenAssets)。
+      isMobileViewport && visualVariant.id === 'prototype-c' ? [] : overlayGardenAssets,
     [isMobileViewport, overlayGardenAssets, visualVariant.id]
   )
   const liveDefaultGardenOverlayCount = defaultGardenHidden ? 0 : gardenAssets.filter((asset) => asset.visible).length
@@ -1254,7 +1260,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }, MAP_3D_GUIDE_SLOW_READY_MS)
 
       try {
-        const TMap = await loadTMap()
+        // 移动端导览图不使用热力图/3D 模型(树木已关),核心 SDK 就绪即建图,
+        // 不再被 visualization 热力扩展库的加载阻塞,显著缩短首屏白屏。
+        // 桌面保持等待扩展库就绪,确保园林树木所需的 model.GLTFModel 可用。
+        const TMap = await loadTMap({ waitFor: isMobileViewport ? 'core' : 'heat' })
         perfRecorder.recordMapVisualEvent({
           type: 'tmapScriptLoaded',
           reason: 'loadTMap'
@@ -1268,7 +1277,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(routeCenter.lat, routeCenter.lng),
-          zoom: SCENIC_CAMERA_BOUNDS.defaultZoom,
+          zoom: isMobileViewport ? MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM : SCENIC_CAMERA_BOUNDS.defaultZoom,
           minZoom: SCENIC_CAMERA_BOUNDS.minZoom,
           maxZoom: SCENIC_CAMERA_BOUNDS.maxZoom,
           pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
@@ -1416,7 +1425,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     entryCameraPlayedRef.current = true
     setActiveCameraMode('overviewEstate')
-    moveMapCamera(routeCenter, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
+    // 移动端入场停在近景(同 building3d 瓦片更少),不拉到 16.85 全景广角;
+    // 用户随时可点「总览」拉到真广角。桌面维持原总览入场。
+    const entryPreset = isMobileViewport
+      ? { ...MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate, zoom: MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM }
+      : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
+    moveMapCamera(routeCenter, entryPreset)
   }, [debugGarden, mapStatus])
 
   useEffect(() => {

@@ -5,7 +5,7 @@
 // raw is kept for local debug/rollback comparison, and safe-v1 is kept only where earlier trial files exist.
 // Draco candidates are intentionally excluded because current manual Tencent GLTFModel testing cannot open them.
 
-export type LandmarkModelVariant = 'raw' | 'safe-v1' | 'safe-v2'
+export type LandmarkModelVariant = 'raw' | 'safe-v1' | 'safe-v2' | 'lite-v1' | 'formal'
 
 export type LandmarkOptimizedModelCandidate = {
   variant: LandmarkModelVariant
@@ -24,6 +24,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/lingshan-buddha-v2.safe-v2.glb',
       sizeLabel: '14.57 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/lingshan-buddha-v2.lite-v1.glb',
+      sizeLabel: '530 KB'
     }
   ],
   baizi_mile: [
@@ -36,6 +41,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/baizi-milefo.safe-v2.glb',
       sizeLabel: '21.90 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/baizi-milefo.lite-v1.glb',
+      sizeLabel: '858 KB'
     }
   ],
   foshou_square: [
@@ -48,6 +58,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/buddha-hand-plaza.safe-v2.glb',
       sizeLabel: '30.04 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/buddha-hand-plaza.lite-v1.glb',
+      sizeLabel: '1.16 MB'
     }
   ],
   shengjing_square: [
@@ -60,6 +75,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/shengjing-plaza.safe-v2.glb',
       sizeLabel: '20.90 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/shengjing-plaza.lite-v1.glb',
+      sizeLabel: '908 KB'
     }
   ],
   sansheng_hall: [
@@ -72,6 +92,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/sansheng-hall.safe-v2.glb',
       sizeLabel: '107.75 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/sansheng-hall.lite-v1.glb',
+      sizeLabel: '1.80 MB'
     }
   ],
   xiangfu_temple: [
@@ -84,6 +109,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/xiangfu-temple.safe-v2.glb',
       sizeLabel: '108.73 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/xiangfu-temple.lite-v1.glb',
+      sizeLabel: '1.81 MB'
     }
   ],
   manlong_flying_tower: [
@@ -96,6 +126,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/manlong-flying-tower.safe-v2.glb',
       sizeLabel: '58.97 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/manlong-flying-tower.lite-v1.glb',
+      sizeLabel: '2.53 MB'
     }
   ],
   foqian_square: [
@@ -108,6 +143,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/buddha-front-plaza.safe-v2.glb',
       sizeLabel: '16.80 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/buddha-front-plaza.lite-v1.glb',
+      sizeLabel: '718 KB'
     }
   ],
   wuyin_tancheng: [
@@ -125,6 +165,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/wuyin-mandala.safe-v2.glb',
       sizeLabel: '16.53 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/wuyin-mandala.lite-v1.glb',
+      sizeLabel: '812 KB'
     }
   ],
   fan_gong: [
@@ -142,6 +187,11 @@ const lingshanOptimizedModelCandidates: Record<string, LandmarkOptimizedModelCan
       variant: 'safe-v2',
       modelUrl: '/models/lingshan/optimized/fan-gong.safe-v2.glb',
       sizeLabel: '43.86 MB'
+    },
+    {
+      variant: 'lite-v1',
+      modelUrl: '/models/lingshan/optimized-min/fan-gong.lite-v1.glb',
+      sizeLabel: '989 KB'
     }
   ]
 }
