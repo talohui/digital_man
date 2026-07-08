@@ -97,6 +97,10 @@ function pushToServer(eventName: string, properties: Record<string, unknown>): v
   }).catch(() => {/* analytics-server 未启动时静默忽略 */})
 }
 
+export function initPosthog(): void {
+  initPostHogIdle()
+}
+
 // ---- 公开：capture ----
 export function capture(eventName: string, properties: Record<string, unknown> = {}): void {
   // PostHog(Key 非空时才启用,SDK 未就绪先入队)

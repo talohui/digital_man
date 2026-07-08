@@ -1,5 +1,8 @@
 const TMAP_SCRIPT_ID = 'tmap-gl-script'
 const TMAP_SCRIPT_BASE = 'https://map.qq.com/api/gljs?v=1.exp'
+const TMAP_SCRIPT_LIBRARIES = 'model'
+const TMAP_GLOBAL_READY_TIMEOUT_MS = 10000
+const TMAP_GLOBAL_READY_POLL_MS = 80
 
 function getMapKey() {
   const key = import.meta.env.VITE_TMAP_WEB_KEY?.trim()
@@ -28,7 +31,19 @@ export async function loadTMap() {
     const existing = document.getElementById(TMAP_SCRIPT_ID) as HTMLScriptElement | null
 
     if (existing) {
-      existing.addEventListener('load', () => resolve(window.TMap), { once: true })
+      if (existing.dataset.loaded === 'true') {
+        waitForTMapGlobal(resolve, reject)
+        return
+      }
+
+      existing.addEventListener(
+        'load',
+        () => {
+          existing.dataset.loaded = 'true'
+          waitForTMapGlobal(resolve, reject)
+        },
+        { once: true }
+      )
       existing.addEventListener(
         'error',
         () => {
@@ -44,15 +59,10 @@ export async function loadTMap() {
     script.id = TMAP_SCRIPT_ID
     script.async = true
     script.charset = 'utf-8'
-    script.src = `${TMAP_SCRIPT_BASE}&key=${encodeURIComponent(key)}`
+    script.src = `${TMAP_SCRIPT_BASE}&key=${encodeURIComponent(key)}&libraries=${encodeURIComponent(TMAP_SCRIPT_LIBRARIES)}`
     script.onload = () => {
-      if (!window.TMap) {
-        window.__tmapLoader = undefined
-        reject(new Error('腾讯地图脚本已加载，但未检测到 TMap 对象。'))
-        return
-      }
-
-      resolve(window.TMap)
+      script.dataset.loaded = 'true'
+      waitForTMapGlobal(resolve, reject)
     }
     script.onerror = () => {
       window.__tmapLoader = undefined
@@ -63,4 +73,25 @@ export async function loadTMap() {
   })
 
   return window.__tmapLoader
+}
+
+function waitForTMapGlobal(resolve: (value: any) => void, reject: (reason?: unknown) => void) {
+  const startedAt = Date.now()
+
+  const poll = () => {
+    if (window.TMap) {
+      resolve(window.TMap)
+      return
+    }
+
+    if (Date.now() - startedAt >= TMAP_GLOBAL_READY_TIMEOUT_MS) {
+      window.__tmapLoader = undefined
+      reject(new Error('腾讯地图脚本已加载，但未检测到 TMap 对象。'))
+      return
+    }
+
+    window.setTimeout(poll, TMAP_GLOBAL_READY_POLL_MS)
+  }
+
+  poll()
 }

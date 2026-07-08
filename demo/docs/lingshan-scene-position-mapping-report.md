@@ -1,0 +1,195 @@
+# 灵山胜境真实坐标到 3D scenePosition 映射评估报告
+
+## 1. 目的
+
+本报告用于评估如何将灵山胜境 POI 的真实经纬度映射到 3D 艺术地图坐标。当前阶段只建立映射工具和对比评估，不直接覆盖已有 `scenePosition`。
+
+评估目标是回答：
+
+- 真实 `lat/lng` 投影到 3D 平面后，大致空间关系是什么。
+- 当前人工 `scenePosition` 与真实投影方向是否一致。
+- 后续是否适合采用“真实投影坐标 + 人工艺术偏移”的方式重构 3D 空间布局。
+
+## 2. 当前状态
+
+- `displayLocation` / `navLocation` 是真实地图坐标，用于腾讯地图展示、导航终点和后续 POI 绑定。
+- `scenePosition` 是艺术化 3D 场景坐标，用于 `/scenic-3d-map` 的低模节点、核心地标和金色导览线。
+- 当前 3D 地图已经通过 `poiId` 与真实地图建立连接：同一个 `poiId` 同时关联真实坐标、3D 坐标、模型资产、讲解内容和路线站点。
+- 当前 `scenePosition` 主要是人工构图坐标，不是由经纬度自动投影生成。
+- 本阶段新增 `geoToScenePosition` 工具，用于评估真实坐标投影结果，但不写回 `lingshanMapData.ts`。
+
+## 3. 映射公式
+
+新增工具：`src/lib/scenic3d/geoToScene.ts`
+
+核心类型：
+
+```ts
+export type ScenePoint = {
+  x: number
+  y: number
+  z: number
+}
+
+export type GeoPoint = {
+  lat: number
+  lng: number
+}
+
+export type GeoToSceneOptions = {
+  center: GeoPoint
+  scale?: number
+  y?: number
+}
+```
+
+映射公式：
+
+```ts
+x = (lng - center.lng) * Math.cos(center.lat * Math.PI / 180) * 111320 * scale
+z = -(lat - center.lat) * 110540 * scale
+y = options.y ?? 0
+```
+
+说明：
+
+- `center` 使用 `scenicCenter`，即 `31.4268,120.1008`。
+- `scale` 本报告使用默认值 `0.01`。
+- `x` 表示东西方向，向东为正。
+- `z` 表示南北方向，向北为负，便于在 Three.js 俯视图中让北侧出现在更靠后的区域。
+- 这是小范围景区内的近似局部平面投影，不是复杂 GIS 投影。
+
+## 4. 19 个 POI 映射对比表
+
+| poiId | 名称 | lat,lng | 当前 scenePosition | 投影 scenePosition | 差异说明 |
+|---|---|---|---|---|---|
+| `south_gate` | 南门入园 | 31.4206,120.102977 | (-4.6, 0, 4.7) | (2.07, 0, 6.85) | 明显人工构图偏移；Δx=-6.67, Δz=-2.15 |
+| `lingshan_wall` | 灵山大照壁 | 31.421406,120.102497 | (-4.25, 0, 4.05) | (1.61, 0, 5.96) | 明显人工构图偏移；Δx=-5.86, Δz=-1.91 |
+| `shengjing_square` | 胜境广场 | 31.423651,120.100913 | (-3.45, 0, 3.25) | (0.11, 0, 3.48) | 明显人工构图偏移；Δx=-3.56, Δz=-0.23 |
+| `fozu_tan` | 佛足坛 | 31.422754,120.101616 | (-4.35, 0, 3.05) | (0.78, 0, 4.47) | 明显人工构图偏移；Δx=-5.13, Δz=-1.42 |
+| `jiulong_guanyu` | 九龙灌浴 | 31.424819,120.100158 | (-2.8, 0, 2.35) | (-0.61, 0, 2.19) | 方向大致一致；Δx=-2.19, Δz=0.16 |
+| `puti_avenue` | 菩提大道 | 31.423152,120.101141 | (-2.05, 0, 1.55) | (0.32, 0, 4.03) | 明显人工构图偏移；Δx=-2.37, Δz=-2.48 |
+| `foshou_square` | 佛手广场 | 31.426961,120.09836 | (-1.35, 0, 0.25) | (-2.32, 0, -0.18) | 局部接近，但方向/构图有人工偏移；Δx=0.97, Δz=0.43 |
+| `xiangfu_temple` | 祥符禅寺 | 31.427981,120.097983 | (-0.75, 0, -0.25) | (-2.68, 0, -1.31) | 方向大致一致；Δx=1.93, Δz=1.06 |
+| `xingtan_square` | 杏坛广场 | 31.428958,120.097377 | (-0.55, 0, -0.7) | (-3.25, 0, -2.39) | 方向大致一致；Δx=2.7, Δz=1.69 |
+| `foqian_square` | 佛前广场 | 31.429869,120.096713 | (-0.35, 0, -1) | (-3.88, 0, -3.39) | 方向大致一致；Δx=3.53, Δz=2.39 |
+| `giant_buddha` | 灵山大佛 | 31.430272,120.096436 | (0, 0, -1.2) | (-4.15, 0, -3.84) | 明显人工构图偏移；Δx=4.15, Δz=2.64 |
+| `baizi_mile` | 百子戏弥勒 | 31.427195,120.098842 | (0.65, 0, 0.65) | (-1.86, 0, -0.44) | 明显人工构图偏移；Δx=2.51, Δz=1.09 |
+| `fan_gong` | 梵宫 | 31.427822,120.102423 | (3.45, 0, -0.15) | (1.54, 0, -1.13) | 方向大致一致；Δx=1.91, Δz=0.98 |
+| `fan_gong_square` | 梵宫广场 | 31.426932,120.102597 | (2.85, 0, 0.35) | (1.71, 0, -0.15) | 局部接近，但方向/构图有人工偏移；Δx=1.14, Δz=0.5 |
+| `wuyin_tancheng` | 五印坛城 | 31.424808,120.103015 | (-1.75, 0, -4.05) | (2.1, 0, 2.2) | 明显人工构图偏移；Δx=-3.85, Δz=-6.25 |
+| `manfeilong_tower` | 曼飞龙塔 | 31.426147,120.104684 | (3.9, 0, -2.35) | (3.69, 0, 0.72) | 明显人工构图偏移；Δx=0.21, Δz=-3.07 |
+| `lingshan_jingshe` | 灵山精舍 | 31.429077,120.105668 | (4.35, 0, -3.7) | (4.62, 0, -2.52) | 方向大致一致；Δx=-0.27, Δz=-1.18 |
+| `sansheng_hall` | 三圣殿 | 31.424393,120.096276 | (-2.65, 0, -1.9) | (-4.3, 0, 2.66) | 明显人工构图偏移；Δx=1.65, Δz=-4.56 |
+| `exit` | 景区出口 | 31.422989,120.102372 | (3.95, 0, 4.25) | (1.49, 0, 4.21) | 方向大致一致；Δx=2.46, Δz=0.04 |
+
+## 5. 判断结论
+
+### 方向大致一致的点
+
+以下点的当前 `scenePosition` 与真实投影的象限或大方向基本一致，后续可以考虑在保留人工构图的前提下小幅校正：
+
+- `jiulong_guanyu`
+- `xiangfu_temple`
+- `xingtan_square`
+- `foqian_square`
+- `fan_gong`
+- `lingshan_jingshe`
+- `exit`
+
+### 局部接近但存在人工偏移的点
+
+以下点与投影结果距离不算特别大，但为了页面构图和路线可读性做了偏移：
+
+- `foshou_square`
+- `fan_gong_square`
+
+### 明显偏离真实空间关系的点
+
+以下点当前更偏艺术化布局或为了 3D 构图做了较强调整：
+
+- `south_gate`
+- `lingshan_wall`
+- `shengjing_square`
+- `fozu_tan`
+- `puti_avenue`
+- `giant_buddha`
+- `baizi_mile`
+- `wuyin_tancheng`
+- `manfeilong_tower`
+- `sansheng_hall`
+
+其中入口区真实投影在场景东南侧，但当前人工构图放在西南侧；五印坛城真实投影偏东南，但当前放在左后方；灵山大佛真实投影偏西北，但当前被放在中心偏后，以突出主视觉。
+
+### 是否建议采用真实投影坐标 + artisticOffset
+
+建议后续采用“真实投影坐标 + artisticOffset”的方案，而不是直接覆盖现有 `scenePosition`。
+
+原因：
+
+- 真实投影能保证相对方向和空间关系更接近地理事实。
+- `artisticOffset` 能保留水墨地图、低模沙盘和主视觉构图需要。
+- 可以清楚区分“真实空间基础”和“视觉表达偏移”。
+- 便于后续解释 3D 路线不是精确导航路线。
+
+### 是否建议保留人工构图
+
+建议保留人工构图能力。当前 `/scenic-3d-map` 已经围绕镜头、山水、金线和标签做了视觉优化，如果直接替换为真实投影坐标，可能导致：
+
+- 主视觉重心偏移。
+- 入口区、梵宫区、坛城区拥挤或远离。
+- 当前标签和节点层级重新产生遮挡。
+- 现有 3D 路线构图被破坏。
+
+## 6. 后续建议
+
+下一阶段可以考虑：
+
+1. 新增 `scenePositionSource` 字段，用于标记 `manual`、`projected`、`projected_with_offset`。
+2. 新增 `artisticOffset` 字段，保存相对投影坐标的人工偏移。
+3. 新增 `src/data/scenic3d/lingshanSceneLayout.ts`，将 3D 布局数据从真实 POI 数据中拆出。
+4. 在 `lingshanSceneLayout.ts` 中同时保存：
+   - `projectedScenePosition`
+   - `artisticOffset`
+   - `finalScenePosition`
+   - 标签偏移、模型缩放、显示层级等 3D 专用配置。
+5. 不建议直接覆盖现有 `scenePosition`，避免破坏当前 `/scenic-3d-map` 已经形成的视觉构图。
+
+推荐路线：
+
+- 第一阶段：保留现有 `scenePosition`，新增投影工具和评估报告。
+- 第二阶段：新增独立 3D layout 数据层，记录投影坐标与人工偏移。
+- 第三阶段：只在 `/scenic-3d-map` 中读取新的 layout 数据做 A/B 对比。
+- 第四阶段：确认视觉和空间关系后，再考虑迁移或重命名现有 `scenePosition`。
+
+## 7. scenePositionSource 与 sceneOffset 设计
+
+阶段三十三为 `LingshanPoi` 补充了两个 3D 坐标元数据字段：
+
+```ts
+scenePositionSource?: 'manual' | 'projected' | 'projected_with_offset'
+
+sceneOffset?: {
+  x: number
+  y?: number
+  z: number
+}
+```
+
+字段含义：
+
+- `scenePositionSource: 'manual'`：当前 `scenePosition` 是人工艺术化坐标。
+- `scenePositionSource: 'projected'`：未来可表示 `scenePosition` 由真实 `lat/lng` 直接投影生成。
+- `scenePositionSource: 'projected_with_offset'`：未来可表示 `scenePosition` 由真实投影坐标叠加艺术偏移得到。
+- `sceneOffset`：未来用于记录相对投影坐标的视觉构图偏移量。
+
+当前 19 个拥有 `scenePosition` 的 POI 均设置为 `scenePositionSource: 'manual'`。这是因为现有 3D 场景坐标已经围绕水墨构图、镜头视角、标签位置和路线可读性做过人工调整。
+
+本阶段没有填充 `sceneOffset`，也没有改变任何 `scenePosition` 数值。`/scenic-3d-map` 的视觉效果保持不变。
+
+后续如果采用“真实投影坐标 + artisticOffset”方案，可以逐步迁移为：
+
+1. 使用 `geoToScenePosition` 得到 projected 坐标。
+2. 为需要构图调整的 POI 记录 `sceneOffset`。
+3. 将最终展示坐标标记为 `projected_with_offset`。
+4. 在独立 3D layout 数据层中管理 projected、offset 和 final 三类坐标，避免真实 POI 数据与艺术布局耦合过重。

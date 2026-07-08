@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, EnvironmentOutlined, LoadingOutlined } from '@ant-design/icons'
 import { Modal, Rate } from 'antd'
-import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
 import {
   getDefaultSpotId,
@@ -9,17 +9,128 @@ import {
   getGuideSpotById,
   getGuideRouteSpots,
   guideRoutes,
+  guideSpots,
   scenicCenter,
   type GuideSpot,
   type LatLngPoint
 } from '../data/guideData'
+import {
+  getLingshanPresetRoutePath,
+  lingshanPois,
+  lingshanSceneRoutes,
+  lingshanSceneRouteToGuideRouteMap,
+  USE_LINGSHAN_PRESET_ROUTE_PATHS
+} from '../data/lingshanMapData'
+import {
+  getLingshanRouteGeometryByGuideRouteId
+} from '../data/lingshanRouteGeometries'
+import {
+  lingshanRoadNetworkSamplingPlan,
+  type RoadSamplingPair,
+  type RoadSamplingPairSource
+} from '../data/lingshanRoadNetworkSamplingPlan'
+import {
+  getDebugMapModelOverlays,
+  getMapModelOverlayByPoiId,
+  type LingshanMapModelOverlay
+} from '../data/lingshanMapModelOverlays'
+import {
+  clearUserLocationWatch,
+  isGeolocationSupported,
+  watchUserLocation,
+  type BrowserLocation,
+  type GeolocationErrorState
+} from '../lib/geolocation'
 import { loadTMap } from '../lib/loadTMap'
-import { buildWalkingRoute } from '../lib/routePlanning'
+import {
+  evaluateRouteDeviation,
+  evaluateRouteDeviationConfirmation,
+  findNearestRoutePoint,
+  findNextStop,
+  formatDistanceMeters,
+  haversineDistanceMeters,
+  type RouteDeviationConfirmState,
+  type RouteDeviationLevel
+} from '../lib/routeProgress'
+import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
+import {
+  buildRoadNetworkExportPayload,
+  buildRoadNetworkExportSegment,
+  downloadRoadNetworkJson,
+  type RoadNetworkExportSegment,
+  type RoadNetworkExportSkippedPair
+} from '../lib/roadNetworkExport'
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 
 type MapStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RouteStatus = 'idle' | 'loading' | 'ready' | 'fallback'
+type RouteDiagnostics = {
+  pathPointCount: number
+  distanceMeters: number
+  durationMinutes: number
+  usedFallback: boolean
+  fallbackReason?: string
+}
+type RouteSource = 'unknown' | 'tencent_walking' | 'preset' | 'fallback'
+type Tencent3DCapabilityReport = {
+  generatedAt: string
+  mapMethods: string[]
+  tmapClasses: string[]
+  supports: {
+    setPitch: boolean
+    setRotation: boolean
+    easeTo: boolean
+    setZoom: boolean
+    getPitch: boolean
+    getRotation: boolean
+    buildingClasses: string[]
+    customLayerClasses: string[]
+    webGLLayerClasses: string[]
+    modelOverlayClasses: string[]
+  }
+}
+type LocationMode = 'gps' | 'mock'
+type LocationStatus = 'idle' | 'watching' | 'located' | 'error'
+type RoadNetworkExportStatus = 'idle' | 'sampling' | 'completed' | 'stopped'
+type RoadNetworkExportProgress = {
+  status: RoadNetworkExportStatus
+  currentIndex: number
+  successCount: number
+  skippedCount: number
+  currentPair?: RoadSamplingPair
+  message: string
+}
+
+const QUERY_POI_FOCUS_ZOOM = 17
+const ROAD_NETWORK_EXPORT_FILENAME = 'lingshan-road-network-candidates.json'
+const ROAD_NETWORK_EXPORT_DELAY_MS = 650
+const DEBUG_GLTF_MODEL_ID_PREFIX = 'debug_lingshan_map_gltf_model'
+const DEBUG_GLTF_TARGET_ZOOM = 19.5
+const DEBUG_GLTF_TARGET_PITCH = 65
+const DEBUG_GLTF_TARGET_ROTATION = 0
+const DEBUG_GLTF_RESTORE_ZOOM = 16
+const DEBUG_GLTF_SCALE_OPTIONS = [50, 100, 500, 1000, 3000, 5000]
+const DEBUG_GLTF_VIEW_PRESETS = [
+  { label: '正面近景', zoom: 19.5, pitch: 65, rotation: 0 },
+  { label: '左前侧', zoom: 19.5, pitch: 65, rotation: -45 },
+  { label: '右前侧', zoom: 19.5, pitch: 65, rotation: 45 },
+  { label: '俯视检查', zoom: 18.5, pitch: 0, rotation: 0 },
+  { label: '远景鸟瞰', zoom: 17.5, pitch: 55, rotation: -30 }
+] as const
+const DEBUG_GLTF_DEFAULT_OVERLAY_ID = getDebugMapModelOverlays()[0]?.poiId ?? 'giant_buddha'
+const emptyRoadNetworkExportProgress: RoadNetworkExportProgress = {
+  status: 'idle',
+  currentIndex: 0,
+  successCount: 0,
+  skippedCount: 0,
+  message: '未开始'
+}
+const emptyRouteDeviationConfirmation: RouteDeviationConfirmState = {
+  consecutiveOffRouteCount: 0,
+  shouldWarn: false,
+  shouldSuggestReroute: false
+}
 
 const scenicMarkerIcon = createSvgDataUri(`
   <svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
@@ -49,13 +160,50 @@ const activeMarkerIcon = createSvgDataUri(`
   </svg>
 `)
 
+const userLocationIcon = createSvgDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+    <defs>
+      <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(37,99,235,0.3)"/>
+      </filter>
+    </defs>
+    <g filter="url(#shadow)">
+      <circle cx="22" cy="22" r="16" fill="rgba(59,130,246,0.22)" stroke="#ffffff" stroke-width="2"/>
+      <circle cx="22" cy="22" r="8" fill="#2563EB" stroke="#ffffff" stroke-width="3"/>
+    </g>
+  </svg>
+`)
+
+const mockLocationTargets = [
+  { poiId: 'south_gate', label: '模拟在南门' },
+  { poiId: 'jiulong_guanyu', label: '模拟在九龙灌浴' },
+  { poiId: 'giant_buddha', label: '模拟在灵山大佛' },
+  { poiId: 'fan_gong', label: '模拟在梵宫' },
+  { poiId: 'wuyin_tancheng', label: '模拟在五印坛城' },
+  { poiId: 'exit', label: '模拟在景区出口' }
+]
+
 function GuideMapPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const markerLayerRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
+  const sceneRouteDebugLayerRef = useRef<any>(null)
+  const userLocationMarkerRef = useRef<any>(null)
+  const userAccuracyCircleRef = useRef<any>(null)
+  const gltfDebugModelRef = useRef<any>(null)
+  const gltfDebugPreviousZoomRef = useRef<number | null>(null)
+  const routeDeviationRouteIdRef = useRef<string | null>(null)
+  const stopRoadNetworkExportRef = useRef(false)
   const infoWindowRef = useRef<any>(null)
+  const appliedQueryPoiIdRef = useRef<string | null>(null)
+  const appliedQueryPoiFocusIdRef = useRef<string | null>(null)
+  const appliedSceneRouteIdRef = useRef<string | null>(null)
+  const hasManualRouteSwitchRef = useRef(false)
+  const showCurrentRouteRef = useRef(true)
+  const userLocationWatchIdRef = useRef<number | null>(null)
 
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const selectedSpotId = useGuideStore((state) => state.selectedSpotId)
@@ -67,22 +215,227 @@ function GuideMapPage() {
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('idle')
   const [pageMessage, setPageMessage] = useState('地图准备中...')
   const [showRoutePanel, setShowRoutePanel] = useState(false)
+  const [routeDiagnostics, setRouteDiagnostics] = useState<RouteDiagnostics | null>(null)
+  const [currentPlannedRouteForDebug, setCurrentPlannedRouteForDebug] = useState<PlannedRoute | null>(null)
+  const [routeExportMessage, setRouteExportMessage] = useState('')
+  const [routeSource, setRouteSource] = useState<RouteSource>('unknown')
+  const [locationMode, setLocationMode] = useState<LocationMode>('mock')
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle')
+  const [userLocation, setUserLocation] = useState<BrowserLocation | null>(null)
+  const [locationError, setLocationError] = useState<GeolocationErrorState | null>(null)
+  const [routeDeviationConfirmation, setRouteDeviationConfirmation] =
+    useState<RouteDeviationConfirmState>(emptyRouteDeviationConfirmation)
+  const [reroutePlaceholderMessage, setReroutePlaceholderMessage] = useState('')
+  const [roadNetworkExportProgress, setRoadNetworkExportProgress] =
+    useState<RoadNetworkExportProgress>(emptyRoadNetworkExportProgress)
+  const [roadNetworkExportSegments, setRoadNetworkExportSegments] = useState<RoadNetworkExportSegment[]>([])
+  const [roadNetworkExportSkipped, setRoadNetworkExportSkipped] = useState<RoadNetworkExportSkippedPair[]>([])
+  const [roadNetworkExportMessage, setRoadNetworkExportMessage] = useState('')
+  const [tencent3DCapabilityReport, setTencent3DCapabilityReport] = useState<Tencent3DCapabilityReport | null>(null)
+  const [tencent3DDebugMessage, setTencent3DDebugMessage] = useState('')
+  const [selectedGltfOverlayPoiId, setSelectedGltfOverlayPoiId] = useState(DEBUG_GLTF_DEFAULT_OVERLAY_ID)
+  const [showGltfDebugModel, setShowGltfDebugModel] = useState(true)
+  const [gltfModelScale, setGltfModelScale] = useState(1000)
+  const [gltfModelHeight, setGltfModelHeight] = useState(50)
+  const [gltfModelRotationX, setGltfModelRotationX] = useState(0)
+  const [gltfModelRotationY, setGltfModelRotationY] = useState(0)
+  const [gltfModelRotationZ, setGltfModelRotationZ] = useState(0)
+  const [showGltfAdvancedRotation, setShowGltfAdvancedRotation] = useState(false)
+  const [gltfModelRebuildToken, setGltfModelRebuildToken] = useState(0)
+  const [gltfModelDebugMessage, setGltfModelDebugMessage] = useState('')
+  const [gltfModelLoadStatus, setGltfModelLoadStatus] = useState('未创建')
+  const [gltfModelErrorMessage, setGltfModelErrorMessage] = useState('')
+  const [gltfModelApplyMessage, setGltfModelApplyMessage] = useState('')
+  const [gltfModelCopyMessage, setGltfModelCopyMessage] = useState('')
+  const [gltfModelRuntimeReadout, setGltfModelRuntimeReadout] = useState('等待模型创建')
+  const [gltfCameraTarget, setGltfCameraTarget] = useState({
+    label: '默认近景',
+    zoom: DEBUG_GLTF_TARGET_ZOOM,
+    pitch: DEBUG_GLTF_TARGET_PITCH,
+    rotation: DEBUG_GLTF_TARGET_ROTATION
+  })
 
+  const queryPoiId = searchParams.get('poi')?.trim() ?? ''
+  const querySceneRouteId = searchParams.get('sceneRoute')?.trim() ?? ''
+  const queryDebugSceneRoute = searchParams.get('debugSceneRoute')?.trim().toLowerCase() ?? ''
+  const queryDebugRoadNetwork = searchParams.get('debugRoadNetwork')?.trim().toLowerCase() ?? ''
+  const queryDebugTencent3D = searchParams.get('debugTencent3D')?.trim().toLowerCase() ?? ''
+  const queryDebugGltfModel = searchParams.get('debugGltfModel')?.trim().toLowerCase() ?? ''
+  const isMapDebugMode = queryDebugSceneRoute === '1' || queryDebugSceneRoute === 'true'
+  const isRoadNetworkDebugMode = queryDebugRoadNetwork === '1' || queryDebugRoadNetwork === 'true'
+  const isTencent3DDebugMode = queryDebugTencent3D === '1' || queryDebugTencent3D === 'true'
+  const isGltfModelDebugMode = queryDebugGltfModel === '1' || queryDebugGltfModel === 'true'
+  const isSceneRouteDebugEnabled = Boolean(querySceneRouteId) && isMapDebugMode
+  const [showPoiMarkers, setShowPoiMarkers] = useState(true)
+  const [showCurrentRoute, setShowCurrentRoute] = useState(true)
+  const [showSceneRouteDebugLine, setShowSceneRouteDebugLine] = useState(isSceneRouteDebugEnabled)
+  const [showRouteDiagnosticsPanel, setShowRouteDiagnosticsPanel] = useState(isMapDebugMode)
+  const [showEnhancedMapPanelBody, setShowEnhancedMapPanelBody] = useState(true)
+  const [showRoadNetworkExportDetails, setShowRoadNetworkExportDetails] = useState(true)
+  const shouldShowSceneRouteDebugLine = isSceneRouteDebugEnabled && showSceneRouteDebugLine
+  const roadNetworkDebugPanelTop = isMapDebugMode && showRouteDiagnosticsPanel ? 340 : 92
+  const debugMapModelOverlays = useMemo(() => getDebugMapModelOverlays(), [])
+  const selectedGltfModelOverlay =
+    getMapModelOverlayByPoiId(selectedGltfOverlayPoiId) ?? debugMapModelOverlays[0]
+  const queryPoiSpot = queryPoiId ? guideSpots.find((spot) => spot.id === queryPoiId) : undefined
+  const queryPoiRoute = queryPoiSpot
+    ? guideRoutes.find((item) => item.stops.some((stop) => stop.spotId === queryPoiSpot.id))
+    : undefined
+  const querySceneGuideRouteId = querySceneRouteId ? lingshanSceneRouteToGuideRouteMap[querySceneRouteId] : undefined
+  const querySceneGuideRoute = querySceneGuideRouteId
+    ? guideRoutes.find((item) => item.id === querySceneGuideRouteId)
+    : undefined
   const route = getGuideRouteById(activeRouteId)
   const sceneId = `map:${route.id}`
-  const routeSpots = getGuideRouteSpots(route.id)
+  const routeSpots = useMemo(() => getGuideRouteSpots(route.id), [route.id])
+  const roadNetworkPairSourceCounts = useMemo(() => getRoadSamplingPairSourceCounts(), [])
+  const sceneRouteDebugPath = useMemo(
+    () => (querySceneRouteId ? getSceneRouteDebugPath(querySceneRouteId) : []),
+    [querySceneRouteId]
+  )
   const selectedSpot = getGuideSpotById(selectedSpotId || getDefaultSpotId(route.id))
   const selectedIndex = route.stops.findIndex((stop) => stop.spotId === selectedSpot.id)
+  const isGeolocationSecureContext = isBrowserGeolocationSecureContext()
+  const userDistanceFromScenicCenter = userLocation ? getDistanceMeters(userLocation, scenicCenter) : null
+  const isUserFarFromScenicArea =
+    userLocation?.source === 'gps' && userDistanceFromScenicCenter !== null && userDistanceFromScenicCenter > 2000
+  const currentRouteGeometry = useMemo(() => getLingshanRouteGeometryByGuideRouteId(activeRouteId), [activeRouteId])
+  const routeForProgress = currentRouteGeometry ? getGuideRouteById(currentRouteGeometry.guideRouteId) : route
+  const routeProgressEstimate = useMemo(() => {
+    if (!userLocation || !currentRouteGeometry || currentRouteGeometry.path.length < 2) {
+      return null
+    }
+
+    const nearestRoutePoint = findNearestRoutePoint(userLocation, currentRouteGeometry.path)
+
+    if (!nearestRoutePoint) {
+      return null
+    }
+
+    const distanceToNearestStopMeters = getNearestRouteStopDistanceMeters(userLocation, routeForProgress.stops)
+
+    return {
+      nearestRoutePoint,
+      distanceToNearestStopMeters,
+      nextStop: findNextStop(userLocation, routeForProgress.stops, getRouteProgressSpot),
+      routeDeviation: evaluateRouteDeviation(nearestRoutePoint.distanceMeters, {
+        distanceToNearestStopMeters
+      })
+    }
+  }, [currentRouteGeometry, routeForProgress.stops, userLocation])
+
+  const focusQueryPoiOnce = (spot: GuideSpot) => {
+    if (appliedQueryPoiFocusIdRef.current === spot.id) {
+      return
+    }
+
+    focusQueryPoiSpot(mapRef.current, infoWindowRef.current, spot)
+    appliedQueryPoiFocusIdRef.current = spot.id
+  }
+
+  useEffect(() => {
+    setRouteDeviationConfirmation((previous) => {
+      const previousCount =
+        routeDeviationRouteIdRef.current === activeRouteId ? previous.consecutiveOffRouteCount : 0
+      routeDeviationRouteIdRef.current = activeRouteId
+
+      if (!userLocation || !routeProgressEstimate) {
+        return emptyRouteDeviationConfirmation
+      }
+
+      return evaluateRouteDeviationConfirmation({
+        level: routeProgressEstimate.routeDeviation.level,
+        previousCount
+      })
+    })
+  }, [activeRouteId, routeProgressEstimate, userLocation])
+
+  useEffect(() => {
+    if (!routeDeviationConfirmation.shouldSuggestReroute) {
+      setReroutePlaceholderMessage('')
+    }
+  }, [routeDeviationConfirmation.shouldSuggestReroute])
+
+  useEffect(() => {
+    showCurrentRouteRef.current = showCurrentRoute
+    routeLayerRef.current?.setMap?.(showCurrentRoute && mapRef.current ? mapRef.current : null)
+  }, [mapStatus, showCurrentRoute])
+
+  useEffect(() => {
+    setShowSceneRouteDebugLine(isSceneRouteDebugEnabled)
+    setShowRouteDiagnosticsPanel(isMapDebugMode)
+  }, [isMapDebugMode, isSceneRouteDebugEnabled, querySceneRouteId])
 
   useEffect(() => {
     setActiveScene(sceneId, { routeName: route.name })
   }, [route.name, sceneId, setActiveScene])
 
   useEffect(() => {
+    if (!queryPoiSpot) {
+      return
+    }
+
+    if (appliedQueryPoiIdRef.current === queryPoiSpot.id) {
+      return
+    }
+
+    appliedQueryPoiFocusIdRef.current = null
+
+    if (queryPoiRoute && queryPoiRoute.id !== activeRouteId) {
+      setActiveRouteId(queryPoiRoute.id)
+    }
+
+    if (selectedSpotId !== queryPoiSpot.id) {
+      setSelectedSpotId(queryPoiSpot.id)
+    }
+
+    appliedQueryPoiIdRef.current = queryPoiSpot.id
+  }, [activeRouteId, queryPoiRoute, queryPoiSpot, selectedSpotId, setActiveRouteId, setSelectedSpotId])
+
+  useEffect(() => {
+    if (!querySceneRouteId || queryPoiSpot || hasManualRouteSwitchRef.current) {
+      return
+    }
+
+    if (appliedSceneRouteIdRef.current === querySceneRouteId) {
+      return
+    }
+
+    if (querySceneGuideRoute && querySceneGuideRoute.id !== activeRouteId) {
+      setActiveRouteId(querySceneGuideRoute.id)
+    }
+
+    appliedSceneRouteIdRef.current = querySceneRouteId
+  }, [activeRouteId, queryPoiSpot, querySceneGuideRoute, querySceneRouteId, setActiveRouteId])
+
+  useEffect(() => {
     if (!route.stops.some((stop) => stop.spotId === selectedSpotId)) {
       setSelectedSpotId(getDefaultSpotId(route.id))
     }
   }, [route, selectedSpotId, setSelectedSpotId])
+
+  useEffect(() => {
+    if (!selectedGltfModelOverlay) {
+      return
+    }
+
+    setGltfModelScale(selectedGltfModelOverlay.scale)
+    setGltfModelHeight(selectedGltfModelOverlay.height)
+    setGltfModelRotationX(selectedGltfModelOverlay.rotation[0])
+    setGltfModelRotationY(selectedGltfModelOverlay.rotation[1])
+    setGltfModelRotationZ(selectedGltfModelOverlay.rotation[2])
+    setGltfModelLoadStatus('未创建')
+    setGltfModelErrorMessage('')
+    setGltfModelApplyMessage('')
+    setGltfModelCopyMessage('')
+    setGltfModelRuntimeReadout('等待模型创建')
+    setGltfModelDebugMessage(
+      selectedGltfModelOverlay.modelUrl
+        ? `已切换到 ${selectedGltfModelOverlay.name} 模型配置。`
+        : `${selectedGltfModelOverlay.name} 模型尚未配置，等待模型接入。`
+    )
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [selectedGltfModelOverlay])
 
   useEffect(() => {
     let cancelled = false
@@ -132,14 +485,210 @@ function GuideMapPage() {
 
     return () => {
       cancelled = true
+      clearUserLocationWatch(userLocationWatchIdRef.current)
+      userLocationWatchIdRef.current = null
       infoWindowRef.current?.close?.()
+      sceneRouteDebugLayerRef.current?.setMap?.(null)
+      userLocationMarkerRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current?.setMap?.(null)
+      gltfDebugModelRef.current?.setMap?.(null)
       mapRef.current?.destroy?.()
       mapRef.current = null
       markerLayerRef.current = null
       routeLayerRef.current = null
+      sceneRouteDebugLayerRef.current = null
+      userLocationMarkerRef.current = null
+      userAccuracyCircleRef.current = null
+      gltfDebugModelRef.current = null
       infoWindowRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    gltfDebugModelRef.current?.setMap?.(null)
+    gltfDebugModelRef.current?.remove?.()
+    gltfDebugModelRef.current?.destroy?.()
+    gltfDebugModelRef.current = null
+    setGltfModelErrorMessage('')
+
+    if (!isGltfModelDebugMode) {
+      setGltfModelLoadStatus('未创建')
+      setGltfModelRuntimeReadout('等待模型创建')
+      return
+    }
+
+    if (!selectedGltfModelOverlay) {
+      setGltfModelDebugMessage('未找到可用的模型覆盖物配置。')
+      setGltfModelLoadStatus('配置缺失')
+      setGltfModelRuntimeReadout('配置缺失')
+      return
+    }
+
+    if (!selectedGltfModelOverlay.modelUrl || selectedGltfModelOverlay.status === 'missing_model') {
+      setGltfModelDebugMessage(`${selectedGltfModelOverlay.name} 模型尚未配置，等待模型接入。`)
+      setGltfModelLoadStatus('missing_model')
+      setGltfModelRuntimeReadout('未创建：缺少 modelUrl')
+      return
+    }
+
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      setGltfModelDebugMessage('地图尚未就绪，暂不能创建 GLTFModel。')
+      setGltfModelLoadStatus('等待地图就绪')
+      setGltfModelRuntimeReadout('等待地图就绪')
+      return
+    }
+
+    if (!window.TMap.model || typeof window.TMap.model.GLTFModel !== 'function') {
+      setGltfModelDebugMessage('当前 TMap 未加载 model 附加库或 GLTFModel 不可用。')
+      setGltfModelLoadStatus('GLTFModel 不可用')
+      setGltfModelRuntimeReadout('GLTFModel 不可用')
+      return
+    }
+
+    const anchor = getGltfDebugModelAnchor(selectedGltfModelOverlay)
+
+    if (!anchor) {
+      setGltfModelDebugMessage(`未找到 ${selectedGltfModelOverlay.name} 模型锚点，无法创建 GLTFModel。`)
+      setGltfModelLoadStatus('锚点缺失')
+      setGltfModelRuntimeReadout('锚点缺失')
+      return
+    }
+
+    try {
+      const gltfModel = new window.TMap.model.GLTFModel({
+        id: `${DEBUG_GLTF_MODEL_ID_PREFIX}_${selectedGltfModelOverlay.poiId}`,
+        map: mapRef.current,
+        url: selectedGltfModelOverlay.modelUrl,
+        position: new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight),
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ],
+        scale: gltfModelScale
+      })
+      gltfDebugModelRef.current = gltfModel
+      setGltfModelDebugMessage(
+        `已尝试创建 ${selectedGltfModelOverlay.name} GLTFModel：scale=${gltfModelScale}，height=${gltfModelHeight}，rotation=[${gltfModelRotationX}, ${gltfModelRotationY}, ${gltfModelRotationZ}]。`
+      )
+      setGltfModelLoadStatus('已创建，等待模型事件')
+      setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfModel))
+
+      if (typeof gltfModel.on === 'function') {
+        gltfModel.on('loaded', () => {
+          setGltfModelLoadStatus('模型加载成功')
+          setGltfModelErrorMessage('')
+        })
+        gltfModel.on('error', (error: unknown) => {
+          const message = getErrorMessage(error)
+          setGltfModelLoadStatus('模型加载失败')
+          setGltfModelErrorMessage(message)
+          console.warn('[debugGltfModel] GLTFModel error', error)
+        })
+      } else {
+        setGltfModelLoadStatus('已创建，当前 SDK 未发现事件监听方法')
+      }
+    } catch (error) {
+      gltfDebugModelRef.current = null
+      setGltfModelLoadStatus('创建失败')
+      setGltfModelErrorMessage(getErrorMessage(error))
+      setGltfModelRuntimeReadout('创建失败')
+      setGltfModelDebugMessage(`GLTFModel 创建失败：${getErrorMessage(error)}`)
+    }
+
+    return () => {
+      gltfDebugModelRef.current?.setMap?.(null)
+      gltfDebugModelRef.current?.remove?.()
+      gltfDebugModelRef.current?.destroy?.()
+      gltfDebugModelRef.current = null
+    }
+  }, [gltfModelRebuildToken, isGltfModelDebugMode, mapStatus, selectedGltfModelOverlay])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (showGltfDebugModel) {
+      if (typeof gltfDebugModelRef.current.show === 'function') {
+        gltfDebugModelRef.current.show()
+        setGltfModelApplyMessage('模型已 show()。')
+      } else if (typeof gltfDebugModelRef.current.setMap === 'function') {
+        gltfDebugModelRef.current.setMap(mapRef.current)
+        setGltfModelApplyMessage('show() 不可用，已通过 setMap(map) 显示模型。')
+      }
+    } else if (typeof gltfDebugModelRef.current.hide === 'function') {
+      gltfDebugModelRef.current.hide()
+      setGltfModelApplyMessage('模型已 hide()。')
+    } else if (typeof gltfDebugModelRef.current.setMap === 'function') {
+      gltfDebugModelRef.current.setMap(null)
+      setGltfModelApplyMessage('hide() 不可用，已通过 setMap(null) 隐藏模型。')
+    }
+
+    setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+  }, [isGltfModelDebugMode, showGltfDebugModel])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setScale === 'function') {
+      try {
+        gltfDebugModelRef.current.setScale(gltfModelScale)
+        setGltfModelApplyMessage('scale 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setScale 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setScale 不可用，scale 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelScale, isGltfModelDebugMode])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setRotation === 'function') {
+      try {
+        gltfDebugModelRef.current.setRotation([gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ])
+        setGltfModelApplyMessage('rotation 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setRotation 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setRotation 不可用，rotation 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ, isGltfModelDebugMode])
+
+  useEffect(() => {
+    if (!isGltfModelDebugMode || !gltfDebugModelRef.current || !window.TMap) {
+      return
+    }
+
+    const anchor = selectedGltfModelOverlay ? getGltfDebugModelAnchor(selectedGltfModelOverlay) : null
+
+    if (!anchor) {
+      return
+    }
+
+    if (typeof gltfDebugModelRef.current.setPosition === 'function') {
+      try {
+        gltfDebugModelRef.current.setPosition(new window.TMap.LatLng(anchor.lat, anchor.lng, gltfModelHeight))
+        setGltfModelApplyMessage('height / position 已应用。')
+        setGltfModelRuntimeReadout(readGltfModelRuntimeReadout(gltfDebugModelRef.current))
+        return
+      } catch (error) {
+        setGltfModelApplyMessage(`setPosition 调用失败，准备重建模型：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelApplyMessage('setPosition 不可用，height 通过重建模型应用。')
+    setGltfModelRebuildToken((current) => current + 1)
+  }, [gltfModelHeight, isGltfModelDebugMode, selectedGltfModelOverlay])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
@@ -150,7 +699,7 @@ function GuideMapPage() {
     infoWindowRef.current?.close?.()
 
     markerLayerRef.current = new window.TMap.MultiMarker({
-      map: mapRef.current,
+      map: showPoiMarkers ? mapRef.current : null,
       styles: {
         scenic: new window.TMap.MarkerStyle({
           width: 24,
@@ -188,7 +737,122 @@ function GuideMapPage() {
     })
 
     focusSpot(mapRef.current, infoWindowRef.current, selectedSpot)
-  }, [mapStatus, navigate, routeSpots, selectedSpot, setSelectedSpotId])
+  }, [mapStatus, navigate, routeSpots, selectedSpot, setSelectedSpotId, showPoiMarkers])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    sceneRouteDebugLayerRef.current?.setMap?.(null)
+    sceneRouteDebugLayerRef.current = null
+
+    if (!shouldShowSceneRouteDebugLine || sceneRouteDebugPath.length < 2) {
+      return
+    }
+
+    sceneRouteDebugLayerRef.current = new window.TMap.MultiPolyline({
+      map: mapRef.current,
+      styles: {
+        sceneRouteDebug: new window.TMap.PolylineStyle({
+          color: '#D97706',
+          width: 4,
+          borderWidth: 1,
+          borderColor: 'rgba(255, 246, 219, 0.82)',
+          lineCap: 'round'
+        })
+      },
+      geometries: [
+        {
+          id: `scene-route-debug:${querySceneRouteId}`,
+          styleId: 'sceneRouteDebug',
+          paths: sceneRouteDebugPath.map((point) => new window.TMap.LatLng(point.lat, point.lng))
+        }
+      ]
+    })
+
+    return () => {
+      sceneRouteDebugLayerRef.current?.setMap?.(null)
+      sceneRouteDebugLayerRef.current = null
+    }
+  }, [mapStatus, querySceneRouteId, sceneRouteDebugPath, shouldShowSceneRouteDebugLine])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    userLocationMarkerRef.current?.setMap?.(null)
+    userAccuracyCircleRef.current?.setMap?.(null)
+    userLocationMarkerRef.current = null
+    userAccuracyCircleRef.current = null
+
+    if (!userLocation) {
+      return
+    }
+
+    const position = new window.TMap.LatLng(userLocation.lat, userLocation.lng)
+
+    userLocationMarkerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      styles: {
+        userLocation: new window.TMap.MarkerStyle({
+          width: 34,
+          height: 34,
+          anchor: { x: 17, y: 17 },
+          src: userLocationIcon
+        })
+      },
+      geometries: [
+        {
+          id: 'user-location',
+          styleId: 'userLocation',
+          position
+        }
+      ]
+    })
+
+    try {
+      if (typeof window.TMap.MultiCircle === 'function' && typeof window.TMap.CircleStyle === 'function') {
+        userAccuracyCircleRef.current = new window.TMap.MultiCircle({
+          map: mapRef.current,
+          styles: {
+            accuracy: new window.TMap.CircleStyle({
+              color: 'rgba(37, 99, 235, 0.14)',
+              borderColor: 'rgba(37, 99, 235, 0.36)',
+              borderWidth: 1
+            })
+          },
+          geometries: [
+            {
+              id: 'user-location-accuracy',
+              styleId: 'accuracy',
+              center: position,
+              radius: Math.max(userLocation.accuracyMeters, 1)
+            }
+          ]
+        })
+      }
+    } catch {
+      userAccuracyCircleRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current = null
+    }
+
+    return () => {
+      userLocationMarkerRef.current?.setMap?.(null)
+      userAccuracyCircleRef.current?.setMap?.(null)
+      userLocationMarkerRef.current = null
+      userAccuracyCircleRef.current = null
+    }
+  }, [mapStatus, userLocation])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || !queryPoiSpot || selectedSpot.id !== queryPoiSpot.id) {
+      return
+    }
+
+    focusQueryPoiOnce(queryPoiSpot)
+  }, [mapStatus, queryPoiSpot, selectedSpot.id])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || !window.TMap || !mapRef.current || routeSpots.length < 2) {
@@ -199,17 +863,34 @@ function GuideMapPage() {
 
     async function renderRoute() {
       setRouteStatus('loading')
+      setRouteDiagnostics(null)
+      setCurrentPlannedRouteForDebug(null)
+      setRouteExportMessage('')
+      setRouteSource('unknown')
       setPageMessage(`${route.name}正在规划景区步行路线...`)
 
-      const plannedRoute = await buildWalkingRoute(routeSpots)
+      const presetRoutePath = USE_LINGSHAN_PRESET_ROUTE_PATHS ? getLingshanPresetRoutePath(route.id) : undefined
+      const hasPresetRoutePath = presetRoutePath !== undefined && presetRoutePath.path.length >= 2
+      const plannedRoute = hasPresetRoutePath
+        ? buildPlannedRouteFromPath(presetRoutePath.path)
+        : await buildWalkingRoute(routeSpots)
 
       if (cancelled || !window.TMap || !mapRef.current) {
         return
       }
 
+      setRouteDiagnostics({
+        pathPointCount: plannedRoute.path.length,
+        distanceMeters: plannedRoute.distanceMeters,
+        durationMinutes: plannedRoute.durationMinutes,
+        usedFallback: plannedRoute.usedFallback,
+        fallbackReason: plannedRoute.fallbackReason
+      })
+      setCurrentPlannedRouteForDebug(plannedRoute)
+
       routeLayerRef.current?.setMap?.(null)
       routeLayerRef.current = new window.TMap.MultiPolyline({
-        map: mapRef.current,
+        map: showCurrentRouteRef.current ? mapRef.current : null,
         styles: {
           route: new window.TMap.PolylineStyle({
             color: '#0D9488',
@@ -228,16 +909,26 @@ function GuideMapPage() {
         ]
       })
 
-      fitMapToRoute(mapRef.current, routeSpots)
+      if (
+        queryPoiSpot &&
+        selectedSpot.id === queryPoiSpot.id &&
+        route.stops.some((stop) => stop.spotId === queryPoiSpot.id)
+      ) {
+        focusQueryPoiOnce(queryPoiSpot)
+      } else {
+        fitMapToRoute(mapRef.current, routeSpots)
+      }
 
       if (plannedRoute.usedFallback) {
+        setRouteSource('fallback')
         setRouteStatus('fallback')
         setPageMessage(`${route.name}已为你连好途经景点，按顺序游览即可。`)
         return
       }
 
+      setRouteSource(hasPresetRoutePath ? 'preset' : 'tencent_walking')
       setRouteStatus('ready')
-      setPageMessage(`${route.name}已按腾讯步行规划绘制完成。`)
+      setPageMessage(hasPresetRoutePath ? `${route.name}已按园区预设路线绘制完成。` : `${route.name}已按腾讯步行规划绘制完成。`)
     }
 
     void renderRoute()
@@ -245,7 +936,368 @@ function GuideMapPage() {
     return () => {
       cancelled = true
     }
-  }, [mapStatus, route, routeSpots])
+  }, [mapStatus, queryPoiSpot, route, routeSpots])
+
+  const stopUserLocationWatch = () => {
+    clearUserLocationWatch(userLocationWatchIdRef.current)
+    userLocationWatchIdRef.current = null
+  }
+
+  const startGpsLocation = () => {
+    setLocationMode('gps')
+    setLocationError(null)
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
+
+    if (userLocationWatchIdRef.current !== null) {
+      return
+    }
+
+    if (!isGeolocationSupported()) {
+      setLocationStatus('error')
+      setLocationError({ message: '浏览器不支持定位' })
+      return
+    }
+
+    setLocationStatus('watching')
+
+    const watchId = watchUserLocation(
+      (location) => {
+        setUserLocation(location)
+        setLocationStatus('located')
+        setLocationError(null)
+      },
+      (error) => {
+        setLocationStatus('error')
+        setLocationError(error)
+      }
+    )
+
+    userLocationWatchIdRef.current = watchId
+  }
+
+  const stopGpsLocation = () => {
+    stopUserLocationWatch()
+    setLocationStatus(userLocation ? 'located' : 'idle')
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
+  }
+
+  const centerUserLocation = () => {
+    if (!userLocation || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    mapRef.current.setCenter(new window.TMap.LatLng(userLocation.lat, userLocation.lng))
+  }
+
+  const handleMockLocation = (poiId: string) => {
+    const location = getMockLocationByPoiId(poiId)
+
+    if (!location) {
+      setLocationMode('mock')
+      setLocationStatus('error')
+      setLocationError({ message: `未找到模拟定位点：${poiId}` })
+      return
+    }
+
+    stopUserLocationWatch()
+    setLocationMode('mock')
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
+    setUserLocation(location)
+    setLocationStatus('located')
+    setLocationError(null)
+
+    if (window.TMap && mapRef.current) {
+      mapRef.current.setCenter(new window.TMap.LatLng(location.lat, location.lng))
+    }
+  }
+
+  const inspectTencent3DCapabilities = () => {
+    const report = buildTencent3DCapabilityReport(mapRef.current, window.TMap)
+    setTencent3DCapabilityReport(report)
+    setTencent3DDebugMessage('已打印当前 TMap.Map 方法和 TMap 可用类名。')
+    console.log('[debugTencent3D] Tencent Maps Web runtime capabilities', report)
+    return report
+  }
+
+  const handleTryTencent3DView = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      setTencent3DDebugMessage('地图尚未初始化，无法切换 3D 视角。')
+      return
+    }
+
+    const report = inspectTencent3DCapabilities()
+    const messages: string[] = []
+
+    if (report.supports.easeTo && typeof map.easeTo === 'function') {
+      try {
+        map.easeTo({ pitch: 55, rotation: 35, zoom: 17 })
+        messages.push('已尝试调用 easeTo 设置 pitch / rotation / zoom。')
+      } catch (error) {
+        messages.push(`easeTo 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (report.supports.setPitch && typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(55)
+        messages.push('已尝试 setPitch(55)。')
+      } catch (error) {
+        messages.push(`setPitch 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('未发现 setPitch。')
+    }
+
+    if (report.supports.setRotation && typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(35)
+        messages.push('已尝试 setRotation(35)。')
+      } catch (error) {
+        messages.push(`setRotation 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('未发现 setRotation。')
+    }
+
+    if (report.supports.setZoom && typeof map.setZoom === 'function') {
+      try {
+        map.setZoom(17)
+        messages.push('已尝试 setZoom(17)。')
+      } catch (error) {
+        messages.push(`setZoom 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    setTencent3DDebugMessage(messages.join(' '))
+  }
+
+  const handleRestoreTencent2DView = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      setTencent3DDebugMessage('地图尚未初始化，无法恢复 2D 视角。')
+      return
+    }
+
+    const report = inspectTencent3DCapabilities()
+    const messages: string[] = []
+
+    if (report.supports.setPitch && typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(0)
+        messages.push('已尝试 setPitch(0)。')
+      } catch (error) {
+        messages.push(`setPitch(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (report.supports.setRotation && typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(0)
+        messages.push('已尝试 setRotation(0)。')
+      } catch (error) {
+        messages.push(`setRotation(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (!messages.length) {
+      messages.push('未发现可用的 pitch / rotation 恢复方法。')
+    }
+
+    setTencent3DDebugMessage(messages.join(' '))
+  }
+
+  const applyGltfDebugCameraPreset = (preset: (typeof DEBUG_GLTF_VIEW_PRESETS)[number]) => {
+    const map = mapRef.current
+    const anchor = selectedGltfModelOverlay ? getGltfDebugModelAnchor(selectedGltfModelOverlay) : null
+
+    if (!map || !window.TMap || !anchor) {
+      setGltfModelDebugMessage('地图或当前模型锚点尚未就绪，无法切换视角。')
+      return
+    }
+
+    if (gltfDebugPreviousZoomRef.current === null && typeof map.getZoom === 'function') {
+      try {
+        gltfDebugPreviousZoomRef.current = map.getZoom()
+      } catch {
+        gltfDebugPreviousZoomRef.current = null
+      }
+    }
+
+    const center = new window.TMap.LatLng(anchor.lat, anchor.lng)
+    const messages: string[] = []
+    setGltfCameraTarget(preset)
+
+    if (typeof map.easeTo === 'function') {
+      try {
+        map.easeTo({
+          center,
+          zoom: preset.zoom,
+          pitch: preset.pitch,
+          rotation: preset.rotation
+        }, { duration: 500 })
+        messages.push(`已尝试 easeTo 切换到${preset.label}。`)
+      } catch (error) {
+        messages.push(`easeTo 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (typeof map.setCenter === 'function') {
+      try {
+        map.setCenter(center)
+        messages.push('已设置地图中心到灵山大佛。')
+      } catch (error) {
+        messages.push(`setCenter 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (typeof map.setZoom === 'function') {
+      try {
+        map.setZoom(preset.zoom)
+        messages.push(`已设置 zoom=${preset.zoom}。`)
+      } catch (error) {
+        messages.push(`setZoom 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(preset.pitch)
+        messages.push(`已设置 pitch=${preset.pitch}。`)
+      } catch (error) {
+        messages.push(`setPitch 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('当前 TMap.Map 未发现 setPitch。')
+    }
+
+    if (typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(preset.rotation)
+        messages.push(`已设置 rotation=${preset.rotation}。`)
+      } catch (error) {
+        messages.push(`setRotation 调用失败：${getErrorMessage(error)}`)
+      }
+    } else {
+      messages.push('当前 TMap.Map 未发现 setRotation。')
+    }
+
+    setGltfModelDebugMessage(messages.join(' '))
+  }
+
+  const handleEnterGltfDebug3DView = () => {
+    applyGltfDebugCameraPreset(DEBUG_GLTF_VIEW_PRESETS[0])
+  }
+
+  const handleRestoreGltfDebug2DView = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      setGltfModelDebugMessage('地图尚未就绪，无法恢复 2D 视角。')
+      return
+    }
+
+    const restoreZoom = gltfDebugPreviousZoomRef.current ?? DEBUG_GLTF_RESTORE_ZOOM
+    const messages: string[] = []
+    setGltfCameraTarget({
+      label: '恢复 2D',
+      zoom: restoreZoom,
+      pitch: 0,
+      rotation: 0
+    })
+
+    if (typeof map.setPitch === 'function') {
+      try {
+        map.setPitch(0)
+        messages.push('已设置 pitch=0。')
+      } catch (error) {
+        messages.push(`setPitch(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (typeof map.setRotation === 'function') {
+      try {
+        map.setRotation(0)
+        messages.push('已设置 rotation=0。')
+      } catch (error) {
+        messages.push(`setRotation(0) 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    if (typeof map.setZoom === 'function') {
+      try {
+        map.setZoom(restoreZoom)
+        messages.push(`已恢复 zoom=${restoreZoom}。`)
+      } catch (error) {
+        messages.push(`setZoom 调用失败：${getErrorMessage(error)}`)
+      }
+    }
+
+    setGltfModelDebugMessage(messages.length ? messages.join(' ') : '当前地图实例未发现可恢复视角的方法。')
+  }
+
+  const copyGltfDebugText = async (text: string, successMessage: string, consoleLabel: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(text)
+      setGltfModelCopyMessage(successMessage)
+    } catch {
+      console.log(consoleLabel, text)
+
+      if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+        window.prompt('当前浏览器不支持直接复制，请手动复制以下内容：', text)
+      }
+
+      setGltfModelCopyMessage('复制失败，请查看控制台或弹窗内容。')
+    }
+  }
+
+  const handleCopyGltfModelOverlayConfig = async () => {
+    if (!selectedGltfModelOverlay) {
+      setGltfModelCopyMessage('未选择模型配置')
+      return
+    }
+
+    await copyGltfDebugText(
+      buildGltfModelOverlayConfigSnippet({
+        overlay: selectedGltfModelOverlay,
+        height: gltfModelHeight,
+        scale: gltfModelScale,
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ]
+      }),
+      '已复制当前模型配置',
+      '[GuideMapPage] GLTF model overlay config'
+    )
+  }
+
+  const handleCopyGltfDebugSummary = async () => {
+    if (!selectedGltfModelOverlay) {
+      setGltfModelCopyMessage('未选择模型配置')
+      return
+    }
+
+    await copyGltfDebugText(
+      buildGltfModelDebugSummary({
+        overlay: selectedGltfModelOverlay,
+        height: gltfModelHeight,
+        scale: gltfModelScale,
+        rotation: [gltfModelRotationX, gltfModelRotationY, gltfModelRotationZ],
+        cameraTarget: gltfCameraTarget,
+        loadStatus: gltfModelLoadStatus,
+        errorMessage: gltfModelErrorMessage
+      }),
+      '已复制调试摘要',
+      '[GuideMapPage] GLTF model debug summary'
+    )
+  }
 
   const [rateOpen, setRateOpen] = useState(false)
   const [rateStars, setRateStars] = useState(0)
@@ -258,12 +1310,210 @@ function GuideMapPage() {
   }
 
   const handleRouteSwitch = (routeId: string) => {
+    hasManualRouteSwitchRef.current = true
+    setRouteDeviationConfirmation(emptyRouteDeviationConfirmation)
+    setReroutePlaceholderMessage('')
     setActiveRouteId(routeId)
     setShowRoutePanel(false)
   }
 
   const handlePreviewOpen = () => {
     navigate(`/spot/${selectedSpot.id}`)
+  }
+
+  const buildWalkingRoutePathExportPayload = () => {
+    if (!currentPlannedRouteForDebug) {
+      return null
+    }
+
+    return {
+      routeId: activeRouteId,
+      sceneRoute: querySceneRouteId,
+      generatedAt: new Date().toISOString(),
+      source: 'tencent_walking_runtime',
+      pointCount: currentPlannedRouteForDebug.path.length,
+      distanceMeters: currentPlannedRouteForDebug.distanceMeters,
+      durationMinutes: currentPlannedRouteForDebug.durationMinutes,
+      usedFallback: currentPlannedRouteForDebug.usedFallback,
+      fallbackReason: currentPlannedRouteForDebug.fallbackReason ?? null,
+      path: currentPlannedRouteForDebug.path
+    }
+  }
+
+  const handleCopyWalkingRoutePathJson = async () => {
+    const payload = buildWalkingRoutePathExportPayload()
+
+    if (!payload) {
+      setRouteExportMessage('路线尚未生成')
+      return
+    }
+
+    const jsonText = JSON.stringify(payload, null, 2)
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(jsonText)
+      setRouteExportMessage('已复制')
+    } catch {
+      console.log('[GuideMapPage] walking route path JSON', jsonText)
+      setRouteExportMessage('复制失败，已输出到控制台。')
+    }
+  }
+
+  const handleDownloadWalkingRoutePathJson = () => {
+    const payload = buildWalkingRoutePathExportPayload()
+
+    if (!payload) {
+      setRouteExportMessage('路线尚未生成')
+      return
+    }
+
+    const jsonText = JSON.stringify(payload, null, 2)
+    const fileName = `${querySceneRouteId || activeRouteId}.tencent-walking.json`
+
+    try {
+      const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' })
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      setRouteExportMessage('已生成下载文件')
+    } catch {
+      console.log('[GuideMapPage] walking route path JSON', jsonText)
+      setRouteExportMessage('下载失败，已输出到控制台。')
+    }
+  }
+
+  const handleStartRoadNetworkExport = async () => {
+    if (roadNetworkExportProgress.status === 'sampling') {
+      return
+    }
+
+    stopRoadNetworkExportRef.current = false
+    setRoadNetworkExportSegments([])
+    setRoadNetworkExportSkipped([])
+    setRoadNetworkExportMessage('')
+    setRoadNetworkExportProgress({
+      status: 'sampling',
+      currentIndex: 0,
+      successCount: 0,
+      skippedCount: 0,
+      message: '采样中'
+    })
+
+    const segments: RoadNetworkExportSegment[] = []
+    const skipped: RoadNetworkExportSkippedPair[] = []
+    const pairs = lingshanRoadNetworkSamplingPlan.pairs
+
+    for (let index = 0; index < pairs.length; index += 1) {
+      const pair = pairs[index]
+
+      if (stopRoadNetworkExportRef.current) {
+        setRoadNetworkExportProgress({
+          status: 'stopped',
+          currentIndex: index,
+          successCount: segments.length,
+          skippedCount: skipped.length,
+          currentPair: pair,
+          message: '已停止采样'
+        })
+        setRoadNetworkExportSegments(segments)
+        setRoadNetworkExportSkipped(skipped)
+        setRoadNetworkExportMessage('采样已停止，未自动下载。')
+        return
+      }
+
+      setRoadNetworkExportProgress({
+        status: 'sampling',
+        currentIndex: index + 1,
+        successCount: segments.length,
+        skippedCount: skipped.length,
+        currentPair: pair,
+        message: '采样中'
+      })
+
+      const fromLocation = getRoadSamplingPoiLocation(pair.fromPoiId)
+      const toLocation = getRoadSamplingPoiLocation(pair.toPoiId)
+
+      if (!fromLocation || !toLocation) {
+        skipped.push({
+          pairId: pair.id,
+          fromPoiId: pair.fromPoiId,
+          toPoiId: pair.toPoiId,
+          reason: '未找到 from/to POI 坐标'
+        })
+        continue
+      }
+
+      try {
+        const plannedRoute = await buildWalkingRoute([fromLocation, toLocation])
+        segments.push(buildRoadNetworkExportSegment(pair, plannedRoute))
+      } catch (error) {
+        skipped.push({
+          pairId: pair.id,
+          fromPoiId: pair.fromPoiId,
+          toPoiId: pair.toPoiId,
+          reason: error instanceof Error ? error.message : '采样失败'
+        })
+      }
+
+      setRoadNetworkExportSegments([...segments])
+      setRoadNetworkExportSkipped([...skipped])
+
+      if (index < pairs.length - 1) {
+        await waitForRoadNetworkExportDelay(ROAD_NETWORK_EXPORT_DELAY_MS)
+      }
+    }
+
+    const payload = buildRoadNetworkExportPayload({
+      pairCount: pairs.length,
+      segments,
+      skipped
+    })
+
+    downloadRoadNetworkJson(payload, ROAD_NETWORK_EXPORT_FILENAME)
+    setRoadNetworkExportProgress({
+      status: 'completed',
+      currentIndex: pairs.length,
+      successCount: segments.length,
+      skippedCount: skipped.length,
+      message: '已完成'
+    })
+    setRoadNetworkExportSegments(segments)
+    setRoadNetworkExportSkipped(skipped)
+    setRoadNetworkExportMessage(`已生成下载文件：${ROAD_NETWORK_EXPORT_FILENAME}`)
+  }
+
+  const handleStopRoadNetworkExport = () => {
+    stopRoadNetworkExportRef.current = true
+    setRoadNetworkExportMessage('正在停止，将在当前 pair 完成后停止。')
+  }
+
+  const handleCopyRoadNetworkExportSummary = async () => {
+    const summary = buildRoadNetworkExportSummary({
+      progress: roadNetworkExportProgress,
+      segments: roadNetworkExportSegments,
+      skipped: roadNetworkExportSkipped
+    })
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('当前浏览器不支持 Clipboard API')
+      }
+
+      await navigator.clipboard.writeText(summary)
+      setRoadNetworkExportMessage('采样摘要已复制')
+    } catch {
+      console.log('[GuideMapPage] roadNetwork export summary', summary)
+      setRoadNetworkExportMessage('复制失败，已输出到控制台。')
+    }
   }
 
   const selectedNarrative = route.stops.find((stop) => stop.spotId === selectedSpot.id)?.narrative ?? selectedSpot.intro
@@ -301,6 +1551,852 @@ function GuideMapPage() {
                 <small>{item.id === route.id ? '当前路线' : item.durationLabel}</small>
               </button>
             ))}
+          </div>
+        ) : null}
+
+        <section
+          className="glass-card"
+          style={{
+            position: 'absolute',
+            top: 20,
+            right: 20,
+            width: 328,
+            maxWidth: 'calc(100vw - 40px)',
+            maxHeight: showEnhancedMapPanelBody ? 'calc(100vh - 140px)' : undefined,
+            padding: '14px 16px',
+            color: '#26443a',
+            overflow: 'hidden',
+            pointerEvents: 'auto'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <p style={{ margin: '0 0 4px', color: '#0f766e', fontSize: 12, fontWeight: 800 }}>
+                腾讯地图增强模式
+              </p>
+              <h1 style={{ margin: '0 0 8px', color: '#173b33', fontSize: 20, lineHeight: 1.25 }}>
+                真实地图导览模式
+              </h1>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowEnhancedMapPanelBody((current) => !current)}
+              style={{
+                minWidth: 48,
+                minHeight: 28,
+                border: '1px solid rgba(13, 148, 136, 0.18)',
+                borderRadius: 999,
+                background: 'rgba(255, 255, 255, 0.62)',
+                color: '#246158',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 800
+              }}
+            >
+              {showEnhancedMapPanelBody ? '收起' : '展开'}
+            </button>
+          </div>
+
+          {showEnhancedMapPanelBody ? (
+            <div
+              style={{
+                maxHeight: 'calc(100vh - 218px)',
+                overflowY: 'auto',
+                paddingRight: 4,
+                overscrollBehavior: 'contain'
+              }}
+            >
+              <p style={{ margin: '0 0 12px', color: '#4b635c', fontSize: 12, lineHeight: 1.6 }}>
+                基于腾讯地图底图显示真实 POI、路线和导航兜底；沉浸式体验可切换到 3D 导览地图。
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/scenic-3d-map')}
+                style={{
+                  width: '100%',
+                  minHeight: 38,
+                  marginBottom: 12,
+                  border: 0,
+                  borderRadius: 12,
+                  background: '#0d9488',
+                  color: '#fffaf0',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  boxShadow: '0 12px 24px rgba(13, 148, 136, 0.18)'
+                }}
+              >
+                进入 3D 导览地图
+              </button>
+
+              <div style={{ marginBottom: 12, paddingTop: 10, borderTop: '1px solid rgba(13, 148, 136, 0.12)' }}>
+                <strong style={{ display: 'block', marginBottom: 8, color: '#244d43', fontSize: 13 }}>图层开关</strong>
+                <label style={getLayerToggleStyle()}>
+                  <input
+                    type="checkbox"
+                    checked={showPoiMarkers}
+                    onChange={(event) => setShowPoiMarkers(event.target.checked)}
+                  />
+                  <span>显示 POI Marker</span>
+                </label>
+                <p style={{ margin: '0 0 6px 24px', color: '#74847d', fontSize: 11, lineHeight: 1.45 }}>
+                  仅控制地图上的景点标记，不影响已打开的信息窗。
+                </p>
+                <label style={getLayerToggleStyle()}>
+                  <input
+                    type="checkbox"
+                    checked={showCurrentRoute}
+                    onChange={(event) => setShowCurrentRoute(event.target.checked)}
+                  />
+                  <span>显示当前路线</span>
+                </label>
+                {isSceneRouteDebugEnabled ? (
+                  <label style={getLayerToggleStyle()}>
+                    <input
+                      type="checkbox"
+                      checked={showSceneRouteDebugLine}
+                      onChange={(event) => setShowSceneRouteDebugLine(event.target.checked)}
+                    />
+                    <span>显示 sceneRoute 调试线</span>
+                  </label>
+                ) : null}
+                {isMapDebugMode ? (
+                  <label style={getLayerToggleStyle()}>
+                    <input
+                      type="checkbox"
+                      checked={showRouteDiagnosticsPanel}
+                      onChange={(event) => setShowRouteDiagnosticsPanel(event.target.checked)}
+                    />
+                    <span>显示路线诊断信息</span>
+                  </label>
+                ) : null}
+              </div>
+
+              <div style={{ marginBottom: 10, padding: 10, borderRadius: 12, background: 'rgba(255, 255, 255, 0.58)' }}>
+                <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线状态</strong>
+                <div style={{ display: 'grid', gap: 3, color: '#4b635c', fontSize: 12, lineHeight: 1.5 }}>
+                  <span>当前真实路线：{route.name}</span>
+                  <span>路线来源：{getRouteSourceLabel(routeSource)}</span>
+                  {isMapDebugMode ? (
+                    <span>usedFallback：{routeDiagnostics ? (routeDiagnostics.usedFallback ? 'true' : 'false') : '-'}</span>
+                  ) : null}
+                  <span>
+                    距离 / 耗时：
+                    {routeDiagnostics ? `${routeDiagnostics.distanceMeters} 米 / ${routeDiagnostics.durationMinutes} 分钟` : '生成中'}
+                  </span>
+                  {routeDiagnostics?.fallbackReason && isMapDebugMode ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10, padding: 10, borderRadius: 12, background: 'rgba(255, 255, 255, 0.58)' }}>
+                <strong
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 8,
+                    color: '#244d43',
+                    fontSize: 13
+                  }}
+                >
+                  <EnvironmentOutlined />
+                  当前位置
+                </strong>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocationMode('gps')
+                      setLocationError(null)
+
+                      if (userLocation?.source === 'mock') {
+                        setUserLocation(null)
+                        setLocationStatus('idle')
+                      }
+                    }}
+                    style={getLocationModeButtonStyle(locationMode === 'gps')}
+                  >
+                    真实定位
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopUserLocationWatch()
+                      setLocationMode('mock')
+                      setLocationError(null)
+
+                      if (userLocation?.source === 'mock') {
+                        setLocationStatus('located')
+                      } else {
+                        setUserLocation(null)
+                        setLocationStatus('idle')
+                      }
+                    }}
+                    style={getLocationModeButtonStyle(locationMode === 'mock')}
+                  >
+                    模拟定位
+                  </button>
+                </div>
+
+                <p style={{ margin: '0 0 8px', color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                  {locationMode === 'gps'
+                    ? '真实定位使用浏览器 GPS，适合在景区现场测试。'
+                    : '模拟定位用于开发、答辩或不在景区时体验导览流程。'}
+                </p>
+
+                {locationMode === 'gps' ? (
+                  <>
+                    {!isGeolocationSecureContext ? (
+                      <p style={{ margin: '0 0 8px', color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                        当前访问环境可能不支持浏览器定位；本地调试建议使用 localhost、HTTPS 或模拟定位。
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={locationStatus === 'watching' ? stopGpsLocation : startGpsLocation}
+                      style={getLocationActionButtonStyle(true)}
+                    >
+                      {locationStatus === 'watching' ? '停止真实定位' : '开始真实定位'}
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {mockLocationTargets.map((target) => (
+                      <button
+                        key={target.poiId}
+                        type="button"
+                        onClick={() => handleMockLocation(target.poiId)}
+                        style={getLocationActionButtonStyle(true)}
+                      >
+                        {target.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {userLocation ? (
+                  <button
+                    type="button"
+                    onClick={centerUserLocation}
+                    style={{ ...getLocationActionButtonStyle(true), marginTop: 8 }}
+                  >
+                    定位到我
+                  </button>
+                ) : null}
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    border: '1px solid rgba(37, 99, 235, 0.12)',
+                    borderRadius: 12,
+                    background: 'rgba(239, 246, 255, 0.72)'
+                  }}
+                >
+                  <strong style={{ display: 'block', marginBottom: 6, color: '#244d43', fontSize: 13 }}>路线进度预估</strong>
+                  <p style={{ margin: '0 0 6px', color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                    基于候选 routeGeometry 和当前位置估算，仅用于导览参考。
+                  </p>
+                  {!userLocation ? (
+                    <p style={{ margin: 0, color: '#667972', fontSize: 11, lineHeight: 1.5 }}>
+                      开启真实定位或模拟定位后查看路线进度。
+                    </p>
+                  ) : !currentRouteGeometry || currentRouteGeometry.path.length < 2 ? (
+                    <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                      当前路线暂无 routeGeometry，无法计算路线进度。
+                    </p>
+                  ) : routeProgressEstimate ? (
+                    <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
+                      <span>routeGeometry：{currentRouteGeometry.status} / {currentRouteGeometry.pointCount} 点</span>
+                      <span style={getRouteDeviationStyle(routeProgressEstimate.routeDeviation.level)}>
+                        路线状态：{routeProgressEstimate.routeDeviation.message}
+                      </span>
+                      <span>连续偏离次数：{routeDeviationConfirmation.consecutiveOffRouteCount}</span>
+                      {routeDeviationConfirmation.shouldWarn ? (
+                        <span style={getConfirmedDeviationStyle(routeDeviationConfirmation.shouldSuggestReroute)}>
+                          连续多次检测到你可能偏离推荐路线
+                        </span>
+                      ) : null}
+                      {routeDeviationConfirmation.shouldSuggestReroute ? (
+                        <button
+                          type="button"
+                          onClick={() => setReroutePlaceholderMessage('重新规划功能将在后续阶段接入')}
+                          style={getReroutePlaceholderButtonStyle()}
+                        >
+                          重新规划到下一站（暂未启用）
+                        </button>
+                      ) : null}
+                      {reroutePlaceholderMessage ? (
+                        <span style={{ color: '#9a5a08', fontWeight: 700 }}>{reroutePlaceholderMessage}</span>
+                      ) : null}
+                      <span>距离当前路线：{formatDistanceMeters(routeProgressEstimate.nearestRoutePoint.distanceMeters)}</span>
+                      {routeProgressEstimate.distanceToNearestStopMeters !== undefined ? (
+                        <span>距离最近路线站点：{formatDistanceMeters(routeProgressEstimate.distanceToNearestStopMeters)}</span>
+                      ) : null}
+                      <span>路线进度：约 {Math.round(routeProgressEstimate.nearestRoutePoint.progressRatio * 100)}%</span>
+                      <span>下一站：{routeProgressEstimate.nextStop.nextStopName ?? '已接近路线终点'}</span>
+                      {routeProgressEstimate.nextStop.distanceToNextStopMeters !== undefined ? (
+                        <span>距离下一站：约 {formatDistanceMeters(routeProgressEstimate.nextStop.distanceToNextStopMeters)}</span>
+                      ) : null}
+                      <span>
+                        {userLocation.source === 'mock'
+                          ? '当前为模拟定位，仅用于开发和演示。'
+                          : '当前位置来自浏览器定位。'}
+                      </span>
+                      <span>当前仅基于候选 routeGeometry 距离判断，尚未启用自动重规划。</span>
+                      <span>真实导航仍以腾讯地图和后续 verified routeGeometry 为准。</span>
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, color: '#9a5a08', fontSize: 11, lineHeight: 1.5 }}>
+                      当前定位无法计算路线进度。
+                    </p>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(13, 148, 136, 0.1)' }}>
+                  <div style={{ display: 'grid', gap: 2, color: '#4b635c', fontSize: 11, lineHeight: 1.5 }}>
+                    <span>定位模式：{getLocationModeLabel(locationMode)}</span>
+                    <span>定位状态：{getLocationStatusLabel(locationStatus)}</span>
+                    {userLocation ? (
+                      <>
+                        <span>
+                          坐标：{userLocation.lat.toFixed(6)},{userLocation.lng.toFixed(6)}
+                        </span>
+                        <span>精度：{Math.round(userLocation.accuracyMeters)} 米</span>
+                        <span>更新时间：{formatLocationTime(userLocation.timestamp)}</span>
+                        <span>
+                          {userLocation.source === 'mock'
+                            ? '当前为模拟定位，不代表真实 GPS 位置。'
+                            : '当前位置来自浏览器定位。'}
+                        </span>
+                      </>
+                    ) : null}
+                    {locationError ? <span style={{ color: '#9a3412' }}>错误信息：{locationError.message}</span> : null}
+                    {isUserFarFromScenicArea ? (
+                      <span style={{ color: '#9a5a08' }}>你当前可能不在灵山胜境景区内，可使用模拟定位体验导览流程。</span>
+                    ) : null}
+                    <span>本阶段仅显示当前位置，尚未启用偏航判断和重规划。</span>
+                    {userLocation ? <span>精度圆：浏览器支持圆形覆盖物时会显示，否则仅展示精度数值。</span> : null}
+                  </div>
+                </div>
+              </div>
+
+              {isMapDebugMode ? (
+                <p style={{ margin: 0, color: '#6b7f77', fontSize: 11, lineHeight: 1.55 }}>
+                  调试模式：可查看诊断信息；访问 <code>/map?sceneRoute=xxx&amp;debugSceneRoute=1</code> 可打开骨架线和路线 path 导出能力。
+                </p>
+              ) : null}
+
+            </div>
+          ) : null}
+        </section>
+
+        {isRoadNetworkDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              top: roadNetworkDebugPanelTop,
+              left: 16,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: `calc(100vh - ${roadNetworkDebugPanelTop + 24}px)`,
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#58451d',
+              pointerEvents: 'auto',
+              zIndex: 8,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div>
+                <p style={{ margin: '0 0 4px', color: '#9a5a08', fontSize: 12, fontWeight: 800 }}>
+                  debugRoadNetwork
+                </p>
+                <strong style={{ display: 'block', marginBottom: 4, color: '#7a4b08', fontSize: 15 }}>
+                  道路网络采样导出
+                </strong>
+                <span style={{ color: '#665326', fontSize: 11, lineHeight: 1.45 }}>
+                  pair 总数：{lingshanRoadNetworkSamplingPlan.pairs.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoadNetworkExportDetails((current) => !current)}
+                style={{
+                  minWidth: 48,
+                  minHeight: 26,
+                  border: '1px solid rgba(154, 90, 8, 0.22)',
+                  borderRadius: 999,
+                  background: 'rgba(255, 255, 255, 0.66)',
+                  color: '#7a4b08',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 800
+                }}
+              >
+                {showRoadNetworkExportDetails ? '收起' : '展开'}
+              </button>
+            </div>
+
+            {showRoadNetworkExportDetails ? (
+              <>
+                <p style={{ margin: '8px 0', color: '#665326', fontSize: 11, lineHeight: 1.55 }}>
+                  基于 {lingshanRoadNetworkSamplingPlan.pairs.length} 个 sampling pair，逐个调用腾讯 walking route，生成 candidate roadNetwork segments。该工具只在 debugRoadNetwork 模式显示，不建议普通游客使用。
+                </p>
+                <div style={{ display: 'grid', gap: 3, marginBottom: 8, color: '#58451d', fontSize: 11, lineHeight: 1.45 }}>
+                  <span>guide_route_adjacent：{roadNetworkPairSourceCounts.guide_route_adjacent}</span>
+                  <span>poi_nearby：{roadNetworkPairSourceCounts.poi_nearby}</span>
+                  <span>core_anchor：{roadNetworkPairSourceCounts.core_anchor}</span>
+                  <span>
+                    当前状态：{getRoadNetworkExportStatusLabel(roadNetworkExportProgress.status)}
+                    {' '}
+                    {roadNetworkExportProgress.currentIndex} / {lingshanRoadNetworkSamplingPlan.pairs.length}
+                  </span>
+                  <span>成功：{roadNetworkExportProgress.successCount}</span>
+                  <span>失败 / 跳过：{roadNetworkExportProgress.skippedCount}</span>
+                  {roadNetworkExportProgress.currentPair ? (
+                    <span>
+                      当前 pair：{roadNetworkExportProgress.currentPair.id}（{roadNetworkExportProgress.currentPair.fromPoiId} -&gt; {roadNetworkExportProgress.currentPair.toPoiId}）
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleStartRoadNetworkExport}
+                    disabled={roadNetworkExportProgress.status === 'sampling'}
+                    style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status !== 'sampling')}
+                  >
+                    开始采样并下载 JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStopRoadNetworkExport}
+                    disabled={roadNetworkExportProgress.status !== 'sampling'}
+                    style={getRoadNetworkExportButtonStyle(roadNetworkExportProgress.status === 'sampling')}
+                  >
+                    停止采样
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyRoadNetworkExportSummary}
+                    style={getRoadNetworkExportButtonStyle(true)}
+                  >
+                    复制采样摘要
+                  </button>
+                </div>
+                <p style={{ margin: '8px 0 0', color: '#7a4b08', fontSize: 11, lineHeight: 1.55 }}>
+                  导出结果为 candidate，不代表官方道路网。采样会调用腾讯 walking route，可能受 API Key、网络和额度影响。生成的 JSON 需要人工复核后才能进入后续 roadNetwork 数据。
+                </p>
+                {roadNetworkExportMessage ? (
+                  <span style={{ display: 'block', marginTop: 6, color: '#7a4b08', fontSize: 11, fontWeight: 800 }}>
+                    {roadNetworkExportMessage}
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {isTencent3DDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              left: isRoadNetworkDebugMode ? 372 : 16,
+              bottom: 24,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 140px)',
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#1f3f46',
+              pointerEvents: 'auto',
+              zIndex: 9,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <p style={{ margin: '0 0 4px', color: '#0f766e', fontSize: 12, fontWeight: 800 }}>
+              debugTencent3D
+            </p>
+            <strong style={{ display: 'block', marginBottom: 6, color: '#164e63', fontSize: 15 }}>
+              腾讯地图 Web 3D 能力调试
+            </strong>
+            <p style={{ margin: '0 0 10px', color: '#42636a', fontSize: 11, lineHeight: 1.55 }}>
+              只检查当前运行时 <code>TMap.Map</code> 和 <code>window.TMap</code> 能力，不读取 Key，不调用路线 API。
+            </p>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <button type="button" onClick={handleTryTencent3DView} style={getTencent3DDebugButtonStyle(true)}>
+                切换 3D 视角
+              </button>
+              <button type="button" onClick={handleRestoreTencent2DView} style={getTencent3DDebugButtonStyle(true)}>
+                恢复 2D 视角
+              </button>
+              <button type="button" onClick={inspectTencent3DCapabilities} style={getTencent3DDebugButtonStyle(true)}>
+                打印当前 TMap 能力
+              </button>
+            </div>
+            {tencent3DDebugMessage ? (
+              <p style={{ margin: '8px 0 0', color: '#0f766e', fontSize: 11, fontWeight: 800, lineHeight: 1.5 }}>
+                {tencent3DDebugMessage}
+              </p>
+            ) : null}
+            <div
+              style={{
+                display: 'grid',
+                gap: 4,
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: '1px solid rgba(15, 118, 110, 0.14)',
+                color: '#31545b',
+                fontSize: 11,
+                lineHeight: 1.5
+              }}
+            >
+              <span>3D 视角：{tencent3DCapabilityReport ? getTencent3DViewSupportLabel(tencent3DCapabilityReport) : '点击打印后检查'}</span>
+              <span>
+                3D 建筑 / 三维底图：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel(tencent3DCapabilityReport.supports.buildingClasses)
+                  : '点击打印后检查'}
+              </span>
+              <span>
+                Web GLB / glTF 模型覆盖物：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel(tencent3DCapabilityReport.supports.modelOverlayClasses)
+                  : '点击打印后检查'}
+              </span>
+              <span>
+                CustomLayer / WebGLLayer：
+                {tencent3DCapabilityReport
+                  ? getCapabilityListLabel([
+                      ...tencent3DCapabilityReport.supports.customLayerClasses,
+                      ...tencent3DCapabilityReport.supports.webGLLayerClasses
+                    ])
+                  : '点击打印后检查'}
+              </span>
+              {tencent3DCapabilityReport ? (
+                <>
+                  <span>Map 方法数：{tencent3DCapabilityReport.mapMethods.length}</span>
+                  <span>TMap 类名数：{tencent3DCapabilityReport.tmapClasses.length}</span>
+                </>
+              ) : null}
+              <span>Android GLModelOverlay：仍按 Android 原生后续方案处理，不能直接用于当前 Web React 页面。</span>
+            </div>
+          </div>
+        ) : null}
+
+        {isGltfModelDebugMode ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              left: isRoadNetworkDebugMode ? 372 : 16,
+              bottom: isTencent3DDebugMode ? 248 : 24,
+              width: 340,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 140px)',
+              overflowY: 'auto',
+              padding: '12px 14px',
+              color: '#43302c',
+              pointerEvents: 'auto',
+              zIndex: 9,
+              overscrollBehavior: 'contain'
+            }}
+          >
+            <p style={{ margin: '0 0 4px', color: '#9a3412', fontSize: 12, fontWeight: 800 }}>
+              debugGltfModel
+            </p>
+            <strong style={{ display: 'block', marginBottom: 6, color: '#7c2d12', fontSize: 15 }}>
+              腾讯地图 GLTF 模型覆盖物
+            </strong>
+            <p style={{ margin: '0 0 10px', color: '#65423a', fontSize: 11, lineHeight: 1.55 }}>
+              仅在调试模式下尝试创建 <code>TMap.model.GLTFModel</code>，模型锚点来自当前选中景点配置，不影响普通游客页面。
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+              {DEBUG_GLTF_VIEW_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => applyGltfDebugCameraPreset(preset)}
+                  style={getGltfDebugButtonStyle(true)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              <button type="button" onClick={handleEnterGltfDebug3DView} style={getGltfDebugButtonStyle(true)}>
+                进入 3D 视角
+              </button>
+              <button type="button" onClick={handleRestoreGltfDebug2DView} style={getGltfDebugButtonStyle(true)}>
+                恢复 2D 视角
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+              <button type="button" onClick={handleCopyGltfModelOverlayConfig} style={getGltfDebugButtonStyle(true)}>
+                复制当前模型配置
+              </button>
+              <button type="button" onClick={handleCopyGltfDebugSummary} style={getGltfDebugButtonStyle(true)}>
+                复制调试摘要
+              </button>
+            </div>
+            <div style={{ display: 'grid', gap: 8, color: '#43302c', fontSize: 11, lineHeight: 1.45 }}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>选择模型配置</span>
+                <select
+                  value={selectedGltfOverlayPoiId}
+                  onChange={(event) => setSelectedGltfOverlayPoiId(event.target.value)}
+                  style={{
+                    minHeight: 30,
+                    border: '1px solid rgba(154, 52, 18, 0.2)',
+                    borderRadius: 8,
+                    background: 'rgba(255, 255, 255, 0.76)',
+                    color: '#7c2d12',
+                    fontWeight: 800
+                  }}
+                >
+                  {debugMapModelOverlays.map((overlay) => (
+                    <option key={overlay.poiId} value={overlay.poiId}>
+                      {overlay.name}（{overlay.status}）
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span>GLTFModel：{getGltfModelAvailabilityLabel()}</span>
+              <span>当前模型：{selectedGltfModelOverlay?.name ?? '未选择'}</span>
+              <span>poiId：{selectedGltfModelOverlay?.poiId ?? '-'}</span>
+              <span>status：{selectedGltfModelOverlay?.status ?? '-'}</span>
+              <span>modelUrl：{selectedGltfModelOverlay?.modelUrl ?? '该景点模型尚未配置'}</span>
+              <span>positionSource：{selectedGltfModelOverlay?.positionSource ?? '-'}</span>
+              <span>position：{getGltfDebugModelPositionLabel(selectedGltfModelOverlay, gltfModelHeight)}</span>
+              <span>
+                当前目标：{gltfCameraTarget.label}，zoom={gltfCameraTarget.zoom}，pitch={gltfCameraTarget.pitch}，rotation={gltfCameraTarget.rotation}
+              </span>
+              <span>model loaded/error 状态：{gltfModelLoadStatus}</span>
+              <span>参数应用：{gltfModelApplyMessage || '等待参数调整'}</span>
+              <span>复制状态：{gltfModelCopyMessage || '等待复制'}</span>
+              <span>运行时读数：{gltfModelRuntimeReadout}</span>
+              <span>
+                当前旋转：rotationX={gltfModelRotationX}，rotationY / yaw={gltfModelRotationY}，rotationZ={gltfModelRotationZ}
+              </span>
+              <span>setRotation 数组：[{gltfModelRotationX}, {gltfModelRotationY}, {gltfModelRotationZ}]</span>
+              {gltfModelErrorMessage ? <span style={{ color: '#9a3412' }}>model error：{gltfModelErrorMessage}</span> : null}
+              {selectedGltfModelOverlay && !selectedGltfModelOverlay.modelUrl ? (
+                <span style={{ color: '#9a3412', fontWeight: 800 }}>等待模型接入：该景点模型尚未配置。</span>
+              ) : null}
+              {selectedGltfModelOverlay?.note ? (
+                <span style={{ color: '#7c2d12' }}>说明：{selectedGltfModelOverlay.note}</span>
+              ) : null}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800 }}>
+                <input
+                  type="checkbox"
+                  checked={showGltfDebugModel}
+                  onChange={(event) => setShowGltfDebugModel(event.target.checked)}
+                />
+                显示测试 GLB 模型
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>scale：{gltfModelScale}</span>
+                <select
+                  value={gltfModelScale}
+                  onChange={(event) => setGltfModelScale(Number(event.target.value))}
+                  style={{
+                    minHeight: 30,
+                    border: '1px solid rgba(154, 52, 18, 0.2)',
+                    borderRadius: 8,
+                    background: 'rgba(255, 255, 255, 0.76)',
+                    color: '#7c2d12',
+                    fontWeight: 800
+                  }}
+                >
+                  {DEBUG_GLTF_SCALE_OPTIONS.map((scale) => (
+                    <option key={scale} value={scale}>
+                      {scale}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>height：{gltfModelHeight.toFixed(1)} 米</span>
+                <input
+                  type="range"
+                  min="-20"
+                  max="120"
+                  step="1"
+                  value={gltfModelHeight}
+                  onChange={(event) => setGltfModelHeight(Number(event.target.value))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>yaw / rotationY：{gltfModelRotationY}°</span>
+                <input
+                  type="range"
+                  min="-180"
+                  max="360"
+                  step="5"
+                  value={gltfModelRotationY}
+                  onChange={(event) => setGltfModelRotationY(Number(event.target.value))}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowGltfAdvancedRotation((current) => !current)}
+                style={getGltfDebugButtonStyle(true)}
+              >
+                {showGltfAdvancedRotation ? '收起高级旋转调试' : '展开高级旋转调试'}
+              </button>
+              {showGltfAdvancedRotation ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    padding: 8,
+                    border: '1px solid rgba(154, 52, 18, 0.14)',
+                    borderRadius: 10,
+                    background: 'rgba(255, 247, 237, 0.58)'
+                  }}
+                >
+                  <span style={{ color: '#7c2d12', lineHeight: 1.5 }}>
+                    yaw 通常使用 rotationY。如果模型倾倒，说明正在调节 pitch/roll，不是朝向。不同 GLB 的本地坐标轴可能不同，需要逐个模型校准。
+                  </span>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationX：{gltfModelRotationX}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="5"
+                      value={gltfModelRotationX}
+                      onChange={(event) => setGltfModelRotationX(Number(event.target.value))}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationY / yaw：{gltfModelRotationY}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="360"
+                      step="5"
+                      value={gltfModelRotationY}
+                      onChange={(event) => setGltfModelRotationY(Number(event.target.value))}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <span>rotationZ：{gltfModelRotationZ}°</span>
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="5"
+                      value={gltfModelRotationZ}
+                      onChange={(event) => setGltfModelRotationZ(Number(event.target.value))}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {gltfModelDebugMessage ? (
+                <span style={{ color: '#9a3412', fontWeight: 800 }}>{gltfModelDebugMessage}</span>
+              ) : null}
+              <span>
+                如果页面提示 GLTFModel 不可用，说明当前腾讯地图脚本未成功加载 <code>libraries=model</code> 或运行时未暴露该类。
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {isMapDebugMode && showRouteDiagnosticsPanel ? (
+          <div
+            className="glass-card"
+            style={{
+              position: 'absolute',
+              top: 86,
+              left: 20,
+              maxWidth: 360,
+              padding: '12px 14px',
+              color: '#4b3b17',
+              fontSize: 12,
+              lineHeight: 1.6,
+              pointerEvents: 'auto'
+            }}
+          >
+            <strong style={{ display: 'block', marginBottom: 4, color: '#9a5a08' }}>路线诊断信息</strong>
+            <span>
+              {querySceneRouteId
+                ? '金色线为 3D sceneRoute 的 POI 骨架连线，不代表真实步行道路。蓝绿色路线为腾讯 walking 或当前真实地图路线。'
+                : '当前显示 plannedRoute 诊断信息。带 sceneRoute 查询参数进入时，可额外查看 3D 路线骨架线。'}
+            </span>
+            <div
+              style={{
+                marginTop: 8,
+                paddingTop: 8,
+                borderTop: '1px solid rgba(154, 90, 8, 0.18)',
+                color: '#58451d'
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: 4, color: '#73510e' }}>plannedRoute 诊断</strong>
+              {routeDiagnostics ? (
+                <div style={{ display: 'grid', gap: 2 }}>
+                  <span>activeRouteId：{route.id}</span>
+                  <span>query sceneRoute：{querySceneRouteId || '-'}</span>
+                  <span>path 点数：{routeDiagnostics.pathPointCount}</span>
+                  <span>距离：{routeDiagnostics.distanceMeters} 米</span>
+                  <span>耗时：{routeDiagnostics.durationMinutes} 分钟</span>
+                  <span>usedFallback：{routeDiagnostics.usedFallback ? 'true' : 'false'}</span>
+                  <span>
+                    路线来源：
+                    {routeDiagnostics.usedFallback ? '存在 fallback 直线兜底段或整条路线兜底' : '腾讯 walking route 成功'}
+                  </span>
+                  {routeDiagnostics.fallbackReason ? <span>fallbackReason：{routeDiagnostics.fallbackReason}</span> : null}
+                </div>
+              ) : (
+                <span>路线生成中...</span>
+              )}
+            </div>
+            {isSceneRouteDebugEnabled ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 8,
+                  borderTop: '1px solid rgba(154, 90, 8, 0.18)'
+                }}
+              >
+                <p style={{ margin: '0 0 8px', color: '#665326' }}>
+                  可复制或下载腾讯 walking 路线 path JSON，下载后的 JSON 可暂存到 tmp/route-exports，后续整理为 routeGeometry 候选数据。该 path 是经纬度点串，不能直接作为 Three.js 坐标，需要再经过 geoToScenePosition 或后续路线映射。
+                </p>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: 6
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleCopyWalkingRoutePathJson}
+                    disabled={!currentPlannedRouteForDebug}
+                    style={getRouteExportButtonStyle(Boolean(currentPlannedRouteForDebug))}
+                  >
+                    复制腾讯路线 path JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadWalkingRoutePathJson}
+                    disabled={!currentPlannedRouteForDebug}
+                    style={getRouteExportButtonStyle(Boolean(currentPlannedRouteForDebug))}
+                  >
+                    下载腾讯路线 path JSON
+                  </button>
+                </div>
+                {routeExportMessage ? (
+                  <span style={{ display: 'block', marginTop: 6, color: '#7a4b08' }}>{routeExportMessage}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {shouldShowSceneRouteDebugLine && sceneRouteDebugPath.length < 2 ? (
+              <span style={{ display: 'block', marginTop: 4, color: '#8a4f0b' }}>当前 sceneRoute 未找到可绘制的骨架线。</span>
+            ) : null}
           </div>
         ) : null}
 
@@ -407,6 +2503,203 @@ function GuideMapPage() {
   )
 }
 
+function getSceneRouteDebugPath(sceneRouteId: string): LatLngPoint[] {
+  const sceneRoute = lingshanSceneRoutes.find((item) => item.id === sceneRouteId)
+
+  if (!sceneRoute) {
+    return []
+  }
+
+  return sceneRoute.poiSequence
+    .map((poiId) => {
+      const lingshanPoi = lingshanPois.find((poi) => poi.id === poiId)
+
+      if (lingshanPoi) {
+        return lingshanPoi.displayLocation
+      }
+
+      const guideSpot = guideSpots.find((spot) => spot.id === poiId)
+
+      if (!guideSpot) {
+        return null
+      }
+
+      return {
+        lat: guideSpot.lat,
+        lng: guideSpot.lng
+      }
+    })
+    .filter((point): point is LatLngPoint => point !== null)
+}
+
+function getGltfDebugModelAnchor(overlay: LingshanMapModelOverlay): LatLngPoint | null {
+  const lingshanPoi = lingshanPois.find((poi) => poi.id === overlay.poiId)
+
+  if (lingshanPoi) {
+    if (overlay.positionSource === 'navLocation') {
+      return lingshanPoi.navLocation ?? lingshanPoi.displayLocation
+    }
+
+    return lingshanPoi.displayLocation ?? lingshanPoi.navLocation
+  }
+
+  const guideSpot = guideSpots.find((spot) => spot.id === overlay.poiId)
+
+  if (!guideSpot) {
+    return null
+  }
+
+  return {
+    lat: guideSpot.lat,
+    lng: guideSpot.lng
+  }
+}
+
+function getGltfModelAvailabilityLabel() {
+  if (typeof window === 'undefined' || !window.TMap) {
+    return 'TMap 尚未加载'
+  }
+
+  return window.TMap.model && typeof window.TMap.model.GLTFModel === 'function'
+    ? '可用'
+    : '不可用，请检查 libraries=model'
+}
+
+function getGltfDebugModelPositionLabel(overlay: LingshanMapModelOverlay | undefined, height: number) {
+  const anchor = overlay ? getGltfDebugModelAnchor(overlay) : null
+
+  if (!anchor) {
+    return `锚点缺失，height=${height}`
+  }
+
+  return `${anchor.lat.toFixed(6)},${anchor.lng.toFixed(6)}, height=${height}`
+}
+
+function buildGltfModelOverlayConfigSnippet({
+  overlay,
+  height,
+  scale,
+  rotation
+}: {
+  overlay: LingshanMapModelOverlay
+  height: number
+  scale: number
+  rotation: [number, number, number]
+}) {
+  const lines = [
+    '{',
+    `  poiId: '${escapeTsString(overlay.poiId)}',`,
+    `  name: '${escapeTsString(overlay.name)}',`
+  ]
+
+  if (overlay.modelUrl) {
+    lines.push(`  modelUrl: '${escapeTsString(overlay.modelUrl)}',`)
+  }
+
+  lines.push(
+    `  positionSource: '${overlay.positionSource}',`,
+    `  height: ${formatNumberForTs(height)},`,
+    `  scale: ${formatNumberForTs(scale)},`,
+    `  rotation: [${rotation.map((value) => formatNumberForTs(value)).join(', ')}],`,
+    `  status: '${overlay.status}',`,
+    '  enabledInDebug: true,',
+    "  note: '由 debugGltfModel 调试面板校准。',",
+    '}'
+  )
+
+  return lines.join('\n')
+}
+
+function buildGltfModelDebugSummary({
+  overlay,
+  height,
+  scale,
+  rotation,
+  cameraTarget,
+  loadStatus,
+  errorMessage
+}: {
+  overlay: LingshanMapModelOverlay
+  height: number
+  scale: number
+  rotation: [number, number, number]
+  cameraTarget: { label: string; zoom: number; pitch: number; rotation: number }
+  loadStatus: string
+  errorMessage: string
+}) {
+  const anchor = getGltfDebugModelAnchor(overlay)
+
+  return [
+    `poiId: ${overlay.poiId}`,
+    `name: ${overlay.name}`,
+    `modelUrl: ${overlay.modelUrl ?? '未配置'}`,
+    `positionSource: ${overlay.positionSource}`,
+    `position: ${anchor ? `${anchor.lat.toFixed(6)},${anchor.lng.toFixed(6)}, height=${height}` : `锚点缺失，height=${height}`}`,
+    `scale: ${scale}`,
+    `rotationX: ${rotation[0]}`,
+    `rotationY / yaw: ${rotation[1]}`,
+    `rotationZ: ${rotation[2]}`,
+    `setRotation: [${rotation.join(', ')}]`,
+    `camera: ${cameraTarget.label}, zoom=${cameraTarget.zoom}, pitch=${cameraTarget.pitch}, rotation=${cameraTarget.rotation}`,
+    `loaded/error status: ${loadStatus}`,
+    `error: ${errorMessage || '无'}`
+  ].join('\n')
+}
+
+function escapeTsString(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+}
+
+function formatNumberForTs(value: number) {
+  return Number.isInteger(value) ? String(value) : Number(value.toFixed(4)).toString()
+}
+
+function readGltfModelRuntimeReadout(model: any) {
+  if (!model) {
+    return '模型实例不存在'
+  }
+
+  const values: string[] = []
+
+  values.push(`getScale=${readSdkGetterValue(model, 'getScale')}`)
+  values.push(`getRotation=${readSdkGetterValue(model, 'getRotation')}`)
+  values.push(`getPosition=${readSdkGetterValue(model, 'getPosition')}`)
+
+  return values.join('；')
+}
+
+function readSdkGetterValue(target: any, methodName: string) {
+  if (!target || typeof target[methodName] !== 'function') {
+    return '不可用'
+  }
+
+  try {
+    return formatSdkDebugValue(target[methodName]())
+  } catch (error) {
+    return `读取失败：${getErrorMessage(error)}`
+  }
+}
+
+function formatSdkDebugValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return String(value)
+  }
+
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatSdkDebugValue(item)).join(', ')}]`
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {
   if (!window.TMap || !map || !infoWindow) {
     return
@@ -417,6 +2710,14 @@ function focusSpot(map: any, infoWindow: any, spot: GuideSpot) {
   infoWindow.setPosition(position)
   infoWindow.setContent(renderInfoWindowContent(spot))
   infoWindow.open()
+}
+
+function focusQueryPoiSpot(map: any, infoWindow: any, spot: GuideSpot) {
+  focusSpot(map, infoWindow, spot)
+
+  if (map && typeof map.setZoom === 'function') {
+    map.setZoom(QUERY_POI_FOCUS_ZOOM)
+  }
 }
 
 function fitMapToRoute(map: any, spots: GuideSpot[]) {
@@ -450,6 +2751,437 @@ function renderInfoWindowContent(spot: GuideSpot) {
 
 function createSvgDataUri(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function buildTencent3DCapabilityReport(map: any, tmap: any): Tencent3DCapabilityReport {
+  const mapMethods = getObjectMethodNames(map)
+  const tmapClasses = getTMapClassNames(tmap)
+
+  return {
+    generatedAt: new Date().toISOString(),
+    mapMethods,
+    tmapClasses,
+    supports: {
+      setPitch: mapMethods.includes('setPitch'),
+      setRotation: mapMethods.includes('setRotation'),
+      easeTo: mapMethods.includes('easeTo'),
+      setZoom: mapMethods.includes('setZoom'),
+      getPitch: mapMethods.includes('getPitch'),
+      getRotation: mapMethods.includes('getRotation'),
+      buildingClasses: filterClassNames(tmapClasses, ['building', 'buildings']),
+      customLayerClasses: filterClassNames(tmapClasses, ['customlayer', 'custom_layer', 'custom']),
+      webGLLayerClasses: filterClassNames(tmapClasses, ['webgl', 'gllayer', 'gl_layer']),
+      modelOverlayClasses: filterClassNames(tmapClasses, ['glmodel', 'modeloverlay', 'gltf', 'glb', 'model'])
+    }
+  }
+}
+
+function getObjectMethodNames(target: any): string[] {
+  if (!target) {
+    return []
+  }
+
+  const methodNames = new Set<string>()
+  let current = target
+
+  while (current && current !== Object.prototype) {
+    Object.getOwnPropertyNames(current).forEach((name) => {
+      if (name === 'constructor') {
+        return
+      }
+
+      try {
+        if (typeof target[name] === 'function') {
+          methodNames.add(name)
+        }
+      } catch {
+        // Some SDK accessors may throw when inspected. Ignore them for debug reporting.
+      }
+    })
+    current = Object.getPrototypeOf(current)
+  }
+
+  return Array.from(methodNames).sort((a, b) => a.localeCompare(b))
+}
+
+function getTMapClassNames(tmap: any): string[] {
+  if (!tmap || typeof tmap !== 'object') {
+    return []
+  }
+
+  return Object.keys(tmap)
+    .filter((name) => {
+      const value = tmap[name]
+      return typeof value === 'function' || (value && typeof value === 'object')
+    })
+    .sort((a, b) => a.localeCompare(b))
+}
+
+function filterClassNames(classNames: string[], keywords: string[]) {
+  return classNames.filter((name) => {
+    const normalized = name.toLowerCase()
+    return keywords.some((keyword) => normalized.includes(keyword))
+  })
+}
+
+function getCapabilityListLabel(items: string[]) {
+  return items.length ? `发现 ${items.join(', ')}` : '未发现运行时类名'
+}
+
+function getTencent3DViewSupportLabel(report: Tencent3DCapabilityReport) {
+  const supported = [
+    report.supports.setPitch ? 'setPitch' : '',
+    report.supports.setRotation ? 'setRotation' : '',
+    report.supports.easeTo ? 'easeTo' : '',
+    report.supports.setZoom ? 'setZoom' : ''
+  ].filter(Boolean)
+
+  return supported.length ? `可试：${supported.join(', ')}` : '未发现 pitch / rotation 相关方法'
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function getRouteExportButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 34,
+    border: '1px solid rgba(154, 90, 8, 0.28)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#7a4b08' : '#9a8d6b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 12,
+    fontWeight: 800
+  }
+}
+
+function getRoadNetworkExportButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 32,
+    border: '1px solid rgba(154, 90, 8, 0.28)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(255, 246, 219, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#7a4b08' : '#9a8d6b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getTencent3DDebugButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 32,
+    border: '1px solid rgba(15, 118, 110, 0.24)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(236, 253, 245, 0.92)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#0f766e' : '#8aa09b',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getGltfDebugButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 32,
+    border: '1px solid rgba(154, 52, 18, 0.24)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(255, 247, 237, 0.94)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#9a3412' : '#a4948d',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getRoadNetworkExportStatusLabel(status: RoadNetworkExportStatus) {
+  switch (status) {
+    case 'sampling':
+      return '采样中'
+    case 'completed':
+      return '已完成'
+    case 'stopped':
+      return '已停止'
+    default:
+      return '未开始'
+  }
+}
+
+function getRoadSamplingPairSourceCounts() {
+  return lingshanRoadNetworkSamplingPlan.pairs.reduce<Record<RoadSamplingPairSource, number>>(
+    (counts, pair) => ({
+      ...counts,
+      [pair.source]: counts[pair.source] + 1
+    }),
+    {
+      guide_route_adjacent: 0,
+      poi_nearby: 0,
+      core_anchor: 0
+    }
+  )
+}
+
+function getRoadSamplingPoiLocation(poiId: string): LatLngPoint | null {
+  const lingshanPoi = lingshanPois.find((poi) => poi.id === poiId)
+
+  if (lingshanPoi) {
+    return lingshanPoi.navLocation || lingshanPoi.displayLocation
+  }
+
+  const guideSpot = guideSpots.find((spot) => spot.id === poiId)
+
+  if (!guideSpot) {
+    return null
+  }
+
+  return {
+    lat: guideSpot.lat,
+    lng: guideSpot.lng
+  }
+}
+
+function waitForRoadNetworkExportDelay(durationMs: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, durationMs)
+  })
+}
+
+function buildRoadNetworkExportSummary(options: {
+  progress: RoadNetworkExportProgress
+  segments: RoadNetworkExportSegment[]
+  skipped: RoadNetworkExportSkippedPair[]
+}) {
+  const counts = getRoadSamplingPairSourceCounts()
+
+  return [
+    '灵山 roadNetwork 采样摘要',
+    `状态：${getRoadNetworkExportStatusLabel(options.progress.status)}`,
+    `总 pair：${lingshanRoadNetworkSamplingPlan.pairs.length}`,
+    `guide_route_adjacent：${counts.guide_route_adjacent}`,
+    `poi_nearby：${counts.poi_nearby}`,
+    `core_anchor：${counts.core_anchor}`,
+    `已处理：${options.progress.currentIndex}`,
+    `成功 segment：${options.segments.length}`,
+    `失败 / 跳过：${options.skipped.length}`,
+    options.progress.currentPair
+      ? `当前 pair：${options.progress.currentPair.id} ${options.progress.currentPair.fromPoiId} -> ${options.progress.currentPair.toPoiId}`
+      : '当前 pair：-',
+    '导出 JSON：lingshan-road-network-candidates.json',
+    '说明：导出结果为 candidate，不代表 official / verified road network。'
+  ].join('\n')
+}
+
+function getRouteSourceLabel(routeSource: RouteSource) {
+  switch (routeSource) {
+    case 'tencent_walking':
+      return '腾讯 walking route'
+    case 'preset':
+      return '预设路线'
+    case 'fallback':
+      return 'fallback 兜底'
+    default:
+      return '路线生成中'
+  }
+}
+
+function getLayerToggleStyle(disabled = false): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 28,
+    color: disabled ? '#9aa8a1' : '#38584f',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 700
+  }
+}
+
+function getLocationModeButtonStyle(active: boolean): CSSProperties {
+  return {
+    minHeight: 30,
+    border: active ? '1px solid rgba(13, 148, 136, 0.55)' : '1px solid rgba(13, 148, 136, 0.16)',
+    borderRadius: 10,
+    background: active ? 'rgba(13, 148, 136, 0.12)' : 'rgba(255, 255, 255, 0.5)',
+    color: active ? '#0f766e' : '#48665e',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 800
+  }
+}
+
+function getLocationActionButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 30,
+    border: '1px solid rgba(37, 99, 235, 0.16)',
+    borderRadius: 10,
+    background: enabled ? 'rgba(239, 246, 255, 0.78)' : 'rgba(255, 255, 255, 0.46)',
+    color: enabled ? '#1d4ed8' : '#8a97a6',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 11,
+    fontWeight: 800
+  }
+}
+
+function getRouteDeviationStyle(level: RouteDeviationLevel): CSSProperties {
+  const styleByLevel: Record<RouteDeviationLevel, CSSProperties> = {
+    on_route: {
+      background: 'rgba(22, 163, 74, 0.12)',
+      border: '1px solid rgba(22, 163, 74, 0.22)',
+      color: '#166534'
+    },
+    near_route_stop: {
+      background: 'rgba(13, 148, 136, 0.12)',
+      border: '1px solid rgba(13, 148, 136, 0.24)',
+      color: '#0f766e'
+    },
+    maybe_off_route: {
+      background: 'rgba(217, 119, 6, 0.12)',
+      border: '1px solid rgba(217, 119, 6, 0.24)',
+      color: '#92400e'
+    },
+    off_route: {
+      background: 'rgba(220, 38, 38, 0.1)',
+      border: '1px solid rgba(220, 38, 38, 0.24)',
+      color: '#991b1b'
+    }
+  }
+
+  return {
+    display: 'block',
+    padding: '5px 7px',
+    borderRadius: 8,
+    fontWeight: 800,
+    ...styleByLevel[level]
+  }
+}
+
+function getConfirmedDeviationStyle(shouldSuggestReroute: boolean): CSSProperties {
+  return {
+    display: 'block',
+    padding: '5px 7px',
+    borderRadius: 8,
+    background: shouldSuggestReroute ? 'rgba(220, 38, 38, 0.1)' : 'rgba(217, 119, 6, 0.12)',
+    border: shouldSuggestReroute ? '1px solid rgba(220, 38, 38, 0.24)' : '1px solid rgba(217, 119, 6, 0.24)',
+    color: shouldSuggestReroute ? '#991b1b' : '#92400e',
+    fontWeight: 800
+  }
+}
+
+function getReroutePlaceholderButtonStyle(): CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid rgba(217, 119, 6, 0.32)',
+    borderRadius: 9,
+    background: 'rgba(255, 251, 235, 0.86)',
+    color: '#92400e',
+    cursor: 'pointer',
+    fontSize: 11,
+    fontWeight: 800,
+    padding: '7px 9px',
+    textAlign: 'center'
+  }
+}
+
+function getLocationModeLabel(mode: LocationMode) {
+  return mode === 'gps' ? '真实定位' : '模拟定位'
+}
+
+function getLocationStatusLabel(status: LocationStatus) {
+  switch (status) {
+    case 'watching':
+      return '定位中'
+    case 'located':
+      return '已定位'
+    case 'error':
+      return '定位失败'
+    default:
+      return '未开启'
+  }
+}
+
+function getMockLocationByPoiId(poiId: string): BrowserLocation | null {
+  const poi = lingshanPois.find((item) => item.id === poiId)
+
+  if (!poi) {
+    return null
+  }
+
+  const location = poi.navLocation || poi.displayLocation
+
+  return {
+    lat: location.lat,
+    lng: location.lng,
+    accuracyMeters: 8,
+    timestamp: Date.now(),
+    source: 'mock'
+  }
+}
+
+function getRouteProgressSpot(spotId: string) {
+  const poi = lingshanPois.find((item) => item.id === spotId)
+
+  if (poi) {
+    const location = poi.navLocation || poi.displayLocation
+
+    return {
+      id: poi.id,
+      name: poi.name,
+      lat: location.lat,
+      lng: location.lng
+    }
+  }
+
+  const spot = guideSpots.find((item) => item.id === spotId)
+
+  if (!spot) {
+    return undefined
+  }
+
+  return {
+    id: spot.id,
+    name: spot.name,
+    lat: spot.lat,
+    lng: spot.lng
+  }
+}
+
+function getNearestRouteStopDistanceMeters(position: LatLngPoint, routeStops: { spotId: string }[]) {
+  const distances = routeStops
+    .map((stop) => {
+      const spot = getRouteProgressSpot(stop.spotId)
+
+      return spot ? haversineDistanceMeters(position, spot) : null
+    })
+    .filter((distance): distance is number => distance !== null)
+
+  return distances.length > 0 ? Math.min(...distances) : undefined
+}
+
+function getDistanceMeters(from: LatLngPoint, to: LatLngPoint) {
+  return haversineDistanceMeters(from, to)
+}
+
+function formatLocationTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+function isBrowserGeolocationSecureContext() {
+  if (typeof window === 'undefined') {
+    return true
+  }
+
+  return window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 }
 
 export default GuideMapPage

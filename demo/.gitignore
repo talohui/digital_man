@@ -9,9 +9,38 @@ tsconfig*.tsbuildinfo
 vite.config.d.ts
 vite.config.js
 
+# 临时导出文件
+tmp/
+
 # 环境变量（含密钥，不能上传）
 .env.local
 .env*.local
 
 # macOS
 .DS_Store
+
+# Lingshan raw landmark GLB assets - local inspection only.
+# Do not commit raw versions; commit optimized/runtime versions later.
+public/models/lingshan/landmarks/lingshan-buddha-v2.glb
+public/models/lingshan/landmarks/fan-gong.glb
+public/models/lingshan/landmarks/baizi-milefo.glb
+public/models/lingshan/landmarks/buddha-hand-plaza.glb
+public/models/lingshan/landmarks/bodhi-avenue.glb
+public/models/lingshan/landmarks/shengjing-plaza.glb
+public/models/lingshan/landmarks/sansheng-hall.glb
+public/models/lingshan/landmarks/xiangfu-temple.glb
+public/models/lingshan/landmarks/wuyin-mandala.glb
+public/models/lingshan/landmarks/manlong-flying-tower.glb
+public/models/lingshan/landmarks/buddha-front-plaza.glb
+
+# Lingshan optimization trial candidates kept local.
+# Runtime safe-v2 files may be committed individually after validation.
+public/models/lingshan/optimized/wuyin-mandala.safe.glb
+public/models/lingshan/optimized/wuyin-mandala.draco.glb
+public/models/lingshan/optimized/fan-gong.safe.glb
+public/models/lingshan/optimized/fan-gong.draco.glb
+
+# Local tree candidate leftovers, not used by runtime.
+public/models/lingshan/tree-candidates/Meshy_AI_Create_a_stylized_low_0616093941_texture.glb
+public/models/lingshan/tree-candidates/fluffy-bodhi-grove.raw.glb
+public/models/lingshan/tree-candidates/fluffy-bodhi-grove.runtime-v1.glb

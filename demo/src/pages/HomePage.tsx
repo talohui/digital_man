@@ -1,4 +1,5 @@
 import { CompassOutlined, LoadingOutlined } from '@ant-design/icons'
+import { Typography } from 'antd'
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
@@ -14,6 +15,7 @@ import { useChatStore } from '../store/useChatStore'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { capturePreferenceUpdate, captureRecommendationClick, captureRecommendationExposure, captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
 
+const { Paragraph } = Typography
 
 function HomePage() {
   const navigate = useNavigate()
@@ -92,6 +94,10 @@ function HomePage() {
     toggleTag(tag)
   }
 
+  const handleEnterScenic3DMap = () => {
+    navigate('/scenic-3d-map')
+  }
+
   return (
     <div className="app-shell">
       <SceneHeader />
@@ -144,6 +150,24 @@ function HomePage() {
                 )}
               </span>
               {lastError ? <small>当前已自动回退到本地推荐规则</small> : null}
+            </div>
+
+            <div
+              className="guide-home-panel__section"
+              style={{
+                padding: 16,
+                border: '1px solid rgba(13, 148, 136, 0.14)',
+                borderRadius: 16,
+                background: 'rgba(255, 255, 255, 0.78)'
+              }}
+            >
+              <p className="guide-home-panel__label">沉浸式 3D 导览地图</p>
+              <Paragraph style={{ margin: '0 0 14px', color: 'rgba(44, 62, 80, 0.72)', fontSize: 14 }}>
+                以艺术化 3D 场景探索灵山核心景点，真实导航可一键切回腾讯地图。
+              </Paragraph>
+              <button className="btn-secondary" style={{ width: '100%' }} onClick={handleEnterScenic3DMap}>
+                进入 3D 导览地图
+              </button>
             </div>
 
             <div className="guide-home-panel__profile-slot">
