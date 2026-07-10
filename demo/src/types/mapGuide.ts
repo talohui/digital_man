@@ -1,6 +1,22 @@
 export type MapViewMode = 'browse' | 'route' | 'poi'
 
-export type RouteStage = 'preview' | 'active' | 'arrived' | 'paused' | 'completed'
+export type ScenicMapPresentation = 'scenic3d' | 'ink2d'
+
+export type RouteStage = 'preview' | 'joining' | 'active' | 'arrived' | 'paused' | 'completed'
+
+export type PoiReturnStage = 'preview' | 'joining' | 'active' | 'arrived'
+
+/**
+ * The route state that a POI detail page must restore when the visitor goes
+ * back to the map. All stop indexes in this type are zero-based.
+ */
+export type PoiRouteReturnContext = {
+  routeId: string
+  poiStopIndex?: number
+  returnStage: PoiReturnStage
+  returnStopIndex?: number
+  presentation?: ScenicMapPresentation
+}
 
 export type XiaolingMode = 'browse' | 'route' | 'poi'
 
@@ -12,6 +28,7 @@ export type MapGuideState = {
   routeStage?: RouteStage
   poiId?: string
   stopIndex?: number
+  joinStopIndex?: number
   source?: PoiEntrySource
   xiaolingMode: XiaolingMode
 }
@@ -29,7 +46,7 @@ export type RouteGuideContext = {
   mode: 'route'
   routeId: string
   routeName: string
-  routeStage: Extract<RouteStage, 'preview' | 'active' | 'arrived'>
+  routeStage: Extract<RouteStage, 'preview' | 'joining' | 'active' | 'arrived'>
   progressText?: string
   currentStopIndex?: number
   currentStopName?: string
@@ -51,7 +68,9 @@ export type PoiGuideContext = {
 
 export type XiaolingGuideContext = BrowseGuideContext | RouteGuideContext | PoiGuideContext
 
-export const ROUTE_STAGES = ['preview', 'active', 'arrived', 'paused', 'completed'] as const satisfies readonly RouteStage[]
+export const ROUTE_STAGES = ['preview', 'joining', 'active', 'arrived', 'paused', 'completed'] as const satisfies readonly RouteStage[]
+
+export const POI_RETURN_STAGES = ['preview', 'joining', 'active', 'arrived'] as const satisfies readonly PoiReturnStage[]
 
 export const POI_ENTRY_SOURCES = ['browse', 'route', 'ai'] as const satisfies readonly PoiEntrySource[]
 
@@ -111,7 +130,15 @@ export function isPoiEntrySource(value: string | null | undefined): value is Poi
   return POI_ENTRY_SOURCES.includes(value as PoiEntrySource)
 }
 
-export function parseStopParam(value: string | null | undefined): number | undefined {
+export function isPoiReturnStage(value: string | null | undefined): value is PoiReturnStage {
+  return POI_RETURN_STAGES.includes(value as PoiReturnStage)
+}
+
+export function isScenicMapPresentation(value: string | null | undefined): value is ScenicMapPresentation {
+  return value === 'scenic3d' || value === 'ink2d'
+}
+
+export function parseStopParam(value: string | null | undefined, stopCount?: number): number | undefined {
   if (!value) {
     return undefined
   }
@@ -121,9 +148,75 @@ export function parseStopParam(value: string | null | undefined): number | undef
     return undefined
   }
 
-  return stopNumber - 1
+  const stopIndex = stopNumber - 1
+  if (stopCount !== undefined && (!Number.isInteger(stopCount) || stopCount <= 0 || stopIndex >= stopCount)) {
+    return undefined
+  }
+
+  return stopIndex
 }
 
 export function formatStopParam(stopIndex: number): string {
-  return String(Math.max(0, stopIndex) + 1)
+  return String(Number.isInteger(stopIndex) && stopIndex >= 0 ? stopIndex + 1 : 1)
+}
+
+export type ParsedRouteNavigationState = {
+  routeStage: RouteStage
+  stopIndex?: number
+  joinStopIndex?: number
+  presentation?: ScenicMapPresentation
+}
+
+/**
+ * Parses route query state without allowing malformed or out-of-range stops
+ * to put a route page into an impossible state. A missing required stop
+ * safely falls back to route preview.
+ */
+export function parseRouteNavigationState(
+  searchParams: Pick<URLSearchParams, 'get'>,
+  stopCount?: number
+): ParsedRouteNavigationState {
+  const presentationValue = searchParams.get('presentation')
+  const presentation = isScenicMapPresentation(presentationValue) ? presentationValue : undefined
+  const requestedStage = searchParams.get('stage')
+  const routeStage = isRouteStage(requestedStage) ? requestedStage : 'preview'
+
+  if (routeStage === 'joining') {
+    const joinStopIndex = parseStopParam(searchParams.get('joinStop'), stopCount)
+    return joinStopIndex === undefined ? { routeStage: 'preview', presentation } : { routeStage, joinStopIndex, presentation }
+  }
+
+  if (routeStage === 'active' || routeStage === 'arrived') {
+    const stopIndex = parseStopParam(searchParams.get('stop'), stopCount)
+    return stopIndex === undefined ? { routeStage: 'preview', presentation } : { routeStage, stopIndex, presentation }
+  }
+
+  return { routeStage, presentation }
+}
+
+/** Parses the return protocol carried by a POI detail URL. */
+export function parsePoiRouteReturnContext(
+  searchParams: Pick<URLSearchParams, 'get'>,
+  stopCount?: number
+): PoiRouteReturnContext | undefined {
+  const routeId = searchParams.get('routeId')?.trim()
+  const returnStageValue = searchParams.get('returnStage')
+  if (!routeId || !isPoiReturnStage(returnStageValue)) {
+    return undefined
+  }
+
+  const poiStopIndex = parseStopParam(searchParams.get('stop'), stopCount)
+  const returnStopIndex = parseStopParam(searchParams.get('returnStop'), stopCount)
+  if ((returnStageValue === 'joining' || returnStageValue === 'active' || returnStageValue === 'arrived') && returnStopIndex === undefined) {
+    return undefined
+  }
+
+  const presentationValue = searchParams.get('presentation')
+  return {
+    routeId,
+    poiStopIndex,
+    returnStage: returnStageValue,
+    returnStopIndex,
+    presentation: isScenicMapPresentation(presentationValue) ? presentationValue : undefined
+  }
 }
