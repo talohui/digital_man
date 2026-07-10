@@ -19,7 +19,7 @@ Browse mode (`viewMode === 'browse'`) never draws a route. It draws `core` POIs 
 - `all`: all non-service POIs, including core POIs.
 - `services`: an empty list until verified service coordinates exist. No synthetic service points are rendered.
 
-Until the state-machine contract lands, `?poiLayer=core|all|services` is a renderer-only compatibility input. A marker with a detail page routes directly to that detail page.
+The renderer consumes `useMapGuideUiStore` directly: `poiVisibilityMode` chooses `core` or `all`, and `serviceFacilitiesEnabled` is an independent switch. The service branch remains intentionally empty until verified coordinates exist. A marker with a detail page routes directly to that detail page.
 
 ## Route Rendering
 
@@ -27,10 +27,10 @@ Every route page selects `getScenicRouteConfig(routeId)`. The route polyline use
 
 - `preview`: full deep-green solid route and all numbered station markers.
 - `active` / `arrived`: completed path is deep green; remaining path is a pale dashed line; the current station and next station retain distinct warm highlights.
-- `joining` compatibility: `?stage=joining&joinStop=N` is accepted before the shared type lands. Segments before N are muted and station N becomes the active entry point.
+- `joining`: the shared protocol supplies `joinStopIndex` (zero-based). Segments before that station are muted and the joining station becomes the active entry point. A URL fallback remains safe for direct route links.
 
-The renderer accepts a pending `mapFocusMode` state value (`overview` or `current`) without owning its type. `overview` fits the active route camera; `current` focuses the current station. The temporary query fallback is `?mapFocus=overview|current`.
+The renderer consumes `mapFocusMode` from `useMapGuideUiStore`. `overview` fits the active route camera; `current` focuses the current station. Preview always uses overview. Expanded active/arrived cards narrow the marker field to current, next, and at most three nearby core POIs; collapsed cards restore all numbered route stations without resetting the camera.
 
 ## Ownership Boundary
 
-This worktree only changes map data, TMap marker/polyline layers and camera presentation. It does not modify route cards, drawers, mobile CSS, navigation helpers, or the shared `MapGuideState` type. When `codex/state-machine` is merged, map rendering should consume the agreed `joining`, POI layer, and map-focus fields directly and remove the temporary query fallbacks.
+This worktree only changes map data, TMap marker/polyline layers and camera presentation. It does not modify route cards, drawers, mobile CSS, or Fay. Navigation and state-machine protocol are consumed as published by their dedicated modules.

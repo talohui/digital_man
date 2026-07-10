@@ -78,13 +78,14 @@ import { preloadMap3DLandmarkAssets } from '../lib/map3dPreload'
 import { buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
 import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
-import type { MapGuideState } from '../types/mapGuide'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
+import type { MapGuideState, PoiReturnStage, ScenicMapPresentation } from '../types/mapGuide'
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
-export type ScenicMapPresentation = 'scenic3d' | 'ink2d'
+export type { ScenicMapPresentation } from '../types/mapGuide'
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
 type GardenLodState = {
   opacity: number
@@ -823,6 +824,11 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const effectiveGuideState = guideState ?? ({ viewMode: 'browse', xiaolingMode: 'browse' } satisfies MapGuideState)
+  const poiVisibilityMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
+  const serviceFacilitiesEnabled = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
+  const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
+  const mapFocusMode = useMapGuideUiStore((state) => state.mapFocusMode)
+  const setSelectedPoiId = useMapGuideUiStore((state) => state.setSelectedPoiId)
   const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
   const scenicMapPresentation = useMemo(
     () => resolveScenicMapPresentation(presentation, isMobileViewport),
@@ -1140,13 +1146,17 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   const isRouteGuideView = effectiveGuideState.viewMode === 'route' && Boolean(effectiveGuideState.routeId)
   const routeGuideStage = effectiveGuideState.routeStage ?? 'preview'
   const routeGuideStopIndex = clampRouteStopIndex(effectiveGuideState.stopIndex, routeStops.length)
-  const joiningStopIndex = getJoiningStopIndexFromQuery(routeStops.length)
+  const requestedJoiningStopIndex = effectiveGuideState.joinStopIndex ?? getJoiningStopIndexFromQuery(routeStops.length)
+  const joiningStopIndex =
+    routeGuideStage === 'joining' && requestedJoiningStopIndex !== undefined
+      ? clampRouteStopIndex(requestedJoiningStopIndex, routeStops.length)
+      : undefined
   const effectiveRouteStopIndex = joiningStopIndex ?? routeGuideStopIndex
   const shouldRenderRoute = isRouteGuideView
   const shouldRenderRouteProgress =
     isRouteGuideView && (routeGuideStage === 'active' || routeGuideStage === 'arrived' || joiningStopIndex !== undefined)
-  const mapFocusMode = getGuideMapFocusMode(effectiveGuideState, routeGuideStage)
-  const poiLayerMode = useMemo<LingshanPoiLayerMode>(() => getPoiLayerModeFromQuery(), [])
+  const effectiveMapFocusMode = routeGuideStage === 'preview' ? 'overview' : mapFocusMode
+  const poiLayerMode: LingshanPoiLayerMode = poiVisibilityMode
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
 
   useEffect(() => {
@@ -1167,7 +1177,7 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       return
     }
 
-    if (mapFocusMode === 'overview') {
+    if (effectiveMapFocusMode === 'overview') {
       moveMapCamera(currentRouteCenter, isInk2DPresentation ? INK_2D_CAMERA_PRESET : MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview)
       return
     }
@@ -1183,7 +1193,7 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     effectiveRouteStopIndex,
     isInk2DPresentation,
     isRouteGuideView,
-    mapFocusMode,
+    effectiveMapFocusMode,
     mapStatus,
     routeStops
   ])
@@ -5246,12 +5256,22 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
-    const routeProgressMode = shouldRenderRouteProgress
+    // Expanded active/arrived cards intentionally narrow the marker field;
+    // collapsed cards restore every numbered station without moving the map.
+    const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
     const routeContextPois = routeProgressMode
       ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
       : []
+    const browsePois = Array.from(
+      new Map(
+        [
+          ...getLingshanPoisForLayer(poiLayerMode),
+          ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
+        ].map((poi) => [poi.id, poi])
+      ).values()
+    )
     const renderedPois = !isRouteGuideView
-      ? getLingshanPoisForLayer(poiLayerMode)
+      ? browsePois
       : routeProgressMode
         ? routeContextPois
         : lingshanPois.filter((poi) => routeStopIds.has(poi.id))
@@ -5354,13 +5374,20 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
         return
       }
 
+      setSelectedPoiId(poiId)
       if (!isRouteGuideView) {
-        goToPoiFromBrowse(navigate, poiId)
+        goToPoiFromBrowse(navigate, poiId, scenicMapPresentation)
         return
       }
 
       const stopIndex = routeStops.findIndex((stop) => stop.spotId === poiId)
-      goToPoiFromRoute(navigate, poiId, currentRouteId, stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex)
+      goToPoiFromRoute(navigate, poiId, {
+        routeId: currentRouteId,
+        poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+        returnStage: getPoiReturnStage(routeGuideStage),
+        returnStopIndex: effectiveRouteStopIndex,
+        presentation: scenicMapPresentation
+      })
     }
     poiMarkerLayerRef.current.on?.('click', handlePoiMarkerClick)
     perfRecorder.markStageEnd('poiInit')
@@ -5388,7 +5415,12 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     nextStop.nextStopId,
     perfRecorder,
     poiLayerMode,
+    routeCardExpanded,
+    routeGuideStage,
     routeStops,
+    scenicMapPresentation,
+    setSelectedPoiId,
+    serviceFacilitiesEnabled,
     shouldRenderRouteProgress,
     terminalStopId
   ])
@@ -7494,15 +7526,22 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
           const poi = lingshanPois.find((item) => item.id === id)
 
           if (hasLingshanPoiDetail(id)) {
+            setSelectedPoiId(id)
             stopActiveTour('manual')
             if (poi) {
               setActiveLandmarkId(id)
               focusLandmarkCamera(id, getBestPoiLocation(poi), false)
             }
             if (effectiveGuideState.viewMode === 'route' && effectiveGuideState.routeId) {
-              goToPoiFromRoute(navigate, id, effectiveGuideState.routeId, effectiveGuideState.stopIndex ?? stopIndex)
+              goToPoiFromRoute(navigate, id, {
+                routeId: effectiveGuideState.routeId,
+                poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+                returnStage: getPoiReturnStage(routeGuideStage),
+                returnStopIndex: effectiveRouteStopIndex,
+                presentation: scenicMapPresentation
+              })
             } else {
-              goToPoiFromBrowse(navigate, id)
+              goToPoiFromBrowse(navigate, id, scenicMapPresentation)
             }
             return
           }
@@ -10342,39 +10381,8 @@ function getJoiningStopIndexFromQuery(stopCount: number) {
   return clampRouteStopIndex(joinStop - 1, stopCount)
 }
 
-/**
- * Layer selection is intentionally query-compatible until Codex C's shared
- * state protocol lands. Services return no fabricated coordinates.
- */
-function getPoiLayerModeFromQuery(): LingshanPoiLayerMode {
-  if (typeof window === 'undefined') {
-    return 'core'
-  }
-
-  const value = new URLSearchParams(window.location.search).get('poiLayer')
-  return value === 'all' || value === 'services' ? value : 'core'
-}
-
-type MapFocusMode = 'overview' | 'current'
-
-/**
- * Accepts the pending shared-store field without coupling this worktree to
- * the state-machine branch. The query remains a useful integration fallback.
- */
-function getGuideMapFocusMode(guideState: MapGuideState, stage: string): MapFocusMode {
-  const stateValue = (guideState as MapGuideState & { mapFocusMode?: unknown }).mapFocusMode
-  if (stateValue === 'overview' || stateValue === 'current') {
-    return stateValue
-  }
-
-  if (typeof window !== 'undefined') {
-    const queryValue = new URLSearchParams(window.location.search).get('mapFocus')
-    if (queryValue === 'overview' || queryValue === 'current') {
-      return queryValue
-    }
-  }
-
-  return stage === 'preview' ? 'overview' : 'current'
+function getPoiReturnStage(stage: string): PoiReturnStage {
+  return stage === 'joining' || stage === 'active' || stage === 'arrived' ? stage : 'preview'
 }
 
 function getRouteProgressPois(currentStopId?: string, nextStopId?: string, nearbyCoreLimit = 3) {
