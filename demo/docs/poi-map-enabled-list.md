@@ -23,5 +23,11 @@
 | lingshan_jingshe | 灵山精舍 | existing guideData | existing-poi-config | existing | all / route | marker | 1 |
 | sansheng_hall | 三圣殿 | existing guideData | existing-poi-config | existing | core | core + GLB | 1 |
 | exit | 景区出口 | existing guideData | existing-poi-config | existing | all / route | marker | 5 |
+| wuming_bridge | 五明桥 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
+| wuzhi_gate | 五智门 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
+| jiangmo_relief | 降魔浮雕 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
+| ashoka_pillar | 阿育王柱 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
+| buddhist_culture_museum | 佛教文化博览馆 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
+| wujinyi_zhai | 无尽意斋 | — | 腾讯查询待恢复 | unresolved | 否 | 否 | 0 |
 
 “existing guideData”表示本次没有改变既有经纬度；精确数值和待核验点见 `docs/poi-coordinate-provenance.md`。

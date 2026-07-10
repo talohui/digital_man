@@ -1405,13 +1405,13 @@ export function Map3DGuideExperience({
       currentPresentation: scenicMapPresentation,
       contextLostCount: contextLostCountRef.current,
       hardRecoveryCount: hardRecoveryCountRef.current,
-      currentPoiLayerMode: poiLayerMode,
+      currentPoiLayerMode: poiVisibilityMode,
       customPoiVisibleCount,
-      tencentPoiFeatureEnabled: poiLayerMode === 'all',
+      tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
       activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
       lastMapError
     }
-  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapInstanceId, poiLayerMode, sceneArbiter, scenicMapPresentation])
+  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapInstanceId, poiVisibilityMode, sceneArbiter, scenicMapPresentation])
   const landmarkInspector = useLandmarkModelInspector({
     active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,

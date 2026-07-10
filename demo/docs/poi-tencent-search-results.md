@@ -2,20 +2,25 @@
 
 本次实现了受灵山正式边界约束的 Tencent `TMap.service.Search.searchRectangle` 开发工具；它不会在游客端或生产地图启动时请求地点搜索。
 
-截至本次代码变更，当前工作树未提供可供脚本使用的 `TMAP_WEB_SERVICE_KEY` shell 环境变量，且不会读取或记录 `.env.local`，因此下表没有伪造搜索结果。待在已配置腾讯 Web Key 的开发地图中运行开发态解析工具，或由维护者以环境变量运行脚本后补全。
+本轮已只读使用主工作区既有环境配置并真实调用腾讯官方接口；Key 没有写入源码、日志或文档。两次请求均在 `LINGSHAN_INK_MAP_BOUNDS` 矩形范围内执行，没有查询全无锡：
+
+- `VITE_TMAP_WEB_KEY` 返回腾讯状态 **199**：此 Key 未开通 WebService API 功能。
+- `VITE_TMAP_ROUTE_KEY` 返回腾讯状态 **121**：此 Key 当日 WebService 调用量已达上限。
+
+因此腾讯没有返回任何可供复核的候选坐标。下表记录真实阻断结果，不能将其当作“无此景点”的结论。
 
 | 景点 | 查询词 | 腾讯POI ID | 返回名称 | 类别 | 地址 | lat | lng | 匹配分 | 处理结果 |
 |---|---|---|---|---|---|---:|---:|---:|---|
-| 五明桥 | 五明桥 / 五明桥景区 | 待查询 | — | — | — | — | — | — | unresolved |
-| 五智门 | 五智门 / 五智门牌坊 | 待查询 | — | — | — | — | — | — | unresolved |
-| 降魔浮雕 | 降魔浮雕 / 降魔浮雕墙 | 待查询 | — | — | — | — | — | — | unresolved |
-| 阿育王柱 | 阿育王柱 / 阿育王石柱 | 待查询 | — | — | — | — | — | — | unresolved |
-| 佛教文化博览馆 | 佛教文化博览馆 / 灵山佛教文化博览馆 | 待查询 | — | — | — | — | — | — | unresolved |
-| 无尽意斋 | 无尽意斋 / 无尽意斋院 | 待查询 | — | — | — | — | — | — | unresolved |
+| 五明桥 | 五明桥 / 五明桥景区 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 五智门 | 五智门 / 五智门牌坊 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 降魔浮雕 | 降魔浮雕 / 降魔浮雕墙 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 阿育王柱 | 阿育王柱 / 阿育王石柱 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 佛教文化博览馆 | 佛教文化博览馆 / 灵山佛教文化博览馆 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 无尽意斋 | 无尽意斋 / 无尽意斋院 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
 
 ## 执行方式
 
-1. 游客端不运行查询。仅在已加载腾讯地图 SDK 的开发地图中调用 `resolveLingshanPoiCoordinates(poiId)`，或以环境变量运行 `scripts/resolve-lingshan-poi-coordinates.mjs`。
+1. 游客端不运行查询。待 WebService Key 开通/额度恢复后，仅在已加载腾讯地图 SDK 的开发地图中调用 `resolveLingshanPoiCoordinates(poiId)`，或以环境变量运行 `scripts/resolve-lingshan-poi-coordinates.mjs`。
 2. 搜索严格使用 `LINGSHAN_INK_MAP_BOUNDS` 的矩形范围，不扩大到整个无锡。
 3. 只有名称精确/可靠别名匹配、景区范围内、类别/地址合理，且相对第二候选有明显优势的候选才可以标记为 `verified`。
 4. `needs-review` 必须在开发态地图里显示候选并人工确认或拖动校准；`unresolved` 不会上正式 Marker。
