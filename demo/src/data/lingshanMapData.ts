@@ -90,6 +90,21 @@ export const LINGSHAN_CORE_POI_IDS = [
 
 export type LingshanPoiLayerMode = 'core' | 'all' | 'services'
 
+/** Reserved contract for a future verified third-party scenic POI source. */
+export type ExternalPoi = {
+  id: string
+  name: string
+  location: LatLngPoint
+  category?: string
+}
+
+export type ExternalPoiProvider = {
+  searchWithinScenicArea: (options: {
+    bounds: { north: number; south: number; east: number; west: number }
+    categories?: string[]
+  }) => Promise<ExternalPoi[]>
+}
+
 export type LingshanRoutePath = {
   routeId: string
   path: LatLngPoint[]
@@ -315,20 +330,41 @@ export function isLingshanCorePoi(poi: Pick<LingshanPoi, 'id'>) {
   return corePoiIdSet.has(poi.id)
 }
 
+export function hasValidLingshanPoiLocation(poi: Pick<LingshanPoi, 'displayLocation'>) {
+  const { lat, lng } = poi.displayLocation
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+}
+
+export function isLingshanServiceFacilityPoi(poi: Pick<LingshanPoi, 'category'>) {
+  return poi.category === 'service' || poi.category === 'toilet' || poi.category === 'food' || poi.category === 'bus'
+}
+
 /**
  * Rendering-only POI filter. `services` deliberately returns no inferred
  * points until verified service coordinates are available.
  */
 export function getLingshanPoisForLayer(mode: LingshanPoiLayerMode): LingshanPoi[] {
   if (mode === 'core') {
-    return lingshanPois.filter(isLingshanCorePoi)
+    return lingshanPois.filter((poi) => isLingshanCorePoi(poi) && hasValidLingshanPoiLocation(poi))
   }
 
   if (mode === 'services') {
     return []
   }
 
-  return lingshanPois.filter((poi) => poi.category !== 'service' && poi.category !== 'toilet' && poi.category !== 'food')
+  return lingshanPois.filter((poi) => !isLingshanServiceFacilityPoi(poi) && hasValidLingshanPoiLocation(poi))
+}
+
+export function getLingshanPoiLayerSummary() {
+  const core = getLingshanPoisForLayer('core')
+  const all = getLingshanPoisForLayer('all')
+  const coreIds = new Set(core.map((poi) => poi.id))
+
+  return {
+    coreCount: core.length,
+    allCount: all.length,
+    difference: all.filter((poi) => !coreIds.has(poi.id)).map((poi) => ({ id: poi.id, name: poi.name }))
+  }
 }
 
 export const lingshanPresetRoutePaths: LingshanRoutePath[] = guideRoutes.map((route) => ({
