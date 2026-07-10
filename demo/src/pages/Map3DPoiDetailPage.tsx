@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getScenicRouteConfig } from '../data/lingshanScenicRoutes'
 import { getLingshanPoiDetailById, lingshanPoiDetails, type LingshanPoiDetail } from '../data/lingshanPoiDetails'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
-import { isPoiEntrySource, parseStopParam, POI_MODE_QUESTION_MAP } from '../types/mapGuide'
+import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam, POI_MODE_QUESTION_MAP } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
 
 type ModelPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -27,6 +27,7 @@ function Map3DPoiDetailPage() {
   const resolvedPoiId = resolvePoiDetailId(poiId)
   const detail = getLingshanPoiDetailById(resolvedPoiId)
   const route = routeId ? getScenicRouteConfig(routeId) : undefined
+  const routeReturnContext = route ? parsePoiRouteReturnContext(searchParams, route.stops.length) : undefined
   const relatedDetails = useMemo(
     () => lingshanPoiDetails.filter((item) => item.id !== detail?.id).slice(0, 4),
     [detail?.id]
@@ -35,7 +36,14 @@ function Map3DPoiDetailPage() {
   const [xiaolingOpen, setXiaolingOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
-  const handleBack = () => goBackFromPoi(navigate, { from: source, routeId, stopIndex })
+  const handleBack = () => goBackFromPoi(navigate, {
+    from: source,
+    routeId,
+    poiStopIndex: stopIndex,
+    returnStage: routeReturnContext?.returnStage,
+    returnStopIndex: routeReturnContext?.returnStopIndex,
+    presentation: routeReturnContext?.presentation
+  })
   const isRouteEntry = source === 'route'
   const stopNumber = stopIndex !== undefined ? stopIndex + 1 : undefined
 
@@ -73,7 +81,8 @@ function Map3DPoiDetailPage() {
   const xiaolingTip = isRouteEntry
     ? '小灵：我可以给你讲讲建筑格局、礼佛顺序和路线衔接。'
     : '小灵：我可以给你讲讲这里的佛诞故事、看点和拍照建议。'
-  const nextStopIndex = stopIndex !== undefined ? stopIndex + 1 : undefined
+  const routeResumeStopIndex = routeReturnContext?.returnStopIndex ?? stopIndex
+  const nextStopIndex = routeResumeStopIndex !== undefined ? routeResumeStopIndex + 1 : undefined
   const routeStopCount = route?.stops.length ?? 0
   const canContinueRoute = Boolean(
     isRouteEntry && routeId && nextStopIndex !== undefined && (!routeStopCount || nextStopIndex < routeStopCount)
@@ -235,7 +244,7 @@ function Map3DPoiDetailPage() {
             disabled={!canContinueRoute}
             onClick={() => {
               if (routeId && nextStopIndex !== undefined) {
-                goContinueNextStop(navigate, routeId, nextStopIndex)
+                goContinueNextStop(navigate, routeId, nextStopIndex, routeReturnContext?.presentation)
               }
             }}
           >

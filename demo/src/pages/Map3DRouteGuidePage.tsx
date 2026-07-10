@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
@@ -20,10 +20,14 @@ import {
   goContinueNextStop,
   goToMapBrowse,
   goToPoiFromRoute,
-  goToRouteActive
+  goToRouteActive,
+  goToRouteArrived,
+  goToRoutePreview,
+  toggleMapPresentation
 } from '../lib/mapGuideNavigation'
-import { isRouteStage, parseStopParam, ROUTE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
+import { parseRouteNavigationState, ROUTE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
 import { Map3DGuideExperience, type ScenicMapPresentation } from './Map3DGuidePage'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import '../styles/map/mapRouteMobile.css'
 
 const DEFAULT_STOP_INDEX = 0
@@ -98,13 +102,24 @@ function getRoutePreviewSummary(route: Pick<ScenicRouteConfig, 'id' | 'descripti
   return ROUTE_PREVIEW_SUMMARIES[route.id] ?? route.description
 }
 
+function getRouteRecommendationText(routeId: string) {
+  const recommendations: Record<string, string> = {
+    historical_culture: '这条路线会带你了解灵山的佛教历史与建筑故事，要不要开始？',
+    prayer_meditation: '这条路线适合祈福、礼佛和静心漫步，跟我慢慢走一走吧。',
+    highlights_checkin: '这条路线串起主要地标和拍照打卡点，适合第一次来快速看精华。',
+    natural_scenery: '这条路线沿山水林景展开，适合放慢脚步看看自然风光。',
+    family: '这条路线节奏更轻松，适合亲子同行和趣味体验。'
+  }
+  return recommendations[routeId] ?? '我会陪你按路线看看灵山的重点景点和游览节奏。'
+}
+
 function getRoutePreviewTabs() {
   const options = getScenicRouteOptions()
   const ordered = ROUTE_PREVIEW_TAB_IDS.map((routeId) => options.find((item) => item.id === routeId)).filter(
     (item): item is ReturnType<typeof getScenicRouteOptions>[number] => Boolean(item)
   )
   const remaining = options.filter((item) => !ordered.some((route) => route.id === item.id))
-  return [...ordered, ...remaining]
+  return [...ordered, ...remaining].map((item) => getScenicRouteConfig(item.id))
 }
 
 function getRouteMockAnswer(question: string, route: ScenicRouteConfig) {
@@ -274,27 +289,27 @@ function XiaolingInlineEntry({ label = '继续问小灵', onClick }: { label?: s
   )
 }
 
-function RoutePreviewCard({
+function RoutePreviewSlide({
   route,
-  selectedRouteId,
-  onSelectRoute,
+  selected,
   onOpenXiaoling,
   onStart
 }: {
   route: ScenicRouteConfig
-  selectedRouteId: string
-  onSelectRoute: (routeId: string) => void
+  selected: boolean
   onOpenXiaoling: () => void
   onStart: (routeId: string) => void
 }) {
-  const routeOptions = getRoutePreviewTabs()
-  const selectedRoute = getScenicRouteConfig(resolveScenicRouteId(selectedRouteId)) ?? route
-  const tags = selectedRoute.tags.slice(0, 2)
+  const tags = route.tags.slice(0, 2)
 
   return (
-    <section className="map-route-tour-card map-route-tour-card--preview" aria-label="路线预览">
+    <section
+      className={`map-route-tour-card map-route-tour-card--preview map-route-tour-preview-slide${selected ? ' is-current' : ''}`}
+      data-route-preview-id={route.id}
+      aria-label={`${getRouteTabLabel(route)}路线预览`}
+    >
       <button type="button" className="map-route-tour-preview-xiaoling" onClick={onOpenXiaoling}>
-        <span>小灵推荐路线：这条路线会带你看灵山最重要的人文景点，要不要开始？</span>
+        <span>小灵推荐路线：{getRouteRecommendationText(route.id)}</span>
       </button>
       <button type="button" className="map-route-tour-preview-guide" onClick={onOpenXiaoling}>
         <span className="map-route-tour-avatar" aria-hidden="true">
@@ -309,9 +324,9 @@ function RoutePreviewCard({
           </div>
           <div className="map-route-tour-card__content">
             <span className="map-route-tour-kicker">路线预览</span>
-            <h2>{getRouteTabLabel(selectedRoute)}</h2>
+            <h2>{getRouteTabLabel(route)}</h2>
             <p className="map-route-tour-meta">
-              {selectedRoute.guideRoute.durationLabel} · {selectedRoute.stops.length}个景点
+              {route.guideRoute.durationLabel} · {route.stops.length}个景点
             </p>
             <div className="map-route-tour-tags">
               {tags.map((tag) => (
@@ -320,46 +335,21 @@ function RoutePreviewCard({
             </div>
           </div>
         </div>
-        <p className="map-route-tour-desc">{getRoutePreviewSummary(selectedRoute)}</p>
+        <p className="map-route-tour-desc">{getRoutePreviewSummary(route)}</p>
         <div className="map-route-tour-stops" aria-label="站点时间线">
-          {selectedRoute.stops.map((stop, index) => (
+          {route.stops.map((stop, index) => (
             <span key={`${stop.id}-${index}`}>
               <i>{index + 1}</i>
               {getStationShortName(stop.name)}
             </span>
           ))}
         </div>
-        <div className="map-route-tour-preview-carousel" aria-label="切换推荐路线">
-          {routeOptions.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className={item.id === selectedRoute.id ? 'is-active' : ''}
-              onClick={() => onSelectRoute(resolveScenicRouteId(item.id))}
-              aria-pressed={item.id === selectedRoute.id}
-            >
-              {getRouteTabLabel(item)}
-            </button>
-          ))}
-        </div>
         <div className="map-route-tour-card__footer">
-          <button type="button" className="map-route-tour-primary" onClick={() => onStart(selectedRoute.id)}>
+          <button type="button" className="map-route-tour-primary" onClick={() => onStart(route.id)}>
             开始游览
           </button>
           <div className="map-route-tour-footer-hint">
             <small>左右滑动查看更多路线</small>
-            <div className="map-route-tour-dots" aria-label="切换推荐路线">
-              {routeOptions.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  className={item.id === selectedRoute.id ? 'is-active' : ''}
-                  onClick={() => onSelectRoute(resolveScenicRouteId(item.id))}
-                  aria-label={`查看${getRouteTabLabel(item)}`}
-                  aria-pressed={item.id === selectedRoute.id}
-                />
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -367,16 +357,118 @@ function RoutePreviewCard({
   )
 }
 
+function RoutePreviewDeck({
+  selectedRouteId,
+  onSelectRoute,
+  onOpenXiaoling,
+  onStart
+}: {
+  selectedRouteId: string
+  onSelectRoute: (routeId: string) => void
+  onOpenXiaoling: () => void
+  onStart: (routeId: string) => void
+}) {
+  const routeOptions = getRoutePreviewTabs()
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const settleTimerRef = useRef<number | null>(null)
+
+  const selectLargestVisibleCard = useCallback(() => {
+    const track = trackRef.current
+    if (!track) {
+      return
+    }
+
+    const trackRect = track.getBoundingClientRect()
+    let bestRouteId = selectedRouteId
+    let bestArea = -1
+
+    track.querySelectorAll<HTMLElement>('[data-route-preview-id]').forEach((card) => {
+      const rect = card.getBoundingClientRect()
+      const width = Math.max(0, Math.min(rect.right, trackRect.right) - Math.max(rect.left, trackRect.left))
+      const height = Math.max(0, Math.min(rect.bottom, trackRect.bottom) - Math.max(rect.top, trackRect.top))
+      const area = width * height
+      if (area > bestArea) {
+        bestArea = area
+        bestRouteId = card.dataset.routePreviewId ?? bestRouteId
+      }
+    })
+
+    if (bestRouteId !== selectedRouteId) {
+      onSelectRoute(bestRouteId)
+    }
+  }, [onSelectRoute, selectedRouteId])
+
+  useEffect(() => {
+    const track = trackRef.current
+    if (!track) {
+      return undefined
+    }
+
+    const activeCard = track.querySelector<HTMLElement>(`[data-route-preview-id="${selectedRouteId}"]`)
+    if (!activeCard) {
+      return undefined
+    }
+
+    const trackRect = track.getBoundingClientRect()
+    const cardRect = activeCard.getBoundingClientRect()
+    const targetLeft = track.scrollLeft + cardRect.left - trackRect.left - (trackRect.width - cardRect.width) / 2
+
+    if (Math.abs(track.scrollLeft - targetLeft) > 2) {
+      track.scrollTo({ left: Math.max(0, targetLeft), behavior: 'auto' })
+    }
+
+    return undefined
+  }, [selectedRouteId])
+
+  useEffect(() => () => {
+    if (settleTimerRef.current !== null) {
+      window.clearTimeout(settleTimerRef.current)
+    }
+  }, [])
+
+  return (
+    <div className="map-route-tour-preview-deck" aria-label="左右滑动切换路线">
+      <div
+        className="map-route-tour-preview-deck__track"
+        ref={trackRef}
+        onScroll={() => {
+          if (settleTimerRef.current !== null) {
+            window.clearTimeout(settleTimerRef.current)
+          }
+          settleTimerRef.current = window.setTimeout(selectLargestVisibleCard, 160)
+        }}
+      >
+        {routeOptions.map((route) => (
+          <RoutePreviewSlide
+            key={route.id}
+            route={route}
+            selected={route.id === selectedRouteId}
+            onOpenXiaoling={onOpenXiaoling}
+            onStart={onStart}
+          />
+        ))}
+      </div>
+      <div className="map-route-tour-dots" aria-label="当前路线">
+        {routeOptions.map((route) => (
+          <span key={route.id} className={route.id === selectedRouteId ? 'is-active' : ''} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function RouteActiveCard({
   route,
   currentStopIndex,
   onOpenXiaoling,
+  onPreviewGuide,
   onNavigate,
   onPoiDetail
 }: {
   route: ScenicRouteConfig
   currentStopIndex: number
   onOpenXiaoling: () => void
+  onPreviewGuide: (stop: ScenicRouteStop | undefined) => void
   onNavigate: () => void
   onPoiDetail: (stopIndex: number) => void
 }) {
@@ -399,9 +491,9 @@ function RouteActiveCard({
           导航到下一站
         </button>
         <button type="button" onClick={() => onPoiDetail(nextStopIndex)}>
-          景点详情
+          下一站详情
         </button>
-        <button type="button" onClick={onOpenXiaoling}>
+        <button type="button" onClick={() => onPreviewGuide(nextStop)}>
           预览讲解
         </button>
       </div>
@@ -482,7 +574,7 @@ function RouteCollapsedBar({
       : stage === 'arrived'
         ? '小灵讲解已准备好'
         : '距你320m · 步行约6分钟'
-  const primaryLabel = stage === 'preview' ? '开始游览' : stage === 'arrived' ? '听讲解' : '导航'
+  const primaryLabel = stage === 'preview' ? '开始游览' : stage === 'arrived' ? '景点详情' : '导航'
 
   return (
     <section className="map-route-tour-card map-route-tour-card--collapsed" aria-label="路线卡片已收起">
@@ -500,10 +592,12 @@ function RouteCollapsedBar({
 function RouteXiaolingSheet({
   route,
   open,
+  guidedRequest,
   onClose
 }: {
   route: ScenicRouteConfig
   open: boolean
+  guidedRequest?: { id: number; prompt: string; answer: string } | null
   onClose: () => void
 }) {
   const defaultAnswer = '你可以问我下一站怎么走、是否跳过某站，或者让小灵先讲讲下一站的故事。'
@@ -513,13 +607,20 @@ function RouteXiaolingSheet({
   const [voiceActive, setVoiceActive] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      setSelectedQuestion('')
-      setAnswerText(defaultAnswer)
-      setInputText('')
-      setVoiceActive(false)
+    setSelectedQuestion('')
+    setAnswerText(defaultAnswer)
+    setInputText('')
+    setVoiceActive(false)
+  }, [defaultAnswer, route.id])
+
+  useEffect(() => {
+    if (!open || !guidedRequest) {
+      return
     }
-  }, [defaultAnswer, open, route.id])
+    setSelectedQuestion(guidedRequest.prompt)
+    setAnswerText(guidedRequest.answer)
+    setInputText('')
+  }, [guidedRequest, open])
 
   if (!open) {
     return null
@@ -603,20 +704,32 @@ function RouteXiaolingSheet({
   )
 }
 
-function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfig; guideState: MapGuideState }) {
+function RouteTourMobileOverlay({
+  route,
+  guideState,
+  presentation
+}: {
+  route: ScenicRouteConfig
+  guideState: MapGuideState
+  presentation: ScenicMapPresentation
+}) {
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
   const [xiaolingOpen, setXiaolingOpen] = useState(false)
+  const [guidedRequest, setGuidedRequest] = useState<{ id: number; prompt: string; answer: string } | null>(null)
   const [serviceOpen, setServiceOpen] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
-  const [cardCollapsed, setCardCollapsed] = useState(false)
-  const [overviewMode, setOverviewMode] = useState<'overview' | 'current'>('current')
-  const [is3dActive, setIs3dActive] = useState(true)
+  const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
+  const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
+  const overviewMode = useMapGuideUiStore((state) => state.mapFocusMode)
+  const setOverviewMode = useMapGuideUiStore((state) => state.setMapFocusMode)
   const [selectedRouteId, setSelectedRouteId] = useState(route.id)
   const [feedbackText, setFeedbackText] = useState('')
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
+  const navigateTimerRef = useRef<number | null>(null)
   const stage = guideState.routeStage ?? 'preview'
+  const cardCollapsed = !routeCardExpanded
   const stopCount = route.stops.length
   const currentStopIndex = clampStopIndex(stage === 'preview' ? DEFAULT_STOP_INDEX : guideState.stopIndex, stopCount)
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
@@ -626,12 +739,18 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
   }, [])
 
   useEffect(() => {
-    setCardCollapsed(false)
-  }, [stage, route.id])
+    setRouteCardExpanded(true)
+  }, [route.id, setRouteCardExpanded, stage])
 
   useEffect(() => {
     setSelectedRouteId(route.id)
   }, [route.id])
+
+  useEffect(() => () => {
+    if (navigateTimerRef.current !== null) {
+      window.clearTimeout(navigateTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!feedbackText) {
@@ -677,7 +796,13 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
       setFeedbackText('当前站点详情建设中')
       return
     }
-    goToPoiFromRoute(navigate, poiId, route.id, stopIndex)
+    goToPoiFromRoute(navigate, poiId, {
+      routeId: route.id,
+      poiStopIndex: stopIndex,
+      returnStage: stage === 'active' ? 'active' : 'arrived',
+      returnStopIndex: currentStopIndex,
+      presentation
+    })
   }
 
   const handleContinue = () => {
@@ -687,15 +812,11 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
     }
 
     const nextStopIndex = currentStopIndex + 1
-    goContinueNextStop(navigate, route.id, nextStopIndex)
+    goContinueNextStop(navigate, route.id, nextStopIndex, presentation)
   }
 
   const handleToggle3d = () => {
-    setIs3dActive((value) => {
-      const nextValue = !value
-      setFeedbackText(nextValue ? '3D 模式后续接入' : '已切回地图浏览')
-      return nextValue
-    })
+    toggleMapPresentation(navigate)
   }
 
   const handleLocate = () => {
@@ -703,7 +824,36 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
   }
 
   const handleNavigateNext = () => {
-    setFeedbackText('导航能力建设中，后续将接入腾讯地图路线规划。')
+    if (currentStopIndex >= stopCount - 1) {
+      setFeedbackText('路线已完成')
+      return
+    }
+
+    const nextStopIndex = currentStopIndex + 1
+    setFeedbackText('正在为你规划路线')
+    if (navigateTimerRef.current !== null) {
+      window.clearTimeout(navigateTimerRef.current)
+    }
+    navigateTimerRef.current = window.setTimeout(() => {
+      goToRouteArrived(navigate, route.id, nextStopIndex, presentation)
+    }, 1400)
+  }
+
+  const openXiaoling = () => {
+    setServiceOpen(false)
+    setGuidedRequest(null)
+    setXiaolingOpen(true)
+  }
+
+  const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
+    const stopName = stop?.name ?? '下一站'
+    setServiceOpen(false)
+    setGuidedRequest({
+      id: Date.now(),
+      prompt: `请用导览员的语气，为我讲解一下“${stopName}”这一站。`,
+      answer: `${stopName}是${route.name}中的下一站。你可以先留意它与前后空间的衔接，再从建筑、历史或游览礼序中选择感兴趣的角度继续了解。`
+    })
+    setXiaolingOpen(true)
   }
 
   const handleCollapsedPrimary = () => {
@@ -712,7 +862,7 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
       return
     }
     if (stage === 'arrived') {
-      setXiaolingOpen(true)
+      handlePoiDetail(currentStopIndex)
       return
     }
     handleNavigateNext()
@@ -729,9 +879,9 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
       aria-label="路线游览移动端覆盖层"
     >
       <RouteTopbar
-        routeName={route.name}
+        routeName={stage === 'preview' ? '路线预览' : route.name}
         progressText={progressText}
-        onBack={() => goToMapBrowse(navigate)}
+        onBack={() => goToMapBrowse(navigate, presentation)}
         onMore={() => setFeedbackText('更多功能建设中')}
       />
       <RouteToolRail
@@ -739,28 +889,34 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
         stage={stage}
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
-        is3dActive={is3dActive}
+        is3dActive={presentation === 'scenic3d'}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
-        onExit={() => goToMapBrowse(navigate)}
-        onService={() => setServiceOpen(true)}
+        onExit={() => goToMapBrowse(navigate, presentation)}
+        onService={() => {
+          setXiaolingOpen(false)
+          setServiceOpen(true)
+        }}
       />
       <RouteToolRail
         side="right"
         stage={stage}
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
-        is3dActive={is3dActive}
+        is3dActive={presentation === 'scenic3d'}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
-        onExit={() => goToMapBrowse(navigate)}
-        onService={() => setServiceOpen(true)}
+        onExit={() => goToMapBrowse(navigate, presentation)}
+        onService={() => {
+          setXiaolingOpen(false)
+          setServiceOpen(true)
+        }}
       />
       <div className={`map-route-tour-bottom${cardCollapsed ? ' is-collapsed' : ''}`}>
         <button
           type="button"
           className="map-route-tour-collapse-toggle"
-          onClick={() => setCardCollapsed((value) => !value)}
+          onClick={() => setRouteCardExpanded(!routeCardExpanded)}
           aria-expanded={!cardCollapsed}
           aria-label={cardCollapsed ? '展开路线卡片' : '收起路线卡片'}
         >
@@ -771,22 +927,24 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
             route={route}
             stage={stage}
             currentStopIndex={currentStopIndex}
-            onExpand={() => setCardCollapsed(false)}
+            onExpand={() => setRouteCardExpanded(true)}
             onPrimary={handleCollapsedPrimary}
           />
         ) : stage === 'preview' ? (
-          <RoutePreviewCard
-            route={route}
+          <RoutePreviewDeck
             selectedRouteId={selectedRouteId}
-            onSelectRoute={setSelectedRouteId}
-            onOpenXiaoling={() => setXiaolingOpen(true)}
-            onStart={(targetRouteId) => goToRouteActive(navigate, targetRouteId, 0)}
+            onSelectRoute={(routeId) => {
+              setSelectedRouteId(routeId)
+              goToRoutePreview(navigate, routeId, presentation, { replace: true })
+            }}
+            onOpenXiaoling={openXiaoling}
+            onStart={(targetRouteId) => goToRouteActive(navigate, targetRouteId, 0, presentation)}
           />
         ) : stage === 'arrived' ? (
           <RouteArrivedCard
             route={route}
             currentStopIndex={currentStopIndex}
-            onOpenXiaoling={() => setXiaolingOpen(true)}
+            onOpenXiaoling={openXiaoling}
             onPoiDetail={handlePoiDetail}
             onContinue={handleContinue}
           />
@@ -794,7 +952,8 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
           <RouteActiveCard
             route={route}
             currentStopIndex={currentStopIndex}
-            onOpenXiaoling={() => setXiaolingOpen(true)}
+            onOpenXiaoling={openXiaoling}
+            onPreviewGuide={handlePreviewGuide}
             onNavigate={handleNavigateNext}
             onPoiDetail={handlePoiDetail}
           />
@@ -829,7 +988,7 @@ function RouteTourMobileOverlay({ route, guideState }: { route: ScenicRouteConfi
           </section>
         </div>
       ) : null}
-      <RouteXiaolingSheet route={route} open={xiaolingOpen} onClose={() => setXiaolingOpen(false)} />
+      <RouteXiaolingSheet route={route} open={xiaolingOpen} guidedRequest={guidedRequest} onClose={() => setXiaolingOpen(false)} />
     </div>,
     document.body
   )
@@ -844,15 +1003,14 @@ function Map3DRouteGuidePage() {
   }, [routeId])
 
   const guideState = useMemo<MapGuideState>(() => {
-    const stageParam = searchParams.get('stage')
-    const routeStage = isRouteStage(stageParam) ? stageParam : 'preview'
-    const stopIndex = parseStopParam(searchParams.get('stop'))
+    const parsedState = parseRouteNavigationState(searchParams, route.stops.length)
 
     return {
       viewMode: 'route',
       routeId: route.id,
-      routeStage,
-      stopIndex,
+      routeStage: parsedState.routeStage,
+      stopIndex: parsedState.stopIndex,
+      joinStopIndex: parsedState.joinStopIndex,
       xiaolingMode: 'route'
     }
   }, [route, searchParams])
@@ -864,7 +1022,11 @@ function Map3DRouteGuidePage() {
   return (
     <>
       <Map3DGuideExperience variant="prototype-c" guideState={guideState} presentation={routePresentation} />
-      <RouteTourMobileOverlay route={route} guideState={guideState} />
+      <RouteTourMobileOverlay
+        route={route}
+        guideState={guideState}
+        presentation={routePresentation}
+      />
     </>
   )
 }

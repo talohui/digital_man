@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -10,7 +10,7 @@ import {
   getScenicRouteOptions,
   type ScenicRouteConfig
 } from '../data/lingshanScenicRoutes'
-import { goToRoutePreview } from '../lib/mapGuideNavigation'
+import { goToRoutePreview, toggleMapPresentation } from '../lib/mapGuideNavigation'
 import { BROWSE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
 import { Map3DGuideExperience, type ScenicMapPresentation } from './Map3DGuidePage'
 import '../styles/map/mapBrowseMobile.css'
@@ -43,17 +43,7 @@ const BROWSE_SERVICE_CATEGORIES = [
   }
 ] as const
 
-const ROUTE_PREVIEW_SUMMARIES: Record<string, string> = {
-  historical_culture: '覆盖灵山代表性人文主线，适合听佛教历史与建筑故事。',
-  prayer_meditation: '串联祈福礼佛节点，适合放慢脚步感受静心氛围。',
-  family: '节奏轻松、停留点清楚，适合亲子同行慢慢游览。',
-  highlights_checkin: '精选大佛、梵宫等高辨识度景点，适合拍照打卡。',
-  natural_scenery: '沿山水与广场空间展开，适合边走边看景区风貌。'
-}
-
-function getRoutePreviewSummary(route: Pick<ScenicRouteConfig, 'id' | 'description'>) {
-  return ROUTE_PREVIEW_SUMMARIES[route.id] ?? route.description ?? '适合第一次到访灵山胜境的游客，按景区主线轻松进入游览节奏。'
-}
+type BrowseLayerMode = 'core' | 'all'
 
 function getBrowseMockAnswer(question: string, route: ScenicRouteConfig) {
   if (question.includes('1 小时')) {
@@ -93,14 +83,18 @@ function BrowseTopbar({ onBack, onMore }: { onBack: () => void; onMore: () => vo
 
 function BrowseToolRail({
   is3dActive,
+  isLayerOpen,
   onLocate,
   onToggle3d,
-  onService
+  onService,
+  onLayer
 }: {
   is3dActive: boolean
+  isLayerOpen: boolean
   onLocate: () => void
   onToggle3d: () => void
   onService: () => void
+  onLayer: () => void
 }) {
   return (
     <MapMobileToolRail
@@ -110,65 +104,31 @@ function BrowseToolRail({
       items={[
         { id: 'locate', label: '定位', icon: '⌖', onClick: onLocate },
         { id: '3d', label: '3D', icon: '◆', active: is3dActive, onClick: onToggle3d },
-        { id: 'service', label: '服务', icon: '⌂', onClick: onService }
+        { id: 'service', label: '服务', icon: '⌂', onClick: onService },
+        { id: 'layers', label: '图层', icon: '▧', active: isLayerOpen, onClick: onLayer }
       ]}
     />
   )
 }
 
-function BrowseRecommendedCard({
-  route,
-  onRoute,
-  onXiaoling
-}: {
-  route: ScenicRouteConfig
+function BrowseCompanionCard({ onRoute, onXiaoling }: {
   onRoute: () => void
   onXiaoling: () => void
 }) {
-  const tags = route.tags.slice(0, 2)
-
   return (
-    <section className="map-browse-route-card" aria-label="今日推荐路线">
-      <button type="button" className="map-browse-xiaoling-tip" onClick={onXiaoling}>
-        小灵：我可以帮你规划路线、讲景点故事，也能找服务点。
-      </button>
-      <button type="button" className="map-browse-xiaoling-avatar" onClick={onXiaoling} aria-label="问小灵">
+    <section className="map-browse-companion-card" aria-label="小灵陪伴入口">
+      <button type="button" className="map-browse-companion-card__avatar" onClick={onXiaoling} aria-label="问小灵">
         <span aria-hidden="true">
           <i />
         </span>
-        <em>问小灵</em>
       </button>
-
-      <div className="map-browse-route-card__main">
-        <div className="map-browse-route-cover" aria-hidden="true">
-          <span />
-        </div>
-        <div className="map-browse-route-card__content">
-          <span className="map-browse-kicker">今日推荐路线</span>
-          <h2>{route.name}</h2>
-          <p className="map-browse-meta">
-            {route.guideRoute.durationLabel} · {route.stops.length}个景点
-          </p>
-          <div className="map-browse-tags">
-            {tags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-          <p className="map-browse-route-desc">{getRoutePreviewSummary(route)}</p>
-        </div>
+      <button type="button" className="map-browse-companion-card__tip" onClick={onXiaoling}>
+        小灵：想找路线、听讲解、问服务点，都可以问我。
+      </button>
+      <div className="map-browse-companion-card__actions">
+        <button type="button" onClick={onXiaoling}>问小灵</button>
+        <button type="button" className="is-route" onClick={onRoute}>路线</button>
       </div>
-
-      <button
-        type="button"
-        className="map-browse-route-primary"
-        onClick={onRoute}
-      >
-        <span>
-          进入
-          <br />
-          路线
-        </span>
-      </button>
     </section>
   )
 }
@@ -279,7 +239,7 @@ function BrowseXiaolingSheet({
   )
 }
 
-function BrowseServiceSheet({
+function BrowseServicePanel({
   open,
   category,
   onCategoryChange,
@@ -290,16 +250,35 @@ function BrowseServiceSheet({
   onCategoryChange: (category: (typeof BROWSE_SERVICE_CATEGORIES)[number]['id']) => void
   onClose: () => void
 }) {
+  const dragStartYRef = useRef<number | null>(null)
+
   if (!open) {
     return null
   }
 
   return (
-    <div className="map-browse-service" role="dialog" aria-modal="true" aria-label="游园服务占位">
-      <button type="button" className="map-browse-service__scrim" onClick={onClose} aria-label="关闭服务" />
-      <section>
+    <section
+      className="map-browse-service-panel"
+      role="dialog"
+      aria-label="游园服务占位"
+      onPointerDown={(event) => {
+        dragStartYRef.current = event.clientY
+      }}
+      onPointerUp={(event) => {
+        if (dragStartYRef.current !== null && event.clientY - dragStartYRef.current > 52) {
+          onClose()
+        }
+        dragStartYRef.current = null
+      }}
+      onPointerCancel={() => {
+        dragStartYRef.current = null
+      }}
+    >
         <div className="map-browse-sheet__handle" aria-hidden="true" />
-        <strong>游园服务</strong>
+        <header>
+          <strong>游园服务</strong>
+          <button type="button" onClick={onClose} aria-label="关闭服务">×</button>
+        </header>
         <p>小灵将为你展示附近的洗手间、休息区、餐饮点和出口。服务点位建设中，当前为功能示意。</p>
         <div className="map-browse-service__categories" aria-label="游园服务分类">
           {BROWSE_SERVICE_CATEGORIES.map((item) => (
@@ -316,21 +295,62 @@ function BrowseServiceSheet({
         <div className="map-browse-service__note">
           {BROWSE_SERVICE_CATEGORIES.find((item) => item.id === category)?.description}
         </div>
-        <button type="button" onClick={onClose}>
-          知道了
-        </button>
-      </section>
-    </div>
+    </section>
   )
 }
 
-function BrowseMobileOverlay({ route }: { route: ScenicRouteConfig }) {
+function BrowseLayerPanel({
+  open,
+  mode,
+  serviceVisible,
+  onModeChange,
+  onServiceVisibleChange
+}: {
+  open: boolean
+  mode: BrowseLayerMode
+  serviceVisible: boolean
+  onModeChange: (mode: BrowseLayerMode) => void
+  onServiceVisibleChange: (visible: boolean) => void
+}) {
+  if (!open) {
+    return null
+  }
+
+  return (
+    <section className="map-browse-layer-panel" aria-label="地图图层">
+      <strong>地图图层</strong>
+      <button type="button" className={mode === 'core' ? 'is-active' : ''} onClick={() => onModeChange('core')}>
+        核心景点
+      </button>
+      <button type="button" className={mode === 'all' ? 'is-active' : ''} onClick={() => onModeChange('all')}>
+        全部景点
+      </button>
+      <label>
+        <input
+          type="checkbox"
+          checked={serviceVisible}
+          onChange={(event) => onServiceVisibleChange(event.target.checked)}
+        />
+        服务设施
+      </label>
+      {serviceVisible ? <small>服务设施数据建设中</small> : null}
+    </section>
+  )
+}
+
+function BrowseMobileOverlay({ route, presentation, onPresentationChange }: {
+  route: ScenicRouteConfig
+  presentation: ScenicMapPresentation
+  onPresentationChange: (presentation: ScenicMapPresentation) => void
+}) {
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
   const [xiaolingOpen, setXiaolingOpen] = useState(false)
   const [serviceOpen, setServiceOpen] = useState(false)
+  const [layerOpen, setLayerOpen] = useState(false)
+  const [layerMode, setLayerMode] = useState<BrowseLayerMode>('core')
+  const [serviceFacilitiesVisible, setServiceFacilitiesVisible] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof BROWSE_SERVICE_CATEGORIES)[number]['id']>('restroom')
-  const [is3dActive, setIs3dActive] = useState(true)
   const [feedbackText, setFeedbackText] = useState('')
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
@@ -375,7 +395,25 @@ function BrowseMobileOverlay({ route }: { route: ScenicRouteConfig }) {
     [visualViewportHeight, visualViewportOffsetTop]
   )
 
-  const handleRoute = () => goToRoutePreview(navigate, route.id)
+  const closeService = () => setServiceOpen(false)
+  const openXiaoling = () => {
+    closeService()
+    setXiaolingOpen(true)
+  }
+  const toggleService = () => {
+    setServiceOpen((open) => {
+      if (!open) {
+        setXiaolingOpen(false)
+        setLayerOpen(false)
+      }
+      return !open
+    })
+  }
+  const toggleLayer = () => {
+    closeService()
+    setLayerOpen((open) => !open)
+  }
+  const handleRoute = () => goToRoutePreview(navigate, 'historical_culture')
 
   if (!mounted || typeof document === 'undefined') {
     return null
@@ -388,27 +426,36 @@ function BrowseMobileOverlay({ route }: { route: ScenicRouteConfig }) {
         onMore={() => setFeedbackText('更多功能建设中')}
       />
       <BrowseToolRail
-        is3dActive={is3dActive}
+        is3dActive={presentation === 'scenic3d'}
+        isLayerOpen={layerOpen}
         onLocate={() => setFeedbackText('已回到当前位置附近')}
         onToggle3d={() => {
-          setIs3dActive((value) => !value)
-          setFeedbackText(is3dActive ? '已切回地图浏览' : '3D 模式后续接入')
+          onPresentationChange(presentation === 'scenic3d' ? 'ink2d' : 'scenic3d')
         }}
-        onService={() => setServiceOpen(true)}
+        onService={toggleService}
+        onLayer={toggleLayer}
       />
       <div className="map-browse-bottom">
-        <BrowseRecommendedCard
-          route={route}
-          onRoute={handleRoute}
-          onXiaoling={() => setXiaolingOpen(true)}
-        />
+        <BrowseCompanionCard onRoute={handleRoute} onXiaoling={openXiaoling} />
       </div>
       {feedbackText ? <div className="map-browse-toast">{feedbackText}</div> : null}
-      <BrowseServiceSheet
+      <BrowseLayerPanel
+        open={layerOpen}
+        mode={layerMode}
+        serviceVisible={serviceFacilitiesVisible}
+        onModeChange={setLayerMode}
+        onServiceVisibleChange={(visible) => {
+          setServiceFacilitiesVisible(visible)
+          if (visible) {
+            setFeedbackText('服务设施数据建设中')
+          }
+        }}
+      />
+      <BrowseServicePanel
         open={serviceOpen}
         category={serviceCategory}
         onCategoryChange={setServiceCategory}
-        onClose={() => setServiceOpen(false)}
+        onClose={closeService}
       />
       <BrowseXiaolingSheet route={route} open={xiaolingOpen} onClose={() => setXiaolingOpen(false)} />
     </div>,
@@ -418,6 +465,7 @@ function BrowseMobileOverlay({ route }: { route: ScenicRouteConfig }) {
 
 function Map3DGuidePrototypeCPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const recommendedRouteId = getDefaultScenicRouteId() || getScenicRouteOptions()[0]?.id
   const recommendedRoute = getScenicRouteConfig(recommendedRouteId)
   const browsePresentation = useMemo<ScenicMapPresentation>(() => {
@@ -428,7 +476,11 @@ function Map3DGuidePrototypeCPage() {
   return (
     <>
       <Map3DGuideExperience variant="prototype-c" guideState={browseGuideState} presentation={browsePresentation} />
-      <BrowseMobileOverlay route={recommendedRoute} />
+      <BrowseMobileOverlay
+        route={recommendedRoute}
+        presentation={browsePresentation}
+        onPresentationChange={() => toggleMapPresentation(navigate)}
+      />
     </>
   )
 }
