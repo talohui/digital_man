@@ -171,6 +171,7 @@ type UseLandmarkModelInspectorOptions = {
   useLocalDrafts?: boolean
   map: any
   mapReady: boolean
+  isMapCurrent?: (map: any) => boolean
   overlays: LingshanMapModelOverlay[]
   perfRecorder: Map3DPerfRecorder
   resolveLocation: (overlay: LingshanMapModelOverlay) => LatLngPoint | null
@@ -183,6 +184,7 @@ export function useLandmarkModelInspector({
   useLocalDrafts = true,
   map,
   mapReady,
+  isMapCurrent,
   overlays,
   perfRecorder,
   resolveLocation,
@@ -212,13 +214,25 @@ export function useLandmarkModelInspector({
   >(() => buildInitialCompanionCalibrationEdits(overlays, active && useLocalDrafts ? loadCalibrationDrafts() : {}))
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
   const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
+  const canTouchRuntimeMap = () => Boolean(map && (isMapCurrent ? isMapCurrent(map) : true))
+  const detachRuntimeModel = (layerName: string, model: any) => {
+    if (!model) {
+      return
+    }
+    const manager = layerManager
+    if (manager && manager.getLayer(layerName) === model) {
+      manager.removeLayer(layerName, model)
+      return
+    }
+    clearLandmarkModel(model, canTouchRuntimeMap())
+  }
 
   useEffect(() => {
     if (!active) {
-      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName)
+      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchRuntimeMap())
       modelsRef.current = new Map()
       loadedModelUrlsRef.current = new Map()
-      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName)
+      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName, canTouchRuntimeMap())
       companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
@@ -231,7 +245,7 @@ export function useLandmarkModelInspector({
     setCalibrationEdits(buildInitialCalibrationEdits(overlays, drafts))
     setCompanionCalibrationEdits(buildInitialCompanionCalibrationEdits(overlays, drafts))
     perfRecorder.setLandmarkTotal(overlays.length)
-  }, [active, layerManager, overlays, perfRecorder, useLocalDrafts])
+  }, [active, isMapCurrent, layerManager, map, overlays, perfRecorder, useLocalDrafts])
 
   useEffect(() => {
     setState((current) => {
@@ -295,7 +309,7 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     if (!active || !activeCalibrationId) {
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchRuntimeMap())
       return
     }
 
@@ -304,7 +318,7 @@ export function useLandmarkModelInspector({
     const anchor = overlay ? resolveLocation(overlay) : null
 
     if (!overlay || !calibration || !anchor) {
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchRuntimeMap())
       return
     }
 
@@ -313,12 +327,13 @@ export function useLandmarkModelInspector({
       active,
       map,
       mapReady,
+      mapCurrent: canTouchRuntimeMap(),
       overlay,
       anchor,
       calibration,
       layerRef: footprintMaskLayerRef
     })
-  }, [active, activeCalibrationId, calibrationEdits, map, mapReady, overlayLookup, resolveLocation])
+  }, [active, activeCalibrationId, calibrationEdits, isMapCurrent, map, mapReady, overlayLookup, resolveLocation])
 
   useEffect(() => {
     const activeValues = activeCalibrationId ? calibrationEdits[activeCalibrationId] : undefined
@@ -331,16 +346,17 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     return () => {
-      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName)
+      const canTouchMap = canTouchRuntimeMap()
+      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchMap)
       modelsRef.current = new Map()
       loadedModelUrlsRef.current = new Map()
-      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName)
+      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName, canTouchMap)
       companionModelsRef.current = new Map()
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchMap)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
       clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
     }
-  }, [layerManager])
+  }, [isMapCurrent, layerManager, map])
 
   const items = useMemo(
     () =>
@@ -468,8 +484,7 @@ export function useLandmarkModelInspector({
     const hadModel = modelsRef.current.has(id)
     const model = modelsRef.current.get(id)
     if (model) {
-      clearLandmarkModel(model)
-      layerManager?.removeLayer(getLandmarkModelLayerName(id))
+      detachRuntimeModel(getLandmarkModelLayerName(id), model)
       modelsRef.current.delete(id)
       loadedModelUrlsRef.current.delete(id)
     }
@@ -495,8 +510,7 @@ export function useLandmarkModelInspector({
     const model = modelsRef.current.get(id)
 
     if (model) {
-      clearLandmarkModel(model)
-      layerManager?.removeLayer(getLandmarkModelLayerName(id))
+      detachRuntimeModel(getLandmarkModelLayerName(id), model)
       modelsRef.current.delete(id)
       loadedModelUrlsRef.current.delete(id)
     }
@@ -516,7 +530,7 @@ export function useLandmarkModelInspector({
     const anchor = overlay ? resolveLocation(overlay) : null
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
 
-    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !overlay || !anchor || !calibration) {
       return
     }
 
@@ -644,8 +658,7 @@ export function useLandmarkModelInspector({
     const model = companionModelsRef.current.get(key)
 
     if (model) {
-      clearLandmarkModel(model)
-      layerManager?.removeLayer(getCompanionModelLayerName(key))
+      detachRuntimeModel(getCompanionModelLayerName(key), model)
       companionModelsRef.current.delete(key)
     }
 
@@ -673,7 +686,7 @@ export function useLandmarkModelInspector({
           mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
         : undefined
 
-    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !overlay || !anchor || !calibration) {
       return
     }
 
@@ -894,7 +907,7 @@ export function useLandmarkModelInspector({
       loadOptions?: LandmarkLoadOptions
     }
   ) => {
-    if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !window.TMap.model?.GLTFModel) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
@@ -955,8 +968,7 @@ export function useLandmarkModelInspector({
       return false
     }
 
-    clearLandmarkModel(modelsRef.current.get(id))
-    layerManager?.removeLayer(getLandmarkModelLayerName(id))
+    detachRuntimeModel(getLandmarkModelLayerName(id), modelsRef.current.get(id))
     modelsRef.current.delete(id)
     loadedModelUrlsRef.current.delete(id)
 
@@ -986,7 +998,7 @@ export function useLandmarkModelInspector({
       })
 
       const health = await inspectGlbModelUrl(runtimeModelUrl)
-      if (versionsRef.current.get(id) !== version) {
+      if (versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
         return false
       }
       if (!health.ok) {
@@ -1003,6 +1015,9 @@ export function useLandmarkModelInspector({
     }
 
     try {
+      if (!canTouchRuntimeMap()) {
+        return false
+      }
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${id}`,
         map,
@@ -1014,7 +1029,10 @@ export function useLandmarkModelInspector({
 
       modelsRef.current.set(id, model)
       loadedModelUrlsRef.current.set(id, runtimeModelUrl)
-      layerManager?.registerLayer(getLandmarkModelLayerName(id), model)
+      if (layerManager && !layerManager.registerLayer(getLandmarkModelLayerName(id), model, map)) {
+        clearLandmarkModel(model, canTouchRuntimeMap())
+        return false
+      }
       const durationMs = Math.round(performance.now() - startedAt)
       updateItemState(id, (current) => ({
         ...current,
@@ -1029,7 +1047,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (versionsRef.current.get(id) !== version) {
+          if (versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)
@@ -1069,7 +1087,7 @@ export function useLandmarkModelInspector({
       return false
     }
 
-    if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !window.TMap.model?.GLTFModel) {
       updateCompanionState(key, (current) => ({
         ...current,
         status: 'failed',
@@ -1108,8 +1126,7 @@ export function useLandmarkModelInspector({
       return true
     }
 
-    clearLandmarkModel(companionModelsRef.current.get(key))
-    layerManager?.removeLayer(getCompanionModelLayerName(key))
+    detachRuntimeModel(getCompanionModelLayerName(key), companionModelsRef.current.get(key))
     companionModelsRef.current.delete(key)
 
     const version = (companionVersionsRef.current.get(key) ?? 0) + 1
@@ -1137,6 +1154,9 @@ export function useLandmarkModelInspector({
 
     if (options.trackLoad) {
       const exists = await modelUrlLooksAvailable(companion.modelUrl)
+      if (!canTouchRuntimeMap() || companionVersionsRef.current.get(key) !== version) {
+        return false
+      }
       if (!exists) {
         const errorMessage = `底座模型文件缺失，待放入 ${companion.modelUrl.replace('/models/lingshan/optimized/', '')}`
         updateCompanionState(key, (current) => ({
@@ -1159,7 +1179,7 @@ export function useLandmarkModelInspector({
       }
 
       const health = await inspectGlbModelUrl(companion.modelUrl)
-      if (companionVersionsRef.current.get(key) !== version) {
+      if (companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
         return false
       }
       if (!health.ok) {
@@ -1185,6 +1205,9 @@ export function useLandmarkModelInspector({
     }
 
     try {
+      if (!canTouchRuntimeMap()) {
+        return false
+      }
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${parentId}-${companionId}`,
         map,
@@ -1195,7 +1218,10 @@ export function useLandmarkModelInspector({
       })
 
       companionModelsRef.current.set(key, model)
-      layerManager?.registerLayer(getCompanionModelLayerName(key), model)
+      if (layerManager && !layerManager.registerLayer(getCompanionModelLayerName(key), model, map)) {
+        clearLandmarkModel(model, canTouchRuntimeMap())
+        return false
+      }
       const durationMs = Math.round(performance.now() - startedAt)
       updateCompanionState(key, (current) => ({
         ...current,
@@ -1218,7 +1244,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (companionVersionsRef.current.get(key) !== version) {
+          if (companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)
@@ -1755,33 +1781,34 @@ function applyFootprintMaskLayer(options: {
   active: boolean
   map: any
   mapReady: boolean
+  mapCurrent: boolean
   overlay: LingshanMapModelOverlay
   anchor: LatLngPoint
   calibration: LandmarkCalibrationValues
   layerRef: MutableRefObject<any>
 }) {
-  const { active, map, mapReady, overlay, anchor, calibration, layerRef } = options
+  const { active, map, mapReady, mapCurrent, overlay, anchor, calibration, layerRef } = options
   const mask = calibration.footprintMask
 
-  if (!active || !mapReady || !map || !window.TMap || !mask?.enabled) {
-    clearFootprintMaskLayer(layerRef)
+  if (!active || !mapReady || !mapCurrent || !map || !window.TMap || !mask?.enabled) {
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   const geometries = buildFootprintMaskGeometries(options.id, anchor, calibration, mask)
 
   if (!geometries.length) {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   if (!overlay.footprintMask || !window.TMap.MultiPolygon || !window.TMap.PolygonStyle) {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   try {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     // TMap.MultiPolygon is a ground footprint. `height` is retained in the draft
     // for a future thin-base implementation, but it does not remove Tencent 3D buildings.
     layerRef.current = new window.TMap.MultiPolygon({
@@ -1797,7 +1824,7 @@ function applyFootprintMaskLayer(options: {
       geometries
     })
   } catch {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
   }
 }
 
@@ -1914,7 +1941,11 @@ function colorWithOpacity(color: string, opacity: number) {
   return color
 }
 
-function clearLandmarkModel(model: any) {
+function clearLandmarkModel(model: any, canTouchMap = true) {
+  if (!canTouchMap) {
+    return
+  }
+
   try {
     model?.setMap?.(null)
   } catch {
@@ -1934,24 +1965,31 @@ function clearLandmarkModel(model: any) {
   }
 }
 
-function clearFootprintMaskLayer(layerRef: MutableRefObject<any>) {
+function clearFootprintMaskLayer(layerRef: MutableRefObject<any>, canTouchMap = true) {
   const layer = layerRef.current
-  layer?.setMap?.(null)
-  layer?.remove?.()
-  layer?.destroy?.()
+  if (canTouchMap) {
+    try {
+      layer?.setMap?.(null)
+      layer?.remove?.()
+      layer?.destroy?.()
+    } catch {
+      // A destroyed Tencent map owns its former footprint layer cleanup.
+    }
+  }
   layerRef.current = null
 }
 
 function clearLandmarkModels(
   models: Map<string, any>,
   layerManager?: LayerManager,
-  getLayerName: (id: string) => string = getLandmarkModelLayerName
+  getLayerName: (id: string) => string = getLandmarkModelLayerName,
+  canTouchMap = true
 ) {
   models.forEach((model, id) => {
     if (layerManager) {
-      layerManager.removeLayer(getLayerName(id))
+      layerManager.removeLayer(getLayerName(id), model)
     } else {
-      clearLandmarkModel(model)
+      clearLandmarkModel(model, canTouchMap)
     }
   })
 }

@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import {
-  BuddhaRealmAtmosphere,
-  type BuddhaRealmAtmosphereMode,
-  type BuddhaRealmClearMaskShape,
-  type BuddhaRealmClearMaskSize
-} from '../components/map3d/BuddhaRealmAtmosphere'
-import type { DynamicInkMistStatus } from '../components/map3d/DynamicInkMistCanvas'
 import { Map3DPerfPanel } from '../components/map3d/Map3DPerfPanel'
 import {
   ScenicPoiBillboards,
@@ -359,22 +352,16 @@ const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 const MAP_3D_GUIDE_STYLE_ID = 'style1'
-const LINGSHAN_NATIVE_SKY_OPTIONS = {
-  color: '#EAF0E6',
-  brightness: 0.82,
-  animated: true
-} as const
-const LINGSHAN_NATIVE_FOG_OPTIONS = {
-  color: '#DDE8DF'
-} as const
 const MAP_3D_GUIDE_RENDER_OPTIONS = {
-  enableBloom: true,
-  skyOptions: LINGSHAN_NATIVE_SKY_OPTIONS,
-  fogOptions: LINGSHAN_NATIVE_FOG_OPTIONS
+  enableBloom: true
 } as const
 const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
   features: ['base', 'building3d', 'label']
+} as const
+const MAP_3D_GUIDE_CORE_BASE_MAP = {
+  type: 'vector',
+  features: ['base', 'building3d']
 } as const
 const MAP_3D_GUIDE_EXPORT_BASE_MAP = {
   type: 'vector',
@@ -428,6 +415,8 @@ const INK_2D_CAMERA_PRESET: Map3DCameraPreset = {
   rotation: 0,
   durationMs: 520
 }
+const MAP_3D_RETRY_DELAY_MS = 360
+const MAP_PRESENTATION_CLOUD_MIN_MS = 650
 
 // 仅调试备用，默认不用。正式页面使用腾讯地图平台托管自定义图层，不再依赖本地切片或自建瓦片服务。
 const ENABLE_LOCAL_INK_TILE_FALLBACK = false
@@ -476,8 +465,6 @@ const INK_MAP_MIN_ZOOM = TENCENT_CUSTOM_LAYER_CONFIG.minZoom
 const INK_MAP_MAX_ZOOM = 18.85
 const INK_MAP_DEBUG_MIN_ZOOM = 15.2
 const INK_MAP_DEBUG_MAX_ZOOM = 21.4
-const INK_MAP_EDGE_MIST_ZOOM_THRESHOLD = 18.08
-const INK_MAP_EDGE_MIST_GAP_RATIO = 0.26
 const inkMapBoundCornerOrder: InkMapBoundCorner[] = ['northWest', 'northEast', 'southEast', 'southWest']
 const inkMapBoundCornerLabels: Record<InkMapBoundCorner, string> = {
   northWest: 'northwest',
@@ -835,6 +822,42 @@ function getInk2DCameraPreset(preset: Map3DCameraPreset): Map3DCameraPreset {
   }
 }
 
+function getMapBaseMapConfig(options: { clean: boolean; showNativePoiLabels: boolean }) {
+  if (options.clean) {
+    return MAP_3D_GUIDE_EXPORT_BASE_MAP
+  }
+  return options.showNativePoiLabels ? MAP_3D_GUIDE_BASE_MAP : MAP_3D_GUIDE_CORE_BASE_MAP
+}
+
+function applyTencentBaseMapPoiMode(map: any, options: { clean: boolean; showNativePoiLabels: boolean }) {
+  if (!map || typeof map.setBaseMap !== 'function') {
+    return false
+  }
+
+  try {
+    map.setBaseMap(getMapBaseMapConfig(options))
+    return true
+  } catch (error) {
+    console.warn('[Map3D] Tencent base-map POI label switch unavailable', error)
+    return false
+  }
+}
+
+function getKnownPoiIdFromTencentMapEvent(event: any) {
+  const nativePoi = event?.poi ?? event?.poiInfo ?? event?.detail?.poi ?? event?.detail?.poiInfo
+  const nativeName = nativePoi?.name ?? nativePoi?.title ?? nativePoi?.displayName
+  if (typeof nativeName !== 'string' || !nativeName.trim()) {
+    return undefined
+  }
+
+  const normalizedName = normalizePoiName(nativeName)
+  return lingshanPois.find((poi) => normalizePoiName(poi.name) === normalizedName)?.id
+}
+
+function normalizePoiName(name: string) {
+  return name.replace(/[\s·•・·・－-]/g, '').toLowerCase()
+}
+
 export function Map3DGuideExperience({
   variant = 'default',
   guideState,
@@ -861,8 +884,30 @@ export function Map3DGuideExperience({
   const mapRef = useRef<any>(null)
   const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
   const presentationGenerationRef = useRef(0)
+  const mapAttemptGenerationRef = useRef(0)
+  const mapInstanceGenerationCounterRef = useRef(0)
+  const activeMapInstanceGenerationRef = useRef(0)
+  const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
+  const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
   const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
   const initializedPresentationRef = useRef<ScenicMapPresentation | null>(null)
+  const presentationCloudStartedAtRef = useRef(0)
+  const presentationCloudHideTimerRef = useRef<number | null>(null)
+  const isMapInstanceUsable = useCallback((candidate: any) => {
+    return Boolean(
+      candidate &&
+      (typeof candidate === 'object' || typeof candidate === 'function') &&
+      !destroyedMapInstancesRef.current.has(candidate)
+    )
+  }, [])
+  const isMapInstanceCurrent = useCallback((candidate: any) => {
+    if (!isMapInstanceUsable(candidate) || mapRef.current !== candidate) {
+      return false
+    }
+
+    const instanceGeneration = mapInstanceGenerationsRef.current.get(candidate)
+    return Boolean(instanceGeneration && instanceGeneration === activeMapInstanceGenerationRef.current)
+  }, [isMapInstanceUsable])
   const routeLayerRef = useRef<any>(null)
   const tourRouteProgressLayerRef = useRef<any>(null)
   const poiMarkerLayerRef = useRef<any>(null)
@@ -935,7 +980,6 @@ export function Map3DGuideExperience({
   // Tree GLB system removed due to memory pressure; debugGarden/Tree Candidate Lab is no longer active.
   const debugGarden = false
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
-  const enableDynamicMistDebugOverride = useMemo(() => debugPerf && isQueryEnabled('enableDynamicMist'), [debugPerf])
   const debugInkBounds = false
   const exportInkBase = false
   const isInkCleanMode = debugInkBounds || exportInkBase
@@ -1069,6 +1113,7 @@ export function Map3DGuideExperience({
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [presentationTransition, setPresentationTransition] = useState<MapPresentationTransition>('idle')
   const [presentationSwitchError, setPresentationSwitchError] = useState<string | undefined>()
+  const [presentationCloudPhase, setPresentationCloudPhase] = useState<'hidden' | 'covering' | 'opening'>('hidden')
   const [isMapCreated, setIsMapCreated] = useState(false)
   const [isMapIdle, setIsMapIdle] = useState(false)
   const [isMapVisualReady, setIsMapVisualReady] = useState(false)
@@ -1148,12 +1193,6 @@ export function Map3DGuideExperience({
   const [inkOverlayCameraSnapshot, setInkOverlayCameraSnapshot] = useState<InkOverlayCameraState>(() => inkOverlayCameraStateRef.current)
   const [inkTileDomFallbackActive, setInkTileDomFallbackActive] = useState(false)
   const [inkTileGroundFallbackActive, setInkTileGroundFallbackActive] = useState(false)
-  const [dynamicMistStatus, setDynamicMistStatus] = useState<DynamicInkMistStatus>({
-    canvasActive: false,
-    degraded: false,
-    quality: 'off',
-    recoveryState: 'disabled'
-  })
 
   useEffect(() => {
     setPresentationFallback(null)
@@ -1163,6 +1202,41 @@ export function Map3DGuideExperience({
     presentationTransition === 'destroying' ||
     presentationTransition === 'waiting-container' ||
     presentationTransition === 'initializing'
+
+  useEffect(() => {
+    if (presentationCloudHideTimerRef.current !== null) {
+      window.clearTimeout(presentationCloudHideTimerRef.current)
+      presentationCloudHideTimerRef.current = null
+    }
+
+    if (isPresentationSwitching && initializedPresentationRef.current !== null) {
+      if (presentationCloudPhase === 'hidden') {
+        presentationCloudStartedAtRef.current = performance.now()
+      }
+      setPresentationCloudPhase('covering')
+      return
+    }
+
+    if (presentationCloudPhase === 'covering' && (presentationTransition === 'ready' || presentationTransition === 'failed')) {
+      const elapsed = performance.now() - presentationCloudStartedAtRef.current
+      const waitMs = Math.max(0, MAP_PRESENTATION_CLOUD_MIN_MS - elapsed)
+      presentationCloudHideTimerRef.current = window.setTimeout(() => {
+        setPresentationCloudPhase('opening')
+        presentationCloudHideTimerRef.current = window.setTimeout(() => {
+          setPresentationCloudPhase('hidden')
+          presentationCloudHideTimerRef.current = null
+        }, 360)
+      }, waitMs)
+    }
+  }, [isPresentationSwitching, presentationCloudPhase, presentationTransition])
+
+  useEffect(() => {
+    return () => {
+      if (presentationCloudHideTimerRef.current !== null) {
+        window.clearTimeout(presentationCloudHideTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     activePresentationRef.current = scenicMapPresentation
@@ -1181,12 +1255,42 @@ export function Map3DGuideExperience({
       presentationSwitchError
     })
   }, [debugPerf, isPresentationSwitching, onPresentationTransitionChange, presentationSwitchError, presentationTransition, scenicMapPresentation])
+
+  useEffect(() => {
+    const handleRuntimeError = (event: ErrorEvent) => {
+      if (!isStaleTencentLayerError(event.error ?? event.message)) {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation?.()
+      if (debugPerf) {
+        console.warn('[Map3D] ignored stale Tencent layer callback after map destroy', event.error ?? event.message)
+      }
+    }
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (!isStaleTencentLayerError(event.reason)) {
+        return
+      }
+      event.preventDefault()
+      if (debugPerf) {
+        console.warn('[Map3D] ignored stale Tencent layer promise after map destroy', event.reason)
+      }
+    }
+
+    window.addEventListener('error', handleRuntimeError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+    return () => {
+      window.removeEventListener('error', handleRuntimeError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [debugPerf])
   const landmarkInspector = useLandmarkModelInspector({
     active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,
     useLocalDrafts: debugPerf || debugGarden,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
+    isMapCurrent: isMapInstanceCurrent,
     overlays: landmarkModelOverlays,
     perfRecorder,
     resolveLocation: getModelOverlayLocation,
@@ -1839,42 +1943,21 @@ export function Map3DGuideExperience({
   const inkExportUiSuppressed = inkExportUiHidden || cleanShot
   const configuredInkBoundsDraft = useMemo(() => getConfiguredInkBoundsDraft(), [])
   const showFormalInkBounds = ((isInkCleanMode && !cleanShot) || showInkBounds) && !inkExportUiHidden
-  const atmosphereMode: BuddhaRealmAtmosphereMode = isInk2DPresentation
-    ? 'normal'
-    : !isMapVisualReady
-    ? 'intro'
-    : tourMode === 'buddhaRealmTour'
-      ? 'tour'
-      : activeLandmarkId || activeCameraMode === 'landmarkFocus'
-        ? 'focus'
-        : 'normal'
-  const debugGardenDynamicMistDisabled = debugGarden && !enableDynamicMistDebugOverride
-  const dynamicMistEnabled =
-    visualVariant.id === 'prototype-c' &&
-    !isInkCleanMode &&
-    !isInk2DPresentation &&
-    isMapVisualReady &&
-    (!debugGarden || enableDynamicMistDebugOverride)
-  const edgeMistState = useMemo(
-    () =>
-      getInkMapEdgeMistState({
-        center: mapBoundsSnapshot.center,
-        disabledReason: mapBoundsDisabledReason,
-        enabled: mapBoundsEnabled,
-        zoom: mapBoundsSnapshot.zoom
-      }),
-    [mapBoundsDisabledReason, mapBoundsEnabled, mapBoundsSnapshot.center, mapBoundsSnapshot.zoom]
-  )
-  const clearMaskState = useMemo(
-    () =>
-      getBuddhaRealmClearMaskState({
-        edgeMistLevel: edgeMistState.level,
-        enabled: mapBoundsEnabled,
-        mode: atmosphereMode,
-        tourActive: tourMode === 'buddhaRealmTour'
-      }),
-    [atmosphereMode, edgeMistState.level, mapBoundsEnabled, tourMode]
-  )
+  // Persistent cloud, mountain, haze and canvas mist layers were removed from
+  // the production map. Only the short presentation transition remains.
+  const edgeMistState = {
+    level: 'normal' as const,
+    reason: 'persistent-atmosphere-removed',
+    strength: 0,
+    nearInkBoundary: false,
+    distanceToInkBoundary: 0
+  }
+  const clearMaskState = {
+    mode: 'disabled' as const,
+    size: 'wide' as const,
+    center: 'none',
+    shape: 'round' as const
+  }
   const scenicPoiBillboards = useMemo<ScenicPoiBillboardItem[]>(
     () => {
       const billboardConfigs = new Map(scenicPoiBillboardConfigs.map((config) => [config.id, config]))
@@ -1936,32 +2019,27 @@ export function Map3DGuideExperience({
   useEffect(() => {
     perfRecorder.recordMapVisualEvent({
       type: poiBillboardActiveId ? 'billboardHighlightEvent' : 'poiBillboardStateChanged',
-      atmosphereMode,
-      atmosphereVisible: visualVariant.id === 'prototype-c',
+      atmosphereMode: 'normal',
+      atmosphereVisible: false,
       poiBillboardCount: scenicPoiBillboards.length,
       poiBillboardMode,
       activePoiBillboardId: poiBillboardActiveId ?? null,
-      horizonMaskEnabled: visualVariant.id === 'prototype-c',
-      horizonMaskIntensity: atmosphereMode === 'intro' ? 0.72 : atmosphereMode === 'tour' ? 0.66 : 0.54,
+      horizonMaskEnabled: false,
+      horizonMaskIntensity: 0,
       activePoiCount: activePoiBillboardCount,
       mutedPoiCount: mutedPoiBillboardCount,
-      waterHintsEnabled: visualVariant.id === 'prototype-c',
-      waterHintsCount: 3,
+      waterHintsEnabled: false,
+      waterHintsCount: 0,
       tourPoiSuppressionEnabled,
-      dynamicMistEnabled,
-      dynamicMistCanvasActive: dynamicMistStatus.canvasActive,
-      dynamicMistQuality: dynamicMistStatus.quality,
-      dynamicMistDegraded: dynamicMistStatus.degraded,
-      dynamicMistDegradeReason: dynamicMistStatus.degradeReason,
-      dynamicMistFpsEstimate: dynamicMistStatus.fpsEstimate,
-      dynamicMistFrameMs: dynamicMistStatus.frameMs,
-      dynamicMistRecoveryState: dynamicMistStatus.recoveryState,
-      dynamicMistSpeedScale: dynamicMistStatus.speedScale,
-      dynamicMistContrastScale: dynamicMistStatus.contrastScale,
-      skyOptionsAnimated: LINGSHAN_NATIVE_SKY_OPTIONS.animated,
-      enableDynamicMistDebugOverride,
-      debugGardenDynamicMistDisabled,
-      coreClearMaskEnabled: visualVariant.id === 'prototype-c',
+      dynamicMistEnabled: false,
+      dynamicMistCanvasActive: false,
+      dynamicMistQuality: 'off',
+      dynamicMistDegraded: false,
+      dynamicMistRecoveryState: 'disabled',
+      skyOptionsAnimated: false,
+      enableDynamicMistDebugOverride: false,
+      debugGardenDynamicMistDisabled: true,
+      coreClearMaskEnabled: false,
       poiLiftMode: 'raised',
       activePoiLiftPx,
       currentZoom: roundNumber(mapBoundsSnapshot.zoom, 2),
@@ -1988,27 +2066,6 @@ export function Map3DGuideExperience({
   }, [
     activePoiBillboardCount,
     activePoiLiftPx,
-    atmosphereMode,
-    clearMaskState.center,
-    clearMaskState.mode,
-    clearMaskState.shape,
-    clearMaskState.size,
-    debugGardenDynamicMistDisabled,
-    dynamicMistEnabled,
-    dynamicMistStatus.canvasActive,
-    dynamicMistStatus.degradeReason,
-    dynamicMistStatus.degraded,
-    dynamicMistStatus.fpsEstimate,
-    dynamicMistStatus.frameMs,
-    dynamicMistStatus.quality,
-    dynamicMistStatus.recoveryState,
-    dynamicMistStatus.speedScale,
-    dynamicMistStatus.contrastScale,
-    edgeMistState.level,
-    edgeMistState.distanceToInkBoundary,
-    edgeMistState.nearInkBoundary,
-    edgeMistState.reason,
-    edgeMistState.strength,
     mapBoundsDisabledReason,
     mapBoundsEnabled,
     mapBoundsSnapshot.center,
@@ -2017,13 +2074,11 @@ export function Map3DGuideExperience({
     mapMinZoom,
     mutedPoiBillboardCount,
     noMapBoundsDebugOverride,
-    enableDynamicMistDebugOverride,
     perfRecorder,
     poiBillboardActiveId,
     poiBillboardMode,
     scenicPoiBillboards.length,
-    tourPoiSuppressionEnabled,
-    visualVariant.id
+    tourPoiSuppressionEnabled
   ])
 
   const distanceToRoute = nearestRoutePoint?.distanceMeters ?? 0
@@ -2692,6 +2747,7 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     const generation = ++presentationGenerationRef.current
+    const mapInitAbortController = new AbortController()
     let cancelled = false
     const isCurrentGeneration = () => !cancelled && generation === presentationGenerationRef.current
 
@@ -2704,11 +2760,108 @@ export function Map3DGuideExperience({
     let visualReadyFallbackTimer: number | null = null
     let visualTimeoutTimer: number | null = null
     let curtainHideTimer: number | null = null
+    let retryDelayTimer: number | null = null
+    let retryDelayResolve: ((ready: boolean) => void) | null = null
     let visualReadyRafIds: number[] = []
     let visualReadyScheduled = false
     let mapCreatedAt = 0
+    let lastHandledFailureAttempt = -1
     const mapVisualEventCleanups: Array<() => void> = []
     const mapInteractionEventCleanups: Array<() => void> = []
+
+    const clearAttemptTimersAndListeners = () => {
+      if (visualReadyTimer !== null) window.clearTimeout(visualReadyTimer)
+      if (visualReadyFallbackTimer !== null) window.clearTimeout(visualReadyFallbackTimer)
+      if (visualTimeoutTimer !== null) window.clearTimeout(visualTimeoutTimer)
+      if (curtainHideTimer !== null) window.clearTimeout(curtainHideTimer)
+      if (retryDelayTimer !== null) window.clearTimeout(retryDelayTimer)
+      retryDelayResolve?.(false)
+      visualReadyTimer = null
+      visualReadyFallbackTimer = null
+      visualTimeoutTimer = null
+      curtainHideTimer = null
+      retryDelayTimer = null
+      retryDelayResolve = null
+      visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
+      visualReadyRafIds = []
+      mapVisualEventCleanups.splice(0).forEach((cleanup) => cleanup())
+      mapInteractionEventCleanups.splice(0).forEach((cleanup) => cleanup())
+    }
+
+    const clearOverlayRefs = () => {
+      routeLayerRef.current = null
+      tourRouteProgressLayerRef.current = null
+      poiMarkerLayerRef.current = null
+      userMarkerLayerRef.current = null
+      rerouteLayerRef.current = null
+      landmarkHighlightLayerRef.current = null
+      decorMarkerLayerRef.current = null
+      forestPatchLayerRef.current = null
+      formalInkBoundsMarkerLayerRef.current = null
+      formalInkBoundsBoundaryLayerRef.current = null
+      formalInkBoundsFillLayerRef.current = null
+      inkBoundsMarkerLayerRef.current = null
+      inkBoundsBoundaryLayerRef.current = null
+      gardenEditorPolygonLayerRef.current = null
+      gardenEditorVertexLayerRef.current = null
+      gardenPreviewMarkerLayerRef.current = null
+      gardenAssetEditMarkerLayerRef.current = null
+      treeCandidateMarkerLayerRef.current = null
+      treeCandidateEditMarkerLayerRef.current = null
+      inkTileLayerRef.current = null
+      inkTileGroundFallbackLayerRef.current = null
+      tencentCustomLayerInitKeyRef.current = ''
+    }
+
+    const waitForRetryDelay = () =>
+      new Promise<boolean>((resolve) => {
+        retryDelayResolve = resolve
+        retryDelayTimer = window.setTimeout(() => {
+          retryDelayTimer = null
+          retryDelayResolve = null
+          resolve(isCurrentGeneration())
+        }, MAP_3D_RETRY_DELAY_MS)
+      })
+
+    const disposeCreatedMap = (preserveViewport: boolean) => {
+      const map = createdMap
+      clearAttemptTimersAndListeners()
+      if (!map || !isMapInstanceUsable(map)) {
+        createdMap = null
+        return
+      }
+
+      if (preserveViewport) {
+        const preservedCenter = readMapCenterForProjection(map)
+        const preservedZoom = readMapZoomForProjection(map)
+        if (preservedCenter && preservedZoom != null) {
+          presentationViewportRef.current = { center: preservedCenter, zoom: preservedZoom }
+        }
+      }
+
+      if (mapRef.current === map) {
+        mapRef.current = null
+      }
+
+      gltfModelRefs.current = new Map()
+      sceneWindowManager.destroy()
+      glbMemoryManager.destroy()
+      glbSpatialController.destroy()
+      layerManager.destroy()
+      clearOverlayRefs()
+      destroyedMapInstancesRef.current.add(map)
+      mapInstanceGenerationsRef.current.delete(map)
+      activeMapInstanceGenerationRef.current = 0
+
+      try {
+        map.destroy?.()
+      } catch (error) {
+        if (debugPerf) {
+          console.warn('[map-presentation] map destroy ignored', error)
+        }
+      }
+      createdMap = null
+    }
 
     const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
       setStartupStage(stage)
@@ -2729,7 +2882,7 @@ export function Map3DGuideExperience({
     }
 
     const markMapVisualReady = (reason: string) => {
-      if (!isCurrentGeneration() || mapVisualReadyRef.current) {
+      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current) {
         return
       }
 
@@ -2765,7 +2918,7 @@ export function Map3DGuideExperience({
     }
 
     const scheduleMapVisualReady = (reason: string) => {
-      if (!isCurrentGeneration() || mapVisualReadyRef.current || visualReadyScheduled) {
+      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current || visualReadyScheduled) {
         return
       }
 
@@ -2788,6 +2941,9 @@ export function Map3DGuideExperience({
       const remainingDelay = Math.max(0, MAP_3D_GUIDE_MIN_BASEMAP_READY_MS - (now - mapCreatedAt))
 
       visualReadyTimer = window.setTimeout(() => {
+        if (!createdMap || !isMapInstanceCurrent(createdMap)) {
+          return
+        }
         visualReadyRafIds = [
           window.requestAnimationFrame(() => {
             const secondRafId = window.requestAnimationFrame(() => {
@@ -2799,9 +2955,12 @@ export function Map3DGuideExperience({
       }, remainingDelay)
     }
 
-    async function initMap() {
+    async function initMap(attempt = 0) {
+      const attemptGeneration = ++mapAttemptGenerationRef.current
+      const isCurrentAttempt = () =>
+        isCurrentGeneration() && attemptGeneration === mapAttemptGenerationRef.current
       const mapElement = mapElementRef.current
-      if (!mapElement || !isCurrentGeneration()) {
+      if (!mapElement || !isCurrentAttempt()) {
         return
       }
 
@@ -2824,6 +2983,7 @@ export function Map3DGuideExperience({
       mapFirstIdleRef.current = false
       mapOverlaysStartedRef.current = false
       mapRoutePoiShownRef.current = false
+      visualReadyScheduled = false
       entryCameraPlayedRef.current = false
       mapLoadingCurtainShownAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
       setPageMessage('正在加载腾讯地图真实底座...')
@@ -2836,18 +2996,10 @@ export function Map3DGuideExperience({
         reason: 'loadTMap'
       })
 
-      const containerReady = await waitForMapContainerLayout(mapElement, isCurrentGeneration)
-      if (!containerReady || !isCurrentGeneration()) {
-        if (isCurrentGeneration()) {
-          const message = '地图容器尚未完成布局，请稍后重试'
-          setMapStatus('error')
-          setPresentationTransition('failed')
-          setPresentationSwitchError(message)
-          setPageMessage(message)
-          if (scenicMapPresentation === 'scenic3d') {
-            setPresentationFallback('ink2d')
-            replaceMapPresentationInUrl(navigate, 'ink2d')
-          }
+      const containerReady = await waitForMapContainerLayout(mapElement, isCurrentAttempt, mapInitAbortController.signal)
+      if (!containerReady || !isCurrentAttempt()) {
+        if (isCurrentAttempt()) {
+          await handleMapAttemptFailure(new Error('地图容器尚未完成布局'), attempt)
         }
         return
       }
@@ -2855,7 +3007,12 @@ export function Map3DGuideExperience({
       setPresentationTransition('initializing')
 
       visualTimeoutTimer = window.setTimeout(() => {
-        if (!isCurrentGeneration() || mapVisualReadyRef.current) {
+        if (!isCurrentAttempt() || mapVisualReadyRef.current) {
+          return
+        }
+
+        if (scenicMapPresentation === 'scenic3d' && attempt === 0) {
+          void handleMapAttemptFailure(new Error('3D 地图底图就绪超时'), attempt)
           return
         }
 
@@ -2874,7 +3031,7 @@ export function Map3DGuideExperience({
 
       try {
         const TMap = await loadTMap()
-        if (!isCurrentGeneration()) {
+        if (!isCurrentAttempt()) {
           return
         }
         perfRecorder.recordMapVisualEvent({
@@ -2883,7 +3040,7 @@ export function Map3DGuideExperience({
         })
         recordStartupStage('creatingMap', 'tmap-loaded')
 
-        if (!isCurrentGeneration() || !mapElementRef.current) {
+        if (!isCurrentAttempt() || !mapElementRef.current) {
           return
         }
 
@@ -2901,20 +3058,32 @@ export function Map3DGuideExperience({
           pitch: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
           rotation: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
-          baseMap: isInkCleanMode ? MAP_3D_GUIDE_EXPORT_BASE_MAP : MAP_3D_GUIDE_BASE_MAP,
+          baseMap: getMapBaseMapConfig({
+            clean: isInkCleanMode,
+            showNativePoiLabels: poiLayerMode === 'all'
+          }),
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
         })
-        if (!isCurrentGeneration()) {
-          map?.destroy?.()
+        if (!isCurrentAttempt()) {
+          if (map && (typeof map === 'object' || typeof map === 'function')) {
+            destroyedMapInstancesRef.current.add(map)
+          }
+          try {
+            map?.destroy?.()
+          } catch {
+            // The stale constructor result is already detached from React state.
+          }
           return
         }
         createdMap = map
+        const mapInstanceGeneration = ++mapInstanceGenerationCounterRef.current
+        mapInstanceGenerationsRef.current.set(map, mapInstanceGeneration)
+        activeMapInstanceGenerationRef.current = mapInstanceGeneration
         mapRef.current = map
         layerManager.init(map)
         glbSpatialController.init(map)
         glbMemoryManager.init(map)
         sceneWindowManager.init()
-        const nativeSkyResult = applyLingshanNativeSkyOptions(map)
         setIsMapCreated(true)
         perfRecorder.recordMapVisualEvent({
           type: 'mapCreated'
@@ -2926,13 +3095,11 @@ export function Map3DGuideExperience({
         })
         perfRecorder.recordMapVisualEvent({
           type: 'nativeSkyConfigured',
-          nativeSkyEnabled: true,
-          nativeSkyApplied: nativeSkyResult.skyApplied,
-          nativeFogApplied: nativeSkyResult.fogApplied,
-          nativeSkyColor: LINGSHAN_NATIVE_SKY_OPTIONS.color,
-          nativeFogColor: LINGSHAN_NATIVE_FOG_OPTIONS.color,
-          skyOptionsAnimated: LINGSHAN_NATIVE_SKY_OPTIONS.animated,
-          reason: nativeSkyResult.error ?? 'constructor-render-options'
+          nativeSkyEnabled: false,
+          nativeSkyApplied: false,
+          nativeFogApplied: false,
+          skyOptionsAnimated: false,
+          reason: 'persistent-atmosphere-removed'
         })
         perfRecorder.recordMapVisualEvent({
           type: 'initialCameraApplied',
@@ -2988,35 +3155,60 @@ export function Map3DGuideExperience({
           mapInteractionEventCleanups.push(() => map.off?.(eventName, handler))
         })
       } catch (error) {
-        if (!isCurrentGeneration()) {
+        if (!isCurrentAttempt()) {
           return
         }
-        perfRecorder.markStageEnd('mapInit')
-        setMapStatus('error')
-        if (visualTimeoutTimer !== null) {
-          window.clearTimeout(visualTimeoutTimer)
-          visualTimeoutTimer = null
-        }
-        setMapReadyTimedOut(true)
-        setIsMapVisualReady(false)
-        setLoadingCurtainVisible(true)
-        recordStartupStage('failed', 'map-load-error')
-        const message = error instanceof Error ? error.message : '腾讯地图加载失败'
-        setPageMessage(message)
-        setPresentationSwitchError(message)
-        setPresentationTransition('failed')
+        await handleMapAttemptFailure(error, attempt)
+      }
+    }
+
+    async function handleMapAttemptFailure(error: unknown, attempt: number) {
+      if (!isCurrentGeneration() || attempt <= lastHandledFailureAttempt) {
+        return
+      }
+      lastHandledFailureAttempt = attempt
+      mapAttemptGenerationRef.current += 1
+
+      const message = error instanceof Error ? error.message : '腾讯地图加载失败'
+      disposeCreatedMap(true)
+
+      if (scenicMapPresentation === 'scenic3d' && attempt === 0) {
+        setPresentationTransition('destroying')
+        setPresentationSwitchError(`${message}，正在自动重试`)
+        setPageMessage('3D 地图初始化波动，正在自动重试...')
         perfRecorder.recordMapVisualEvent({
-          type: 'mapReadyTimedOut',
-          reason: 'map-load-error'
+          type: 'mapSlow',
+          reason: 'scenic3d-auto-retry'
         })
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapFailed',
-          reason: 'map-load-error'
-        })
-        if (scenicMapPresentation === 'scenic3d') {
-          setPresentationFallback('ink2d')
-          replaceMapPresentationInUrl(navigate, 'ink2d')
+
+        const retryReady = await waitForRetryDelay()
+        if (retryReady && isCurrentGeneration()) {
+          setPresentationTransition('waiting-container')
+          await initMap(1)
         }
+        return
+      }
+
+      perfRecorder.markStageEnd('mapInit')
+      setMapStatus('error')
+      setMapReadyTimedOut(true)
+      setIsMapVisualReady(false)
+      setLoadingCurtainVisible(true)
+      recordStartupStage('failed', 'map-load-error')
+      setPageMessage(message)
+      setPresentationSwitchError(message)
+      setPresentationTransition('failed')
+      perfRecorder.recordMapVisualEvent({
+        type: 'mapReadyTimedOut',
+        reason: 'map-load-error'
+      })
+      perfRecorder.recordMapVisualEvent({
+        type: 'mapFailed',
+        reason: 'map-load-error'
+      })
+      if (scenicMapPresentation === 'scenic3d') {
+        setPresentationFallback('ink2d')
+        replaceMapPresentationInUrl(navigate, 'ink2d')
       }
     }
 
@@ -3024,60 +3216,17 @@ export function Map3DGuideExperience({
 
     return () => {
       cancelled = true
+      mapInitAbortController.abort()
       presentationGenerationRef.current += 1
-      if (visualReadyTimer !== null) {
-        window.clearTimeout(visualReadyTimer)
-      }
-      if (visualReadyFallbackTimer !== null) {
-        window.clearTimeout(visualReadyFallbackTimer)
-      }
-      if (visualTimeoutTimer !== null) {
-        window.clearTimeout(visualTimeoutTimer)
-      }
-      if (curtainHideTimer !== null) {
-        window.clearTimeout(curtainHideTimer)
-      }
-      visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
-      mapVisualEventCleanups.forEach((cleanup) => cleanup())
-      mapInteractionEventCleanups.forEach((cleanup) => cleanup())
-      const preservedCenter = readCurrentMapCenter()
-      const preservedZoom = readCurrentMapZoom()
-      if (preservedCenter && preservedZoom !== undefined) {
-        presentationViewportRef.current = { center: preservedCenter, zoom: preservedZoom }
-      }
+      mapAttemptGenerationRef.current += 1
       if (mapInteractionRef.current.exitTimerId !== undefined) {
         window.clearTimeout(mapInteractionRef.current.exitTimerId)
         mapInteractionRef.current.exitTimerId = undefined
       }
-      routeLayerRef.current?.setMap?.(null)
-      tourRouteProgressLayerRef.current?.setMap?.(null)
-      poiMarkerLayerRef.current?.setMap?.(null)
-      userMarkerLayerRef.current?.setMap?.(null)
-      rerouteLayerRef.current?.setMap?.(null)
-      landmarkHighlightLayerRef.current?.setMap?.(null)
-      decorMarkerLayerRef.current?.setMap?.(null)
-      forestPatchLayerRef.current?.setMap?.(null)
-      formalInkBoundsMarkerLayerRef.current?.setMap?.(null)
-      formalInkBoundsBoundaryLayerRef.current?.setMap?.(null)
-      formalInkBoundsFillLayerRef.current?.setMap?.(null)
-      inkBoundsMarkerLayerRef.current?.setMap?.(null)
-      inkBoundsBoundaryLayerRef.current?.setMap?.(null)
-      gardenEditorPolygonLayerRef.current?.setMap?.(null)
-      gardenEditorVertexLayerRef.current?.setMap?.(null)
-      gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-      clearGltfModels(gltfModelRefs.current)
-      gltfModelRefs.current = new Map()
-      sceneWindowManager.destroy()
-      glbMemoryManager.destroy()
-      glbSpatialController.destroy()
-      layerManager.destroy()
       stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
-      createdMap?.destroy?.()
-      if (mapRef.current === createdMap) {
-        mapRef.current = null
-      }
+      disposeCreatedMap(true)
     }
-  }, [glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInk2DPresentation, isInkCleanMode, layerManager, mapMaxZoom, mapMinZoom, perfRecorder, scenicMapPresentation, sceneWindowManager, shouldRedirectLocalTMapHost])
+  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInk2DPresentation, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapMaxZoom, mapMinZoom, perfRecorder, scenicMapPresentation, sceneWindowManager, shouldRedirectLocalTMapHost])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden || isInkCleanMode) {
@@ -3138,7 +3287,44 @@ export function Map3DGuideExperience({
   }, [mapVisualReadyForOverlays, perfRecorder])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (mapStatus !== 'ready' || !targetMap || !isMapInstanceCurrent(targetMap)) {
+      return
+    }
+
+    applyTencentBaseMapPoiMode(targetMap, {
+      clean: isInkCleanMode,
+      showNativePoiLabels: poiLayerMode === 'all'
+    })
+
+    if (isRouteGuideView || poiLayerMode !== 'all') {
+      return
+    }
+
+    const handleNativePoiClick = (event: any) => {
+      if (!isMapInstanceCurrent(targetMap)) {
+        return
+      }
+      const poiId = getKnownPoiIdFromTencentMapEvent(event)
+      if (!poiId || !hasLingshanPoiDetail(poiId)) {
+        return
+      }
+
+      setSelectedPoiId(poiId)
+      goToPoiFromBrowse(navigate, poiId, scenicMapPresentation)
+    }
+
+    targetMap.on?.('click', handleNativePoiClick)
+    return () => {
+      if (isMapInstanceUsable(targetMap)) {
+        targetMap.off?.('click', handleNativePoiClick)
+      }
+    }
+  }, [isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, isRouteGuideView, mapStatus, navigate, poiLayerMode, scenicMapPresentation, setSelectedPoiId])
+
+  useEffect(() => {
+    const targetMap = mapRef.current
+    if (mapStatus !== 'ready' || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -3152,12 +3338,14 @@ export function Map3DGuideExperience({
       }
     }
 
-    mapRef.current.on?.('click', handleManualMapClick)
+    targetMap.on?.('click', handleManualMapClick)
 
     return () => {
-      mapRef.current?.off?.('click', handleManualMapClick)
+      if (isMapInstanceUsable(targetMap)) {
+        targetMap.off?.('click', handleManualMapClick)
+      }
     }
-  }, [debugInkBounds, mapStatus])
+  }, [debugInkBounds, isMapInstanceCurrent, isMapInstanceUsable, mapStatus])
 
   useEffect(() => {
     formalInkBoundsMarkerLayerRef.current?.setMap?.(null)
@@ -3408,8 +3596,15 @@ export function Map3DGuideExperience({
   useEffect(() => {
     // 官方托管图层只跟地图 ready / 启用状态绑定，不跟本地瓦片 opacity/source 绑定，避免普通重渲染重复 createCustomLayer。
     const targetMap = mapRef.current
+    const targetMapGeneration = targetMap ? mapInstanceGenerationsRef.current.get(targetMap) : undefined
     let ownedLayer: any = null
-    const isTargetMapCurrent = () => mapRef.current === targetMap
+    const isTargetMapCurrent = () =>
+      Boolean(
+        targetMap &&
+        targetMapGeneration &&
+        isMapInstanceCurrent(targetMap) &&
+        mapInstanceGenerationsRef.current.get(targetMap) === targetMapGeneration
+      )
     const recordInkTileEvent = (event: {
       inkTilesEnabled: boolean
       inkTileLayerReady: boolean
@@ -3473,30 +3668,48 @@ export function Map3DGuideExperience({
         return
       }
 
-      try {
-        layer.setMap?.(null)
-      } catch {
-        // Some Tencent layer versions only expose map.removeLayer/destroy.
+      if (!targetMap || !isMapInstanceUsable(targetMap)) {
+        if (inkTileLayerRef.current === layer) {
+          inkTileLayerRef.current = null
+          tencentCustomLayerInitKeyRef.current = ''
+        }
+        ownedLayer = null
+        return
       }
 
-      try {
-        targetMap?.removeLayer?.(layer)
-      } catch {
-        // Optional cleanup path.
-      }
+      const managedName = layerManager.getLayer('custom_tile') === layer
+        ? 'custom_tile'
+        : layerManager.getLayer('custom_tile_fallback') === layer
+          ? 'custom_tile_fallback'
+          : undefined
 
-      try {
-        layer.destroy?.()
-      } catch {
-        // Optional cleanup path.
+      if (managedName) {
+        layerManager.removeLayer(managedName, layer)
+      } else {
+        try {
+          layer.setMap?.(null)
+        } catch {
+          // Some Tencent layer versions only expose map.removeLayer/destroy.
+        }
+
+        try {
+          targetMap.removeLayer?.(layer)
+        } catch {
+          // Optional cleanup path.
+        }
+
+        try {
+          layer.destroy?.()
+        } catch {
+          // Optional cleanup path.
+        }
       }
 
       if (inkTileLayerRef.current === layer) {
         inkTileLayerRef.current = null
         tencentCustomLayerInitKeyRef.current = ''
-        layerManager.removeLayer('custom_tile')
-        layerManager.removeLayer('custom_tile_fallback')
       }
+      ownedLayer = null
     }
 
     cleanupLayer()
@@ -3529,6 +3742,13 @@ export function Map3DGuideExperience({
       let disposed = false
       const removeDetachedLayer = (layer: any) => {
         if (!layer) {
+          return
+        }
+
+        // Once Tencent Map has been destroyed its layer APIs can dereference
+        // an internal null layer registry (`getLayer`). The map destroy already
+        // owns that cleanup, so stale promise results are simply abandoned.
+        if (!targetMap || !isMapInstanceUsable(targetMap)) {
           return
         }
 
@@ -3604,7 +3824,7 @@ export function Map3DGuideExperience({
           ownedLayer = layer
           inkTileLayerRef.current = layer
           tencentCustomLayerInitKeyRef.current = customLayerInitKey
-          layerManager.registerLayer('custom_tile', layer)
+          layerManager.registerLayer('custom_tile', layer, targetMap)
 
           try {
             layer.setOpacity?.(TENCENT_CUSTOM_LAYER_CONFIG.opacity)
@@ -3720,7 +3940,7 @@ export function Map3DGuideExperience({
 
       ownedLayer = layer
       inkTileLayerRef.current = layer
-      layerManager.registerLayer('custom_tile_fallback', layer)
+      layerManager.registerLayer('custom_tile_fallback', layer, targetMap)
 
       try {
         layer.setOpacity?.(getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current))
@@ -3776,11 +3996,16 @@ export function Map3DGuideExperience({
     }
 
     return cleanupLayer
-  }, [inkTilesEnabled, layerManager, mapVisualReadyForOverlays, noInkTilesOverride, perfRecorder])
+  }, [inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapVisualReadyForOverlays, noInkTilesOverride, perfRecorder])
 
   useEffect(() => {
     if (!inkTilesEnabled) {
       setInkTileOpacityEffective(getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current))
+      return
+    }
+
+    const targetMap = mapRef.current
+    if (!targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -3791,7 +4016,10 @@ export function Map3DGuideExperience({
       }
 
       rafId = window.requestAnimationFrame(() => {
-        const zoom = readMapZoomForProjection(mapRef.current) ?? currentZoomRef.current
+        if (!isMapInstanceCurrent(targetMap)) {
+          return
+        }
+        const zoom = readMapZoomForProjection(targetMap) ?? currentZoomRef.current
         const nextOpacity = ENABLE_TENCENT_CUSTOM_LAYER ? TENCENT_CUSTOM_LAYER_CONFIG.opacity : getInkTileEffectiveOpacity(inkTileOpacity, zoom)
         setInkTileOpacityEffective((current) => (Math.abs(current - nextOpacity) < 0.001 ? current : nextOpacity))
 
@@ -3816,18 +4044,21 @@ export function Map3DGuideExperience({
     updateOpacity()
 
     const mapEvents = ['idle', 'zoom', 'zoom_changed', 'zoomend']
-    mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, updateOpacity))
+    mapEvents.forEach((eventName) => targetMap.on?.(eventName, updateOpacity))
 
     return () => {
       if (rafId) {
         window.cancelAnimationFrame(rafId)
       }
-      mapEvents.forEach((eventName) => mapRef.current?.off?.(eventName, updateOpacity))
+      if (isMapInstanceUsable(targetMap)) {
+        mapEvents.forEach((eventName) => targetMap.off?.(eventName, updateOpacity))
+      }
     }
-  }, [inkTileOpacity, inkTilesEnabled, mapVisualReadyForOverlays])
+  }, [inkTileOpacity, inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, mapVisualReadyForOverlays])
 
   useEffect(() => {
-    if (!mapVisualReadyForOverlays || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -3838,8 +4069,11 @@ export function Map3DGuideExperience({
       }
 
       rafId = window.requestAnimationFrame(() => {
-        const center = readMapCenterForProjection(mapRef.current) ?? routeCenter
-        const zoom = readMapZoomForProjection(mapRef.current) ?? currentZoomRef.current
+        if (!isMapInstanceCurrent(targetMap)) {
+          return
+        }
+        const center = readMapCenterForProjection(targetMap) ?? routeCenter
+        const zoom = readMapZoomForProjection(targetMap) ?? currentZoomRef.current
 
         setMapBoundsSnapshot((current) =>
           Math.abs(current.center.lat - center.lat) < 0.000001 &&
@@ -3855,19 +4089,22 @@ export function Map3DGuideExperience({
     }
 
     const mapEvents = ['idle', 'dragend', 'moveend', 'zoomend', 'bounds_changed', 'center_changed']
-    mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, updateSnapshot))
+    mapEvents.forEach((eventName) => targetMap.on?.(eventName, updateSnapshot))
     updateSnapshot()
 
     return () => {
       if (rafId) {
         window.cancelAnimationFrame(rafId)
       }
-      mapEvents.forEach((eventName) => mapRef.current?.off?.(eventName, updateSnapshot))
+      if (isMapInstanceUsable(targetMap)) {
+        mapEvents.forEach((eventName) => targetMap.off?.(eventName, updateSnapshot))
+      }
     }
-  }, [mapVisualReadyForOverlays])
+  }, [isMapInstanceCurrent, isMapInstanceUsable, mapVisualReadyForOverlays])
 
   useEffect(() => {
-    if (!mapBoundsEnabled || !mapVisualReadyForOverlays || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapBoundsEnabled || !mapVisualReadyForOverlays || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -3877,12 +4114,16 @@ export function Map3DGuideExperience({
         window.cancelAnimationFrame(rafId)
       }
 
-      rafId = window.requestAnimationFrame(() => clampScenicCameraBounds(reason))
+      rafId = window.requestAnimationFrame(() => {
+        if (isMapInstanceCurrent(targetMap)) {
+          clampScenicCameraBounds(reason)
+        }
+      })
     }
 
     const handlers = ['idle', 'dragend', 'moveend', 'zoomend'].map((eventName) => {
       const handler = () => scheduleCorrection(eventName)
-      mapRef.current?.on?.(eventName, handler)
+      targetMap.on?.(eventName, handler)
       return { eventName, handler }
     })
     scheduleCorrection('map-bounds-ready')
@@ -3891,9 +4132,11 @@ export function Map3DGuideExperience({
       if (rafId) {
         window.cancelAnimationFrame(rafId)
       }
-      handlers.forEach(({ eventName, handler }) => mapRef.current?.off?.(eventName, handler))
+      if (isMapInstanceUsable(targetMap)) {
+        handlers.forEach(({ eventName, handler }) => targetMap.off?.(eventName, handler))
+      }
     }
-  }, [mapBoundsEnabled, mapVisualReadyForOverlays])
+  }, [isMapInstanceCurrent, isMapInstanceUsable, mapBoundsEnabled, mapVisualReadyForOverlays])
 
   useEffect(() => {
     if (!inkTilesEnabled || !inkTileDomFallbackActive || !mapVisualReadyForOverlays || !mapRef.current) {
@@ -4403,103 +4646,113 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     if (isInkCleanMode || !shouldRenderRoute) {
-      routeLayerRef.current?.setMap?.(null)
-      layerManager.removeLayer('route')
+      layerManager.removeLayer('route', routeLayerRef.current)
       routeLayerRef.current = null
       return
     }
 
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
     perfRecorder.markStageStart('routeDraw')
-    routeLayerRef.current?.setMap?.(null)
-    layerManager.removeLayer('route')
+    layerManager.removeLayer('route', routeLayerRef.current)
     // Route layers must stay above optional ink map tile layers.
-    routeLayerRef.current = new window.TMap.MultiPolyline({
-      map: mapRef.current,
+    const routeLayer = new window.TMap.MultiPolyline({
+      map: targetMap,
       styles: {
-        routeShadow: new window.TMap.PolylineStyle({
-          color: 'rgba(95, 67, 21, 0.18)',
-          width: 22,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routeAura: new window.TMap.PolylineStyle({
-          color: 'rgba(231, 208, 154, 0.22)',
+        previewOuter: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 247, 218, 0.90)',
           width: 15,
           borderWidth: 0,
           lineCap: 'round'
         }),
-        routeGlow: new window.TMap.PolylineStyle({
-          color: 'rgba(242, 193, 78, 0.34)',
+        previewBorder: new window.TMap.PolylineStyle({
+          color: '#9C6A12',
           width: 10,
           borderWidth: 0,
           lineCap: 'round'
         }),
-        mainRoute: new window.TMap.PolylineStyle({
-          color: '#E7D09A',
-          width: 7,
-          borderWidth: 2,
-          borderColor: '#9C6815',
-          lineCap: 'round'
-        }),
-        routeCore: new window.TMap.PolylineStyle({
-          color: '#B7842A',
-          width: 1.5,
+        previewInner: new window.TMap.PolylineStyle({
+          color: '#F0B82E',
+          width: 6,
           borderWidth: 0,
           lineCap: 'round'
         }),
-        completedRoute: new window.TMap.PolylineStyle({
-          color: '#B7842A',
+        completedOuter: new window.TMap.PolylineStyle({
+          color: '#E6E1D7',
+          width: 12,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        completedInner: new window.TMap.PolylineStyle({
+          color: '#9E9A91',
           width: 7,
-          borderWidth: 2.5,
-          borderColor: '#9C6815',
+          borderWidth: 0,
           lineCap: 'round'
         }),
-        remainingRoute: new window.TMap.PolylineStyle({
-          color: '#E7D09A',
-          width: 6,
-          borderWidth: 1.5,
-          borderColor: 'rgba(156, 104, 21, 0.52)',
+        remainingOuter: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 247, 218, 0.90)',
+          width: 14,
+          borderWidth: 0,
           lineCap: 'round'
         }),
-        beforeJoinRoute: new window.TMap.PolylineStyle({
-          color: '#B9AD95',
+        remainingBorder: new window.TMap.PolylineStyle({
+          color: '#9C6A12',
+          width: 9,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        remainingInner: new window.TMap.PolylineStyle({
+          color: '#E5A91B',
           width: 5,
-          borderWidth: 1,
-          borderColor: 'rgba(111, 93, 63, 0.42)',
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        beforeJoinOuter: new window.TMap.PolylineStyle({
+          color: '#F0EDE6',
+          width: 11,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        beforeJoinInner: new window.TMap.PolylineStyle({
+          color: '#C8C1B4',
+          width: 6,
+          borderWidth: 0,
           lineCap: 'round'
         }),
         activeRouteHalo: new window.TMap.PolylineStyle({
-          color: 'rgba(242, 193, 78, 0.50)',
+          color: 'rgba(255, 247, 218, 0.78)',
           width: 18,
           borderWidth: 0,
           lineCap: 'round'
         }),
         activeRoute: new window.TMap.PolylineStyle({
-          color: '#9C6815',
+          color: '#E5A91B',
           width: 8,
           borderWidth: 3,
-          borderColor: '#F2C14E',
+          borderColor: '#9C6A12',
           lineCap: 'round'
         })
       },
       geometries: buildGuideRouteGeometries()
     })
-    layerManager.registerLayer('route', routeLayerRef.current)
+    routeLayerRef.current = routeLayer
+    layerManager.registerLayer('route', routeLayer, targetMap)
     perfRecorder.markStageEnd('routeDraw')
 
     return () => {
-      routeLayerRef.current?.setMap?.(null)
-      layerManager.removeLayer('route')
-      routeLayerRef.current = null
+      layerManager.removeLayer('route', routeLayer)
+      if (routeLayerRef.current === routeLayer) {
+        routeLayerRef.current = null
+      }
     }
   }, [
     currentRouteId,
     currentRoutePath,
     isInkCleanMode,
+    isMapInstanceCurrent,
     layerManager,
     mapVisualReadyForOverlays,
     nextStop.nextStopId,
@@ -4541,13 +4794,18 @@ export function Map3DGuideExperience({
     if (!shouldRenderRouteProgress) {
       return [
         {
-          id: `${routeGeometryIdPrefix}-preview`,
-          styleId: 'mainRoute',
+          id: `${routeGeometryIdPrefix}-preview-outer`,
+          styleId: 'previewOuter',
           paths: currentRoutePath.map(toTMapLatLng)
         },
         {
-          id: `${routeGeometryIdPrefix}-preview-core`,
-          styleId: 'routeCore',
+          id: `${routeGeometryIdPrefix}-preview-border`,
+          styleId: 'previewBorder',
+          paths: currentRoutePath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-preview-inner`,
+          styleId: 'previewInner',
           paths: currentRoutePath.map(toTMapLatLng)
         }
       ]
@@ -4561,20 +4819,32 @@ export function Map3DGuideExperience({
     const remainingPath = currentRoutePath.slice(Math.max(0, progressIndex))
     const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
     const showActiveSegment = tourMode !== 'buddhaRealmTour'
+    const completedOuterStyle = joiningStopIndex !== undefined ? 'beforeJoinOuter' : 'completedOuter'
+    const completedInnerStyle = joiningStopIndex !== undefined ? 'beforeJoinInner' : 'completedInner'
     const geometries = [
         {
-          id: `${routeGeometryIdPrefix}-remaining`,
-          styleId: 'remainingRoute',
+          id: `${routeGeometryIdPrefix}-remaining-outer`,
+          styleId: 'remainingOuter',
           paths: remainingPath.map(toTMapLatLng)
         },
         {
-          id: `${routeGeometryIdPrefix}-completed`,
-          styleId: joiningStopIndex !== undefined ? 'beforeJoinRoute' : 'completedRoute',
+          id: `${routeGeometryIdPrefix}-remaining-border`,
+          styleId: 'remainingBorder',
+          paths: remainingPath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-remaining-inner`,
+          styleId: 'remainingInner',
+          paths: remainingPath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-completed-outer`,
+          styleId: completedOuterStyle,
           paths: completedPath.map(toTMapLatLng)
         },
         {
-          id: `${routeGeometryIdPrefix}-completed-core`,
-          styleId: 'routeCore',
+          id: `${routeGeometryIdPrefix}-completed-inner`,
+          styleId: completedInnerStyle,
           paths: completedPath.map(toTMapLatLng)
         }
       ]
@@ -4866,7 +5136,8 @@ export function Map3DGuideExperience({
       return
     }
 
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -5376,13 +5647,13 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     if (isInkCleanMode) {
-      poiMarkerLayerRef.current?.setMap?.(null)
-      layerManager.removeLayer('poi_route')
+      layerManager.removeLayer('poi_route', poiMarkerLayerRef.current)
       poiMarkerLayerRef.current = null
       return
     }
 
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -5390,6 +5661,7 @@ export function Map3DGuideExperience({
     const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
+    const browseAllMode = !isRouteGuideView && poiLayerMode === 'all'
     // Expanded active/arrived cards intentionally narrow the marker field;
     // collapsed cards restore every numbered station without moving the map.
     const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
@@ -5432,15 +5704,24 @@ export function Map3DGuideExperience({
     })
 
     if (!isRouteGuideView) {
-      renderedPois.forEach((poi) => {
-        const styleId = `browse-${poi.id}`
-        markerStyles[styleId] = new window.TMap.MarkerStyle({
-          width: 96,
-          height: 42,
-          anchor: { x: 48, y: 37 },
-          src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
+      if (browseAllMode) {
+        markerStyles.browseKnownPoiHotspot = new window.TMap.MarkerStyle({
+          width: 44,
+          height: 44,
+          anchor: { x: 22, y: 22 },
+          src: createSvgDataUrl(transparentPoiHotspotSvg())
         })
-      })
+      } else {
+        renderedPois.forEach((poi) => {
+          const styleId = `browse-${poi.id}`
+          markerStyles[styleId] = new window.TMap.MarkerStyle({
+            width: 96,
+            height: 42,
+            anchor: { x: 48, y: 37 },
+            src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
+          })
+        })
+      }
     } else if (routeProgressMode) {
       routeContextPois
         .filter((poi) => !routeStopIds.has(poi.id))
@@ -5459,9 +5740,9 @@ export function Map3DGuideExperience({
       if (!isRouteGuideView) {
         return {
           id: poi.id,
-          styleId: `browse-${poi.id}`,
+          styleId: browseAllMode ? 'browseKnownPoiHotspot' : `browse-${poi.id}`,
           position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: { title: poi.name }
+          properties: { title: poi.name, transparentHotspot: browseAllMode }
         }
       }
 
@@ -5494,14 +5775,14 @@ export function Map3DGuideExperience({
         }
       })
 
-    poiMarkerLayerRef.current?.setMap?.(null)
-    layerManager.removeLayer('poi_route')
-    poiMarkerLayerRef.current = new window.TMap.MultiMarker({
-      map: mapRef.current,
+    layerManager.removeLayer('poi_route', poiMarkerLayerRef.current)
+    const poiLayer = new window.TMap.MultiMarker({
+      map: targetMap,
       styles: markerStyles,
       geometries: poiGeometries
     })
-    layerManager.registerLayer('poi_route', poiMarkerLayerRef.current)
+    poiMarkerLayerRef.current = poiLayer
+    layerManager.registerLayer('poi_route', poiLayer, targetMap)
     const handlePoiMarkerClick = (event: any) => {
       const poiId = event?.geometry?.id ?? event?.geometryId ?? event?.id
       if (typeof poiId !== 'string' || !hasLingshanPoiDetail(poiId)) {
@@ -5523,7 +5804,7 @@ export function Map3DGuideExperience({
         presentation: scenicMapPresentation
       })
     }
-    poiMarkerLayerRef.current.on?.('click', handlePoiMarkerClick)
+    poiLayer.on?.('click', handlePoiMarkerClick)
     perfRecorder.markStageEnd('poiInit')
     if (!mapRoutePoiShownRef.current) {
       mapRoutePoiShownRef.current = true
@@ -5534,14 +5815,20 @@ export function Map3DGuideExperience({
     }
 
     return () => {
-      poiMarkerLayerRef.current?.setMap?.(null)
-      layerManager.removeLayer('poi_route')
-      poiMarkerLayerRef.current = null
+      if (isMapInstanceUsable(targetMap)) {
+        poiLayer.off?.('click', handlePoiMarkerClick)
+      }
+      layerManager.removeLayer('poi_route', poiLayer)
+      if (poiMarkerLayerRef.current === poiLayer) {
+        poiMarkerLayerRef.current = null
+      }
     }
   }, [
     currentRouteId,
     effectiveRouteStopIndex,
     isInkCleanMode,
+    isMapInstanceCurrent,
+    isMapInstanceUsable,
     isRouteGuideView,
     layerManager,
     mapVisualReadyForOverlays,
@@ -5721,9 +6008,8 @@ export function Map3DGuideExperience({
   }, [isInkCleanMode, mapVisualReadyForOverlays, reroutePlan])
 
   useEffect(() => {
-    clearGltfModels(gltfModelRefs.current)
+    layerManager.removeLayer('model_default_giant_buddha_beta', gltfModelRefs.current.get(defaultModelOverlay?.poiId ?? ''))
     gltfModelRefs.current = new Map()
-    layerManager.removeLayer('model_default_giant_buddha_beta')
 
     if (visualVariant.id === 'prototype-c') {
       if (debugPerf && showModelBeta) {
@@ -5768,8 +6054,12 @@ export function Map3DGuideExperience({
         rotation: defaultModelOverlay.rotation,
         scale: defaultModelOverlay.scale
       })
+      if (!layerManager.registerLayer('model_default_giant_buddha_beta', model, mapRef.current)) {
+        clearGltfModel(model)
+        setModelStatus('地图实例已切换，已取消旧模型加载')
+        return
+      }
       gltfModelRefs.current.set(defaultModelOverlay.poiId, model)
-      layerManager.registerLayer('model_default_giant_buddha_beta', model)
       setModelStatus('正在加载灵山大佛 GLB Beta')
 
       if (typeof model.on === 'function') {
@@ -5783,9 +6073,8 @@ export function Map3DGuideExperience({
     }
 
     return () => {
-      clearGltfModels(gltfModelRefs.current)
+      layerManager.removeLayer('model_default_giant_buddha_beta', gltfModelRefs.current.get(defaultModelOverlay.poiId))
       gltfModelRefs.current = new Map()
-      layerManager.removeLayer('model_default_giant_buddha_beta')
     }
   }, [debugPerf, layerManager, mapVisualReadyForOverlays, showModelBeta, visualVariant.id])
 
@@ -7506,6 +7795,7 @@ export function Map3DGuideExperience({
       data-presentation-transition={presentationTransition}
       data-presentation-switching={isPresentationSwitching ? 'true' : 'false'}
       data-presentation-switch-error={presentationSwitchError ?? ''}
+      data-presentation-cloud={presentationCloudPhase}
       data-map-view-mode={effectiveGuideState.viewMode}
       data-route-id={effectiveGuideState.routeId}
       data-route-stage={effectiveGuideState.routeStage}
@@ -7648,21 +7938,28 @@ export function Map3DGuideExperience({
           <small>DOM overlay 仅用于正北俯视校验；3D 视角会自动降级或隐藏。</small>
         </div>
       ) : null}
-      <div className="map-3d-guide-skin" aria-hidden="true" />
-      <div className="map-3d-guide-mist" aria-hidden="true" />
-      <div className="map-3d-guide-paperedge" aria-hidden="true" />
-      <BuddhaRealmAtmosphere
-        clearMaskShape={clearMaskState.shape}
-        clearMaskSize={clearMaskState.size}
-        dynamicMistEnabled={dynamicMistEnabled}
-        edgeMistLevel={edgeMistState.level}
-        mode={atmosphereMode}
-        onDynamicMistStatusChange={setDynamicMistStatus}
-        visible={visualVariant.id === 'prototype-c' && !isInkCleanMode && !isInk2DPresentation}
-      />
+      {presentationCloudPhase !== 'hidden' ? (
+        <div
+          className={`map-presentation-cloud map-presentation-cloud--${presentationCloudPhase}`}
+          role="status"
+          aria-live="polite"
+          aria-label="地图视角切换中"
+        >
+          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--left" />
+          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--center" />
+          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--right" />
+          <span className="map-presentation-cloud__label">正在切换地图视角</span>
+        </div>
+      ) : null}
       <ScenicPoiBillboards
         map={mapRef.current}
-        mapReady={visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays && !isInkCleanMode && !isInk2DPresentation}
+        mapReady={
+          visualVariant.id === 'prototype-c' &&
+          mapVisualReadyForOverlays &&
+          !isInkCleanMode &&
+          !isInk2DPresentation &&
+          (isRouteGuideView || poiLayerMode === 'core')
+        }
         items={scenicPoiBillboards}
         mode={poiBillboardMode}
         activeId={poiBillboardActiveId}
@@ -8324,14 +8621,12 @@ export function Map3DGuideExperience({
           </div>
 
           <div className="map-3d-guide-render-audit">
-            <strong>3D 氛围实验</strong>
+            <strong>3D 渲染状态</strong>
             <span>
               enableBloom：{MAP_3D_GUIDE_RENDER_OPTIONS.enableBloom ? '开启，泛光实验中' : '关闭'}
             </span>
-            <span>fogOptions：{LINGSHAN_NATIVE_FOG_OPTIONS.color}</span>
-            <span>
-              skyOptions：{LINGSHAN_NATIVE_SKY_OPTIONS.color} · brightness {LINGSHAN_NATIVE_SKY_OPTIONS.brightness}
-            </span>
+            <span>persistent fog / mountain / canvas mist：已移除</span>
+            <span>仅 2D / 3D 切换时显示短暂云层转场。</span>
             <p>
               腾讯地图平台托管自定义图层已默认启用：{TENCENT_CUSTOM_LAYER_NAME}（layerId {TENCENT_CUSTOM_LAYER_ID}）；
               `noInkTiles=1` 可临时回到腾讯原底图。
@@ -9961,121 +10256,6 @@ function isZoomNearLimit(zoom: number, minZoom: number, maxZoom: number) {
   return zoom <= minZoom + 0.04 || zoom >= maxZoom - 0.04
 }
 
-function getInkMapEdgeMistState({
-  center,
-  disabledReason,
-  enabled,
-  zoom
-}: {
-  center: LatLngPoint
-  disabledReason: 'none' | 'debugGarden' | 'debugPerfNoMapBounds'
-  enabled: boolean
-  zoom: number
-}): {
-  level: 'normal' | 'strong'
-  reason: string
-  strength: number
-  nearInkBoundary: boolean
-  distanceToInkBoundary: number
-} {
-  if (!enabled) {
-    return {
-      level: 'normal',
-      reason: disabledReason === 'none' ? 'disabled' : disabledReason,
-      strength: 0,
-      nearInkBoundary: false,
-      distanceToInkBoundary: 0
-    }
-  }
-
-  const farZoom = Number.isFinite(zoom) && zoom <= INK_MAP_EDGE_MIST_ZOOM_THRESHOLD
-  const bounds = getScaledInkMapBounds(INK_MAP_CENTER_LIMIT_RATIO)
-  const latSpan = Math.max(0.000001, bounds.north - bounds.south)
-  const lngSpan = Math.max(0.000001, bounds.east - bounds.west)
-  const nearestGap = Math.min(
-    (bounds.north - center.lat) / latSpan,
-    (center.lat - bounds.south) / latSpan,
-    (bounds.east - center.lng) / lngSpan,
-    (center.lng - bounds.west) / lngSpan
-  )
-  const latMeters = Math.min(bounds.north - center.lat, center.lat - bounds.south) * 111_320
-  const lngMeters =
-    Math.min(bounds.east - center.lng, center.lng - bounds.west) *
-    111_320 *
-    Math.max(0.2, Math.cos((center.lat * Math.PI) / 180))
-  const distanceToInkBoundary = Math.round(Math.min(latMeters, lngMeters))
-  const nearInkBoundary = nearestGap <= INK_MAP_EDGE_MIST_GAP_RATIO
-
-  if (farZoom || nearInkBoundary) {
-    return {
-      level: 'strong',
-      reason: farZoom && nearInkBoundary ? 'far-zoom+near-edge' : farZoom ? 'far-zoom' : 'near-edge',
-      strength: farZoom && nearInkBoundary ? 1 : farZoom ? 0.92 : 0.88,
-      nearInkBoundary,
-      distanceToInkBoundary
-    }
-  }
-
-  return {
-    level: 'normal',
-    reason: 'center-clear',
-    strength: 0.68,
-    nearInkBoundary,
-    distanceToInkBoundary
-  }
-}
-
-function getBuddhaRealmClearMaskState({
-  edgeMistLevel,
-  enabled,
-  mode,
-  tourActive
-}: {
-  edgeMistLevel: 'normal' | 'strong'
-  enabled: boolean
-  mode: BuddhaRealmAtmosphereMode
-  tourActive: boolean
-}): {
-  mode: 'disabled' | 'map-center' | 'tour-route' | 'focus-center'
-  size: BuddhaRealmClearMaskSize
-  center: string
-  shape: BuddhaRealmClearMaskShape
-} {
-  if (!enabled) {
-    return {
-      mode: 'disabled',
-      size: 'wide',
-      center: 'camera-center',
-      shape: 'round'
-    }
-  }
-
-  if (tourActive || mode === 'tour') {
-    return {
-      mode: 'tour-route',
-      size: edgeMistLevel === 'strong' ? 'compact' : 'balanced',
-      center: 'route-camera-center',
-      shape: 'route-ellipse'
-    }
-  }
-
-  if (mode === 'focus') {
-    return {
-      mode: 'focus-center',
-      size: 'balanced',
-      center: 'focused-camera-center',
-      shape: 'round'
-    }
-  }
-
-  return {
-    mode: 'map-center',
-    size: edgeMistLevel === 'strong' ? 'balanced' : 'wide',
-    center: 'map-camera-center',
-    shape: 'round'
-  }
-}
-
 function formatInkMapBoundsForPerf(bounds: { north: number; south: number; east: number; west: number }) {
   return `N${bounds.north.toFixed(6)} S${bounds.south.toFixed(6)} E${bounds.east.toFixed(6)} W${bounds.west.toFixed(6)}`
 }
@@ -10407,7 +10587,7 @@ function latLngToWorldPixel(point: LatLngPoint, zoom: number) {
  * a measurable layout. Wait for two paint frames and an actual rectangle,
  * rather than guessing with a fixed startup delay.
  */
-function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolean): Promise<boolean> {
+function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolean, signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
     let firstFrame = 0
@@ -10426,6 +10606,7 @@ function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolea
       if (pollTimer !== undefined) window.clearInterval(pollTimer)
       if (deadlineTimer !== undefined) window.clearTimeout(deadlineTimer)
       observer?.disconnect()
+      signal?.removeEventListener('abort', handleAbort)
     }
     const finish = (ready: boolean) => {
       if (settled) return
@@ -10433,6 +10614,7 @@ function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolea
       cleanup()
       resolve(ready)
     }
+    const handleAbort = () => finish(false)
     const check = () => {
       if (!isCurrent()) {
         finish(false)
@@ -10456,6 +10638,10 @@ function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolea
     firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(beginObservation)
     })
+    signal?.addEventListener('abort', handleAbort, { once: true })
+    if (signal?.aborted) {
+      finish(false)
+    }
   })
 }
 
@@ -10510,36 +10696,6 @@ function applyInkCleanMapCamera(map: any, TMap: any, center: LatLngPoint, zoom: 
     }
   } catch {
     // The constructor already requests the same clean camera; unsupported setters are safe to ignore.
-  }
-}
-
-function applyLingshanNativeSkyOptions(map: any) {
-  let skyApplied = false
-  let fogApplied = false
-  let error: string | undefined
-
-  try {
-    if (typeof map?.setSkyOptions === 'function') {
-      map.setSkyOptions(LINGSHAN_NATIVE_SKY_OPTIONS)
-      skyApplied = true
-    }
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err)
-  }
-
-  try {
-    if (typeof map?.setFogOptions === 'function') {
-      map.setFogOptions(LINGSHAN_NATIVE_FOG_OPTIONS)
-      fogApplied = true
-    }
-  } catch (err) {
-    error = error ?? (err instanceof Error ? err.message : String(err))
-  }
-
-  return {
-    skyApplied,
-    fogApplied,
-    error
   }
 }
 
@@ -10599,10 +10755,6 @@ function clearGltfModel(model: any) {
   model?.destroy?.()
 }
 
-function clearGltfModels(models: Map<string, any>) {
-  models.forEach((model) => clearGltfModel(model))
-}
-
 function orderMapModelOverlaysForLoading(overlays: LingshanMapModelOverlay[]) {
   const priorityWeight: Record<LingshanMapModelOverlay['priority'], number> = {
     high: 0,
@@ -10623,6 +10775,11 @@ function isQueryEnabled(name: string) {
 
   const value = new URLSearchParams(window.location.search).get(name)
   return value === '1' || value === 'true'
+}
+
+function isStaleTencentLayerError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /cannot read properties of null.*getLayer/i.test(message) || /null.*getLayer/i.test(message)
 }
 
 function clampRouteStopIndex(stopIndex: number | undefined, stopCount: number) {
@@ -12444,6 +12601,12 @@ function browsePoiMarkerSvg(name: string, isCore: boolean, subdued = false) {
   </svg>`
 }
 
+function transparentPoiHotspotSvg() {
+  // Keep a tiny alpha so Tencent's marker hit-test retains a 44px touch area
+  // without drawing an icon or label over native POI text.
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="21" fill="rgba(255,255,255,0.01)"/></svg>'
+}
+
 function escapeSvgText(value: string) {
   const entities: Record<string, string> = {
     '&': '&amp;',
@@ -12476,7 +12639,99 @@ const map3DGuideCss = `
     radial-gradient(circle at 50% 42%, rgba(242, 235, 216, .92), rgba(221, 233, 217, .88) 52%, rgba(207, 222, 209, .96) 100%),
     #dde9d9;
   opacity: .98;
-  filter: saturate(.84) sepia(.08) contrast(.96) brightness(1.04);
+  filter: none;
+}
+
+.map-presentation-cloud {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  overflow: hidden;
+  pointer-events: auto;
+  background: rgba(241, 240, 228, .18);
+  opacity: 1;
+  transition: opacity 360ms ease;
+}
+
+.map-presentation-cloud--opening {
+  opacity: 0;
+}
+
+.map-presentation-cloud__bank {
+  position: absolute;
+  top: -18%;
+  bottom: -18%;
+  width: 64%;
+  background:
+    radial-gradient(circle at 28% 26%, rgba(255,255,255,.98) 0 12%, transparent 29%),
+    radial-gradient(circle at 58% 42%, rgba(245,244,233,.96) 0 18%, transparent 38%),
+    radial-gradient(circle at 36% 70%, rgba(226,232,218,.92) 0 16%, transparent 36%);
+  filter: blur(12px);
+  will-change: transform, opacity;
+}
+
+.map-presentation-cloud__bank--left {
+  left: -12%;
+  animation: map-presentation-cloud-left 820ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud__bank--center {
+  left: 18%;
+  width: 66%;
+  opacity: .82;
+  animation: map-presentation-cloud-center 860ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud__bank--right {
+  right: -12%;
+  transform: scaleX(-1);
+  animation: map-presentation-cloud-right 820ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--left {
+  transform: translateX(-72%);
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--center {
+  transform: translateY(-48%) scale(.88);
+  opacity: 0;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--right {
+  transform: translateX(72%) scaleX(-1);
+}
+
+.map-presentation-cloud__label {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -50%);
+  color: #365348;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 1px 8px rgba(255,255,255,.96);
+  transition: opacity 180ms ease;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__label {
+  opacity: 0;
+}
+
+@keyframes map-presentation-cloud-left {
+  from { transform: translateX(-58%); opacity: .45; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes map-presentation-cloud-center {
+  from { transform: translateY(20%) scale(.84); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: .82; }
+}
+
+@keyframes map-presentation-cloud-right {
+  from { transform: translateX(58%) scaleX(-1); opacity: .45; }
+  to { transform: translateX(0) scaleX(-1); opacity: 1; }
 }
 
 .map-3d-guide-ink-overlay {
@@ -13290,7 +13545,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-map {
-  filter: saturate(.70) sepia(.10) contrast(.98) brightness(1.02);
+  filter: none;
 }
 
 .map-3d-guide-shell--prototype-c.map-3d-guide-shell--ink2d .map-3d-guide-map {

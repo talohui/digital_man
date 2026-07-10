@@ -33,9 +33,15 @@ export class LayerManager {
     this.map = map
   }
 
-  registerLayer(name: string, layer: any) {
+  registerLayer(name: string, layer: any, ownerMap?: any) {
     if (!name || !layer) {
-      return
+      return false
+    }
+
+    // Async Tencent layer/model creation may resolve after its map was
+    // replaced. Never register that stale object against the new map.
+    if (!this.map || (ownerMap && ownerMap !== this.map)) {
+      return false
     }
 
     if (this.records.has(name)) {
@@ -51,17 +57,22 @@ export class LayerManager {
       order
     })
     this.notify()
+    return true
   }
 
-  register(name: string, layer: any) {
-    this.registerLayer(name, layer)
+  register(name: string, layer: any, ownerMap?: any) {
+    return this.registerLayer(name, layer, ownerMap)
   }
 
-  removeLayer(name: string) {
+  removeLayer(name: string, expectedLayer?: any) {
     const record = this.records.get(name)
 
     if (!record) {
       this.layers.delete(name)
+      return
+    }
+
+    if (expectedLayer && record.layer !== expectedLayer) {
       return
     }
 
@@ -86,7 +97,7 @@ export class LayerManager {
   setVisible(name: string, visible: boolean) {
     const record = this.records.get(name)
 
-    if (!record) {
+    if (!record || !this.map) {
       return
     }
 
@@ -96,11 +107,16 @@ export class LayerManager {
   }
 
   destroy() {
-    Array.from(this.records.keys()).forEach((name) => this.removeLayer(name))
+    const currentMap = this.map
+    Array.from(this.records.values()).forEach((record) => detachLayer(record.layer, currentMap))
     this.map = null
     this.layers.clear()
     this.records.clear()
     this.notify()
+  }
+
+  isCurrentMap(map: any) {
+    return Boolean(map && this.map === map)
   }
 
   subscribe(listener: LayerManagerListener) {
