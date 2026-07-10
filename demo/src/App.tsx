@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
+import { GlobalXiaolingAssistant } from './components/guide'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
@@ -182,7 +183,32 @@ function App() {
   if (isMobile && !isAdminRoute) {
     return (
       <RouteErrorBoundary>
+        <>
+          <Routes>
+            <Route path="/three-preview" element={<ThreePreviewRoute />} />
+            <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
+            <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
+            <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
+            <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
+            <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
+            <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
+            <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
+            <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
+            <Route path="*" element={<MobileShellRoute />} />
+          </Routes>
+          <GlobalXiaolingAssistant />
+        </>
+      </RouteErrorBoundary>
+    )
+  }
+
+  return (
+    <RouteErrorBoundary>
+      <>
         <Routes>
+          <Route path="/" element={<HomeRoute />} />
+          <Route path="/map" element={<GuideMapRoute />} />
+          <Route path="/spot/:spotId" element={<SpotGuideRoute />} />
           <Route path="/three-preview" element={<ThreePreviewRoute />} />
           <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
           <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
@@ -192,32 +218,13 @@ function App() {
           <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
           <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-          <Route path="*" element={<MobileShellRoute />} />
+          <Route path="/guide" element={<HomeRoute />} />
+          <Route path="/me" element={<HomeRoute />} />
+          <Route path="/admin" element={<AdminDashboardRoute />} />
+          <Route path="/admin/avatar" element={<AdminAvatarRoute />} />
         </Routes>
-      </RouteErrorBoundary>
-    )
-  }
-
-  return (
-    <RouteErrorBoundary>
-      <Routes>
-        <Route path="/" element={<HomeRoute />} />
-        <Route path="/map" element={<GuideMapRoute />} />
-        <Route path="/spot/:spotId" element={<SpotGuideRoute />} />
-        <Route path="/three-preview" element={<ThreePreviewRoute />} />
-        <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
-        <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
-        <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
-        <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
-        <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
-        <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
-        <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
-        <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-        <Route path="/guide" element={<HomeRoute />} />
-        <Route path="/me" element={<HomeRoute />} />
-        <Route path="/admin" element={<AdminDashboardRoute />} />
-        <Route path="/admin/avatar" element={<AdminAvatarRoute />} />
-      </Routes>
+        <GlobalXiaolingAssistant />
+      </>
     </RouteErrorBoundary>
   )
 }

@@ -2,55 +2,64 @@
 
 ## Scope
 
-This UI worktree owns mobile cards, sheets, carousel behavior, copy, and presentation-only interactions. It does not change Tencent map initialization, POI marker rendering, route geometry, GLB runtime, camera control, or Fay communication.
+This worktree owns the mobile assistant shell, cards, sheets, carousel behavior, copy, and presentation-only interactions. It does not change Tencent map initialization, POI marker rendering, route geometry, GLB runtime, camera control, or real Fay communication.
 
-## Browse Overlay
+## One Persistent Xiaoling
 
-`Map3DGuidePrototypeCPage.tsx` keeps the map as the main surface and renders a compact, always-visible Xiaoling companion card instead of a default route recommendation card.
+`GlobalXiaolingAssistant` is mounted next to the map module routes in `App.tsx`, outside the individual browse, route, and POI page components. It remains mounted while navigating among the three map pages and portals its visible UI to `document.body`.
 
-- `问小灵` opens the existing browse-mode mock sheet.
-- `路线` always enters the `historical_culture` route preview.
-- The right rail contains `定位` / `3D` / `服务` / `图层`.
-- The 3D rail item reflects the real `presentation` query state. No separate fake 3D state is maintained.
-- The layer panel supports core POIs, all POIs, and an independent service-facility switch. Service facilities only show a construction notice and never render fake points.
-- The service panel is compact, has no full-screen scrim, leaves the map usable, supports close and downward swipe, and is exclusive with Xiaoling and the layer panel.
-- The layer panel and Xiaoling sheet may coexist.
+- Browse, route, and POI pages no longer render separate Xiaoling drawers.
+- The old browse companion card, route-card portrait, POI hero assistant card, and POI floating portrait have been removed.
+- Route recommendation text, `预览讲解`, and `继续问小灵` remain page-level triggers, but all open the same global drawer.
+- Opening the assistant closes an open service panel. Opening a service panel closes the assistant. Layer controls may coexist with the assistant.
+- The floating companion disappears while the drawer is open and returns after the drawer closes.
 
-## Route Preview Carousel
+The UI shell currently uses a small custom-event adapter so page-level triggers do not own session state. After Guide Core integration this adapter is replaced by the persistent guide session store and context bridge.
 
-The preview title is always `路线预览`; the selected route name remains inside the card.
+## Portal And QQ Browser Adaptation
 
-- Route card order is fixed: `historical_culture`, `prayer_meditation`, `highlights_checkin`, `natural_scenery`, `family`.
-- Cards use free horizontal scrolling without scroll snap.
-- While scrolling, the current route URL and map data remain unchanged.
-- After 160 ms without a scroll event, the UI calculates the visible intersection area for each card and selects the largest visible card.
-- The selected route then calls `goToRoutePreview(..., { replace: true })`, so selection updates the URL without building up browser history.
-- The dots are indicators only, not navigation controls.
-- Preview cards default to expanded. A collapsed summary keeps the route name, duration/station count, start action, and expand control; route switching is unavailable while collapsed.
-- Xiaoling recommendation copy is keyed by `routeId` rather than hard-coded to historical culture.
+The assistant root is a fixed portal layer above map overlays. Its root is pointer-transparent; only the floating entry, drawer, scrim, controls, and cards receive pointer events. Closing the drawer unmounts both drawer and scrim, so no transparent layer remains to block the map.
 
-## Route Active And Arrived
+- Drawer height is constrained to 86% of the dynamic viewport.
+- `window.visualViewport` height and offset are exposed as local CSS variables for QQ browser and soft-keyboard changes.
+- `100dvh` remains the CSS fallback and safe-area bottom padding protects the composer.
+- The message timeline scrolls independently while the input composer remains visible.
+- Downward close gestures are captured only by the drawer handle, not the conversation scroller.
 
-- `预览讲解` opens the route-mode Xiaoling sheet and injects one guide-style question for the next stop with a mock response.
-- `继续问小灵` opens the same sheet without injecting another question, preserving the current local conversation state.
-- `导航到下一站` shows a planning message and, after 1.4 seconds, demonstrates arrival at the following station. This is a presentation-only transition.
-- Active card detail wording is `下一站详情`.
-- Arrived collapsed-card primary wording is `景点详情`.
-- Route-card collapse consumes `useMapGuideUiStore.routeCardExpanded`. The UI state is intentionally separate from map camera state.
+## Borderless Digital Human Stage
 
-## State-Machine Integration
+`DigitalHumanStage` provides `idle`, `listening`, `thinking`, `speaking`, and `offline` visual states. The figure is an independent, pointer-transparent layer blended into the drawer background with both `mask-image` and `-webkit-mask-image`.
 
-The UI now consumes the `codex/state-machine` navigation protocol without modifying shared state files.
+The repository does not currently contain a suitable transparent Xiaoling half-body bitmap or animation asset. The first UI shell therefore uses an integrated CSS fallback figure rather than a black-background screenshot, native video, or framed media card. `DigitalHumanStage` is the renderer adapter boundary for a later transparent Live2D/canvas implementation.
 
-1. Preview selection calls `goToRoutePreview` with `replace: true`.
-2. Active next-stop detail passes `returnStage: 'active'` and the current stop; arrived detail passes `returnStage: 'arrived'`.
-3. The presentation-only arrival delay calls `goToRouteArrived` after 1.4 seconds.
-4. Route card expansion is shared through `useMapGuideUiStore` for later map POI visibility policies.
+## Structured Guide UI
+
+The drawer UI contains reusable renderers for:
+
+- `route_cards`
+- `poi_card`
+- `navigation_card`
+- `next_stop_card`
+- `route_progress`
+
+The initial shell can render the demonstration request “我只有两个小时，想轻松一点，主要想拍照。” as a recommendation for `highlights_checkin`. Before Guide Core integration this is local mock behavior; after integration message data and actions come from `GuideMessage`, `GuideUiPayload`, and `GuideActionRegistry`.
+
+## Route Page Triggers
+
+- `预览讲解` opens the global route-mode drawer and appends one guide-style request for the next stop.
+- `继续问小灵` opens the same drawer without adding another request.
+- Preview recommendation copy stays keyed by `routeId`.
+- Removing the embedded route-card portrait prevents it from covering the route title.
+
+## Existing Route UI Behavior
+
+The preview title remains `路线预览`. Route cards use free horizontal scrolling and select the largest visible card after scrolling stops. Preview cards default to expanded; route switching is unavailable while collapsed. Active detail links preserve `returnStage: active`, arrived detail links preserve `returnStage: arrived`, and the presentation-only navigation action demonstrates arrival after a short delay.
 
 ## Still Mocked
 
-- Xiaoling/Fay answers and voice input.
+- Real Fay/digital-human communication and speech recognition.
+- Transparent production digital-human renderer asset.
 - User location and single-point navigation.
 - Service facility POIs.
-- Actual 3D mode behavior beyond the existing presentation query.
 - Arrival detection and route re-planning.
+- Real model interaction beyond existing map presentation behavior.
