@@ -21,7 +21,12 @@ import type {
   LingshanMap3DForestPatch,
   LingshanMap3DGardenAsset
 } from '../data/lingshanMap3DGardenAssets'
-import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
+import {
+  getLingshanPoisForLayer,
+  lingshanPois,
+  type LingshanPoi,
+  type LingshanPoiLayerMode
+} from '../data/lingshanMapData'
 import {
   getMapModelOverlayByPoiId,
   getMapModelOverlayInspectorId,
@@ -73,13 +78,14 @@ import { preloadMap3DLandmarkAssets } from '../lib/map3dPreload'
 import { buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
 import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
-import type { MapGuideState } from '../types/mapGuide'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
+import type { MapGuideState, PoiReturnStage, ScenicMapPresentation } from '../types/mapGuide'
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
-export type ScenicMapPresentation = 'scenic3d' | 'ink2d'
+export type { ScenicMapPresentation } from '../types/mapGuide'
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
 type GardenLodState = {
   opacity: number
@@ -818,6 +824,11 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const effectiveGuideState = guideState ?? ({ viewMode: 'browse', xiaolingMode: 'browse' } satisfies MapGuideState)
+  const poiVisibilityMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
+  const serviceFacilitiesEnabled = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
+  const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
+  const mapFocusMode = useMapGuideUiStore((state) => state.mapFocusMode)
+  const setSelectedPoiId = useMapGuideUiStore((state) => state.setSelectedPoiId)
   const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
   const scenicMapPresentation = useMemo(
     () => resolveScenicMapPresentation(presentation, isMobileViewport),
@@ -826,6 +837,7 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   const isInk2DPresentation = scenicMapPresentation === 'ink2d'
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
+  const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
   const routeLayerRef = useRef<any>(null)
   const tourRouteProgressLayerRef = useRef<any>(null)
   const poiMarkerLayerRef = useRef<any>(null)
@@ -1131,7 +1143,60 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   const landmarkRuntimeLoadTimersRef = useRef<number[]>([])
 
   const routeStops = currentRouteConfig.stops
+  const isRouteGuideView = effectiveGuideState.viewMode === 'route' && Boolean(effectiveGuideState.routeId)
+  const routeGuideStage = effectiveGuideState.routeStage ?? 'preview'
+  const routeGuideStopIndex = clampRouteStopIndex(effectiveGuideState.stopIndex, routeStops.length)
+  const requestedJoiningStopIndex = effectiveGuideState.joinStopIndex ?? getJoiningStopIndexFromQuery(routeStops.length)
+  const joiningStopIndex =
+    routeGuideStage === 'joining' && requestedJoiningStopIndex !== undefined
+      ? clampRouteStopIndex(requestedJoiningStopIndex, routeStops.length)
+      : undefined
+  const effectiveRouteStopIndex = joiningStopIndex ?? routeGuideStopIndex
+  const shouldRenderRoute = isRouteGuideView
+  const shouldRenderRouteProgress =
+    isRouteGuideView && (routeGuideStage === 'active' || routeGuideStage === 'arrived' || joiningStopIndex !== undefined)
+  const effectiveMapFocusMode = routeGuideStage === 'preview' ? 'overview' : mapFocusMode
+  const poiLayerMode: LingshanPoiLayerMode = poiVisibilityMode
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
+
+  useEffect(() => {
+    if (!isRouteGuideView) {
+      return
+    }
+
+    setSelectedStopIndex(effectiveRouteStopIndex)
+    const position = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
+    if (position) {
+      setSimulatedPosition(position)
+      setRoutePathIndex(findNearestRoutePoint(position, currentRoutePath)?.nearestIndex ?? 0)
+    }
+  }, [currentRoutePath, effectiveRouteStopIndex, isRouteGuideView, routeStops])
+
+  useEffect(() => {
+    if (!isRouteGuideView || mapStatus !== 'ready' || !mapRef.current) {
+      return
+    }
+
+    if (effectiveMapFocusMode === 'overview') {
+      moveMapCamera(currentRouteCenter, isInk2DPresentation ? INK_2D_CAMERA_PRESET : MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview)
+      return
+    }
+
+    const currentLocation = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
+    if (currentLocation) {
+      moveMapCamera(currentLocation, isInk2DPresentation ? INK_2D_CAMERA_PRESET : MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus, {
+        targetPoiId: routeStops[effectiveRouteStopIndex]?.spotId
+      })
+    }
+  }, [
+    currentRouteCenter,
+    effectiveRouteStopIndex,
+    isInk2DPresentation,
+    isRouteGuideView,
+    effectiveMapFocusMode,
+    mapStatus,
+    routeStops
+  ])
   const nearestRoutePoint = useMemo(
     () => findNearestRoutePoint(simulatedPosition, currentRoutePath),
     [currentRoutePath, simulatedPosition]
@@ -2732,10 +2797,11 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
         const inkExportCamera = isInkCleanMode
           ? getConfiguredInkBoundsCamera(mapElementRef.current, { squareViewport: inkUseSquareExportCamera })
           : null
-        const exportMapCenter = inkExportCamera?.center ?? routeCenter
+        const preservedViewport = presentationViewportRef.current
+        const exportMapCenter = inkExportCamera?.center ?? preservedViewport?.center ?? (isRouteGuideView ? currentRouteCenter : scenicCenter)
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(exportMapCenter.lat, exportMapCenter.lng),
-          zoom: inkExportCamera?.zoom ?? (isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
+          zoom: inkExportCamera?.zoom ?? preservedViewport?.zoom ?? (isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
           minZoom: mapMinZoom,
           maxZoom: mapMaxZoom,
           pitch: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
@@ -2864,6 +2930,11 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
       mapVisualEventCleanups.forEach((cleanup) => cleanup())
       mapInteractionEventCleanups.forEach((cleanup) => cleanup())
+      const preservedCenter = readCurrentMapCenter()
+      const preservedZoom = readCurrentMapZoom()
+      if (preservedCenter && preservedZoom !== undefined) {
+        presentationViewportRef.current = { center: preservedCenter, zoom: preservedZoom }
+      }
       if (mapInteractionRef.current.exitTimerId !== undefined) {
         window.clearTimeout(mapInteractionRef.current.exitTimerId)
         mapInteractionRef.current.exitTimerId = undefined
@@ -2902,15 +2973,17 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     }
 
     entryCameraPlayedRef.current = true
+    const entryTarget = isRouteGuideView ? currentRouteCenter : scenicCenter
+
     if (isInk2DPresentation) {
       setActiveCameraMode('routeOverview')
-      moveMapCamera(currentRouteCenter, INK_2D_CAMERA_PRESET)
+      moveMapCamera(entryTarget, INK_2D_CAMERA_PRESET)
       return
     }
 
     setActiveCameraMode('overviewEstate')
-    moveMapCamera(currentRouteCenter, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
-  }, [currentRouteCenter, debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus])
+    moveMapCamera(entryTarget, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
+  }, [currentRouteCenter, debugGarden, isInk2DPresentation, isInkCleanMode, isRouteGuideView, mapStatus])
 
   useEffect(() => {
     if (!isInkCleanMode || mapStatus !== 'ready' || !mapRef.current || !window.TMap) {
@@ -4201,7 +4274,7 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   }, [assetLoadState, decorOverlays, visualVariant.id])
 
   useEffect(() => {
-    if (isInkCleanMode) {
+    if (isInkCleanMode || !shouldRenderRoute) {
       routeLayerRef.current?.setMap?.(null)
       layerManager.removeLayer('route')
       routeLayerRef.current = null
@@ -4220,54 +4293,62 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       map: mapRef.current,
       styles: {
         routeShadow: new window.TMap.PolylineStyle({
-          color: 'rgba(74, 54, 18, 0.18)',
-          width: 30,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routeAura: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 226, 132, 0.30)',
-          width: 23,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routeGlow: new window.TMap.PolylineStyle({
-          color: 'rgba(236, 176, 56, 0.66)',
-          width: 15,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        mainRoute: new window.TMap.PolylineStyle({
-          color: '#f1bd3e',
-          width: 9,
-          borderWidth: 4,
-          borderColor: 'rgba(255, 250, 226, 0.96)',
-          lineCap: 'round'
-        }),
-        routeCore: new window.TMap.PolylineStyle({
-          color: 'rgba(110, 68, 7, 0.82)',
-          width: 2,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        completedRoute: new window.TMap.PolylineStyle({
-          color: 'rgba(49, 90, 74, 0.42)',
-          width: 7,
-          borderWidth: 2,
-          borderColor: 'rgba(244, 241, 224, 0.74)',
-          lineCap: 'round'
-        }),
-        activeRouteHalo: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 220, 105, 0.58)',
+          color: 'rgba(31, 90, 77, 0.18)',
           width: 22,
           borderWidth: 0,
           lineCap: 'round'
         }),
+        routeAura: new window.TMap.PolylineStyle({
+          color: 'rgba(31, 90, 77, 0.16)',
+          width: 15,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        routeGlow: new window.TMap.PolylineStyle({
+          color: 'rgba(31, 90, 77, 0.34)',
+          width: 10,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        mainRoute: new window.TMap.PolylineStyle({
+          color: '#1f5a4d',
+          width: 7,
+          borderWidth: 2,
+          borderColor: 'rgba(245, 241, 232, 0.96)',
+          lineCap: 'round'
+        }),
+        routeCore: new window.TMap.PolylineStyle({
+          color: 'rgba(21, 74, 63, 0.92)',
+          width: 1.5,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        completedRoute: new window.TMap.PolylineStyle({
+          color: '#1f5a4d',
+          width: 7,
+          borderWidth: 2.5,
+          borderColor: 'rgba(245, 241, 232, 0.94)',
+          lineCap: 'round'
+        }),
+        remainingRoute: new window.TMap.PolylineStyle({
+          color: 'rgba(192, 179, 142, 0.82)',
+          width: 6,
+          borderWidth: 1.5,
+          borderColor: 'rgba(245, 241, 232, 0.82)',
+          lineCap: 'round',
+          dashArray: [10, 8]
+        }),
+        activeRouteHalo: new window.TMap.PolylineStyle({
+          color: 'rgba(231, 192, 99, 0.44)',
+          width: 18,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
         activeRoute: new window.TMap.PolylineStyle({
-          color: '#ffe38c',
-          width: 11,
-          borderWidth: 5,
-          borderColor: 'rgba(121, 79, 12, 0.40)',
+          color: '#c9a86a',
+          width: 8,
+          borderWidth: 3,
+          borderColor: 'rgba(31, 90, 77, 0.58)',
           lineCap: 'round'
         })
       },
@@ -4290,7 +4371,12 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     nextStop.nextStopId,
     perfRecorder,
     routePathIndex,
+    routeStops,
     selectedStopId,
+    effectiveRouteStopIndex,
+    joiningStopIndex,
+    shouldRenderRoute,
+    shouldRenderRouteProgress,
     tourMode
   ])
 
@@ -4316,47 +4402,50 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
   }
 
   function buildGuideRouteGeometries() {
-    const completedPath = currentRoutePath.slice(0, Math.min(currentRoutePath.length, routePathIndex + 1))
-    const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
-    const showStandardProgress = tourMode !== 'buddhaRealmTour'
     const routeGeometryIdPrefix = `${currentRouteId}-route`
-    const geometries = [
+
+    if (!shouldRenderRouteProgress) {
+      return [
         {
-          id: `${routeGeometryIdPrefix}-shadow`,
-          styleId: 'routeShadow',
-          paths: currentRoutePath.map(toTMapLatLng)
-        },
-        {
-          id: `${routeGeometryIdPrefix}-aura`,
-          styleId: 'routeAura',
-          paths: currentRoutePath.map(toTMapLatLng)
-        },
-        {
-          id: `${routeGeometryIdPrefix}-glow`,
-          styleId: 'routeGlow',
-          paths: currentRoutePath.map(toTMapLatLng)
-        },
-        {
-          id: `${routeGeometryIdPrefix}-main`,
+          id: `${routeGeometryIdPrefix}-preview`,
           styleId: 'mainRoute',
           paths: currentRoutePath.map(toTMapLatLng)
         },
         {
-          id: `${routeGeometryIdPrefix}-core`,
+          id: `${routeGeometryIdPrefix}-preview-core`,
           styleId: 'routeCore',
           paths: currentRoutePath.map(toTMapLatLng)
         }
       ]
-
-    if (showStandardProgress && completedPath.length > 1) {
-      geometries.push({
-        id: `${routeGeometryIdPrefix}-completed`,
-        styleId: 'completedRoute',
-        paths: completedPath.map(toTMapLatLng)
-      })
     }
 
-    if (showStandardProgress && activePath.length > 1) {
+    const progressLocation = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
+    const progressIndex = progressLocation
+      ? findNearestRoutePoint(progressLocation, currentRoutePath)?.nearestIndex ?? routePathIndex
+      : routePathIndex
+    const completedPath = currentRoutePath.slice(0, Math.min(currentRoutePath.length, progressIndex + 1))
+    const remainingPath = currentRoutePath.slice(Math.max(0, progressIndex))
+    const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
+    const showActiveSegment = tourMode !== 'buddhaRealmTour'
+    const geometries = [
+        {
+          id: `${routeGeometryIdPrefix}-remaining`,
+          styleId: 'remainingRoute',
+          paths: remainingPath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-completed`,
+          styleId: joiningStopIndex !== undefined ? 'remainingRoute' : 'completedRoute',
+          paths: completedPath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-completed-core`,
+          styleId: 'routeCore',
+          paths: completedPath.map(toTMapLatLng)
+        }
+      ]
+
+    if (showActiveSegment && activePath.length > 1) {
       geometries.push(
         {
           id: `${routeGeometryIdPrefix}-active-halo`,
@@ -5164,10 +5253,31 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
     }
 
     perfRecorder.markStageStart('poiInit')
-    const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
-    const currentStopId = routeStops[selectedStopIndex]?.spotId
+    const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
-    const markerStyles = routeStops.reduce<Record<string, any>>((styles, stop, index) => {
+    const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
+    // Expanded active/arrived cards intentionally narrow the marker field;
+    // collapsed cards restore every numbered station without moving the map.
+    const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
+    const routeContextPois = routeProgressMode
+      ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
+      : []
+    const browsePois = Array.from(
+      new Map(
+        [
+          ...getLingshanPoisForLayer(poiLayerMode),
+          ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
+        ].map((poi) => [poi.id, poi])
+      ).values()
+    )
+    const renderedPois = !isRouteGuideView
+      ? browsePois
+      : routeProgressMode
+        ? routeContextPois
+        : lingshanPois.filter((poi) => routeStopIds.has(poi.id))
+    const markerStyles: Record<string, any> = {}
+
+    routeStops.forEach((stop, index) => {
       const state =
         stop.spotId === terminalStopId
           ? 'terminal'
@@ -5179,18 +5289,57 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       const styleId = `poi-${index}-${state}`
       const size = state === 'current' ? 44 : state === 'next' ? 40 : state === 'terminal' ? 42 : 34
 
-      styles[styleId] = new window.TMap.MarkerStyle({
+      markerStyles[styleId] = new window.TMap.MarkerStyle({
         width: size,
         height: size + 8,
         anchor: { x: size / 2, y: size + 6 },
         src: createSvgDataUrl(routePoiMarkerSvg(state, index + 1))
       })
+    })
 
-      return styles
-    }, {})
-    const poiGeometries = lingshanPois
-      .filter((poi) => routeStopIds.has(poi.id))
-      .map((poi) => {
+    if (!isRouteGuideView) {
+      renderedPois.forEach((poi) => {
+        const styleId = `browse-${poi.id}`
+        markerStyles[styleId] = new window.TMap.MarkerStyle({
+          width: 96,
+          height: 42,
+          anchor: { x: 48, y: 37 },
+          src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
+        })
+      })
+    } else if (routeProgressMode) {
+      routeContextPois
+        .filter((poi) => !routeStopIds.has(poi.id))
+        .forEach((poi) => {
+          const styleId = `context-${poi.id}`
+          markerStyles[styleId] = new window.TMap.MarkerStyle({
+            width: 92,
+            height: 38,
+            anchor: { x: 46, y: 34 },
+            src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, false, true))
+          })
+        })
+    }
+
+    const poiGeometries = renderedPois.map((poi) => {
+      if (!isRouteGuideView) {
+        return {
+          id: poi.id,
+          styleId: `browse-${poi.id}`,
+          position: toTMapLatLng(getBestPoiLocation(poi)),
+          properties: { title: poi.name }
+        }
+      }
+
+      if (routeProgressMode && !routeStopIds.has(poi.id)) {
+        return {
+          id: poi.id,
+          styleId: `context-${poi.id}`,
+          position: toTMapLatLng(getBestPoiLocation(poi)),
+          properties: { title: poi.name }
+        }
+      }
+
         const stopIndex = routeStops.findIndex((stop) => stop.spotId === poi.id)
         const state =
           poi.id === terminalStopId
@@ -5219,6 +5368,28 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       geometries: poiGeometries
     })
     layerManager.registerLayer('poi_route', poiMarkerLayerRef.current)
+    const handlePoiMarkerClick = (event: any) => {
+      const poiId = event?.geometry?.id ?? event?.geometryId ?? event?.id
+      if (typeof poiId !== 'string' || !hasLingshanPoiDetail(poiId)) {
+        return
+      }
+
+      setSelectedPoiId(poiId)
+      if (!isRouteGuideView) {
+        goToPoiFromBrowse(navigate, poiId, scenicMapPresentation)
+        return
+      }
+
+      const stopIndex = routeStops.findIndex((stop) => stop.spotId === poiId)
+      goToPoiFromRoute(navigate, poiId, {
+        routeId: currentRouteId,
+        poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+        returnStage: getPoiReturnStage(routeGuideStage),
+        returnStopIndex: effectiveRouteStopIndex,
+        presentation: scenicMapPresentation
+      })
+    }
+    poiMarkerLayerRef.current.on?.('click', handlePoiMarkerClick)
     perfRecorder.markStageEnd('poiInit')
     if (!mapRoutePoiShownRef.current) {
       mapRoutePoiShownRef.current = true
@@ -5233,7 +5404,26 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
       layerManager.removeLayer('poi_route')
       poiMarkerLayerRef.current = null
     }
-  }, [isInkCleanMode, layerManager, mapVisualReadyForOverlays, nextStop.nextStopId, perfRecorder, routeStops, selectedStopIndex, terminalStopId])
+  }, [
+    currentRouteId,
+    effectiveRouteStopIndex,
+    isInkCleanMode,
+    isRouteGuideView,
+    layerManager,
+    mapVisualReadyForOverlays,
+    navigate,
+    nextStop.nextStopId,
+    perfRecorder,
+    poiLayerMode,
+    routeCardExpanded,
+    routeGuideStage,
+    routeStops,
+    scenicMapPresentation,
+    setSelectedPoiId,
+    serviceFacilitiesEnabled,
+    shouldRenderRouteProgress,
+    terminalStopId
+  ])
 
   useEffect(() => {
     if (isInkCleanMode) {
@@ -7336,15 +7526,22 @@ export function Map3DGuideExperience({ variant = 'default', guideState, presenta
           const poi = lingshanPois.find((item) => item.id === id)
 
           if (hasLingshanPoiDetail(id)) {
+            setSelectedPoiId(id)
             stopActiveTour('manual')
             if (poi) {
               setActiveLandmarkId(id)
               focusLandmarkCamera(id, getBestPoiLocation(poi), false)
             }
             if (effectiveGuideState.viewMode === 'route' && effectiveGuideState.routeId) {
-              goToPoiFromRoute(navigate, id, effectiveGuideState.routeId, effectiveGuideState.stopIndex ?? stopIndex)
+              goToPoiFromRoute(navigate, id, {
+                routeId: effectiveGuideState.routeId,
+                poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+                returnStage: getPoiReturnStage(routeGuideStage),
+                returnStopIndex: effectiveRouteStopIndex,
+                presentation: scenicMapPresentation
+              })
             } else {
-              goToPoiFromBrowse(navigate, id)
+              goToPoiFromBrowse(navigate, id, scenicMapPresentation)
             }
             return
           }
@@ -10157,6 +10354,58 @@ function isQueryEnabled(name: string) {
   return value === '1' || value === 'true'
 }
 
+function clampRouteStopIndex(stopIndex: number | undefined, stopCount: number) {
+  if (!stopCount) {
+    return 0
+  }
+
+  return Math.min(Math.max(stopIndex ?? 0, 0), stopCount - 1)
+}
+
+/** Temporary compatibility for the pending shared `joining` state contract. */
+function getJoiningStopIndexFromQuery(stopCount: number) {
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('stage') !== 'joining') {
+    return undefined
+  }
+
+  const joinStop = Number(params.get('joinStop'))
+  if (!Number.isInteger(joinStop) || joinStop <= 0) {
+    return 0
+  }
+
+  return clampRouteStopIndex(joinStop - 1, stopCount)
+}
+
+function getPoiReturnStage(stage: string): PoiReturnStage {
+  return stage === 'joining' || stage === 'active' || stage === 'arrived' ? stage : 'preview'
+}
+
+function getRouteProgressPois(currentStopId?: string, nextStopId?: string, nearbyCoreLimit = 3) {
+  const selectedIds = new Set([currentStopId, nextStopId].filter((id): id is string => Boolean(id)))
+  const current = lingshanPois.find((poi) => poi.id === currentStopId)
+  const next = lingshanPois.find((poi) => poi.id === nextStopId)
+  const focus = current && next
+    ? {
+        lat: (current.displayLocation.lat + next.displayLocation.lat) / 2,
+        lng: (current.displayLocation.lng + next.displayLocation.lng) / 2
+      }
+    : current?.displayLocation ?? next?.displayLocation ?? scenicCenter
+  const nearbyCore = getLingshanPoisForLayer('core')
+    .filter((poi) => !selectedIds.has(poi.id))
+    .sort((a, b) => haversineDistanceMeters(focus, a.displayLocation) - haversineDistanceMeters(focus, b.displayLocation))
+    .slice(0, nearbyCoreLimit)
+
+  return [
+    ...lingshanPois.filter((poi) => selectedIds.has(poi.id)),
+    ...nearbyCore
+  ]
+}
+
 function getInitialScenicRouteIdFromQuery() {
   if (typeof window === 'undefined') {
     return getDefaultScenicRouteId()
@@ -11891,6 +12140,34 @@ function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', ind
       }
     </g>
   </svg>`
+}
+
+function browsePoiMarkerSvg(name: string, isCore: boolean, subdued = false) {
+  const label = escapeSvgText(name.length > 8 ? `${name.slice(0, 8)}…` : name)
+  const ink = isCore ? '#1f5a4d' : '#52776c'
+  const paper = subdued ? 'rgba(245,241,232,.82)' : 'rgba(255,250,235,.94)'
+  const gold = isCore ? '#c9a86a' : '#b9aa87'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="42" viewBox="0 0 96 42">
+    <defs><filter id="s" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="3" stdDeviation="2" flood-color="rgba(22,56,47,.22)"/></filter></defs>
+    <g filter="url(#s)" opacity="${subdued ? '.78' : '1'}">
+      <circle cx="13" cy="20" r="8" fill="${ink}" stroke="#f7edd5" stroke-width="2"/>
+      <path d="M13 15.5v9M8.5 20h9" stroke="#f7edd5" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M24 7h62l5 13-5 13H24l-5-13 5-13Z" fill="${paper}" stroke="${gold}" stroke-width="1.5"/>
+      <text x="56" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="${ink}">${label}</text>
+    </g>
+  </svg>`
+}
+
+function escapeSvgText(value: string) {
+  const entities: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;'
+  }
+  return value.replace(/[&<>"']/g, (character) => entities[character] ?? character)
 }
 
 function userLocationSvg() {
