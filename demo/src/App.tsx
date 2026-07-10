@@ -3,6 +3,7 @@ import { Routes, Route, useLocation } from 'react-router-dom'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
+import { GuideContextBridge } from './guide'
 
 const AppProviders = lazy(() => import('./components/AppProviders'))
 const ChatConnectionManager = lazy(() => import('./components/ChatConnectionManager'))
@@ -182,6 +183,7 @@ function App() {
   if (isMobile && !isAdminRoute) {
     return (
       <RouteErrorBoundary>
+        <GuideContextBridge />
         <Routes>
           <Route path="/three-preview" element={<ThreePreviewRoute />} />
           <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
@@ -200,6 +202,7 @@ function App() {
 
   return (
     <RouteErrorBoundary>
+      <GuideContextBridge />
       <Routes>
         <Route path="/" element={<HomeRoute />} />
         <Route path="/map" element={<GuideMapRoute />} />
