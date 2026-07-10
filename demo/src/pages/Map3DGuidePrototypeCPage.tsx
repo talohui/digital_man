@@ -10,7 +10,7 @@ import {
   getScenicRouteOptions,
   type ScenicRouteConfig
 } from '../data/lingshanScenicRoutes'
-import { goToRoutePreview } from '../lib/mapGuideNavigation'
+import { goToRoutePreview, toggleMapPresentation } from '../lib/mapGuideNavigation'
 import { BROWSE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
 import { Map3DGuideExperience, type ScenicMapPresentation } from './Map3DGuidePage'
 import '../styles/map/mapBrowseMobile.css'
@@ -464,7 +464,8 @@ function BrowseMobileOverlay({ route, presentation, onPresentationChange }: {
 }
 
 function Map3DGuidePrototypeCPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const recommendedRouteId = getDefaultScenicRouteId() || getScenicRouteOptions()[0]?.id
   const recommendedRoute = getScenicRouteConfig(recommendedRouteId)
   const browsePresentation = useMemo<ScenicMapPresentation>(() => {
@@ -478,11 +479,7 @@ function Map3DGuidePrototypeCPage() {
       <BrowseMobileOverlay
         route={recommendedRoute}
         presentation={browsePresentation}
-        onPresentationChange={(presentation) => {
-          const nextSearchParams = new URLSearchParams(searchParams)
-          nextSearchParams.set('presentation', presentation)
-          setSearchParams(nextSearchParams, { replace: true })
-        }}
+        onPresentationChange={() => toggleMapPresentation(navigate)}
       />
     </>
   )

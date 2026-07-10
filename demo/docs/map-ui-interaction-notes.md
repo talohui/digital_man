@@ -24,7 +24,7 @@ The preview title is always `路线预览`; the selected route name remains insi
 - Cards use free horizontal scrolling without scroll snap.
 - While scrolling, the current route URL and map data remain unchanged.
 - After 160 ms without a scroll event, the UI calculates the visible intersection area for each card and selects the largest visible card.
-- The selected route then uses a temporary replace-navigation adapter. After merging `codex/state-machine`, this adapter must switch to the shared preview-selection helper.
+- The selected route then calls `goToRoutePreview(..., { replace: true })`, so selection updates the URL without building up browser history.
 - The dots are indicators only, not navigation controls.
 - Preview cards default to expanded. A collapsed summary keeps the route name, duration/station count, start action, and expand control; route switching is unavailable while collapsed.
 - Xiaoling recommendation copy is keyed by `routeId` rather than hard-coded to historical culture.
@@ -36,18 +36,16 @@ The preview title is always `路线预览`; the selected route name remains insi
 - `导航到下一站` shows a planning message and, after 1.4 seconds, demonstrates arrival at the following station. This is a presentation-only transition.
 - Active card detail wording is `下一站详情`.
 - Arrived collapsed-card primary wording is `景点详情`.
-- Card-collapse state remains local until the state-machine branch provides the shared UI-store bridge. Do not use collapse to mutate map camera state.
+- Route-card collapse consumes `useMapGuideUiStore.routeCardExpanded`. The UI state is intentionally separate from map camera state.
 
-## State-Machine Merge Points
+## State-Machine Integration
 
-`codex/state-machine` is expected to own the final navigation protocol, especially `returnStage`, `returnStop`, joining, and the route-arrival transition. This worktree deliberately leaves small TODO adapters in `Map3DRouteGuidePage.tsx` rather than changing the shared navigation helper or `mapGuide` types.
+The UI now consumes the `codex/state-machine` navigation protocol without modifying shared state files.
 
-After the merge:
-
-1. Replace the preview route `navigate(..., { replace: true })` adapter with the shared preview helper.
-2. Replace POI detail navigation so active uses `returnStage=active` and arrived uses `returnStage=arrived`.
-3. Replace the demo arrival timeout with the state-machine navigation helper.
-4. Publish `cardCollapsed` to the shared UI store if the map visibility policy requires it.
+1. Preview selection calls `goToRoutePreview` with `replace: true`.
+2. Active next-stop detail passes `returnStage: 'active'` and the current stop; arrived detail passes `returnStage: 'arrived'`.
+3. The presentation-only arrival delay calls `goToRouteArrived` after 1.4 seconds.
+4. Route card expansion is shared through `useMapGuideUiStore` for later map POI visibility policies.
 
 ## Still Mocked
 

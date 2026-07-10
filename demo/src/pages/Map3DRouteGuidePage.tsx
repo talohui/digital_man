@@ -21,10 +21,13 @@ import {
   goToMapBrowse,
   goToPoiFromRoute,
   goToRouteActive,
-  goToRouteArrived
+  goToRouteArrived,
+  goToRoutePreview,
+  toggleMapPresentation
 } from '../lib/mapGuideNavigation'
-import { isRouteStage, parseStopParam, ROUTE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
+import { parseRouteNavigationState, ROUTE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
 import { Map3DGuideExperience, type ScenicMapPresentation } from './Map3DGuidePage'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import '../styles/map/mapRouteMobile.css'
 
 const DEFAULT_STOP_INDEX = 0
@@ -704,11 +707,11 @@ function RouteXiaolingSheet({
 function RouteTourMobileOverlay({
   route,
   guideState,
-  onPreviewRouteChange
+  presentation
 }: {
   route: ScenicRouteConfig
   guideState: MapGuideState
-  onPreviewRouteChange: (routeId: string) => void
+  presentation: ScenicMapPresentation
 }) {
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
@@ -716,15 +719,17 @@ function RouteTourMobileOverlay({
   const [guidedRequest, setGuidedRequest] = useState<{ id: number; prompt: string; answer: string } | null>(null)
   const [serviceOpen, setServiceOpen] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
-  const [cardCollapsed, setCardCollapsed] = useState(false)
-  const [overviewMode, setOverviewMode] = useState<'overview' | 'current'>('current')
-  const [is3dActive, setIs3dActive] = useState(true)
+  const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
+  const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
+  const overviewMode = useMapGuideUiStore((state) => state.mapFocusMode)
+  const setOverviewMode = useMapGuideUiStore((state) => state.setMapFocusMode)
   const [selectedRouteId, setSelectedRouteId] = useState(route.id)
   const [feedbackText, setFeedbackText] = useState('')
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
   const navigateTimerRef = useRef<number | null>(null)
   const stage = guideState.routeStage ?? 'preview'
+  const cardCollapsed = !routeCardExpanded
   const stopCount = route.stops.length
   const currentStopIndex = clampStopIndex(stage === 'preview' ? DEFAULT_STOP_INDEX : guideState.stopIndex, stopCount)
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
@@ -734,8 +739,8 @@ function RouteTourMobileOverlay({
   }, [])
 
   useEffect(() => {
-    setCardCollapsed(false)
-  }, [stage, route.id])
+    setRouteCardExpanded(true)
+  }, [route.id, setRouteCardExpanded, stage])
 
   useEffect(() => {
     setSelectedRouteId(route.id)
@@ -791,8 +796,13 @@ function RouteTourMobileOverlay({
       setFeedbackText('当前站点详情建设中')
       return
     }
-    // TODO(state-machine): consume Codex C's returnStage/returnStop helper here.
-    goToPoiFromRoute(navigate, poiId, route.id, stopIndex)
+    goToPoiFromRoute(navigate, poiId, {
+      routeId: route.id,
+      poiStopIndex: stopIndex,
+      returnStage: stage === 'active' ? 'active' : 'arrived',
+      returnStopIndex: currentStopIndex,
+      presentation
+    })
   }
 
   const handleContinue = () => {
@@ -802,15 +812,11 @@ function RouteTourMobileOverlay({
     }
 
     const nextStopIndex = currentStopIndex + 1
-    goContinueNextStop(navigate, route.id, nextStopIndex)
+    goContinueNextStop(navigate, route.id, nextStopIndex, presentation)
   }
 
   const handleToggle3d = () => {
-    setIs3dActive((value) => {
-      const nextValue = !value
-      setFeedbackText(nextValue ? '3D 模式后续接入' : '已切回地图浏览')
-      return nextValue
-    })
+    toggleMapPresentation(navigate)
   }
 
   const handleLocate = () => {
@@ -829,8 +835,7 @@ function RouteTourMobileOverlay({
       window.clearTimeout(navigateTimerRef.current)
     }
     navigateTimerRef.current = window.setTimeout(() => {
-      // TODO(state-machine): switch to Codex C's navigation arrival helper after merge.
-      goToRouteArrived(navigate, route.id, nextStopIndex)
+      goToRouteArrived(navigate, route.id, nextStopIndex, presentation)
     }, 1400)
   }
 
@@ -876,7 +881,7 @@ function RouteTourMobileOverlay({
       <RouteTopbar
         routeName={stage === 'preview' ? '路线预览' : route.name}
         progressText={progressText}
-        onBack={() => goToMapBrowse(navigate)}
+        onBack={() => goToMapBrowse(navigate, presentation)}
         onMore={() => setFeedbackText('更多功能建设中')}
       />
       <RouteToolRail
@@ -884,10 +889,10 @@ function RouteTourMobileOverlay({
         stage={stage}
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
-        is3dActive={is3dActive}
+        is3dActive={presentation === 'scenic3d'}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
-        onExit={() => goToMapBrowse(navigate)}
+        onExit={() => goToMapBrowse(navigate, presentation)}
         onService={() => {
           setXiaolingOpen(false)
           setServiceOpen(true)
@@ -898,10 +903,10 @@ function RouteTourMobileOverlay({
         stage={stage}
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
-        is3dActive={is3dActive}
+        is3dActive={presentation === 'scenic3d'}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
-        onExit={() => goToMapBrowse(navigate)}
+        onExit={() => goToMapBrowse(navigate, presentation)}
         onService={() => {
           setXiaolingOpen(false)
           setServiceOpen(true)
@@ -911,7 +916,7 @@ function RouteTourMobileOverlay({
         <button
           type="button"
           className="map-route-tour-collapse-toggle"
-          onClick={() => setCardCollapsed((value) => !value)}
+          onClick={() => setRouteCardExpanded(!routeCardExpanded)}
           aria-expanded={!cardCollapsed}
           aria-label={cardCollapsed ? '展开路线卡片' : '收起路线卡片'}
         >
@@ -922,7 +927,7 @@ function RouteTourMobileOverlay({
             route={route}
             stage={stage}
             currentStopIndex={currentStopIndex}
-            onExpand={() => setCardCollapsed(false)}
+            onExpand={() => setRouteCardExpanded(true)}
             onPrimary={handleCollapsedPrimary}
           />
         ) : stage === 'preview' ? (
@@ -930,10 +935,10 @@ function RouteTourMobileOverlay({
             selectedRouteId={selectedRouteId}
             onSelectRoute={(routeId) => {
               setSelectedRouteId(routeId)
-              onPreviewRouteChange(routeId)
+              goToRoutePreview(navigate, routeId, presentation, { replace: true })
             }}
             onOpenXiaoling={openXiaoling}
-            onStart={(targetRouteId) => goToRouteActive(navigate, targetRouteId, 0)}
+            onStart={(targetRouteId) => goToRouteActive(navigate, targetRouteId, 0, presentation)}
           />
         ) : stage === 'arrived' ? (
           <RouteArrivedCard
@@ -992,22 +997,20 @@ function RouteTourMobileOverlay({
 function Map3DRouteGuidePage() {
   const { routeId } = useParams()
   const [searchParams] = useSearchParams()
-  const navigate = useNavigate()
   const route = useMemo(() => {
     const resolvedRouteId = resolveScenicRouteId(routeId ?? getDefaultScenicRouteId())
     return getScenicRouteConfig(resolvedRouteId)
   }, [routeId])
 
   const guideState = useMemo<MapGuideState>(() => {
-    const stageParam = searchParams.get('stage')
-    const routeStage = isRouteStage(stageParam) ? stageParam : 'preview'
-    const stopIndex = parseStopParam(searchParams.get('stop'))
+    const parsedState = parseRouteNavigationState(searchParams, route.stops.length)
 
     return {
       viewMode: 'route',
       routeId: route.id,
-      routeStage,
-      stopIndex,
+      routeStage: parsedState.routeStage,
+      stopIndex: parsedState.stopIndex,
+      joinStopIndex: parsedState.joinStopIndex,
       xiaolingMode: 'route'
     }
   }, [route, searchParams])
@@ -1022,14 +1025,7 @@ function Map3DRouteGuidePage() {
       <RouteTourMobileOverlay
         route={route}
         guideState={guideState}
-        onPreviewRouteChange={(nextRouteId) => {
-          const nextSearchParams = new URLSearchParams(searchParams)
-          nextSearchParams.delete('stage')
-          nextSearchParams.delete('stop')
-          const search = nextSearchParams.toString()
-          // TODO(state-machine): replace this temporary URL adapter with Codex C's preview selection helper.
-          navigate(`/map-3d-guide-c/route/${nextRouteId}${search ? `?${search}` : ''}`, { replace: true })
-        }}
+        presentation={routePresentation}
       />
     </>
   )
