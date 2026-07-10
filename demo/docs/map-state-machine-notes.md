@@ -52,7 +52,7 @@ goBackFromPoi(navigate, {
 })
 ```
 
-这样 active 第 2 站查看第 3 站详情后仍恢复 `active&stop=2`，而 arrived 第 3 站详情会恢复 `arrived&stop=3`。现有旧的 `goToPoiFromRoute(navigate, poiId, routeId, poiStopIndex)` 签名仍可用：它会从当前 URL 推断 active/arrived/joining/preview 返回状态，供页面逐步迁移。
+这样 active 第 2 站查看第 3 站详情后仍恢复 `active&stop=2`，而 arrived 第 3 站详情会恢复 `arrived&stop=3`。现有旧的 `goToPoiFromRoute(navigate, poiId, routeId, poiStopIndex)` 签名仍可用：它会从当前 URL 推断返回状态，供页面逐步迁移。
 
 ## 统一 helper
 
@@ -68,7 +68,7 @@ goBackFromPoi(navigate, {
 - `setMapPresentation`
 - `toggleMapPresentation`
 
-所有 helper 会保留当前的有效 `presentation` 与无关 query；`setMapPresentation`/`toggleMapPresentation` 仅改写 `presentation`，因此会保留 `path`、`routeId`、`stage`、`stop`、`joinStop`、`returnStage` 和 `returnStop`。它们默认 `replace: true`，避免 2D/3D 切换制造浏览历史。
+所有 helper 会保留当前有效的 `presentation` 与无关 query；`setMapPresentation`/`toggleMapPresentation` 仅改写 `presentation`，因此保留 path、routeId、stage、stop、joinStop、returnStage 和 returnStop。它们默认 replace，避免 2D/3D 切换制造浏览历史。
 
 `presentation=ink2d` 表示 3D 按钮不高亮，`presentation=scenic3d` 表示按钮整项高亮；按钮文案始终为“3D”。
 
@@ -76,11 +76,50 @@ goBackFromPoi(navigate, {
 
 `src/store/useMapGuideUiStore.ts` 保存选中 POI、卡片展开、小灵抽屉、图层/服务面板、POI 图层、服务设施和地图焦点模式。它不保存腾讯地图实例、渲染器、路线 geometry、GLB 或 Fay 状态。切换 presentation 不调用 `resetMapGuideUi()`，因此这些 UI 状态保持不变。
 
-面板互斥（服务面板与小灵/图层）由 UI 调用方根据交互语义组合 setter；store 不强加视觉策略。普通页面跳转如需清理瞬时状态，可显式调用 `resetMapGuideUi()`。
+面板互斥由 UI 调用方按交互语义组合 setter；store 不强加视觉策略。普通页面跳转如需清理瞬时状态，可显式调用 `resetMapGuideUi()`。
 
-## A/B Codex 接入
+## 地图页面接入
 
-- 路线页使用 `parseRouteNavigationState(searchParams, route.stops.length)` 替换自行解析 `stage`/`stop`/`joinStop`。
-- POI 页使用 `parsePoiRouteReturnContext(searchParams, route?.stops.length)`，把结果传给 `goBackFromPoi`；进入详情一律采用 `goToPoiFromRoute` 的对象签名。
-- 2D/3D 按钮调用 `toggleMapPresentation(navigate)`；不要手写或重置 query。
+- 路线页使用 `parseRouteNavigationState(searchParams, route.stops.length)` 解析 stage/stop/joinStop。
+- POI 页使用 `parsePoiRouteReturnContext(searchParams, route?.stops.length)`，进入详情优先采用 `goToPoiFromRoute` 对象签名。
+- 2D/3D 按钮调用 `toggleMapPresentation(navigate)`，不要手写或重置 query。
 - UI 控件从 `useMapGuideUiStore` 读写瞬时状态，页面跳转与 presentation 切换不创建地图实例。
+
+## 小灵 Guide Session 核心
+
+## 边界
+
+本模块维护跨 `browse / route / poi` 的单一会话、可靠页面上下文、结构化消息和白名单动作。本阶段使用确定性 mock，不连接 Fay、地图实例、定位或真实导航。
+
+## Store API
+
+`useGuideSessionStore` 使用 `sessionStorage` 持久化，包含 `sessionId`、消息、上下文、偏好、推荐路线、抽屉状态与数字人状态。主要动作：
+
+- `ensureSessionId()`
+- `setContext(context)`
+- `setDrawerOpen(open)`
+- `addMessage(message)`
+- `sendGuideMessage(text)`
+- `markRecommendedRouteOpened(routeId)`
+- `resetGuideSession()`
+
+## 上下文
+
+`GuideContextBridge` 挂在 `App` 的稳定上层，基于 Router URL、`mapGuide` 解析器和 `lingshanScenicRoutes` 数据更新：页面、presentation、路线、阶段、当前/下一站、POI 与返回状态。它不读取 DOM 文案。
+
+## 消息与动作
+
+消息可携带 `route_cards / poi_card / navigation_card / next_stop_card / route_progress`。动作仅接受白名单 routeId 和已知 poiId，页面跳转统一调用 `mapGuideNavigation` helper，禁止自由 URL。
+
+## UI 接入
+
+1. 全局数字人 UI 订阅 `useGuideSessionStore`，不在各页面创建独立会话。
+2. 输入调用 `sendGuideMessage(text)`。
+3. 根据 `message.ui.type` 渲染业务卡片。
+4. 路线卡按钮调用 `executeGuideAction({ type: 'open_route_preview', routeId }, { navigate, presentation })`。
+5. 抽屉开关使用 `isDrawerOpen / setDrawerOpen`。
+6. `status` 驱动 idle/listening/thinking/speaking/error 视觉。
+
+## 推荐规则
+
+规则从时间、兴趣、节奏和同行人评分五条真实路线。“两小时 + 轻松 + 拍照”额外提升 `highlights_checkin`，确保主推荐稳定。进入刚由小灵推荐的路线后，仅追加一次连续引导语。
