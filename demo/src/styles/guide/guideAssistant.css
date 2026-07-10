@@ -91,12 +91,12 @@
 .guide-floating-companion__tip {
   min-width: 0;
   border: 0;
-  flex: 1 1 158px;
+  flex: 1 1 150px;
   padding: 0;
   background: transparent;
   color: var(--map-green-deep, #214a3b);
   font-family: var(--map-font-serif, serif);
-  font-size: clamp(13px, 3.35vw, 16px);
+  font-size: clamp(14px, 3.6vw, 16px);
   font-weight: 700;
   line-height: 1.38;
   text-align: left;
@@ -113,22 +113,21 @@
 
 .guide-floating-companion__content > button:not(.guide-floating-companion__tip) {
   flex: 0 0 auto;
-  min-height: clamp(30px, 8vw, 36px);
-  border: 1px solid rgba(31, 59, 49, 0.14);
-  border-radius: 999px;
-  padding: 0 14px;
-  background: rgba(255, 251, 236, 0.72);
-  color: var(--map-green-deep, #214a3b);
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 2px;
+  background: transparent;
+  color: rgba(31, 59, 49, 0.78);
   font-family: var(--map-font-serif, serif);
-  font-size: clamp(12px, 3vw, 14px);
+  font-size: clamp(14px, 3.6vw, 16px);
   font-weight: 700;
+  line-height: 1.38;
   touch-action: manipulation;
 }
 
 .guide-floating-companion__content .is-route {
-  border-color: transparent;
-  background: var(--map-green-deep, #214a3b);
-  color: #fff7df;
+  color: var(--map-green-deep, #214a3b);
 }
 
 .guide-floating-companion--avatar-only {
