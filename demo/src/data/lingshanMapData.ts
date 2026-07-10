@@ -67,6 +67,29 @@ export type LingshanPoi = {
   note?: string
 }
 
+/**
+ * Map rendering uses an explicit set instead of fuzzy name matching so the
+ * browse layer stays stable when editorial POI names change.
+ */
+export const LINGSHAN_CORE_POI_IDS = [
+  'south_gate',
+  'lingshan_wall',
+  'shengjing_square',
+  'giant_buddha',
+  'jiulong_guanyu',
+  'puti_avenue',
+  'foshou_square',
+  'foqian_square',
+  'xiangfu_temple',
+  'fan_gong',
+  'wuyin_tancheng',
+  'sansheng_hall',
+  'baizi_mile',
+  'manfeilong_tower'
+] as const
+
+export type LingshanPoiLayerMode = 'core' | 'all' | 'services'
+
 export type LingshanRoutePath = {
   routeId: string
   path: LatLngPoint[]
@@ -284,6 +307,29 @@ export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
     note: inferPoiNote(spot)
   }
 })
+
+const corePoiIdSet = new Set<string>(LINGSHAN_CORE_POI_IDS)
+
+/** The public browse map's primary POI set. */
+export function isLingshanCorePoi(poi: Pick<LingshanPoi, 'id'>) {
+  return corePoiIdSet.has(poi.id)
+}
+
+/**
+ * Rendering-only POI filter. `services` deliberately returns no inferred
+ * points until verified service coordinates are available.
+ */
+export function getLingshanPoisForLayer(mode: LingshanPoiLayerMode): LingshanPoi[] {
+  if (mode === 'core') {
+    return lingshanPois.filter(isLingshanCorePoi)
+  }
+
+  if (mode === 'services') {
+    return []
+  }
+
+  return lingshanPois.filter((poi) => poi.category !== 'service' && poi.category !== 'toilet' && poi.category !== 'food')
+}
 
 export const lingshanPresetRoutePaths: LingshanRoutePath[] = guideRoutes.map((route) => ({
   routeId: route.id,
