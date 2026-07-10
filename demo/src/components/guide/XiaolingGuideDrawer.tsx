@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react'
 
 import { DigitalHumanStage, type DigitalHumanStatus } from './DigitalHumanStage'
 import { GuideInputComposer } from './GuideInputComposer'
-import { GuideMessageTimeline, type GuideUiMessage } from './GuideMessageTimeline'
+import { GuideMessageTimeline } from './GuideMessageTimeline'
+import type { GuideAction, GuideMessage } from '../../guide'
 import type { GuideAssistantMode } from './guideAssistantEvents'
 
 export function XiaolingGuideDrawer({
@@ -15,18 +16,18 @@ export function XiaolingGuideDrawer({
   onClose,
   onInputChange,
   onSend,
-  onOpenRoute
+  onAction
 }: {
   open: boolean
   mode: GuideAssistantMode
   summary: string
-  messages: GuideUiMessage[]
+  messages: GuideMessage[]
   input: string
   status: DigitalHumanStatus
   onClose: () => void
   onInputChange: (value: string) => void
   onSend: () => void
-  onOpenRoute: (routeId: string) => void
+  onAction: (action: GuideAction) => void
 }) {
   const dragStartYRef = useRef<number | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -63,7 +64,7 @@ export function XiaolingGuideDrawer({
         </header>
         <DigitalHumanStage status={status} compact={messages.length > 4} />
         <div className="guide-drawer__conversation" ref={timelineRef}>
-          <GuideMessageTimeline messages={messages} onOpenRoute={onOpenRoute} />
+          <GuideMessageTimeline messages={messages} onAction={onAction} />
         </div>
         <GuideInputComposer value={input} onChange={onInputChange} onSubmit={onSend} />
       </section>

@@ -1,5 +1,10 @@
 .guide-message-timeline { display: grid; gap: 9px; }
 
+.guide-action-card-list {
+  display: grid;
+  gap: 8px;
+}
+
 .guide-message {
   display: grid;
   gap: 7px;
@@ -29,6 +34,11 @@
   padding: 12px;
   background: linear-gradient(145deg, rgba(255, 252, 237, 0.94), rgba(226, 241, 224, 0.88));
   box-shadow: 0 8px 18px rgba(24, 62, 48, 0.1);
+}
+
+.guide-action-card--route.is-primary {
+  border-color: rgba(63, 111, 90, 0.42);
+  box-shadow: 0 10px 22px rgba(24, 62, 48, 0.14);
 }
 
 .guide-action-card__eyebrow { color: #8b6b31; font: 800 11px/1 var(--map-font-sans, sans-serif); }

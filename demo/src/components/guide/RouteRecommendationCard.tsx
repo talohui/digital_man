@@ -1,5 +1,7 @@
+import type { ScenicRouteId } from '../../guide'
+
 export type RouteRecommendationCardData = {
-  routeId: string
+  routeId: ScenicRouteId
   name: string
   duration: string
   stopCount: number
@@ -9,13 +11,15 @@ export type RouteRecommendationCardData = {
 
 export function RouteRecommendationCard({
   card,
+  primary = false,
   onOpen
 }: {
   card: RouteRecommendationCardData
-  onOpen?: (routeId: string) => void
+  primary?: boolean
+  onOpen?: (routeId: ScenicRouteId) => void
 }) {
   return (
-    <section className="guide-action-card guide-action-card--route">
+    <section className={`guide-action-card guide-action-card--route${primary ? ' is-primary' : ''}`}>
       <span className="guide-action-card__eyebrow">为你推荐</span>
       <h3>{card.name}</h3>
       <p>{card.duration} · {card.stopCount} 个景点</p>
