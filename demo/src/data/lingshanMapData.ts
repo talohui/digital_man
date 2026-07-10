@@ -1,4 +1,8 @@
 import { guideRoutes, guideSpots, type GuideSpot, type LatLngPoint } from './guideData'
+import {
+  getScenicPoiCatalogItem,
+  LINGSHAN_CORE_SCENIC_POI_IDS
+} from './scenicPoiCatalog'
 
 export type LingshanPoiCategory =
   | 'spot'
@@ -71,22 +75,7 @@ export type LingshanPoi = {
  * Map rendering uses an explicit set instead of fuzzy name matching so the
  * browse layer stays stable when editorial POI names change.
  */
-export const LINGSHAN_CORE_POI_IDS = [
-  'south_gate',
-  'lingshan_wall',
-  'shengjing_square',
-  'giant_buddha',
-  'jiulong_guanyu',
-  'puti_avenue',
-  'foshou_square',
-  'foqian_square',
-  'xiangfu_temple',
-  'fan_gong',
-  'wuyin_tancheng',
-  'sansheng_hall',
-  'baizi_mile',
-  'manfeilong_tower'
-] as const
+export const LINGSHAN_CORE_POI_IDS = LINGSHAN_CORE_SCENIC_POI_IDS
 
 export type LingshanPoiLayerMode = 'core' | 'all' | 'services'
 
@@ -295,16 +284,17 @@ function inferPoiNote(spot: GuideSpot): string | undefined {
 }
 
 export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
+  const catalogItem = getScenicPoiCatalogItem(spot.id)
   const location: LatLngPoint = {
-    lat: spot.lat,
-    lng: spot.lng
+    lat: catalogItem?.coordinate?.lat ?? spot.lat,
+    lng: catalogItem?.coordinate?.lng ?? spot.lng
   }
   const category = inferPoiCategory(spot)
 
   return {
     id: spot.id,
     name: spot.name,
-    aliases: GUIDE_SPOT_ALIASES[spot.id] ?? [],
+    aliases: catalogItem?.aliases ?? GUIDE_SPOT_ALIASES[spot.id] ?? [],
     category,
     bindingPriority: inferBindingPriority(category, spot),
     navPointStrategy: inferNavPointStrategy(category, spot),

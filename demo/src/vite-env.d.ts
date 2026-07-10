@@ -3,6 +3,7 @@
 interface Window {
   TMap?: any
   __tmapLoader?: Promise<any>
+  __LINGSHAN_MAP_DEBUG__?: Record<string, unknown>
 }
 
 interface ImportMetaEnv {
