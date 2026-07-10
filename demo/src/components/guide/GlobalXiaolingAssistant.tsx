@@ -52,6 +52,11 @@ export function GlobalXiaolingAssistant() {
   const sendGuideMessage = useGuideSessionStore((state) => state.sendGuideMessage)
   const addMessage = useGuideSessionStore((state) => state.addMessage)
   const isMapPage = location.pathname.startsWith('/map-3d-guide-c')
+  const visualMode = location.pathname.includes('/route/')
+    ? 'route'
+    : location.pathname.includes('/poi/')
+      ? 'poi'
+      : 'browse'
 
   useEffect(() => setMounted(true), [])
 
@@ -127,11 +132,11 @@ export function GlobalXiaolingAssistant() {
   const digitalStatus = status === 'error' ? 'offline' : status
 
   return createPortal(
-    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={context.page}>
+    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={visualMode}>
       {!open ? (
         <XiaolingFloatingCompanion
-          mode={context.page}
-          onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: context.page } }))}
+          mode={visualMode}
+          onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: visualMode } }))}
           onRoute={() => runAction({ type: 'open_route_preview', routeId: 'historical_culture' })}
         />
       ) : null}
