@@ -18,6 +18,7 @@ type MapMobileToolRailProps = {
   items: MapMobileToolRailItem[]
   ariaLabel: string
   className?: string
+  assistantAnchor?: string
 }
 
 function renderLabel(label: string, vertical?: boolean) {
@@ -28,9 +29,13 @@ function renderLabel(label: string, vertical?: boolean) {
   return label.split('').map((char, index) => <b key={`${char}-${index}`}>{char}</b>)
 }
 
-export function MapMobileToolRail({ side, items, ariaLabel, className }: MapMobileToolRailProps) {
+export function MapMobileToolRail({ side, items, ariaLabel, className, assistantAnchor }: MapMobileToolRailProps) {
   return (
-    <div className={['map-mobile-toolrail', `map-mobile-toolrail--${side}`, className].filter(Boolean).join(' ')} aria-label={ariaLabel}>
+    <div
+      className={['map-mobile-toolrail', `map-mobile-toolrail--${side}`, className].filter(Boolean).join(' ')}
+      aria-label={ariaLabel}
+      data-guide-assistant-anchor={assistantAnchor}
+    >
       {items.map((item) => (
         <button
           type="button"

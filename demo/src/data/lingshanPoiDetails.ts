@@ -1,5 +1,6 @@
 import { guideSpots } from './guideData'
 import { lingshanMapModelOverlays } from './lingshanMapModelOverlays'
+import { hasPoiDetailContent } from './poiDetailContent'
 
 export type LingshanPoiDetail = {
   id: string
@@ -274,5 +275,5 @@ export function getLingshanPoiDetailById(id: string | undefined) {
 }
 
 export function hasLingshanPoiDetail(id: string | undefined) {
-  return Boolean(getLingshanPoiDetailById(id))
+  return Boolean(getLingshanPoiDetailById(id) || hasPoiDetailContent(id))
 }

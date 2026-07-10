@@ -44,6 +44,7 @@ export function GlobalXiaolingAssistant() {
   const [mounted, setMounted] = useState(false)
   const [input, setInput] = useState('')
   const [visualViewport, setVisualViewport] = useState({ height: 0, offsetTop: 0 })
+  const [routeAvatarAnchor, setRouteAvatarAnchor] = useState<{ top: number; right: number } | null>(null)
   const context = useGuideSessionStore((state) => state.context)
   const messages = useGuideSessionStore((state) => state.messages)
   const status = useGuideSessionStore((state) => state.status)
@@ -75,6 +76,64 @@ export function GlobalXiaolingAssistant() {
       window.visualViewport?.removeEventListener('scroll', updateViewport)
     }
   }, [])
+
+  useEffect(() => {
+    if (!mounted || visualMode !== 'route') {
+      setRouteAvatarAnchor(null)
+      return undefined
+    }
+
+    let frameId = 0
+    let observedAnchor: HTMLElement | null = null
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleUpdate)
+
+    function scheduleUpdate() {
+      window.cancelAnimationFrame(frameId)
+      frameId = window.requestAnimationFrame(updateAnchor)
+    }
+
+    function updateAnchor() {
+      const anchor = document.querySelector<HTMLElement>('[data-guide-assistant-anchor="route"]')
+      if (anchor !== observedAnchor) {
+        resizeObserver?.disconnect()
+        observedAnchor = anchor
+        if (anchor) resizeObserver?.observe(anchor)
+      }
+
+      if (!anchor) {
+        setRouteAvatarAnchor(null)
+        return
+      }
+
+      const rect = anchor.getBoundingClientRect()
+      const viewportOffsetTop = window.visualViewport?.offsetTop ?? 0
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+      if (rect.height <= 0 || rect.width <= 0 || rect.bottom < 0 || rect.top > viewportHeight) {
+        setRouteAvatarAnchor(null)
+        return
+      }
+
+      const top = Math.round(rect.bottom - viewportOffsetTop + 12)
+      const right = Math.max(14, Math.round(window.innerWidth - rect.right))
+      setRouteAvatarAnchor((current) => current?.top === top && current.right === right ? current : { top, right })
+    }
+
+    const mutationObserver = new MutationObserver(scheduleUpdate)
+    mutationObserver.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', scheduleUpdate)
+    window.visualViewport?.addEventListener('resize', scheduleUpdate)
+    window.visualViewport?.addEventListener('scroll', scheduleUpdate)
+    scheduleUpdate()
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      mutationObserver.disconnect()
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', scheduleUpdate)
+      window.visualViewport?.removeEventListener('resize', scheduleUpdate)
+      window.visualViewport?.removeEventListener('scroll', scheduleUpdate)
+    }
+  }, [mounted, visualMode])
 
   useEffect(() => {
     if (!isMapPage) setDrawerOpen(false)
@@ -129,6 +188,12 @@ export function GlobalXiaolingAssistant() {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
     '--guide-vvo-top': `${visualViewport.offsetTop}px`
   } as CSSProperties
+  const routeAvatarStyle = routeAvatarAnchor
+    ? ({
+        '--guide-route-avatar-top': `${routeAvatarAnchor.top}px`,
+        '--guide-route-avatar-right': `${routeAvatarAnchor.right}px`
+      } as CSSProperties)
+    : undefined
   const digitalStatus = status === 'error' ? 'offline' : status
 
   return createPortal(
@@ -138,6 +203,8 @@ export function GlobalXiaolingAssistant() {
           mode={visualMode}
           onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: visualMode } }))}
           onRoute={() => runAction({ type: 'open_route_preview', routeId: 'historical_culture' })}
+          floatingStyle={visualMode === 'route' ? routeAvatarStyle : undefined}
+          routeAnchorReady={visualMode !== 'route' || Boolean(routeAvatarAnchor)}
         />
       ) : null}
       <XiaolingGuideDrawer

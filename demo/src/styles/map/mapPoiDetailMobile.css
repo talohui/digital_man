@@ -416,6 +416,18 @@
   line-height: 1.45;
 }
 
+.map-poi-detail__section li strong {
+  display: block;
+  color: #24483c;
+  font-size: inherit;
+  font-weight: 800;
+}
+
+.map-poi-detail__section li span {
+  display: block;
+  margin-top: 2px;
+}
+
 .map-poi-detail__section li::before {
   position: absolute;
   left: 0;
@@ -425,6 +437,35 @@
   background: #c2a268;
   border-radius: 50%;
   content: "";
+}
+
+.map-poi-detail__inline-images {
+  display: grid;
+  gap: 12px;
+  margin: -2px 0 2px;
+}
+
+.map-poi-detail__inline-image {
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid rgba(194, 162, 104, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 252, 240, 0.72);
+  box-shadow: 0 10px 22px rgba(31, 59, 49, 0.08);
+}
+
+.map-poi-detail__inline-image img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.map-poi-detail__inline-image figcaption {
+  padding: 7px 10px 8px;
+  color: rgba(39, 62, 53, 0.62);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .map-poi-detail__related-grid {

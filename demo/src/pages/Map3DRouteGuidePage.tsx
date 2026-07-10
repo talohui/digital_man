@@ -238,6 +238,7 @@ function RouteToolRail({
       side="right"
       className="map-route-tour-toolrail"
       ariaLabel="地图工具"
+      assistantAnchor="route"
       items={stage === 'preview' ? [locateItem, threeDItem, serviceItem] : [locateItem, threeDItem, serviceItem, exitItem]}
     />
   )

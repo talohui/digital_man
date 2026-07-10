@@ -3,6 +3,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { getScenicRouteConfig } from '../data/lingshanScenicRoutes'
 import { getLingshanPoiDetailById, lingshanPoiDetails, type LingshanPoiDetail } from '../data/lingshanPoiDetails'
+import { getPoiDetailContent, type PoiDetailContent } from '../data/poiDetailContent'
+import { guideSpots } from '../data/guideData'
+import { lingshanPois } from '../data/lingshanMapData'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
 import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
@@ -23,7 +26,8 @@ function Map3DPoiDetailPage() {
   const routeId = searchParams.get('routeId') ?? undefined
   const stopIndex = parseStopParam(searchParams.get('stop'))
   const resolvedPoiId = resolvePoiDetailId(poiId)
-  const detail = getLingshanPoiDetailById(resolvedPoiId)
+  const detail = getPoiDetailView(resolvedPoiId)
+  const content = getPoiDetailContent(detail?.id)
   const route = routeId ? getScenicRouteConfig(routeId) : undefined
   const routeReturnContext = route ? parsePoiRouteReturnContext(searchParams, route.stops.length) : undefined
   const relatedDetails = useMemo(
@@ -177,22 +181,27 @@ function Map3DPoiDetailPage() {
       <article className="map-poi-detail__article" ref={articleRef}>
         <section className="map-poi-detail__section">
           <h2>一眼看懂</h2>
-          <p>{detail.intro || `${detail.name} 是灵山胜境中的重要景点，适合结合图文、小灵讲解和现场游览一起了解。`}</p>
+          <p>{content?.overview || detail.intro || `${detail.name} 是灵山胜境中的重要景点，适合结合图文、小灵讲解和现场游览一起了解。`}</p>
         </section>
+        <PoiInlineImages content={content} afterSection="overview" />
 
         <section className="map-poi-detail__section">
           <h2>核心看点</h2>
           <ul>
-            {getLimitedList(detail.highlights, ['景点氛围鲜明', '适合停留拍照', '可结合路线讲解']).map((item) => (
-              <li key={item}>{item}</li>
+            {getHighlightItems(content, detail).map((item) => (
+              <li key={item.title}>
+                <strong>{item.title}</strong>
+                {item.description ? <span>{item.description}</span> : null}
+              </li>
             ))}
           </ul>
         </section>
+        <PoiInlineImages content={content} afterSection="highlights" />
 
         <section className="map-poi-detail__section">
           <h2>游览建议</h2>
           <ul>
-            {getLimitedList(detail.visitTips, ['建议先看整体环境，再靠近观察细节', '适合结合小灵讲解快速理解看点'], 2).map((item) => (
+            {getLimitedList(content?.visitTips ?? detail.visitTips, ['建议先看整体环境，再靠近观察细节', '适合结合小灵讲解快速理解看点'], content?.contentLevel === 'full' ? 5 : 3).map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
@@ -212,7 +221,7 @@ function Map3DPoiDetailPage() {
 
         <p className="map-poi-detail__source-note">
           资料来源：
-          {detail.sources.length ? detail.sources.map((sourceItem) => sourceItem.label).join(' / ') : '灵山胜境官网 / 公开资料'}
+          {content?.source ?? (detail.sources.length ? detail.sources.map((sourceItem) => sourceItem.label).join(' / ') : '灵山胜境官网 / 公开资料')}
         </p>
       </article>
 
@@ -251,6 +260,60 @@ function resolvePoiDetailId(poiId?: string) {
 function getLimitedList(items: string[], fallback: string[], limit = 3) {
   const source = items.length ? items : fallback
   return source.slice(0, limit)
+}
+
+function getHighlightItems(content: PoiDetailContent | undefined, detail: LingshanPoiDetail) {
+  if (content?.highlights.length) {
+    return content.highlights
+  }
+
+  return getLimitedList(detail.highlights, ['景点氛围鲜明', '适合停留拍照', '可结合路线讲解']).map((title) => ({ title, description: '' }))
+}
+
+function PoiInlineImages({ content, afterSection }: { content?: PoiDetailContent; afterSection: 'overview' | 'highlights' }) {
+  const images = content?.inlineImages?.filter((image) => image.afterSection === afterSection) ?? []
+  if (!images.length) return null
+
+  return (
+    <div className="map-poi-detail__inline-images">
+      {images.map((image) => (
+        <figure className="map-poi-detail__inline-image" key={image.src}>
+          <img src={image.src} alt={image.alt} loading="lazy" />
+          {image.caption ? <figcaption>{image.caption}</figcaption> : null}
+        </figure>
+      ))}
+    </div>
+  )
+}
+
+function getPoiDetailView(poiId: string | undefined) {
+  const direct = getLingshanPoiDetailById(poiId)
+  if (direct) return direct
+  if (!poiId) return undefined
+
+  const content = getPoiDetailContent(poiId)
+  const catalogPoi = lingshanPois.find((poi) => poi.id === poiId)
+  const guideSpot = guideSpots.find((spot) => spot.id === poiId)
+  if (!content && !catalogPoi && !guideSpot) return undefined
+
+  const name = catalogPoi?.name ?? guideSpot?.name ?? '灵山景点'
+  return {
+    id: poiId,
+    name,
+    shortName: name,
+    subtitle: content?.contentLevel === 'full' ? '灵山文化导览' : '景区导览节点',
+    category: getFallbackCategory(poiId),
+    intro: content?.overview ?? catalogPoi?.intro ?? guideSpot?.intro ?? '',
+    highlights: content?.highlights.map((item) => item.title) ?? [],
+    visitTips: content?.visitTips ?? [],
+    sources: []
+  } satisfies LingshanPoiDetail
+}
+
+function getFallbackCategory(poiId: string): LingshanPoiDetail['category'] {
+  if (['giant_buddha', 'fan_gong', 'wuyin_tancheng', 'jiulong_guanyu'].includes(poiId)) return '核心景点'
+  if (['south_gate', 'shengjing_square', 'xingtan_square', 'foqian_square', 'fan_gong_square', 'exit'].includes(poiId)) return '空间节点'
+  return '文化节点'
 }
 
 function getStayTimeLabel(detail: LingshanPoiDetail) {
