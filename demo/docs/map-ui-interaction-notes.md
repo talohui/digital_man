@@ -14,7 +14,7 @@ This worktree owns the mobile assistant shell, cards, sheets, carousel behavior,
 - Opening the assistant closes an open service panel. Opening a service panel closes the assistant. Layer controls may coexist with the assistant.
 - The floating companion disappears while the drawer is open and returns after the drawer closes.
 
-The UI shell currently uses a small custom-event adapter so page-level triggers do not own session state. After Guide Core integration this adapter is replaced by the persistent guide session store and context bridge.
+Page-level triggers use a small custom-event adapter only to express open/close intent. Session state is owned by `useGuideSessionStore`, while `GuideContextBridge` updates the active browse/route/POI context after navigation.
 
 ## Portal And QQ Browser Adaptation
 
@@ -42,7 +42,15 @@ The drawer UI contains reusable renderers for:
 - `next_stop_card`
 - `route_progress`
 
-The initial shell can render the demonstration request “我只有两个小时，想轻松一点，主要想拍照。” as a recommendation for `highlights_checkin`. Before Guide Core integration this is local mock behavior; after integration message data and actions come from `GuideMessage`, `GuideUiPayload`, and `GuideActionRegistry`.
+The demonstration request “我只有两个小时，想轻松一点，主要想拍照。” is handled by Guide Core and returns a structured recommendation led by `highlights_checkin`. Messages come from the persistent `GuideMessage` store, cards render `GuideUiPayload`, and all card navigation runs through `GuideActionRegistry`. No component-local conversation store remains.
+
+Guide Core integration details:
+
+- `GuideContextBridge` and `GlobalXiaolingAssistant` are sibling mounts at the application route root.
+- `useGuideSessionStore` preserves messages and drawer state across browse, route, and POI navigation.
+- Route recommendation actions call `executeGuideAction({ type: 'open_route_preview', ... })`; card components do not build URLs.
+- The drawer closes after a successful action, and reopening it shows the persisted conversation.
+- `预览讲解` sends the same guide-style prompt through `sendGuideMessage`; `继续问小灵` only opens the existing session.
 
 ## Route Page Triggers
 
