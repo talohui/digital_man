@@ -6,6 +6,8 @@
 
 本次 UI 内容只使用当前地图最终已读取的 `guideSpots -> lingshanPois` 身份链路，共 19 个 poiId。`poiDetailContent.ts` 仅存放正文内容，不维护坐标、图层、腾讯 POI、路线几何或 GLB 锚点。
 
+地图分支 `codex/map-root-cause-final-fix` 当前停在 `775f455`，已是本分支的直接基线；WIP 提交后执行 `git merge codex/map-root-cause-final-fix` 的结果为 `Already up to date`。因此本轮没有复制、重建或替换地图目录，也没有产生第二套景点身份表。
+
 | poiId | 名称 | 当前详情状态 | overview 字数 | highlights 数量 | tips 数量 | 正文图片数量 | GLB |
 |---|---|---|---:|---:|---:|---:|---|
 | south_gate | 南门入园 | basic / fallback | 83 | 2 | 2 | 0 | 否 |
