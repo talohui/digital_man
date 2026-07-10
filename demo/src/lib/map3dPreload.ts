@@ -3,6 +3,10 @@ import { loadTMap } from './loadTMap'
 
 type PreloadStatus = 'idle' | 'running' | 'done' | 'skipped'
 
+type Map3DGuidePreloadOptions = {
+  includeLandmarkAssets?: boolean
+}
+
 type NetworkInformationLike = {
   saveData?: boolean
   effectiveType?: string
@@ -11,6 +15,9 @@ type NetworkInformationLike = {
 const MAP_3D_PRELOAD_IDLE_DELAY_MS = 1800
 const MAP_3D_PRELOAD_BUDGET_MB = 150
 const MAP_3D_PRELOAD_CONCURRENCY = 2
+const MAP_3D_MOBILE_PRELOAD_IDLE_DELAY_MS = 5200
+const MAP_3D_MOBILE_PRELOAD_BUDGET_MB = 36
+const MAP_3D_MOBILE_PRELOAD_CONCURRENCY = 1
 const preloadPriority = [
   'shengjing_square',
   'lingshan_dazhaobi',
@@ -27,26 +34,36 @@ const preloadPriority = [
   'manlong_flying_tower'
 ]
 
-let preloadStatus: PreloadStatus = 'idle'
-let preloadPromise: Promise<void> | null = null
+let shellPreloadStatus: PreloadStatus = 'idle'
+let landmarkAssetPreloadStatus: PreloadStatus = 'idle'
+let shellPreloadPromise: Promise<void> | null = null
+let landmarkAssetPreloadPromise: Promise<void> | null = null
 
-export function scheduleMap3DGuidePreload() {
-  if (typeof window === 'undefined' || preloadStatus !== 'idle') {
+export function scheduleMap3DGuidePreload(options: Map3DGuidePreloadOptions = {}) {
+  if (typeof window === 'undefined') {
     return
   }
 
-  if (shouldSkipAssetPreload()) {
-    preloadStatus = 'skipped'
+  scheduleMap3DGuideShellPreload()
+
+  if (options.includeLandmarkAssets === false) {
     return
   }
 
-  preloadStatus = 'running'
+  scheduleMap3DLandmarkAssetPreload()
+}
+
+function scheduleMap3DGuideShellPreload() {
+  if (shellPreloadStatus !== 'idle') {
+    return
+  }
+
+  shellPreloadStatus = 'running'
   const run = () => {
-    preloadPromise = preloadMap3DGuideAssets().finally(() => {
-      preloadStatus = 'done'
+    shellPreloadPromise = preloadMap3DGuideShellAssets().finally(() => {
+      shellPreloadStatus = 'done'
     })
   }
-
   const requestIdleCallback = window.requestIdleCallback
 
   if (typeof requestIdleCallback === 'function') {
@@ -57,8 +74,47 @@ export function scheduleMap3DGuidePreload() {
   globalThis.setTimeout(run, MAP_3D_PRELOAD_IDLE_DELAY_MS)
 }
 
+function scheduleMap3DLandmarkAssetPreload() {
+  if (landmarkAssetPreloadStatus !== 'idle') {
+    return
+  }
+
+  if (shouldSkipAssetPreload()) {
+    landmarkAssetPreloadStatus = 'skipped'
+    return
+  }
+
+  landmarkAssetPreloadStatus = 'running'
+  const settings = getPreloadSettings()
+  const run = () => {
+    landmarkAssetPreloadPromise = preloadFarLodAssets().finally(() => {
+      landmarkAssetPreloadStatus = 'done'
+    })
+  }
+  const requestIdleCallback = window.requestIdleCallback
+
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: settings.idleDelayMs + 1800 })
+    return
+  }
+
+  globalThis.setTimeout(run, settings.idleDelayMs)
+}
+
 export function getMap3DGuidePreloadStatus() {
-  return preloadStatus
+  if (shellPreloadStatus === 'running' || landmarkAssetPreloadStatus === 'running') {
+    return 'running'
+  }
+
+  if (shellPreloadStatus === 'skipped' && landmarkAssetPreloadStatus === 'skipped') {
+    return 'skipped'
+  }
+
+  if (shellPreloadStatus === 'done' || landmarkAssetPreloadStatus === 'done') {
+    return 'done'
+  }
+
+  return 'idle'
 }
 
 export function preloadMap3DLandmarkAssets(landmarkIds: string[]) {
@@ -74,9 +130,8 @@ export function preloadMap3DLandmarkAssets(landmarkIds: string[]) {
   void Promise.allSettled(urls.map((url) => preloadAsset(url, 'high')))
 }
 
-async function preloadMap3DGuideAssets() {
+async function preloadMap3DGuideShellAssets() {
   await Promise.allSettled([preloadMap3DGuideRouteChunk(), preloadTMapScript()])
-  await preloadFarLodAssets()
 }
 
 async function preloadMap3DGuideRouteChunk() {
@@ -96,15 +151,18 @@ async function preloadTMapScript() {
 }
 
 async function preloadFarLodAssets() {
+  await shellPreloadPromise
   const entries = getPreloadCandidateUrls()
+  const settings = getPreloadSettings()
 
-  for (let index = 0; index < entries.length; index += MAP_3D_PRELOAD_CONCURRENCY) {
-    const batch = entries.slice(index, index + MAP_3D_PRELOAD_CONCURRENCY)
+  for (let index = 0; index < entries.length; index += settings.concurrency) {
+    const batch = entries.slice(index, index + settings.concurrency)
     await Promise.allSettled(batch.map((url) => preloadAsset(url)))
   }
 }
 
 function getPreloadCandidateUrls() {
+  const settings = getPreloadSettings()
   const byId = new Map(getLandmarkLodPreloadEntries().map((entry) => [entry.landmarkId, entry]))
   const urls: string[] = []
   let usedBudgetMb = 0
@@ -113,7 +171,7 @@ function getPreloadCandidateUrls() {
     const entry = byId.get(landmarkId)
     const sizeMb = parseSizeMb(entry?.sizeLabel)
 
-    if (!entry || !entry.modelUrl || usedBudgetMb + sizeMb > MAP_3D_PRELOAD_BUDGET_MB) {
+    if (!entry || !entry.modelUrl || usedBudgetMb + sizeMb > settings.budgetMb) {
       continue
     }
 
@@ -122,6 +180,22 @@ function getPreloadCandidateUrls() {
   }
 
   return urls
+}
+
+function getPreloadSettings() {
+  if (isLikelyMobileClient()) {
+    return {
+      budgetMb: MAP_3D_MOBILE_PRELOAD_BUDGET_MB,
+      concurrency: MAP_3D_MOBILE_PRELOAD_CONCURRENCY,
+      idleDelayMs: MAP_3D_MOBILE_PRELOAD_IDLE_DELAY_MS
+    }
+  }
+
+  return {
+    budgetMb: MAP_3D_PRELOAD_BUDGET_MB,
+    concurrency: MAP_3D_PRELOAD_CONCURRENCY,
+    idleDelayMs: MAP_3D_PRELOAD_IDLE_DELAY_MS
+  }
 }
 
 async function preloadAsset(url: string, priority: 'low' | 'high' = 'low') {
@@ -152,4 +226,14 @@ function shouldSkipAssetPreload() {
   const effectiveType = connection?.effectiveType ?? ''
 
   return Boolean(connection?.saveData || effectiveType === 'slow-2g' || effectiveType === '2g')
+}
+
+function isLikelyMobileClient() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches
+  const userAgent = navigator.userAgent
+  return Boolean(hasCoarsePointer || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent))
 }

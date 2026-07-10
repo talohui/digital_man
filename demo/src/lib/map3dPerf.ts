@@ -116,6 +116,7 @@ export type Map3DPerfMapVisualEventType =
   | 'tmapScriptLoadStarted'
   | 'tmapScriptLoaded'
   | 'mapCreated'
+  | 'scenicMapPresentationChanged'
   | 'initialCameraApplied'
   | 'baseMapEventReceived'
   | 'mapFirstIdle'
@@ -187,6 +188,7 @@ export type Map3DPerfMapVisualEvent = {
   elapsedMs?: number
   curtainDurationMs?: number
   reason?: string
+  scenicMapPresentation?: 'scenic3d' | 'ink2d'
   startupStage?: Map3DStartupStage
   interactionKind?: 'zoom' | 'drag' | 'move'
   currentZoom?: number

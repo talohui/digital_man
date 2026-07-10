@@ -1,0 +1,84 @@
+{
+  "blankTileUrl" : "\/map\/ink\/tiles\/empty.png",
+  "bounds" : {
+    "northEast" : {
+      "lat" : 31.431918,
+      "lng" : 120.106883
+    },
+    "northWest" : {
+      "lat" : 31.431918,
+      "lng" : 120.092302
+    },
+    "southEast" : {
+      "lat" : 31.419471000000001,
+      "lng" : 120.106883
+    },
+    "southWest" : {
+      "lat" : 31.419471000000001,
+      "lng" : 120.092302
+    }
+  },
+  "flipX" : false,
+  "flipY" : true,
+  "ranges" : {
+    "15" : {
+      "count" : 4,
+      "xMax" : 27316,
+      "xMin" : 27315,
+      "yMax" : 13368,
+      "yMin" : 13367
+    },
+    "16" : {
+      "count" : 9,
+      "xMax" : 54632,
+      "xMin" : 54630,
+      "yMax" : 26737,
+      "yMin" : 26735
+    },
+    "17" : {
+      "count" : 36,
+      "xMax" : 109265,
+      "xMin" : 109260,
+      "yMax" : 53475,
+      "yMin" : 53470
+    },
+    "18" : {
+      "count" : 132,
+      "xMax" : 218531,
+      "xMin" : 218520,
+      "yMax" : 106951,
+      "yMin" : 106941
+    },
+    "19" : {
+      "count" : 484,
+      "xMax" : 437062,
+      "xMin" : 437041,
+      "yMax" : 213903,
+      "yMin" : 213882
+    },
+    "20" : {
+      "count" : 1892,
+      "xMax" : 874124,
+      "xMin" : 874082,
+      "yMax" : 427807,
+      "yMin" : 427764
+    }
+  },
+  "rotate" : 0,
+  "source" : "\/map\/ink\/lingshan-ink-map-v3.png",
+  "sourceHeight" : 1254,
+  "sourceName" : "v3",
+  "sourceTransform" : "flipY",
+  "sourceWidth" : 1254,
+  "tileSize" : 256,
+  "tileUrlTemplate" : "\/map\/ink\/tiles\/v3\/{z}\/{x}\/{y}.png",
+  "variant" : "v3",
+  "zoomLevels" : [
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ]
+}

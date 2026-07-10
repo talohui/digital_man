@@ -1,0 +1,65 @@
+@import './mapTokens.css';
+
+.map-mobile-chrome-button {
+  display: grid;
+  width: var(--map-mobile-control-size, clamp(48px, 12vw, 58px));
+  height: var(--map-mobile-control-size, clamp(48px, 12vw, 58px));
+  place-items: center;
+  border: 1px solid rgba(201, 168, 106, 0.42);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.72), transparent 30%),
+    linear-gradient(140deg, rgba(255, 251, 236, 0.94), rgba(232, 241, 230, 0.88));
+  box-shadow: 0 18px 48px rgba(18, 39, 32, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.58);
+  color: var(--map-green-deep);
+  backdrop-filter: blur(16px);
+}
+
+.map-mobile-chrome-button__back {
+  width: clamp(18px, 5vw, 26px);
+  height: clamp(18px, 5vw, 26px);
+  border-left: clamp(5px, 1.35vw, 6px) solid currentColor;
+  border-bottom: clamp(5px, 1.35vw, 6px) solid currentColor;
+  transform: translateX(4px) rotate(45deg);
+}
+
+.map-mobile-chrome-button__dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+}
+
+.map-mobile-chrome-button__dots i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.map-mobile-chrome-button__close {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+
+.map-mobile-chrome-button__close::before,
+.map-mobile-chrome-button__close::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.map-mobile-chrome-button__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.map-mobile-chrome-button__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}

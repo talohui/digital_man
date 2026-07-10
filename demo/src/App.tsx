@@ -17,6 +17,7 @@ const Map3DGuidePrototypeAPage = lazy(() => import('./pages/Map3DGuidePrototypeA
 const Map3DGuidePrototypeBPage = lazy(() => import('./pages/Map3DGuidePrototypeBPage'))
 const Map3DGuidePrototypeCPage = lazy(() => import('./pages/Map3DGuidePrototypeCPage'))
 const Map3DPoiDetailPage = lazy(() => import('./pages/Map3DPoiDetailPage'))
+const Map3DRouteGuidePage = lazy(() => import('./pages/Map3DRouteGuidePage'))
 const MobileShell = lazy(() => import('./mobile/MobileShell'))
 const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
@@ -108,6 +109,14 @@ function Map3DPoiDetailRoute() {
   )
 }
 
+function Map3DRouteGuideRoute() {
+  return (
+    <PlainLazyRoute label="正在加载路线游览...">
+      <Map3DRouteGuidePage />
+    </PlainLazyRoute>
+  )
+}
+
 function HomeRoute() {
   return (
     <AppLazyRoute label="正在加载智慧导览...">
@@ -160,12 +169,15 @@ function App() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
   const isAdminRoute = location.pathname.startsWith('/admin')
+  const isMapPoiDetailRoute = location.pathname.startsWith('/map-3d-guide-c/poi')
 
   useEffect(() => {
     if (!isAdminRoute) {
-      scheduleMap3DGuidePreload()
+      scheduleMap3DGuidePreload({
+        includeLandmarkAssets: !isMapPoiDetailRoute
+      })
     }
-  }, [isAdminRoute])
+  }, [isAdminRoute, isMapPoiDetailRoute])
 
   if (isMobile && !isAdminRoute) {
     return (
@@ -178,6 +190,7 @@ function App() {
           <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
           <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
           <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
+          <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
           <Route path="*" element={<MobileShellRoute />} />
         </Routes>
@@ -198,6 +211,7 @@ function App() {
         <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
         <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
         <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
+        <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
         <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
         <Route path="/guide" element={<HomeRoute />} />
         <Route path="/me" element={<HomeRoute />} />

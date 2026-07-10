@@ -82,8 +82,47 @@ export function getScenicRouteConfig(routeId?: string | null) {
   return scenicRouteConfigs.find((route) => route.id === routeId) ?? scenicRouteConfigs[0]
 }
 
+export function getScenicRouteById(routeId?: string | null) {
+  if (!routeId) {
+    return undefined
+  }
+
+  return scenicRouteConfigs.find((route) => route.id === routeId)
+}
+
+export function resolveScenicRouteId(routeId?: string | null) {
+  return getScenicRouteById(routeId)?.id ?? getDefaultScenicRouteId()
+}
+
 export function getDefaultScenicRouteId() {
   return guideRoutes.find((route) => route.id === 'historical_culture')?.id ?? guideRoutes[0]?.id ?? ''
+}
+
+export function getRouteStops(routeId?: string | null) {
+  return getScenicRouteConfig(routeId).stops
+}
+
+export function getRouteStopByIndex(routeId: string | null | undefined, stopIndex = 0) {
+  const stops = getRouteStops(routeId)
+  if (!stops.length) {
+    return undefined
+  }
+
+  return stops[Math.min(Math.max(stopIndex, 0), stops.length - 1)]
+}
+
+export function getNextRouteStop(routeId: string | null | undefined, stopIndex = 0) {
+  const stops = getRouteStops(routeId)
+  if (!stops.length) {
+    return undefined
+  }
+
+  return stops[Math.min(Math.max(stopIndex + 1, 0), stops.length - 1)]
+}
+
+export function getRoutePoiId(routeId: string | null | undefined, stopIndex = 0) {
+  const stop = getRouteStopByIndex(routeId, stopIndex)
+  return stop?.poiId ?? stop?.id
 }
 
 export function getScenicRouteOptions() {

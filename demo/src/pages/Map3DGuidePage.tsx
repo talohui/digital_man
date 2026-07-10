@@ -35,10 +35,12 @@ import {
   getDefaultScenicRouteId,
   getScenicRouteConfig,
   getScenicRouteOptions,
+  resolveScenicRouteId,
   type ScenicRouteConfig
 } from '../data/lingshanScenicRoutes'
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
+import { goToPoiFromBrowse, goToPoiFromRoute } from '../lib/mapGuideNavigation'
 import {
   GLBRuntimeOrchestrator,
   type GLBRuntimeOrchestratorSnapshot
@@ -71,11 +73,13 @@ import { preloadMap3DLandmarkAssets } from '../lib/map3dPreload'
 import { buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
 import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
+import type { MapGuideState } from '../types/mapGuide'
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
+export type ScenicMapPresentation = 'scenic3d' | 'ink2d'
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
 type GardenLodState = {
   opacity: number
@@ -392,6 +396,18 @@ const TENCENT_CUSTOM_LAYER_CONFIG = {
 } as const
 const TENCENT_CUSTOM_LAYER_INITIAL_ZOOM = 16
 const MAP_3D_GUIDE_INITIAL_ZOOM = ENABLE_TENCENT_CUSTOM_LAYER ? TENCENT_CUSTOM_LAYER_INITIAL_ZOOM : SCENIC_CAMERA_BOUNDS.defaultZoom
+const INK_2D_INITIAL_ZOOM = 16.35
+const INK_2D_MIN_ZOOM = 15.2
+const INK_2D_MAX_ZOOM = 18.25
+const INK_2D_CAMERA_PRESET: Map3DCameraPreset = {
+  id: 'routeOverview',
+  label: '2D 导览',
+  description: '正俯视水墨导览底图',
+  zoom: 16.9,
+  pitch: 0,
+  rotation: 0,
+  durationMs: 520
+}
 
 // 仅调试备用，默认不用。正式页面使用腾讯地图平台托管自定义图层，不再依赖本地切片或自建瓦片服务。
 const ENABLE_LOCAL_INK_TILE_FALLBACK = false
@@ -754,10 +770,60 @@ const guideCameraPresets: Map3DCameraPreset[] = [
   MAP_3D_GUIDE_CAMERA_PRESETS.closeInspect
 ]
 
-export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DGuideVariant }) {
+type Map3DGuideExperienceProps = {
+  variant?: Map3DGuideVariant
+  guideState?: MapGuideState
+  presentation?: ScenicMapPresentation
+}
+
+function resolveScenicMapPresentation(
+  explicitPresentation: ScenicMapPresentation | undefined,
+  isMobileViewport: boolean
+): ScenicMapPresentation {
+  if (explicitPresentation) {
+    return explicitPresentation
+  }
+
+  if (typeof window !== 'undefined') {
+    const queryValue = new URLSearchParams(window.location.search).get('presentation')
+    if (queryValue === 'scenic3d' || queryValue === 'ink2d') {
+      return queryValue
+    }
+  }
+
+  return isMobileViewport ? 'ink2d' : 'scenic3d'
+}
+
+function getInk2DCameraPreset(preset: Map3DCameraPreset): Map3DCameraPreset {
+  const zoom = clampNumber(
+    preset.id === 'overviewEstate' || preset.id === 'axisCruise' || preset.id === 'routeOverview'
+      ? INK_2D_INITIAL_ZOOM
+      : Math.min(preset.zoom, 17.45),
+    INK_2D_MIN_ZOOM,
+    INK_2D_MAX_ZOOM
+  )
+
+  return {
+    ...preset,
+    label: preset.id === 'routeOverview' ? INK_2D_CAMERA_PRESET.label : preset.label,
+    description: INK_2D_CAMERA_PRESET.description,
+    zoom,
+    pitch: 0,
+    rotation: 0,
+    durationMs: Math.min(preset.durationMs ?? INK_2D_CAMERA_PRESET.durationMs, INK_2D_CAMERA_PRESET.durationMs)
+  }
+}
+
+export function Map3DGuideExperience({ variant = 'default', guideState, presentation }: Map3DGuideExperienceProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
+  const effectiveGuideState = guideState ?? ({ viewMode: 'browse', xiaolingMode: 'browse' } satisfies MapGuideState)
   const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
+  const scenicMapPresentation = useMemo(
+    () => resolveScenicMapPresentation(presentation, isMobileViewport),
+    [isMobileViewport, presentation]
+  )
+  const isInk2DPresentation = scenicMapPresentation === 'ink2d'
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const routeLayerRef = useRef<any>(null)
@@ -814,7 +880,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     isInteracting: false,
     lastInteractionAt: 0
   })
-  const currentZoomRef = useRef(MAP_3D_GUIDE_INITIAL_ZOOM)
+  const currentZoomRef = useRef(isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM)
   const inkOverlayPerfSignatureRef = useRef('')
   const inkTilePerfSignatureRef = useRef('')
   const inkTileNativeRequestCountRef = useRef(0)
@@ -843,8 +909,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       ? 'debugPerfNoMapBounds'
       : 'none'
   const mapBoundsEnabled = (ENABLE_TENCENT_CUSTOM_LAYER || visualVariant.id === 'prototype-c') && !isInkCleanMode && mapBoundsDisabledReason === 'none'
-  const mapMinZoom = getEffectiveInkMapMinZoom(mapBoundsEnabled)
-  const mapMaxZoom = getEffectiveInkMapMaxZoom(mapBoundsEnabled)
+  const mapMinZoom = isInk2DPresentation ? INK_2D_MIN_ZOOM : getEffectiveInkMapMinZoom(mapBoundsEnabled)
+  const mapMaxZoom = isInk2DPresentation ? INK_2D_MAX_ZOOM : getEffectiveInkMapMaxZoom(mapBoundsEnabled)
   const showRoadCheck = false
   const cleanShot = false
   const shotGuide = false
@@ -927,7 +993,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     sceneArbiterRef.current = sceneArbiter
   }, [sceneArbiter])
   const routeOptions = useMemo(() => getScenicRouteOptions(), [])
-  const [currentRouteId, setCurrentRouteId] = useState(() => getInitialScenicRouteIdFromQuery())
+  const [currentRouteId, setCurrentRouteId] = useState(() => resolveScenicRouteId(effectiveGuideState.routeId ?? getInitialScenicRouteIdFromQuery()))
   const [routeSwitchCount, setRouteSwitchCount] = useState(0)
   const currentRouteConfig = useMemo(() => getScenicRouteConfig(currentRouteId), [currentRouteId])
   const currentGuideRoute = currentRouteConfig.guideRoute
@@ -976,14 +1042,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     currentZoom: number
   }>({
     isInteracting: false,
-    currentZoom: MAP_3D_GUIDE_INITIAL_ZOOM
+    currentZoom: isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM
   })
   const [mapBoundsSnapshot, setMapBoundsSnapshot] = useState<{
     center: LatLngPoint
     zoom: number
   }>({
     center: routeCenter,
-    zoom: MAP_3D_GUIDE_INITIAL_ZOOM
+    zoom: isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM
   })
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
   const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(currentInitialPosition)
@@ -1050,7 +1116,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     recoveryState: 'disabled'
   })
   const landmarkInspector = useLandmarkModelInspector({
-    active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode,
+    active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,
     useLocalDrafts: debugPerf || debugGarden,
     map: mapRef.current,
@@ -1141,7 +1207,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [protectedSceneModelIds])
   const mapVisualReadyForOverlays = mapStatus === 'ready' && isMapVisualReady
   const canUseMapInteractions = mapVisualReadyForOverlays && !mapReadyTimedOut && !isInkCleanMode
-  const shouldRunGlbRuntime = visualVariant.id === 'prototype-c' && !isInkCleanMode
+  const shouldRunGlbRuntime = visualVariant.id === 'prototype-c' && !isInkCleanMode && !isInk2DPresentation
   const baseShouldLoadGardenAssets = false
   const shouldLoadGardenAssets = false
   const gardenLodState = useMemo(
@@ -1206,7 +1272,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     landmarkRuntimeLoadTimersRef.current = []
     landmarkRuntimeLoadGenerationRef.current += 1
 
-    if (!ENABLE_LANDMARK_GLB || visualVariant.id !== 'prototype-c' || debugGarden || isInkCleanMode) {
+    if (!ENABLE_LANDMARK_GLB || visualVariant.id !== 'prototype-c' || debugGarden || isInkCleanMode || isInk2DPresentation) {
+      if (isInk2DPresentation) {
+        setModelStatus('移动端 2D 地图模式：核心地标 GLB 暂不加载')
+      }
       return
     }
 
@@ -1618,6 +1687,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     glbRuntimeSnapshot.landmarkGate,
     glbRuntimeSnapshot.phase,
     glbSpatialController,
+    isInk2DPresentation,
     isInkCleanMode,
     landmarkInspector.items,
     landmarkModelOverlays,
@@ -1650,7 +1720,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const inkExportUiSuppressed = inkExportUiHidden || cleanShot
   const configuredInkBoundsDraft = useMemo(() => getConfiguredInkBoundsDraft(), [])
   const showFormalInkBounds = ((isInkCleanMode && !cleanShot) || showInkBounds) && !inkExportUiHidden
-  const atmosphereMode: BuddhaRealmAtmosphereMode = !isMapVisualReady
+  const atmosphereMode: BuddhaRealmAtmosphereMode = isInk2DPresentation
+    ? 'normal'
+    : !isMapVisualReady
     ? 'intro'
     : tourMode === 'buddhaRealmTour'
       ? 'tour'
@@ -1661,6 +1733,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const dynamicMistEnabled =
     visualVariant.id === 'prototype-c' &&
     !isInkCleanMode &&
+    !isInk2DPresentation &&
     isMapVisualReady &&
     (!debugGarden || enableDynamicMistDebugOverride)
   const edgeMistState = useMemo(
@@ -1881,14 +1954,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     selectedStopId,
     tourMode
   ])
-  const prototypeLabel =
-    visualVariant.id === 'prototype-a'
-      ? 'Prototype A 已启用'
-      : visualVariant.id === 'prototype-b'
-        ? 'Prototype B 已启用'
-        : visualVariant.id === 'prototype-c'
-          ? 'Prototype C 已启用'
-        : ''
   const prototypeName =
     visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : visualVariant.id === 'prototype-c' ? 'C' : '默认'
   const configuredAssetUrls = useMemo(
@@ -2072,31 +2137,31 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   useEffect(() => {
     glbSpatialController.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
       mobile: isMobileViewport,
       intervalMs: 200,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, glbSpatialController, isInkCleanMode, isMobileViewport, mapStatus, protectedSceneModelIds, visualVariant.id])
+  }, [debugGarden, glbSpatialController, isInk2DPresentation, isInkCleanMode, isMobileViewport, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
     glbMemoryManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
       maxActiveModels: 80,
       ttlMs: 60000,
       sweepIntervalMs: 5000,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, glbMemoryManager, isInkCleanMode, mapStatus, protectedSceneModelIds, visualVariant.id])
+  }, [debugGarden, glbMemoryManager, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
     sceneArbiter.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
       maxActiveGLB: 80,
       memoryPressureThresholdMB: 360,
       debounceMs: 300
     })
-  }, [debugGarden, isInkCleanMode, mapStatus, sceneArbiter, visualVariant.id])
+  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, sceneArbiter, visualVariant.id])
 
   useEffect(() => {
     return sceneArbiter.subscribe((snapshot) => {
@@ -2134,25 +2199,25 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   useEffect(() => {
     sceneWindowManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !debugGarden && tourMode === 'buddhaRealmTour',
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden && tourMode === 'buddhaRealmTour',
       activeWindowMeters: 300,
       forwardWindowMeters: 800,
       behindProgressWindow: 0.035,
       updateIntervalMs: 1000,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneWindowManager, tourMode, visualVariant.id])
+  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneWindowManager, tourMode, visualVariant.id])
 
   useEffect(() => {
     sceneStateManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !debugGarden && tourMode === 'buddhaRealmTour',
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden && tourMode === 'buddhaRealmTour',
       activeWindowMeters: 300,
       forwardWindowMeters: 800,
       behindProgressWindow: 0.035,
       rehydrateDebounceMs: 300,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneStateManager, tourMode, visualVariant.id])
+  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneStateManager, tourMode, visualVariant.id])
 
   useEffect(() => {
     return sceneWindowManager.subscribe((snapshot) => {
@@ -2670,11 +2735,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         const exportMapCenter = inkExportCamera?.center ?? routeCenter
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(exportMapCenter.lat, exportMapCenter.lng),
-          zoom: inkExportCamera?.zoom ?? MAP_3D_GUIDE_INITIAL_ZOOM,
+          zoom: inkExportCamera?.zoom ?? (isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
           minZoom: mapMinZoom,
           maxZoom: mapMaxZoom,
-          pitch: isInkCleanMode ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-          rotation: isInkCleanMode ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+          pitch: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+          rotation: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
           baseMap: isInkCleanMode ? MAP_3D_GUIDE_EXPORT_BASE_MAP : MAP_3D_GUIDE_BASE_MAP,
           renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
@@ -2688,6 +2753,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         setIsMapCreated(true)
         perfRecorder.recordMapVisualEvent({
           type: 'mapCreated'
+        })
+        perfRecorder.recordMapVisualEvent({
+          type: 'scenicMapPresentationChanged',
+          scenicMapPresentation,
+          reason: isInk2DPresentation ? 'mobile-ink2d-map-mode' : 'scenic3d-map-mode'
         })
         perfRecorder.recordMapVisualEvent({
           type: 'nativeSkyConfigured',
@@ -2824,7 +2894,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
-  }, [glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInkCleanMode, layerManager, mapMaxZoom, mapMinZoom, perfRecorder, sceneWindowManager, shouldRedirectLocalTMapHost])
+  }, [glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInk2DPresentation, isInkCleanMode, layerManager, mapMaxZoom, mapMinZoom, perfRecorder, scenicMapPresentation, sceneWindowManager, shouldRedirectLocalTMapHost])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden || isInkCleanMode) {
@@ -2832,9 +2902,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
 
     entryCameraPlayedRef.current = true
+    if (isInk2DPresentation) {
+      setActiveCameraMode('routeOverview')
+      moveMapCamera(currentRouteCenter, INK_2D_CAMERA_PRESET)
+      return
+    }
+
     setActiveCameraMode('overviewEstate')
     moveMapCamera(currentRouteCenter, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
-  }, [currentRouteCenter, debugGarden, isInkCleanMode, mapStatus])
+  }, [currentRouteCenter, debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus])
 
   useEffect(() => {
     if (!isInkCleanMode || mapStatus !== 'ready' || !mapRef.current || !window.TMap) {
@@ -5477,6 +5553,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     moveMapCamera(getPathCenter(nextRoutePath) ?? nextInitialPosition, MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview)
   }
 
+  useEffect(() => {
+    if (effectiveGuideState.viewMode !== 'route' || !effectiveGuideState.routeId) {
+      return
+    }
+
+    const nextRouteId = resolveScenicRouteId(effectiveGuideState.routeId)
+    if (nextRouteId !== currentRouteId) {
+      switchScenicRoute(nextRouteId)
+    }
+  }, [currentRouteId, effectiveGuideState.routeId, effectiveGuideState.viewMode])
+
   const simulateDeviation = async () => {
     stopActiveTour('manual')
     const base = simulatedPosition
@@ -5574,15 +5661,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
+    const effectivePreset = isInk2DPresentation ? getInk2DCameraPreset(preset) : preset
+
     flyMap3DCamera({
       map,
       TMap: window.TMap,
       target: position,
-      preset,
+      preset: effectivePreset,
       sequenceRef: cameraSequenceRef,
       targetPoiId: options.targetPoiId,
       targetLandmarkId: options.targetLandmarkId,
-      twoStage: options.twoStage,
+      twoStage: isInk2DPresentation ? false : options.twoStage,
       onComplete: (event) => perfRecorder.recordCameraEvent(event)
     })
   }
@@ -5956,6 +6045,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   function startBuddhaRealmTourPlayback() {
+    if (isInk2DPresentation) {
+      moveToNextImmersiveStop()
+      return
+    }
+
     if (tourMode === 'buddhaRealmTour') {
       stopActiveTour('userStop')
       return
@@ -7072,7 +7166,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         loadingCurtainVisible ? 'is-loading-curtain-visible' : ''
       } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''} ${
         mobilePanelsCollapsed ? 'map-3d-guide-shell--mobile-panels-collapsed' : ''
-      }`}
+      } ${isInk2DPresentation ? 'map-3d-guide-shell--ink2d' : 'map-3d-guide-shell--scenic3d'}`}
+      data-map-presentation={scenicMapPresentation}
+      data-map-view-mode={effectiveGuideState.viewMode}
+      data-route-id={effectiveGuideState.routeId}
+      data-route-stage={effectiveGuideState.routeStage}
+      data-route-stop-index={effectiveGuideState.stopIndex}
+      data-xiaoling-mode={effectiveGuideState.xiaolingMode}
     >
       <div ref={mapElementRef} className="map-3d-guide-map" />
       {inkTilesEnabled && inkTileDomFallbackActive && !inkTileGroundFallbackActive ? (
@@ -7220,11 +7320,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         edgeMistLevel={edgeMistState.level}
         mode={atmosphereMode}
         onDynamicMistStatusChange={setDynamicMistStatus}
-        visible={visualVariant.id === 'prototype-c' && !isInkCleanMode}
+        visible={visualVariant.id === 'prototype-c' && !isInkCleanMode && !isInk2DPresentation}
       />
       <ScenicPoiBillboards
         map={mapRef.current}
-        mapReady={visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays && !isInkCleanMode}
+        mapReady={visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays && !isInkCleanMode && !isInk2DPresentation}
         items={scenicPoiBillboards}
         mode={poiBillboardMode}
         activeId={poiBillboardActiveId}
@@ -7241,7 +7341,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               setActiveLandmarkId(id)
               focusLandmarkCamera(id, getBestPoiLocation(poi), false)
             }
-            navigate(`/map-3d-guide-c/poi/${id}`)
+            if (effectiveGuideState.viewMode === 'route' && effectiveGuideState.routeId) {
+              goToPoiFromRoute(navigate, id, effectiveGuideState.routeId, effectiveGuideState.stopIndex ?? stopIndex)
+            } else {
+              goToPoiFromBrowse(navigate, id)
+            }
             return
           }
 
@@ -7402,7 +7506,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           <small>准备截图后按 Esc 恢复 UI。</small>
         </aside>
       ) : null}
-      {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
       {!debugGarden ? (
         <header className="map-3d-guide-mobile-topbar">
           <div>
@@ -12198,6 +12301,34 @@ const map3DGuideCss = `
   display: none;
 }
 
+.map-3d-guide-shell--ink2d .map-3d-guide-skin,
+.map-3d-guide-shell--ink2d .map-3d-guide-mist,
+.map-3d-guide-shell--ink2d .map-3d-guide-paperedge {
+  display: none;
+}
+
+.map-3d-guide-shell--ink2d .map-3d-guide-map {
+  opacity: 1;
+  filter: none;
+}
+
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-control,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-control-container,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-zoom-control,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-rotate-control,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-compass,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-scale-control,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-control,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-zoom,
+.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-compass,
+.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="zoom" i],
+.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="compass" i],
+.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="rotate" i] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .map-3d-guide-shell.is-ink-export-ui-hidden > :not(.map-3d-guide-map) {
   display: none !important;
 }
@@ -12598,6 +12729,11 @@ const map3DGuideCss = `
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-map {
   filter: saturate(.70) sepia(.10) contrast(.98) brightness(1.02);
+}
+
+.map-3d-guide-shell--prototype-c.map-3d-guide-shell--ink2d .map-3d-guide-map {
+  opacity: 1;
+  filter: none;
 }
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-skin {
