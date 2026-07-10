@@ -25,9 +25,14 @@ import {
   goToRoutePreview,
   toggleMapPresentation
 } from '../lib/mapGuideNavigation'
-import { parseRouteNavigationState, ROUTE_MODE_QUESTIONS, type MapGuideState } from '../types/mapGuide'
-import { Map3DGuideExperience, type ScenicMapPresentation } from './Map3DGuidePage'
+import { parseRouteNavigationState, type MapGuideState } from '../types/mapGuide'
+import {
+  Map3DGuideExperience,
+  type MapPresentationTransitionSnapshot,
+  type ScenicMapPresentation
+} from './Map3DGuidePage'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
+import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
 
 const DEFAULT_STOP_INDEX = 0
@@ -122,26 +127,6 @@ function getRoutePreviewTabs() {
   return [...ordered, ...remaining].map((item) => getScenicRouteConfig(item.id))
 }
 
-function getRouteMockAnswer(question: string, route: ScenicRouteConfig) {
-  if (question.includes('下一站')) {
-    return `${route.name}会按当前站点继续带你往前走。演示版先给出路线提醒，正式接入后会结合实时位置和下一站坐标回答。`
-  }
-
-  if (question.includes('跳过')) {
-    return '可以。演示版会保留当前路线进度，正式接入后会把跳过站点写入路线上下文，再继续推荐下一站。'
-  }
-
-  if (question.includes('休息')) {
-    return '附近休息点数据还在建设中。正式版本会优先推荐不偏离当前路线、且适合短暂停留的位置。'
-  }
-
-  if (question.includes('多久')) {
-    return `${route.name}预计${route.guideRoute.durationLabel}。当前演示距离为占位，后续会根据定位和路线点串计算。`
-  }
-
-  return `我会围绕${route.name}继续讲路线重点、下一站看点和游览节奏。`
-}
-
 function getStationShortName(name: string) {
   return name
     .replace('入园', '')
@@ -158,6 +143,7 @@ function RouteToolRail({
   overviewMode,
   onOverviewModeChange,
   is3dActive,
+  is3dSwitching,
   onToggle3d,
   onLocate,
   onExit,
@@ -168,6 +154,7 @@ function RouteToolRail({
   overviewMode: 'overview' | 'current'
   onOverviewModeChange: (mode: 'overview' | 'current') => void
   is3dActive: boolean
+  is3dSwitching: boolean
   onToggle3d: () => void
   onLocate: () => void
   onExit: () => void
@@ -184,6 +171,7 @@ function RouteToolRail({
     label: '3D',
     icon: '◆',
     active: is3dActive,
+    disabled: is3dSwitching,
     onClick: onToggle3d
   }
   const serviceItem: MapMobileToolRailItem = {
@@ -280,10 +268,7 @@ function RouteTopbar({
 
 function XiaolingInlineEntry({ label = '继续问小灵', onClick }: { label?: string; onClick: () => void }) {
   return (
-    <button type="button" className="map-route-tour-xiaoling-entry" onClick={onClick}>
-      <span className="map-route-tour-avatar" aria-hidden="true">
-        <i />
-      </span>
+    <button type="button" className="map-route-tour-guide-trigger" onClick={onClick}>
       <strong>{label}</strong>
     </button>
   )
@@ -310,12 +295,6 @@ function RoutePreviewSlide({
     >
       <button type="button" className="map-route-tour-preview-xiaoling" onClick={onOpenXiaoling}>
         <span>小灵推荐路线：{getRouteRecommendationText(route.id)}</span>
-      </button>
-      <button type="button" className="map-route-tour-preview-guide" onClick={onOpenXiaoling}>
-        <span className="map-route-tour-avatar" aria-hidden="true">
-          <i />
-        </span>
-        <em>问小灵</em>
       </button>
       <div className="map-route-tour-card__inner">
         <div className="map-route-tour-card__main">
@@ -589,134 +568,19 @@ function RouteCollapsedBar({
   )
 }
 
-function RouteXiaolingSheet({
-  route,
-  open,
-  guidedRequest,
-  onClose
-}: {
-  route: ScenicRouteConfig
-  open: boolean
-  guidedRequest?: { id: number; prompt: string; answer: string } | null
-  onClose: () => void
-}) {
-  const defaultAnswer = '你可以问我下一站怎么走、是否跳过某站，或者让小灵先讲讲下一站的故事。'
-  const [selectedQuestion, setSelectedQuestion] = useState('')
-  const [answerText, setAnswerText] = useState(defaultAnswer)
-  const [inputText, setInputText] = useState('')
-  const [voiceActive, setVoiceActive] = useState(false)
-
-  useEffect(() => {
-    setSelectedQuestion('')
-    setAnswerText(defaultAnswer)
-    setInputText('')
-    setVoiceActive(false)
-  }, [defaultAnswer, route.id])
-
-  useEffect(() => {
-    if (!open || !guidedRequest) {
-      return
-    }
-    setSelectedQuestion(guidedRequest.prompt)
-    setAnswerText(guidedRequest.answer)
-    setInputText('')
-  }, [guidedRequest, open])
-
-  if (!open) {
-    return null
-  }
-
-  const handleQuestion = (question: string) => {
-    setSelectedQuestion(question)
-    setAnswerText(getRouteMockAnswer(question, route))
-  }
-
-  const handleSend = () => {
-    const question = inputText.trim()
-    if (!question) {
-      return
-    }
-    setSelectedQuestion(question)
-    setAnswerText(getRouteMockAnswer(question, route))
-    setInputText('')
-  }
-
-  return (
-    <div className="map-route-tour-sheet" role="dialog" aria-modal="true" aria-label="小灵路线问答">
-      <button type="button" className="map-route-tour-sheet__scrim" onClick={onClose} aria-label="关闭小灵问答" />
-      <section className="map-route-tour-sheet__panel">
-        <div className="map-route-tour-sheet__handle" aria-hidden="true" />
-        <div className="map-route-tour-sheet__head">
-          <span className="map-route-tour-avatar" aria-hidden="true">
-            <i />
-          </span>
-          <div>
-            <strong>小灵 · {route.name}</strong>
-            <p>我会按路线进度帮你看下一站、讲重点和提醒节奏。</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
-        </div>
-        <div className="map-route-tour-sheet__chips">
-          {ROUTE_MODE_QUESTIONS.map((question) => (
-            <button
-              type="button"
-              key={question}
-              className={selectedQuestion === question ? 'is-active' : ''}
-              onClick={() => handleQuestion(question)}
-            >
-              {question}
-            </button>
-          ))}
-        </div>
-        <div className="map-route-tour-sheet__answer">
-          <strong>{selectedQuestion || '小灵在这儿'}</strong>
-          <p>{answerText}</p>
-        </div>
-        <div className="map-route-tour-sheet__input">
-          <button
-            type="button"
-            className={voiceActive ? 'is-active' : ''}
-            onClick={() => setVoiceActive((value) => !value)}
-            aria-label="语音输入"
-            aria-pressed={voiceActive}
-          >
-            ◉
-          </button>
-          <input
-            aria-label="继续问小灵"
-            placeholder="继续问小灵路线、下一站、休息点"
-            value={inputText}
-            onChange={(event) => setInputText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                handleSend()
-              }
-            }}
-          />
-          <button type="button" aria-label="发送" onClick={handleSend}>
-            ↑
-          </button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 function RouteTourMobileOverlay({
   route,
   guideState,
-  presentation
+  presentation,
+  presentationSwitching
 }: {
   route: ScenicRouteConfig
   guideState: MapGuideState
   presentation: ScenicMapPresentation
+  presentationSwitching: boolean
 }) {
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
-  const [xiaolingOpen, setXiaolingOpen] = useState(false)
-  const [guidedRequest, setGuidedRequest] = useState<{ id: number; prompt: string; answer: string } | null>(null)
   const [serviceOpen, setServiceOpen] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
@@ -760,6 +624,12 @@ function RouteTourMobileOverlay({
     const timer = window.setTimeout(() => setFeedbackText(''), 1800)
     return () => window.clearTimeout(timer)
   }, [feedbackText])
+
+  useEffect(() => {
+    const closeServiceForGuide = () => setServiceOpen(false)
+    window.addEventListener(guideAssistantEvents.open, closeServiceForGuide)
+    return () => window.removeEventListener(guideAssistantEvents.open, closeServiceForGuide)
+  }, [])
 
   useEffect(() => {
     const updateVisualViewportHeight = () => {
@@ -841,19 +711,17 @@ function RouteTourMobileOverlay({
 
   const openXiaoling = () => {
     setServiceOpen(false)
-    setGuidedRequest(null)
-    setXiaolingOpen(true)
+    openGlobalXiaoling({ mode: 'route' })
   }
 
   const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
     const stopName = stop?.name ?? '下一站'
     setServiceOpen(false)
-    setGuidedRequest({
-      id: Date.now(),
-      prompt: `请用导览员的语气，为我讲解一下“${stopName}”这一站。`,
-      answer: `${stopName}是${route.name}中的下一站。你可以先留意它与前后空间的衔接，再从建筑、历史或游览礼序中选择感兴趣的角度继续了解。`
+    openGlobalXiaoling({
+      mode: 'route',
+      autoPrompt: `请用导览员的语气，为我讲解一下“${stopName}”这一站。`,
+      autoResponse: `${stopName}是${route.name}中的下一站。你可以先留意它与前后空间的衔接，再从建筑、历史或游览礼序中选择感兴趣的角度继续了解。`
     })
-    setXiaolingOpen(true)
   }
 
   const handleCollapsedPrimary = () => {
@@ -890,11 +758,12 @@ function RouteTourMobileOverlay({
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
         is3dActive={presentation === 'scenic3d'}
+        is3dSwitching={presentationSwitching}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
         onExit={() => goToMapBrowse(navigate, presentation)}
         onService={() => {
-          setXiaolingOpen(false)
+          closeGlobalXiaoling()
           setServiceOpen(true)
         }}
       />
@@ -904,11 +773,12 @@ function RouteTourMobileOverlay({
         overviewMode={overviewMode}
         onOverviewModeChange={setOverviewMode}
         is3dActive={presentation === 'scenic3d'}
+        is3dSwitching={presentationSwitching}
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
         onExit={() => goToMapBrowse(navigate, presentation)}
         onService={() => {
-          setXiaolingOpen(false)
+          closeGlobalXiaoling()
           setServiceOpen(true)
         }}
       />
@@ -988,7 +858,6 @@ function RouteTourMobileOverlay({
           </section>
         </div>
       ) : null}
-      <RouteXiaolingSheet route={route} open={xiaolingOpen} guidedRequest={guidedRequest} onClose={() => setXiaolingOpen(false)} />
     </div>,
     document.body
   )
@@ -1018,14 +887,25 @@ function Map3DRouteGuidePage() {
     const presentation = searchParams.get('presentation')
     return presentation === 'scenic3d' || presentation === 'ink2d' ? presentation : 'ink2d'
   }, [searchParams])
+  const [presentationTransition, setPresentationTransition] = useState<MapPresentationTransitionSnapshot>({
+    presentation: routePresentation,
+    transition: 'idle',
+    isPresentationSwitching: false
+  })
 
   return (
     <>
-      <Map3DGuideExperience variant="prototype-c" guideState={guideState} presentation={routePresentation} />
+      <Map3DGuideExperience
+        variant="prototype-c"
+        guideState={guideState}
+        presentation={routePresentation}
+        onPresentationTransitionChange={setPresentationTransition}
+      />
       <RouteTourMobileOverlay
         route={route}
         guideState={guideState}
         presentation={routePresentation}
+        presentationSwitching={presentationTransition.isPresentationSwitching}
       />
     </>
   )

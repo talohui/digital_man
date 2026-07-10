@@ -1,0 +1,114 @@
+.guide-digital-human-stage {
+  position: relative;
+  min-height: clamp(150px, 31dvh, 216px);
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 22px;
+  background:
+    linear-gradient(155deg, rgba(215, 238, 210, 0.58), transparent 54%),
+    linear-gradient(28deg, rgba(255, 239, 180, 0.42), transparent 60%);
+}
+
+.guide-digital-human-stage.is-compact { min-height: 128px; }
+
+.guide-digital-human-stage__mist,
+.guide-digital-human-stage__halo {
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.guide-digital-human-stage__mist {
+  right: -14%;
+  bottom: -24%;
+  width: 86%;
+  height: 84%;
+  background: radial-gradient(ellipse, rgba(113, 164, 122, 0.3), transparent 68%);
+}
+
+.guide-digital-human-stage__halo {
+  top: 8%;
+  left: 50%;
+  width: 150px;
+  height: 150px;
+  background: radial-gradient(circle, rgba(255, 237, 169, 0.82), rgba(255, 237, 169, 0) 70%);
+  transform: translateX(-50%);
+}
+
+.guide-digital-human-stage__figure {
+  position: absolute;
+  z-index: 1;
+  bottom: -14%;
+  left: 50%;
+  width: clamp(142px, 39vw, 190px);
+  height: clamp(170px, 44vw, 224px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%);
+}
+
+.guide-digital-human-stage__hair,
+.guide-digital-human-stage__face,
+.guide-digital-human-stage__robe {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.guide-digital-human-stage__hair {
+  top: 4px;
+  width: 86px;
+  height: 74px;
+  border-radius: 52% 52% 38% 38%;
+  background: #43556d;
+}
+
+.guide-digital-human-stage__face {
+  top: 24px;
+  width: 70px;
+  height: 78px;
+  border-radius: 48% 48% 44% 44%;
+  background: #ffe1ce;
+  box-shadow: inset 0 -8px 0 rgba(208, 126, 108, 0.12);
+}
+
+.guide-digital-human-stage__face::before,
+.guide-digital-human-stage__face::after {
+  position: absolute;
+  top: 37px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #293648;
+  content: '';
+}
+.guide-digital-human-stage__face::before { left: 18px; }
+.guide-digital-human-stage__face::after { right: 18px; }
+
+.guide-digital-human-stage__robe {
+  bottom: 0;
+  width: 128px;
+  height: 130px;
+  border-radius: 55% 55% 14% 14%;
+  background: linear-gradient(180deg, #f4f6e9 0%, #9baed3 34%, #4c628e 100%);
+  box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.26);
+}
+
+.guide-digital-human-stage__figure.is-listening { transform: translateX(-50%) translateY(-3px); }
+.guide-digital-human-stage__figure.is-thinking { filter: saturate(0.84) brightness(1.05); }
+.guide-digital-human-stage__figure.is-speaking { animation: guideHumanSpeak 900ms ease-in-out infinite alternate; }
+.guide-digital-human-stage__figure.is-offline { opacity: 0.5; filter: grayscale(0.45); }
+
+.guide-digital-human-stage > p {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  margin: 0;
+  color: rgba(31, 59, 49, 0.64);
+  font: 700 clamp(10px, 2.5vw, 12px)/1 var(--map-font-sans, sans-serif);
+}
+
+@keyframes guideHumanSpeak { to { transform: translateX(-50%) translateY(-5px) scale(1.015); } }

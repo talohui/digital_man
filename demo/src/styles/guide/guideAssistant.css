@@ -1,0 +1,107 @@
+.guide-assistant-root {
+  position: fixed;
+  top: var(--guide-vvo-top, 0px);
+  left: 0;
+  z-index: 26000;
+  width: 100%;
+  height: var(--guide-vvh, 100dvh);
+  color: var(--map-green-deep, #214a3b);
+  font-family: var(--map-font-serif, "Songti SC", serif);
+  pointer-events: none;
+}
+
+.guide-floating-companion {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  bottom: max(18px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  display: flex;
+  max-width: min(310px, calc(100vw - 32px));
+  align-items: end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.guide-floating-companion__avatar {
+  display: grid;
+  width: clamp(56px, 15vw, 66px);
+  height: clamp(56px, 15vw, 66px);
+  flex: 0 0 auto;
+  place-items: center;
+  border: 4px solid #34764d;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 42%, #ffe1d1 0 25%, transparent 26%),
+    linear-gradient(155deg, #eef6dc, #fdf6dc);
+  box-shadow: 0 12px 28px rgba(24, 62, 48, 0.24);
+  color: #214a3b;
+  font-family: var(--map-font-serif, serif);
+  font-size: clamp(20px, 5vw, 25px);
+  font-weight: 800;
+  touch-action: manipulation;
+}
+
+.guide-floating-companion__bubble {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(201, 168, 106, 0.48);
+  border-radius: 18px 18px 4px 18px;
+  padding: 9px 12px;
+  background: rgba(255, 252, 240, 0.96);
+  box-shadow: 0 10px 24px rgba(20, 57, 44, 0.16);
+  color: #25483d;
+  text-align: left;
+}
+
+.guide-floating-companion__bubble span {
+  display: -webkit-box;
+  overflow: hidden;
+  font-family: var(--map-font-sans, sans-serif);
+  font-size: clamp(11px, 2.9vw, 13px);
+  font-weight: 700;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.guide-floating-companion__bubble > div { display: flex; gap: 6px; }
+.guide-floating-companion__bubble button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #80602b;
+  font: 800 clamp(10px, 2.6vw, 12px)/1 var(--map-font-serif, serif);
+  touch-action: manipulation;
+}
+
+.guide-assistant-root[data-guide-mode="route"] .guide-floating-companion {
+  right: max(78px, calc(env(safe-area-inset-right, 0px) + 72px));
+  bottom: clamp(300px, 39dvh, 360px);
+}
+
+.guide-assistant-root[data-guide-mode="poi"] .guide-floating-companion {
+  bottom: max(94px, calc(env(safe-area-inset-bottom, 0px) + 86px));
+}
+
+.map-route-tour-guide-trigger {
+  min-height: 34px;
+  border: 1px solid rgba(39, 95, 67, 0.18);
+  border-radius: 999px;
+  padding: 0 11px;
+  background: rgba(255, 252, 241, 0.9);
+  color: #24483c;
+  font: 800 clamp(11px, 2.8vw, 13px)/1 var(--map-font-serif, serif);
+  white-space: nowrap;
+}
+
+@media (min-width: 700px) {
+  .guide-floating-companion {
+    right: max(22px, env(safe-area-inset-right, 0px));
+    bottom: max(22px, calc(env(safe-area-inset-bottom, 0px) + 18px));
+  }
+
+  .guide-assistant-root[data-guide-mode="route"] .guide-floating-companion {
+    right: max(96px, calc(env(safe-area-inset-right, 0px) + 88px));
+    bottom: clamp(320px, 36dvh, 390px);
+  }
+}

@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getScenicRouteConfig } from '../data/lingshanScenicRoutes'
 import { getLingshanPoiDetailById, lingshanPoiDetails, type LingshanPoiDetail } from '../data/lingshanPoiDetails'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
-import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam, POI_MODE_QUESTION_MAP } from '../types/mapGuide'
+import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
 
 type ModelPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -13,8 +13,6 @@ const POI_DETAIL_ID_ALIASES: Record<string, string> = {
   jiulong_bath: 'jiulong_guanyu',
   lingshan_screen_wall: 'lingshan_wall'
 }
-
-const GENERIC_POI_QUESTIONS = ['这个景点有什么看点？', '适合停留多久？', '这里适合拍照吗？', '游览时要注意什么？'] as const
 
 function Map3DPoiDetailPage() {
   const navigate = useNavigate()
@@ -33,7 +31,6 @@ function Map3DPoiDetailPage() {
     [detail?.id]
   )
   const [modelPreviewOpen, setModelPreviewOpen] = useState(false)
-  const [xiaolingOpen, setXiaolingOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
   const handleBack = () => goBackFromPoi(navigate, {
@@ -49,7 +46,6 @@ function Map3DPoiDetailPage() {
 
   useEffect(() => {
     setModelPreviewOpen(false)
-    setXiaolingOpen(false)
     setFeedbackText('')
   }, [detail?.id])
 
@@ -77,10 +73,6 @@ function Map3DPoiDetailPage() {
     )
   }
 
-  const questions = POI_MODE_QUESTION_MAP[detail.id] ?? GENERIC_POI_QUESTIONS
-  const xiaolingTip = isRouteEntry
-    ? '小灵：我可以给你讲讲建筑格局、礼佛顺序和路线衔接。'
-    : '小灵：我可以给你讲讲这里的佛诞故事、看点和拍照建议。'
   const routeResumeStopIndex = routeReturnContext?.returnStopIndex ?? stopIndex
   const nextStopIndex = routeResumeStopIndex !== undefined ? routeResumeStopIndex + 1 : undefined
   const routeStopCount = route?.stops.length ?? 0
@@ -154,15 +146,6 @@ function Map3DPoiDetailPage() {
           <p>{detail.subtitle}</p>
         </div>
 
-        <button className="map-poi-detail__xiaoling-card" type="button" onClick={() => setXiaolingOpen(true)}>
-          <span className="map-poi-detail__xiaoling-avatar" aria-hidden="true">
-            <i />
-          </span>
-          <span>
-            {xiaolingTip}
-            <em>点我提问</em>
-          </span>
-        </button>
       </section>
 
       <section className="map-poi-detail__entry">
@@ -253,23 +236,7 @@ function Map3DPoiDetailPage() {
         </div>
       ) : null}
 
-      <button
-        className="map-poi-detail__floating-xiaoling"
-        type="button"
-        onClick={() => setXiaolingOpen(true)}
-        aria-label="问小灵"
-      >
-        <span className="map-poi-detail__xiaoling-avatar" aria-hidden="true">
-          <i />
-        </span>
-        <em>小灵</em>
-      </button>
-
       {feedbackText ? <div className="map-poi-detail__toast">{feedbackText}</div> : null}
-
-      {xiaolingOpen ? (
-        <XiaolingPoiSheet detail={detail} questions={questions} onClose={() => setXiaolingOpen(false)} />
-      ) : null}
     </main>
   )
 }
@@ -284,32 +251,6 @@ function resolvePoiDetailId(poiId?: string) {
 function getLimitedList(items: string[], fallback: string[], limit = 3) {
   const source = items.length ? items : fallback
   return source.slice(0, limit)
-}
-
-function getPoiMockAnswer(detail: LingshanPoiDetail, question: string) {
-  if (question.includes('故事') || question.includes('看点')) {
-    return detail.highlights[0]
-      ? `${detail.name}的重点可以先看“${detail.highlights[0]}”。正式接入后，小灵会结合现场位置继续讲得更细。`
-      : `${detail.name}是灵山胜境中的重要节点，适合结合图文介绍和现场空间一起理解。`
-  }
-
-  if (question.includes('表演')) {
-    return '表演时间后续会接入景区运营数据。演示版先建议你在到达后留意现场公告，并提前几分钟占位观看。'
-  }
-
-  if (question.includes('拍照') || question.includes('位置')) {
-    return '建议先找能看到景点整体轮廓的位置，再靠近观察细节。正式版本会补充更具体的拍照点。'
-  }
-
-  if (question.includes('礼佛') || question.includes('顺序')) {
-    return '可以按景区动线先看整体空间，再进入核心节点停留。正式接入后会结合路线站点给出顺序建议。'
-  }
-
-  if (question.includes('多久') || question.includes('停留')) {
-    return `${getStayTimeLabel(detail)}。如果你在路线中，我也可以按下一站节奏帮你控制时间。`
-  }
-
-  return `我会围绕${detail.name}回答故事、看点、拍照位置和游览建议。`
 }
 
 function getStayTimeLabel(detail: LingshanPoiDetail) {
@@ -500,106 +441,6 @@ function MapPoiModelPreview({ model, name }: { model: LingshanPoiDetail['model']
       {!model ? <span>3D 建设中</span> : null}
       {status === 'loading' ? <span>模型加载中...</span> : null}
       {status === 'error' ? <span>模型暂时无法显示</span> : null}
-    </div>
-  )
-}
-
-function XiaolingPoiSheet({
-  detail,
-  questions,
-  onClose
-}: {
-  detail: LingshanPoiDetail
-  questions: readonly string[]
-  onClose: () => void
-}) {
-  const defaultAnswer = '可以问我这里的故事、看点、拍照位置和游览建议。选择一个问题，我会围绕当前景点继续讲。'
-  const [selectedQuestion, setSelectedQuestion] = useState('')
-  const [answerText, setAnswerText] = useState(defaultAnswer)
-  const [inputText, setInputText] = useState('')
-  const [voiceActive, setVoiceActive] = useState(false)
-
-  useEffect(() => {
-    setSelectedQuestion('')
-    setAnswerText(defaultAnswer)
-    setInputText('')
-    setVoiceActive(false)
-  }, [defaultAnswer, detail.id])
-
-  const handleQuestion = (question: string) => {
-    setSelectedQuestion(question)
-    setAnswerText(getPoiMockAnswer(detail, question))
-  }
-
-  const handleSend = () => {
-    const question = inputText.trim()
-    if (!question) {
-      return
-    }
-    setSelectedQuestion(question)
-    setAnswerText(getPoiMockAnswer(detail, question))
-    setInputText('')
-  }
-
-  return (
-    <div className="map-poi-detail__sheet-layer" role="dialog" aria-modal="true" aria-label={`小灵 · ${detail.name}`}>
-      <button className="map-poi-detail__sheet-scrim" type="button" onClick={onClose} aria-label="关闭小灵问答" />
-      <section className="map-poi-detail__xiaoling-sheet">
-        <div className="map-poi-detail__sheet-handle" />
-        <header className="map-poi-detail__sheet-head">
-          <span className="map-poi-detail__xiaoling-avatar" aria-hidden="true">
-            <i />
-          </span>
-          <div>
-            <h2>小灵 · {detail.name}</h2>
-            <p>你想先了解什么？</p>
-          </div>
-        </header>
-
-        <div className="map-poi-detail__question-grid">
-          {questions.map((question) => (
-            <button
-              key={question}
-              type="button"
-              className={selectedQuestion === question ? 'is-active' : ''}
-              onClick={() => handleQuestion(question)}
-            >
-              {question}
-            </button>
-          ))}
-        </div>
-
-        <div className="map-poi-detail__answer-box">
-          <strong>{selectedQuestion || '小灵在这儿'}</strong>
-          <p>{answerText}</p>
-        </div>
-
-        <div className="map-poi-detail__sheet-input">
-          <button
-            type="button"
-            className={voiceActive ? 'is-active' : ''}
-            onClick={() => setVoiceActive((value) => !value)}
-            aria-label="语音输入"
-            aria-pressed={voiceActive}
-          >
-            <span />
-          </button>
-          <input
-            value={inputText}
-            onChange={(event) => setInputText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                handleSend()
-              }
-            }}
-            placeholder="问小灵景点故事、拍照点"
-            aria-label="问小灵"
-          />
-          <button type="button" aria-label="发送" onClick={handleSend}>
-            ↑
-          </button>
-        </div>
-      </section>
     </div>
   )
 }
