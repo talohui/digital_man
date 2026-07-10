@@ -13,6 +13,7 @@
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const key = process.env.TMAP_WEB_SERVICE_KEY?.trim() || process.env.VITE_TMAP_WEB_KEY?.trim()
 if (!key) {
@@ -26,7 +27,7 @@ const bounds = {
   north: 31.431918,
   east: 120.106883
 }
-const cachePath = resolve('scripts/.cache/lingshan-poi-tencent-search-cache.json')
+const cachePath = resolve(dirname(fileURLToPath(import.meta.url)), '.cache/lingshan-poi-tencent-search-cache.json')
 const queryItems = [
   { id: 'wuming_bridge', name: '五明桥', aliases: ['五明桥景区'] },
   { id: 'wuzhi_gate', name: '五智门', aliases: ['五智门牌坊'] },
@@ -91,28 +92,38 @@ for (const item of queryItems) {
   if (cache.entries[item.id]) {
     continue
   }
-  const resultSets = await Promise.all(
-    [item.name, ...item.aliases].map(async (keyword) => ({ keyword, candidates: await search(keyword) }))
-  )
-  const candidates = resultSets.flatMap(({ keyword, candidates }) =>
-    candidates.map((candidate) => ({
-      query: keyword,
-      id: candidate.id,
-      title: candidate.title,
-      address: candidate.address,
-      category: candidate.category,
-      location: readLocation(candidate),
-      adInfo: candidate.ad_info,
-      score: scoreCandidate(item, candidate)
-    }))
-  )
-  const deduped = Array.from(new Map(candidates.map((candidate) => [candidate.id, candidate])).values()).sort(
-    (left, right) => right.score - left.score
-  )
-  const best = deduped[0]
-  const second = deduped[1]
-  const outcome = best && best.score >= 90 && (!second || best.score - second.score >= 20) ? 'verified' : best ? 'needs-review' : 'unresolved'
-  cache.entries[item.id] = { item, outcome, candidates: deduped, resolvedAt: new Date().toISOString() }
+  try {
+    const resultSets = await Promise.all(
+      [item.name, ...item.aliases].map(async (keyword) => ({ keyword, candidates: await search(keyword) }))
+    )
+    const candidates = resultSets.flatMap(({ keyword, candidates }) =>
+      candidates.map((candidate) => ({
+        query: keyword,
+        id: candidate.id,
+        title: candidate.title,
+        address: candidate.address,
+        category: candidate.category,
+        location: readLocation(candidate),
+        adInfo: candidate.ad_info,
+        score: scoreCandidate(item, candidate)
+      }))
+    )
+    const deduped = Array.from(new Map(candidates.map((candidate) => [candidate.id, candidate])).values()).sort(
+      (left, right) => right.score - left.score
+    )
+    const best = deduped[0]
+    const second = deduped[1]
+    const outcome = best && best.score >= 90 && (!second || best.score - second.score >= 20) ? 'verified' : best ? 'needs-review' : 'unresolved'
+    cache.entries[item.id] = { item, outcome, candidates: deduped, resolvedAt: new Date().toISOString() }
+  } catch (error) {
+    cache.entries[item.id] = {
+      item,
+      outcome: 'unresolved',
+      candidates: [],
+      error: error instanceof Error ? error.message : 'Tencent place search failed',
+      resolvedAt: new Date().toISOString()
+    }
+  }
 }
 
 cache.generatedAt = new Date().toISOString()

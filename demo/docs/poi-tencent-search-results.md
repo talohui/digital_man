@@ -4,19 +4,19 @@
 
 本轮已只读使用主工作区既有环境配置并真实调用腾讯官方接口；Key 没有写入源码、日志或文档。两次请求均在 `LINGSHAN_INK_MAP_BOUNDS` 矩形范围内执行，没有查询全无锡：
 
-- `VITE_TMAP_WEB_KEY` 返回腾讯状态 **199**：此 Key 未开通 WebService API 功能。
-- `VITE_TMAP_ROUTE_KEY` 返回腾讯状态 **121**：此 Key 当日 WebService 调用量已达上限。
+- `VITE_TMAP_WEB_KEY` 对以下六个景点逐一返回腾讯状态 **199**：此 Key 未开通 WebService API 功能。
+- `VITE_TMAP_ROUTE_KEY` 的一次可用性检查返回腾讯状态 **121**：此 Key 当日 WebService 调用量已达上限；为避免无意义消耗额度，没有再对六个关键词重复发起请求。
 
 因此腾讯没有返回任何可供复核的候选坐标。下表记录真实阻断结果，不能将其当作“无此景点”的结论。
 
 | 景点 | 查询词 | 腾讯POI ID | 返回名称 | 类别 | 地址 | lat | lng | 匹配分 | 处理结果 |
 |---|---|---|---|---|---|---:|---:|---:|---|
-| 五明桥 | 五明桥 / 五明桥景区 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
-| 五智门 | 五智门 / 五智门牌坊 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
-| 降魔浮雕 | 降魔浮雕 / 降魔浮雕墙 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
-| 阿育王柱 | 阿育王柱 / 阿育王石柱 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
-| 佛教文化博览馆 | 佛教文化博览馆 / 灵山佛教文化博览馆 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
-| 无尽意斋 | 无尽意斋 / 无尽意斋院 | — | — | — | — | — | — | — | unresolved：Web Key 199 / Route Key 121 |
+| 五明桥 | 五明桥 / 五明桥景区 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
+| 五智门 | 五智门 / 五智门牌坊 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
+| 降魔浮雕 | 降魔浮雕 / 降魔浮雕墙 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
+| 阿育王柱 | 阿育王柱 / 阿育王石柱 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
+| 佛教文化博览馆 | 佛教文化博览馆 / 灵山佛教文化博览馆 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
+| 无尽意斋 | 无尽意斋 / 无尽意斋院 | — | — | — | — | — | — | — | unresolved：实际查询 Web Key 199 |
 
 ## 执行方式
 
