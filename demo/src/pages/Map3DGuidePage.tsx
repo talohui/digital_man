@@ -35,8 +35,7 @@ import {
 } from '../data/lingshanMapData'
 import {
   getScenicPoiCoordinate,
-  hasMapEnabledScenicPoi,
-  resolveScenicPoiIdByName
+  hasMapEnabledScenicPoi
 } from '../data/scenicPoiCatalog'
 import {
   getMapModelOverlayByPoiId,
@@ -112,6 +111,12 @@ export type MapPresentationTransitionSnapshot = {
 }
 export type { ScenicMapPresentation } from '../types/mapGuide'
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
+type CameraState = {
+  center: LatLngPoint
+  zoom: number
+  pitch: number
+  rotation: number
+}
 type GardenLodState = {
   opacity: number
   visibleTier: 'none' | 'reduced' | 'full'
@@ -863,30 +868,6 @@ function applyTencentBaseMapPoiMode(map: any, options: { clean: boolean; showNat
   }
 }
 
-function getKnownPoiIdFromTencentMapEvent(event: any) {
-  const nativePoi = event?.poi ?? event?.poiInfo ?? event?.detail?.poi ?? event?.detail?.poiInfo
-  const nativeName = nativePoi?.name ?? nativePoi?.title ?? nativePoi?.displayName
-  const exactOrAliasId = typeof nativeName === 'string' ? resolveScenicPoiIdByName(nativeName) : undefined
-  if (exactOrAliasId) {
-    return exactOrAliasId
-  }
-
-  const location = nativePoi?.location ?? event?.latLng ?? event?.detail?.latLng
-  const lat = typeof location?.getLat === 'function' ? Number(location.getLat()) : Number(location?.lat)
-  const lng = typeof location?.getLng === 'function' ? Number(location.getLng()) : Number(location?.lng)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return undefined
-  }
-  const clicked = { lat, lng }
-  const nearest = lingshanPois
-    .map((poi) => ({ poi, distance: haversineDistanceMeters(clicked, getBestPoiLocation(poi)) }))
-    .sort((left, right) => left.distance - right.distance)[0]
-  // A coordinate-only fallback remains deliberately strict. It allows known
-  // POIs to open project details without assigning an unknown Tencent point a
-  // fabricated poiId.
-  return nearest && nearest.distance <= 55 ? nearest.poi.id : undefined
-}
-
 type MapRuntimeErrorBoundaryProps = {
   children: ReactNode
   onError: (error: Error, info: ErrorInfo) => void
@@ -940,6 +921,18 @@ export function Map3DGuideExperience({
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
+  const camera2DStateRef = useRef<CameraState>({
+    center: scenicCenter,
+    zoom: INK_2D_INITIAL_ZOOM,
+    pitch: 0,
+    rotation: 0
+  })
+  const camera3DStateRef = useRef<CameraState>({
+    center: scenicCenter,
+    zoom: MAP_3D_GUIDE_INITIAL_ZOOM,
+    pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+    rotation: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation
+  })
   const presentationGenerationRef = useRef(0)
   const presentationSwitchGenerationRef = useRef(0)
   const mapAttemptGenerationRef = useRef(0)
@@ -1048,10 +1041,7 @@ export function Map3DGuideExperience({
   // Tree GLB system removed due to memory pressure; debugGarden/Tree Candidate Lab is no longer active.
   const debugGarden = false
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
-  const debugPoiCoordinates = useMemo(
-    () => debugPerf && isQueryEnabled('debugPoiCoordinates'),
-    [debugPerf]
-  )
+  const debugPoiCalibration = useMemo(() => isQueryEnabled('debugPoiCalibration'), [])
   const debugInkBounds = false
   const exportInkBase = false
   const isInkCleanMode = debugInkBounds || exportInkBase
@@ -1397,11 +1387,18 @@ export function Map3DGuideExperience({
     if (typeof window === 'undefined') {
       return
     }
-    window.__LINGSHAN_MAP_DEBUG__ = {
+    const camera = {
+      currentViewMode: isInk2DPresentation ? '2D' : '3D',
+      center: isInk2DPresentation ? camera2DStateRef.current.center : camera3DStateRef.current.center,
+      zoom: isInk2DPresentation ? camera2DStateRef.current.zoom : camera3DStateRef.current.zoom,
+      pitch: isInk2DPresentation ? camera2DStateRef.current.pitch : camera3DStateRef.current.pitch,
+      rotation: isInk2DPresentation ? camera2DStateRef.current.rotation : camera3DStateRef.current.rotation
+    }
+    const debugSnapshot = {
       mapInstanceId,
       mapCreateCount: mapCreateCountRef.current,
       mapDestroyCount: mapDestroyCountRef.current,
-      currentViewMode: isInk2DPresentation ? '2D' : '3D',
+      currentViewMode: camera.currentViewMode,
       currentPresentation: scenicMapPresentation,
       contextLostCount: contextLostCountRef.current,
       hardRecoveryCount: hardRecoveryCountRef.current,
@@ -1409,9 +1406,12 @@ export function Map3DGuideExperience({
       customPoiVisibleCount,
       tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
       activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
-      lastMapError
+      lastMapError,
+      camera
     }
-  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapInstanceId, poiVisibilityMode, sceneArbiter, scenicMapPresentation])
+    window.__LINGSHAN_MAP_DEBUG__ = debugSnapshot
+    window.LINGSHAN_MAP_DEBUG = debugSnapshot
+  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapBoundsSnapshot, mapInstanceId, poiVisibilityMode, sceneArbiter, scenicMapPresentation])
   const landmarkInspector = useLandmarkModelInspector({
     active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,
@@ -1464,7 +1464,7 @@ export function Map3DGuideExperience({
     }
 
     if (effectiveMapFocusMode === 'overview') {
-      moveMapCamera(getRouteOverviewTarget(currentRoutePath), getRouteOverviewPreset(currentRoutePath))
+      focusRouteOverview()
       return
     }
 
@@ -3419,7 +3419,28 @@ export function Map3DGuideExperience({
 
       setPresentationTransition('initializing')
       try {
-        applyLongLivedMapPresentation(targetMap, window.TMap, scenicMapPresentation, scenicCenter)
+        const currentCamera = readMapCameraState(targetMap, scenicCenter)
+        if (previousPresentation === 'ink2d') {
+          camera2DStateRef.current = currentCamera
+        } else {
+          camera3DStateRef.current = currentCamera
+        }
+        const modeCamera = scenicMapPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
+        const targetCamera: CameraState = {
+          // Preserve the current map viewport while restoring only the
+          // presentation-specific orientation. This avoids a route/POI focus
+          // jump while still returning from 3D to a true top-down camera.
+          center: currentCamera.center,
+          zoom: currentCamera.zoom,
+          pitch: scenicMapPresentation === 'ink2d' ? 0 : modeCamera.pitch,
+          rotation: scenicMapPresentation === 'ink2d' ? 0 : modeCamera.rotation
+        }
+        applyLongLivedMapPresentation(targetMap, window.TMap, scenicMapPresentation, targetCamera, scenicCenter)
+        if (scenicMapPresentation === 'ink2d') {
+          camera2DStateRef.current = targetCamera
+        } else {
+          camera3DStateRef.current = targetCamera
+        }
         if (!isCurrentTransition()) {
           return
         }
@@ -3447,7 +3468,13 @@ export function Map3DGuideExperience({
         setPresentationSwitchError(message)
         setPresentationTransition('failed')
         if (scenicMapPresentation === 'scenic3d') {
-          applyLongLivedMapPresentation(targetMap, window.TMap, 'ink2d', scenicCenter)
+          const fallbackCamera: CameraState = {
+            ...readMapCameraState(targetMap, scenicCenter),
+            pitch: 0,
+            rotation: 0
+          }
+          applyLongLivedMapPresentation(targetMap, window.TMap, 'ink2d', fallbackCamera, scenicCenter)
+          camera2DStateRef.current = fallbackCamera
           setPresentationFallback('ink2d')
           replaceMapPresentationInUrl(navigate, 'ink2d')
         }
@@ -3539,13 +3566,14 @@ export function Map3DGuideExperience({
       if (!isMapInstanceCurrent(targetMap)) {
         return
       }
-      const poiId = getKnownPoiIdFromTencentMapEvent(event)
-      if (!poiId || !hasMapEnabledScenicPoi(poiId)) {
+      const nativePoi = event?.poi ?? event?.poiInfo ?? event?.detail?.poi ?? event?.detail?.poiInfo
+      if (!nativePoi) {
         return
       }
-
-      setSelectedPoiId(poiId)
-      goToPoiFromBrowse(navigate, poiId, scenicMapPresentation)
+      // All-POI mode deliberately belongs to the Tencent base map. Unknown
+      // and known native labels share the same lightweight, non-navigating
+      // response until their public detail content is complete.
+      setPageMessage('该景点详情正在完善')
     }
 
     targetMap.on?.('click', handleNativePoiClick)
@@ -3554,7 +3582,7 @@ export function Map3DGuideExperience({
         targetMap.off?.('click', handleNativePoiClick)
       }
     }
-  }, [isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, isRouteGuideView, mapStatus, navigate, poiLayerMode, scenicMapPresentation, setSelectedPoiId])
+  }, [isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, isRouteGuideView, mapStatus, poiLayerMode])
 
   useEffect(() => {
     const targetMap = mapRef.current
@@ -4308,6 +4336,20 @@ export function Map3DGuideExperience({
         }
         const center = readMapCenterForProjection(targetMap) ?? routeCenter
         const zoom = readMapZoomForProjection(targetMap) ?? currentZoomRef.current
+        const cameraState: CameraState = {
+          center,
+          zoom,
+          pitch: readMapPitch(targetMap),
+          rotation: readMapRotation(targetMap)
+        }
+        // Keep independent camera snapshots while the long-lived TMap
+        // instance moves. Switching presentation restores orientation from
+        // these refs without rebuilding the map or its overlays.
+        if (initializedPresentationRef.current === 'ink2d') {
+          camera2DStateRef.current = { ...cameraState, pitch: 0, rotation: 0 }
+        } else if (initializedPresentationRef.current === 'scenic3d') {
+          camera3DStateRef.current = cameraState
+        }
 
         setMapBoundsSnapshot((current) =>
           Math.abs(current.center.lat - center.lat) < 0.000001 &&
@@ -5896,27 +5938,35 @@ export function Map3DGuideExperience({
     const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
-    const browseAllMode = !isRouteGuideView && poiLayerMode === 'all'
     // Expanded active/arrived cards intentionally narrow the marker field;
     // collapsed cards restore every numbered station without moving the map.
     const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
     const routeContextPois = routeProgressMode
       ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
       : []
-    const browsePois = Array.from(
-      new Map(
-        [
-          ...getLingshanPoisForLayer(poiLayerMode),
-          ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
-        ].map((poi) => [poi.id, poi])
-      ).values()
-    )
+    const browsePois = poiLayerMode === 'all'
+      ? []
+      : Array.from(
+          new Map(
+            [
+              ...getLingshanPoisForLayer(poiLayerMode),
+              ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
+            ].map((poi) => [poi.id, poi])
+          ).values()
+        )
     const renderedPois = !isRouteGuideView
       ? browsePois
       : routeProgressMode
         ? routeContextPois
         : lingshanPois.filter((poi) => routeStopIds.has(poi.id))
     const markerStyles: Record<string, any> = {}
+
+    if (!isRouteGuideView && poiLayerMode === 'all') {
+      poiLayerController.clear()
+      poiMarkerLayerRef.current = null
+      setCustomPoiVisibleCount(0)
+      return
+    }
 
     routeStops.forEach((stop, index) => {
       const state =
@@ -5939,24 +5989,15 @@ export function Map3DGuideExperience({
     })
 
     if (!isRouteGuideView) {
-      if (browseAllMode) {
-        markerStyles.browseKnownPoiHotspot = new window.TMap.MarkerStyle({
-          width: 44,
-          height: 44,
-          anchor: { x: 22, y: 22 },
-          src: createSvgDataUrl(transparentPoiHotspotSvg())
+      renderedPois.forEach((poi) => {
+        const styleId = `browse-${poi.id}`
+        markerStyles[styleId] = new window.TMap.MarkerStyle({
+          width: 96,
+          height: 42,
+          anchor: { x: 48, y: 37 },
+          src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
         })
-      } else {
-        renderedPois.forEach((poi) => {
-          const styleId = `browse-${poi.id}`
-          markerStyles[styleId] = new window.TMap.MarkerStyle({
-            width: 96,
-            height: 42,
-            anchor: { x: 48, y: 37 },
-            src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
-          })
-        })
-      }
+      })
     } else if (routeProgressMode) {
       routeContextPois
         .filter((poi) => !routeStopIds.has(poi.id))
@@ -5975,9 +6016,9 @@ export function Map3DGuideExperience({
       if (!isRouteGuideView) {
         return {
           id: poi.id,
-          styleId: browseAllMode ? 'browseKnownPoiHotspot' : `browse-${poi.id}`,
+          styleId: `browse-${poi.id}`,
           position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: { title: poi.name, transparentHotspot: browseAllMode }
+          properties: { title: poi.name }
         }
       }
 
@@ -6411,7 +6452,7 @@ export function Map3DGuideExperience({
     setActiveCameraMode('routeOverview')
     setActiveTourStepId(undefined)
     setPageMessage(`${nextRouteConfig.name}已就绪`)
-    moveMapCamera(getRouteOverviewTarget(nextRoutePath) ?? nextInitialPosition, getRouteOverviewPreset(nextRoutePath))
+    focusRouteOverview(nextRoutePath, nextInitialPosition)
   }
 
   useEffect(() => {
@@ -6473,18 +6514,18 @@ export function Map3DGuideExperience({
 
   const applyGuideCamera = (mode: GuideCameraMode) => {
     stopActiveTour('manual')
+    if (mode === 'routeOverview') {
+      focusRouteOverview()
+      return
+    }
     const preset =
-      mode === 'routeOverview'
-        ? getRouteOverviewPreset(currentRoutePath)
-        : MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
+      MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
     const target =
       mode === 'overviewEstate'
         ? currentRouteCenter
         : mode === 'axisCruise'
           ? currentAxisCruiseTarget
-          : mode === 'routeOverview'
-            ? getRouteOverviewTarget(currentRoutePath)
-            : mode === 'closeInspect'
+          : mode === 'closeInspect'
               ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
               : mode === 'landmarkFocus'
                 ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
@@ -6499,6 +6540,12 @@ export function Map3DGuideExperience({
       targetPoiId,
       twoStage: mode === 'landmarkFocus' || mode === 'closeInspect'
     })
+  }
+
+  const focusRouteOverview = (path = currentRoutePath, fallback = currentInitialPosition) => {
+    const routePath = path.length >= 2 ? path : getRouteStopLocations(currentGuideRoute)
+    setActiveCameraMode('routeOverview')
+    moveMapCamera(getRouteOverviewTarget(routePath) ?? fallback, getRouteOverviewPreset(routePath))
   }
 
   const focusMap = (position: LatLngPoint, zoom?: number, targetPoiId?: string) => {
@@ -8264,7 +8311,7 @@ export function Map3DGuideExperience({
         }}
       />
       <PoiCoordinateCalibrationPanel
-        enabled={debugPoiCoordinates}
+        enabled={debugPoiCalibration}
         map={mapRef.current}
         mapReady={mapVisualReadyForOverlays}
         isCurrentMap={isMapInstanceCurrent}
@@ -10979,20 +11026,31 @@ function applyInkCleanMapCamera(map: any, TMap: any, center: LatLngPoint, zoom: 
   }
 }
 
+function readMapCameraState(map: any, fallbackCenter: LatLngPoint): CameraState {
+  return {
+    center: readMapCenterForProjection(map) ?? fallbackCenter,
+    zoom: readMapZoomForProjection(map) ?? MAP_3D_GUIDE_INITIAL_ZOOM,
+    pitch: readMapPitch(map),
+    rotation: readMapRotation(map)
+  }
+}
+
 function applyLongLivedMapPresentation(
   map: any,
   TMap: any,
   presentation: ScenicMapPresentation,
+  requestedCamera: CameraState,
   fallbackCenter: LatLngPoint
 ) {
-  const currentCenter = readMapCenterForProjection(map) ?? fallbackCenter
-  const currentZoom = readMapZoomForProjection(map) ?? MAP_3D_GUIDE_INITIAL_ZOOM
   const isInk2D = presentation === 'ink2d'
+  const currentCamera = readMapCameraState(map, fallbackCenter)
   const target = {
-    center: new TMap.LatLng(currentCenter.lat, currentCenter.lng),
-    zoom: isInk2D ? clampNumber(currentZoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM) : clampNumber(currentZoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
-    pitch: isInk2D ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-    rotation: isInk2D ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+    center: new TMap.LatLng(requestedCamera.center?.lat ?? currentCamera.center.lat, requestedCamera.center?.lng ?? currentCamera.center.lng),
+    zoom: isInk2D
+      ? clampNumber(requestedCamera.zoom ?? currentCamera.zoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM)
+      : clampNumber(requestedCamera.zoom ?? currentCamera.zoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
+    pitch: isInk2D ? 0 : requestedCamera.pitch ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+    rotation: isInk2D ? 0 : requestedCamera.rotation ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
     bearing: 0
   }
 
@@ -11007,11 +11065,15 @@ function applyLongLivedMapPresentation(
   try {
     map.easeTo?.(target, { duration: 0 })
   } catch {
-    map.setCenter?.(target.center)
-    map.setZoom?.(target.zoom)
-    map.setPitch?.(target.pitch)
-    map.setRotation?.(target.rotation)
+    // Direct setters below cover older Tencent GL builds.
   }
+  // `easeTo` is not consistently authoritative after setViewMode in Android
+  // WebViews. Apply the complete state again so 3D -> 2D cannot retain tilt.
+  map.setCenter?.(target.center)
+  map.setZoom?.(target.zoom)
+  map.setPitch?.(target.pitch)
+  map.setRotation?.(target.rotation)
+  map.setBearing?.(0)
 }
 
 function inspectMapStyleSupport(map: any, TMap?: any): MapStyleSupportReport {
@@ -12916,12 +12978,6 @@ function browsePoiMarkerSvg(name: string, isCore: boolean, subdued = false) {
   </svg>`
 }
 
-function transparentPoiHotspotSvg() {
-  // Keep a tiny alpha so Tencent's marker hit-test retains a 44px touch area
-  // without drawing an icon or label over native POI text.
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="21" fill="rgba(255,255,255,0.01)"/></svg>'
-}
-
 function escapeSvgText(value: string) {
   const entities: Record<string, string> = {
     '&': '&amp;',
@@ -12980,6 +13036,7 @@ const map3DGuideCss = `
 
 .map-presentation-cloud--opening {
   opacity: 0;
+  pointer-events: none;
 }
 
 .map-presentation-cloud__bank {

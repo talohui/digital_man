@@ -17,7 +17,9 @@ type Props = {
   isCurrentMap: (map: any) => boolean
 }
 
-const unresolvedPois = scenicPoiCatalog.filter((item) => item.coordinateStatus === 'unresolved')
+const calibrationPois = scenicPoiCatalog.filter(
+  (item) => item.coordinateStatus === 'candidate' || item.coordinateStatus === 'needs-review' || item.coordinateStatus === 'unresolved'
+)
 
 function svgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
@@ -32,7 +34,7 @@ function formatCoordinate(candidate?: Pick<TencentPoiCoordinateCandidate, 'lat' 
 }
 
 export function PoiCoordinateCalibrationPanel({ enabled, map, mapReady, isCurrentMap }: Props) {
-  const [poiId, setPoiId] = useState(unresolvedPois[0]?.id ?? '')
+  const [poiId, setPoiId] = useState(calibrationPois[0]?.id ?? '')
   const [candidates, setCandidates] = useState<TencentPoiCoordinateCandidate[]>([])
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
   const [manualPosition, setManualPosition] = useState<TencentPoiCoordinateCandidate | undefined>()
@@ -70,7 +72,7 @@ export function PoiCoordinateCalibrationPanel({ enabled, map, mapReady, isCurren
         styleId: candidate.id === selectedCandidateId ? 'selected' : 'candidate',
         position: new TMap.LatLng(candidate.lat, candidate.lng),
         draggable: candidate.id === selectedCandidateId,
-        properties: { title: candidate.title }
+        properties: { title: `${selectedPoi?.name ?? candidate.title} · ${formatCoordinate(candidate)}` }
       }))
     })
     const handleClick = (event: any) => {
@@ -96,7 +98,7 @@ export function PoiCoordinateCalibrationPanel({ enabled, map, mapReady, isCurren
         // Map may be in a context-loss recovery; the runtime owns final cleanup.
       }
     }
-  }, [candidates, enabled, isCurrentMap, map, mapReady, selectedCandidate, selectedCandidateId])
+  }, [candidates, enabled, isCurrentMap, map, mapReady, selectedCandidate, selectedCandidateId, selectedPoi])
 
   if (!enabled) return null
 
@@ -131,10 +133,13 @@ export function PoiCoordinateCalibrationPanel({ enabled, map, mapReady, isCurren
     <aside style={{ position: 'absolute', zIndex: 1005, right: 16, bottom: 16, width: 300, padding: 12, borderRadius: 8, background: 'rgba(247,244,233,.96)', color: '#19372f', boxShadow: '0 8px 24px rgba(23,50,39,.2)', fontSize: 12 }}>
       <strong>POI 坐标校准（开发态）</strong>
       <select value={poiId} onChange={(event) => setPoiId(event.target.value)} style={{ width: '100%', marginTop: 8 }}>
-        {unresolvedPois.map((item: ScenicPoiCatalogItem) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        {calibrationPois.map((item: ScenicPoiCatalogItem) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
       <button type="button" onClick={runSearch} style={{ width: '100%', marginTop: 8 }}>查询腾讯候选</button>
       <p style={{ margin: '8px 0', lineHeight: 1.45 }}>{status}</p>
+      <p style={{ margin: '4px 0', lineHeight: 1.45 }}>
+        当前候选：{selectedPoi?.name ?? '—'} · {formatCoordinate(selectedCandidate)}
+      </p>
       {candidates.slice(0, 4).map((candidate) => (
         <button key={candidate.id} type="button" onClick={() => setSelectedCandidateId(candidate.id)} style={{ display: 'block', width: '100%', textAlign: 'left', marginTop: 4, border: candidate.id === selectedCandidateId ? '1px solid #b88620' : '1px solid #d9d4c4', background: '#fffdf5' }}>
           {candidate.title} · {candidate.score} 分<br /><small>{formatCoordinate(candidate)}</small>

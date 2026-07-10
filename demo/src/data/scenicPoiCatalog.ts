@@ -19,7 +19,7 @@ export type ScenicPoiCoordinateSourceType =
   | 'tencent-native-poi'
   | 'manual-calibration'
 
-export type ScenicPoiCoordinateStatus = 'verified' | 'existing' | 'needs-review' | 'unresolved'
+export type ScenicPoiCoordinateStatus = 'verified' | 'existing' | 'candidate' | 'needs-review' | 'unresolved'
 
 export type ScenicPoiCatalogItem = {
   id: string
@@ -83,7 +83,7 @@ const aliasesByPoiId: Record<string, string[]> = {
   exit: ['景区出口', '灵山胜境出口']
 }
 
-const unresolvedLingshanPoiDefinitions: Array<Pick<ScenicPoiCatalogItem, 'id' | 'name' | 'aliases' | 'isCore'>> = [
+const candidateLingshanPoiDefinitions: Array<Pick<ScenicPoiCatalogItem, 'id' | 'name' | 'aliases' | 'isCore'>> = [
   { id: 'wuming_bridge', name: '五明桥', aliases: ['五明桥景区'], isCore: false },
   { id: 'wuzhi_gate', name: '五智门', aliases: ['五智门牌坊'], isCore: false },
   { id: 'jiangmo_relief', name: '降魔浮雕', aliases: ['降魔浮雕墙'], isCore: false },
@@ -131,14 +131,14 @@ export const scenicPoiCatalog: ScenicPoiCatalogItem[] = [
     isCore: corePoiIdSet.has(spot.id),
     model: getModelReference(spot.id)
   })),
-  ...unresolvedLingshanPoiDefinitions.map((item) => ({
+  ...candidateLingshanPoiDefinitions.map((item) => ({
     ...item,
     scenicAreaId: 'lingshan' as const,
     coordinateSource: {
       type: 'tencent-native-poi' as const,
-      note: 'Awaiting bounded Tencent place-search confirmation or manual calibration.'
+      note: 'Development-only candidate awaiting Tencent place-search confirmation or manual calibration.'
     },
-    coordinateStatus: 'unresolved' as const,
+    coordinateStatus: 'candidate' as const,
     routeIds: [] as ScenicRouteId[]
   }))
 ]
