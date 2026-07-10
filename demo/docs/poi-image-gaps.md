@@ -27,3 +27,7 @@
 | exit | 景区出口 | 无专属图 / 兜底封面 | 无 | 无 | 是 |
 
 后续补图规则：只使用景区提供、用户提供或仓库内可确认授权的景点照片；每个重点景点正文优先补 1 张 overview 后图片，素材充足时再补 1 张 highlights 后图片，禁止同一图片在同一详情页重复使用。
+
+## 待验证候选
+
+`wuming_bridge`、`wuzhi_gate`、`jiangmo_relief`、`ashoka_pillar`、`buddhist_culture_museum` 与 `wujinyi_zhai` 目前均未通过腾讯坐标验证，也没有正式启用的详情 URL。本轮未为这些未启用候选添加图片引用；待坐标验证、详情入口启用并取得合法图片素材后，再补充对应行。

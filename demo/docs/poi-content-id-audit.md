@@ -45,15 +45,17 @@
 - 五印坛城 -> `wuyin_tancheng`
 - 曼飞龙塔 -> `manfeilong_tower`
 
-## 未匹配列表
+## 地图目录待验证候选
 
-以下资料集景点在当前 `guideSpots/lingshanPois` 中没有正式 poiId，因此本 UI 分支没有新增或猜测 ID：
+地图分支 `2518e9c` 已在 `scenicPoiCatalog.ts` 中为以下资料集景点建立候选 poiId，但 `docs/poi-map-enabled-list.md` 与 `docs/poi-tencent-search-results.md` 均记录其当前为 `unresolved`：腾讯 WebService Key 未开通或已达当日额度，尚未返回可复核坐标。因此它们没有正式 Marker、路线引用或游客端详情入口，本 UI 分支不会提前写入 `poiDetailContent.ts`。
 
-- 五明桥
-- 五智门
-- 降魔浮雕
-- 阿育王柱
-- 佛教文化博览馆
-- 无尽意斋
+| 候选 poiId | 景点 | 目录状态 | 本轮内容处理 |
+|---|---|---|---|
+| wuming_bridge | 五明桥 | unresolved | 不绑定，等待 verified 坐标 |
+| wuzhi_gate | 五智门 | unresolved | 不绑定，等待 verified 坐标 |
+| jiangmo_relief | 降魔浮雕 | unresolved | 不绑定，等待 verified 坐标 |
+| ashoka_pillar | 阿育王柱 | unresolved | 不绑定，等待 verified 坐标 |
+| buddhist_culture_museum | 佛教文化博览馆 | unresolved | 不绑定，等待 verified 坐标 |
+| wujinyi_zhai | 无尽意斋 | unresolved | 不绑定，等待 verified 坐标 |
 
-地图目录新增并确认这些点位后，应使用其最终 poiId 在 `poiDetailContent.ts` 补内容，不建立第二套别名或身份表。
+当地图分支将这些点更新为 `verified` 并加入 `getMapEnabledScenicPois()` 后，应直接使用上表候选 poiId 在 `poiDetailContent.ts` 补内容，不建立第二套别名或身份表。
