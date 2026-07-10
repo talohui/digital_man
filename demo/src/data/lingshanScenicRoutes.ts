@@ -7,6 +7,7 @@ import {
   type LatLngPoint
 } from './guideData'
 import { lingshanPois, type LingshanPoi } from './lingshanMapData'
+import { getScenicPoiCatalogItem } from './scenicPoiCatalog'
 import { getLingshanRouteGeometryByGuideRouteId, type LingshanRouteGeometry } from './lingshanRouteGeometries'
 
 export type ScenicRouteGeometryMode = 'real' | 'candidate' | 'poi-polyline'
@@ -169,8 +170,14 @@ function buildScenicRouteConfig(route: GuideRoute): ScenicRouteConfig {
 
 function resolveScenicRouteStop(stop: GuideRouteStop): ScenicRouteStop {
   const poi = resolveGuideStopPoi(stop)
+  const catalogItem = getScenicPoiCatalogItem(poi?.id ?? stop.spotId)
   const guideSpot = guideSpots.find((spot) => spot.id === stop.spotId)
-  const location = poi
+  const location = catalogItem?.coordinate
+    ? {
+        lat: catalogItem.coordinate.lat,
+        lng: catalogItem.coordinate.lng
+      }
+    : poi
     ? {
         lat: poi.navLocation.lat,
         lng: poi.navLocation.lng

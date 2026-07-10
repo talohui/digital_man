@@ -1,7 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 
 import { Map3DPerfPanel } from '../components/map3d/Map3DPerfPanel'
+import { PoiCoordinateCalibrationPanel } from '../components/map3d/PoiCoordinateCalibrationPanel'
 import {
   ScenicPoiBillboards,
   type ScenicPoiBillboardItem,
@@ -21,12 +34,16 @@ import {
   type LingshanPoiLayerMode
 } from '../data/lingshanMapData'
 import {
+  getScenicPoiCoordinate,
+  hasMapEnabledScenicPoi,
+  resolveScenicPoiIdByName
+} from '../data/scenicPoiCatalog'
+import {
   getMapModelOverlayByPoiId,
   getMapModelOverlayInspectorId,
   getVisibleMapModelOverlays,
   type LingshanMapModelOverlay
 } from '../data/lingshanMapModelOverlays'
-import { hasLingshanPoiDetail } from '../data/lingshanPoiDetails'
 import { resolveLandmarkLodRuntimeChoice } from '../data/lingshanLandmarkLod'
 import { LINGSHAN_INK_MAP_BOUNDS } from '../data/lingshanInkMapBounds'
 import {
@@ -46,6 +63,7 @@ import {
 import { GLBMemoryManager } from '../lib/map/GLBMemoryManager'
 import { GLBSpatialController } from '../lib/map/GLBSpatialController'
 import { LayerManager } from '../lib/map/LayerManager'
+import { PoiLayerController } from '../lib/map/PoiLayerController'
 import { SceneArbiter } from '../lib/map/SceneArbiter'
 import { SceneStateManager, type SceneStateRecord } from '../lib/map/SceneStateManager'
 import { SceneWindowManager } from '../lib/map/SceneWindowManager'
@@ -357,7 +375,9 @@ const MAP_3D_GUIDE_RENDER_OPTIONS = {
 } as const
 const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
-  features: ['base', 'building3d', 'label']
+  // Tencent native POIs are a separate vector feature. `all` must include it;
+  // labels alone do not ask the SDK to render the POI icon/feature layer.
+  features: ['base', 'building3d', 'point', 'label']
 } as const
 const MAP_3D_GUIDE_CORE_BASE_MAP = {
   type: 'vector',
@@ -846,16 +866,53 @@ function applyTencentBaseMapPoiMode(map: any, options: { clean: boolean; showNat
 function getKnownPoiIdFromTencentMapEvent(event: any) {
   const nativePoi = event?.poi ?? event?.poiInfo ?? event?.detail?.poi ?? event?.detail?.poiInfo
   const nativeName = nativePoi?.name ?? nativePoi?.title ?? nativePoi?.displayName
-  if (typeof nativeName !== 'string' || !nativeName.trim()) {
-    return undefined
+  const exactOrAliasId = typeof nativeName === 'string' ? resolveScenicPoiIdByName(nativeName) : undefined
+  if (exactOrAliasId) {
+    return exactOrAliasId
   }
 
-  const normalizedName = normalizePoiName(nativeName)
-  return lingshanPois.find((poi) => normalizePoiName(poi.name) === normalizedName)?.id
+  const location = nativePoi?.location ?? event?.latLng ?? event?.detail?.latLng
+  const lat = typeof location?.getLat === 'function' ? Number(location.getLat()) : Number(location?.lat)
+  const lng = typeof location?.getLng === 'function' ? Number(location.getLng()) : Number(location?.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined
+  }
+  const clicked = { lat, lng }
+  const nearest = lingshanPois
+    .map((poi) => ({ poi, distance: haversineDistanceMeters(clicked, getBestPoiLocation(poi)) }))
+    .sort((left, right) => left.distance - right.distance)[0]
+  // A coordinate-only fallback remains deliberately strict. It allows known
+  // POIs to open project details without assigning an unknown Tencent point a
+  // fabricated poiId.
+  return nearest && nearest.distance <= 55 ? nearest.poi.id : undefined
 }
 
-function normalizePoiName(name: string) {
-  return name.replace(/[\s·•・·・－-]/g, '').toLowerCase()
+type MapRuntimeErrorBoundaryProps = {
+  children: ReactNode
+  onError: (error: Error, info: ErrorInfo) => void
+}
+
+type MapRuntimeErrorBoundaryState = { error?: Error }
+
+/** Limits an unexpected Tencent runtime render error to the map canvas area.
+ * Page cards, the assistant and the presentation transition are outside it. */
+class MapRuntimeErrorBoundary extends Component<MapRuntimeErrorBoundaryProps, MapRuntimeErrorBoundaryState> {
+  state: MapRuntimeErrorBoundaryState = {}
+
+  static getDerivedStateFromError(error: Error): MapRuntimeErrorBoundaryState {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    this.props.onError(error, info)
+  }
+
+  render() {
+    if (this.state.error) {
+      return <div className="map-3d-guide-map-runtime-fallback" role="status">地图正在恢复，请稍候…</div>
+    }
+    return this.props.children
+  }
 }
 
 export function Map3DGuideExperience({
@@ -884,9 +941,20 @@ export function Map3DGuideExperience({
   const mapRef = useRef<any>(null)
   const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
   const presentationGenerationRef = useRef(0)
+  const presentationSwitchGenerationRef = useRef(0)
   const mapAttemptGenerationRef = useRef(0)
   const mapInstanceGenerationCounterRef = useRef(0)
   const activeMapInstanceGenerationRef = useRef(0)
+  const mapCreateCountRef = useRef(0)
+  const mapDestroyCountRef = useRef(0)
+  const contextLostCountRef = useRef(0)
+  const hardRecoveryCountRef = useRef(0)
+  const hardRecoveryRequestRef = useRef<(reason: string, error?: unknown) => void>(() => undefined)
+  const [mapRuntimeGeneration, setMapRuntimeGeneration] = useState(0)
+  const [mapContainerGeneration, setMapContainerGeneration] = useState(0)
+  const [mapInstanceId, setMapInstanceId] = useState(0)
+  const [lastMapError, setLastMapError] = useState('')
+  const [customPoiVisibleCount, setCustomPoiVisibleCount] = useState(0)
   const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
   const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
   const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
@@ -980,6 +1048,10 @@ export function Map3DGuideExperience({
   // Tree GLB system removed due to memory pressure; debugGarden/Tree Candidate Lab is no longer active.
   const debugGarden = false
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
+  const debugPoiCoordinates = useMemo(
+    () => debugPerf && isQueryEnabled('debugPoiCoordinates'),
+    [debugPerf]
+  )
   const debugInkBounds = false
   const exportInkBase = false
   const isInkCleanMode = debugInkBounds || exportInkBase
@@ -1017,6 +1089,10 @@ export function Map3DGuideExperience({
   const shouldRedirectLocalTMapHost = useMemo(() => shouldUseCanonicalLocalhostForTMap(), [])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const layerManager = useMemo(() => new LayerManager(), [])
+  const poiLayerController = useMemo(
+    () => new PoiLayerController(layerManager, isMapInstanceCurrent),
+    [isMapInstanceCurrent, layerManager]
+  )
   const glbRuntimeOrchestrator = useMemo(() => new GLBRuntimeOrchestrator(), [])
   const glbSpatialController = useMemo(() => new GLBSpatialController(), [])
   const glbMemoryManager = useMemo(() => new GLBMemoryManager(), [])
@@ -1203,7 +1279,7 @@ export function Map3DGuideExperience({
     presentationTransition === 'waiting-container' ||
     presentationTransition === 'initializing'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (presentationCloudHideTimerRef.current !== null) {
       window.clearTimeout(presentationCloudHideTimerRef.current)
       presentationCloudHideTimerRef.current = null
@@ -1284,6 +1360,58 @@ export function Map3DGuideExperience({
       window.removeEventListener('unhandledrejection', handleUnhandledRejection)
     }
   }, [debugPerf])
+
+  useEffect(() => {
+    hardRecoveryRequestRef.current = (reason, error) => {
+      if (hardRecoveryCountRef.current >= 1) {
+        setLastMapError(`地图硬恢复已执行过一次，忽略重复请求：${reason}`)
+        return
+      }
+
+      const map = mapRef.current
+      const center = map ? readMapCenterForProjection(map) : null
+      const zoom = map ? readMapZoomForProjection(map) : null
+      if (center && zoom !== null) {
+        presentationViewportRef.current = { center, zoom }
+      }
+
+      hardRecoveryCountRef.current += 1
+      contextLostCountRef.current += 1
+      setLastMapError(error instanceof Error ? error.message : `地图硬恢复：${reason}`)
+      setPresentationSwitchError(undefined)
+      setPresentationTransition('destroying')
+      setPresentationCloudPhase('covering')
+      setMapStatus('loading')
+      // The map-init effect owns the actual teardown. A new DOM container is
+      // intentionally created only for this context-loss path.
+      setMapContainerGeneration((value) => value + 1)
+      setMapRuntimeGeneration((value) => value + 1)
+    }
+
+    return () => {
+      hardRecoveryRequestRef.current = () => undefined
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.__LINGSHAN_MAP_DEBUG__ = {
+      mapInstanceId,
+      mapCreateCount: mapCreateCountRef.current,
+      mapDestroyCount: mapDestroyCountRef.current,
+      currentViewMode: isInk2DPresentation ? '2D' : '3D',
+      currentPresentation: scenicMapPresentation,
+      contextLostCount: contextLostCountRef.current,
+      hardRecoveryCount: hardRecoveryCountRef.current,
+      currentPoiLayerMode: poiLayerMode,
+      customPoiVisibleCount,
+      tencentPoiFeatureEnabled: poiLayerMode === 'all',
+      activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
+      lastMapError
+    }
+  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapInstanceId, poiLayerMode, sceneArbiter, scenicMapPresentation])
   const landmarkInspector = useLandmarkModelInspector({
     active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,
@@ -2747,6 +2875,7 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     const generation = ++presentationGenerationRef.current
+    const initialPresentation = activePresentationRef.current
     const mapInitAbortController = new AbortController()
     let cancelled = false
     const isCurrentGeneration = () => !cancelled && generation === presentationGenerationRef.current
@@ -2847,6 +2976,7 @@ export function Map3DGuideExperience({
       sceneWindowManager.destroy()
       glbMemoryManager.destroy()
       glbSpatialController.destroy()
+      poiLayerController.destroy()
       layerManager.destroy()
       clearOverlayRefs()
       destroyedMapInstancesRef.current.add(map)
@@ -2855,6 +2985,7 @@ export function Map3DGuideExperience({
 
       try {
         map.destroy?.()
+        mapDestroyCountRef.current += 1
       } catch (error) {
         if (debugPerf) {
           console.warn('[map-presentation] map destroy ignored', error)
@@ -2897,7 +3028,7 @@ export function Map3DGuideExperience({
       }
       setIsMapVisualReady(true)
       setMapReadyTimedOut(false)
-      initializedPresentationRef.current = scenicMapPresentation
+      initializedPresentationRef.current = initialPresentation
       setPresentationTransition('ready')
       if (!presentationFallback) {
         setPresentationSwitchError(undefined)
@@ -2965,7 +3096,7 @@ export function Map3DGuideExperience({
       }
 
       setPresentationTransition(
-        initializedPresentationRef.current !== null && initializedPresentationRef.current !== scenicMapPresentation
+        initializedPresentationRef.current !== null && initializedPresentationRef.current !== initialPresentation
           ? 'destroying'
           : 'waiting-container'
       )
@@ -3011,7 +3142,7 @@ export function Map3DGuideExperience({
           return
         }
 
-        if (scenicMapPresentation === 'scenic3d' && attempt === 0) {
+        if (initialPresentation === 'scenic3d' && attempt === 0) {
           void handleMapAttemptFailure(new Error('3D 地图底图就绪超时'), attempt)
           return
         }
@@ -3052,11 +3183,13 @@ export function Map3DGuideExperience({
         const exportMapCenter = inkExportCamera?.center ?? preservedViewport?.center ?? (isRouteGuideView ? currentRouteCenter : scenicCenter)
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(exportMapCenter.lat, exportMapCenter.lng),
-          zoom: inkExportCamera?.zoom ?? preservedViewport?.zoom ?? (isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
-          minZoom: mapMinZoom,
-          maxZoom: mapMaxZoom,
-          pitch: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-          rotation: isInkCleanMode || isInk2DPresentation ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+          zoom: inkExportCamera?.zoom ?? preservedViewport?.zoom ?? (initialPresentation === 'ink2d' ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
+          // A single map instance must accept both presentations. Per-mode
+          // camera constraints are applied later without reconstructing TMap.
+          minZoom: INK_2D_MIN_ZOOM,
+          maxZoom: INK_MAP_MAX_ZOOM,
+          pitch: isInkCleanMode || initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+          rotation: isInkCleanMode || initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
           baseMap: getMapBaseMapConfig({
             clean: isInkCleanMode,
@@ -3081,17 +3214,20 @@ export function Map3DGuideExperience({
         activeMapInstanceGenerationRef.current = mapInstanceGeneration
         mapRef.current = map
         layerManager.init(map)
+        poiLayerController.init(map)
         glbSpatialController.init(map)
         glbMemoryManager.init(map)
         sceneWindowManager.init()
+        mapCreateCountRef.current += 1
+        setMapInstanceId(mapInstanceGeneration)
         setIsMapCreated(true)
         perfRecorder.recordMapVisualEvent({
           type: 'mapCreated'
         })
         perfRecorder.recordMapVisualEvent({
           type: 'scenicMapPresentationChanged',
-          scenicMapPresentation,
-          reason: isInk2DPresentation ? 'mobile-ink2d-map-mode' : 'scenic3d-map-mode'
+          scenicMapPresentation: initialPresentation,
+          reason: initialPresentation === 'ink2d' ? 'mobile-ink2d-map-mode' : 'scenic3d-map-mode'
         })
         perfRecorder.recordMapVisualEvent({
           type: 'nativeSkyConfigured',
@@ -3147,12 +3283,33 @@ export function Map3DGuideExperience({
         const interactionEndEventNames = ['zoomend', 'dragend', 'moveend', 'idle']
         interactionEndEventNames.forEach((eventName) => {
           const handler = () => {
+            if (!isCurrentAttempt() || !isMapInstanceCurrent(map)) {
+              return
+            }
             updateCurrentMapZoomSnapshot()
             scheduleMapInteractionLiteExit(eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move', eventName)
             clampScenicCameraBounds(eventName)
           }
           map.on?.(eventName, handler)
           mapInteractionEventCleanups.push(() => map.off?.(eventName, handler))
+        })
+
+        const requestContextRecovery = (reason: string, error?: unknown) => {
+          if (!isCurrentAttempt() || !isMapInstanceCurrent(map)) {
+            return
+          }
+          hardRecoveryRequestRef.current(reason, error)
+        }
+        const handleContextLost = (event: Event) => {
+          event.preventDefault?.()
+          requestContextRecovery('webglcontextlost')
+        }
+        const handleMapContextLost = (event: any) => requestContextRecovery('tmap-context_lost', event)
+        mapElement?.addEventListener('webglcontextlost', handleContextLost)
+        map.on?.('context_lost', handleMapContextLost)
+        mapInteractionEventCleanups.push(() => {
+          mapElement?.removeEventListener('webglcontextlost', handleContextLost)
+          map.off?.('context_lost', handleMapContextLost)
         })
       } catch (error) {
         if (!isCurrentAttempt()) {
@@ -3172,7 +3329,7 @@ export function Map3DGuideExperience({
       const message = error instanceof Error ? error.message : '腾讯地图加载失败'
       disposeCreatedMap(true)
 
-      if (scenicMapPresentation === 'scenic3d' && attempt === 0) {
+      if (initialPresentation === 'scenic3d' && attempt === 0) {
         setPresentationTransition('destroying')
         setPresentationSwitchError(`${message}，正在自动重试`)
         setPageMessage('3D 地图初始化波动，正在自动重试...')
@@ -3206,7 +3363,7 @@ export function Map3DGuideExperience({
         type: 'mapFailed',
         reason: 'map-load-error'
       })
-      if (scenicMapPresentation === 'scenic3d') {
+      if (initialPresentation === 'scenic3d') {
         setPresentationFallback('ink2d')
         replaceMapPresentationInUrl(navigate, 'ink2d')
       }
@@ -3226,7 +3383,84 @@ export function Map3DGuideExperience({
       stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
       disposeCreatedMap(true)
     }
-  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInk2DPresentation, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapMaxZoom, mapMinZoom, perfRecorder, scenicMapPresentation, sceneWindowManager, shouldRedirectLocalTMapHost])
+  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapRuntimeGeneration, perfRecorder, poiLayerController, sceneWindowManager, shouldRedirectLocalTMapHost])
+
+  useEffect(() => {
+    const targetMap = mapRef.current
+    const targetGeneration = targetMap ? mapInstanceGenerationsRef.current.get(targetMap) : undefined
+    const previousPresentation = initializedPresentationRef.current
+    if (
+      !targetMap ||
+      !targetGeneration ||
+      !isMapInstanceCurrent(targetMap) ||
+      mapStatus !== 'ready' ||
+      previousPresentation === null ||
+      previousPresentation === scenicMapPresentation
+    ) {
+      return
+    }
+
+    const transitionGeneration = ++presentationSwitchGenerationRef.current
+    const abortController = new AbortController()
+    let cancelled = false
+    const isCurrentTransition = () =>
+      !cancelled &&
+      transitionGeneration === presentationSwitchGenerationRef.current &&
+      isMapInstanceCurrent(targetMap) &&
+      mapInstanceGenerationsRef.current.get(targetMap) === targetGeneration
+
+    const apply = async (attempt: 0 | 1) => {
+      setPresentationTransition('waiting-container')
+      setPresentationSwitchError(undefined)
+      const container = mapElementRef.current
+      if (!container || !(await waitForMapContainerLayout(container, isCurrentTransition, abortController.signal)) || !isCurrentTransition()) {
+        return
+      }
+
+      setPresentationTransition('initializing')
+      try {
+        applyLongLivedMapPresentation(targetMap, window.TMap, scenicMapPresentation, scenicCenter)
+        if (!isCurrentTransition()) {
+          return
+        }
+        initializedPresentationRef.current = scenicMapPresentation
+        setPresentationTransition('ready')
+        perfRecorder.recordMapVisualEvent({
+          type: 'scenicMapPresentationChanged',
+          scenicMapPresentation,
+          reason: 'single-map-runtime-switch'
+        })
+      } catch (error) {
+        if (!isCurrentTransition()) {
+          return
+        }
+        if (attempt === 0) {
+          window.setTimeout(() => {
+            if (isCurrentTransition()) {
+              void apply(1)
+            }
+          }, 360)
+          return
+        }
+        const message = error instanceof Error ? error.message : '地图视角切换失败'
+        setLastMapError(message)
+        setPresentationSwitchError(message)
+        setPresentationTransition('failed')
+        if (scenicMapPresentation === 'scenic3d') {
+          applyLongLivedMapPresentation(targetMap, window.TMap, 'ink2d', scenicCenter)
+          setPresentationFallback('ink2d')
+          replaceMapPresentationInUrl(navigate, 'ink2d')
+        }
+      }
+    }
+
+    void apply(0)
+    return () => {
+      cancelled = true
+      abortController.abort()
+      presentationSwitchGenerationRef.current += 1
+    }
+  }, [isMapInstanceCurrent, mapStatus, navigate, perfRecorder, scenicMapPresentation])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden || isInkCleanMode) {
@@ -3306,7 +3540,7 @@ export function Map3DGuideExperience({
         return
       }
       const poiId = getKnownPoiIdFromTencentMapEvent(event)
-      if (!poiId || !hasLingshanPoiDetail(poiId)) {
+      if (!poiId || !hasMapEnabledScenicPoi(poiId)) {
         return
       }
 
@@ -5647,8 +5881,9 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     if (isInkCleanMode) {
-      layerManager.removeLayer('poi_route', poiMarkerLayerRef.current)
+      poiLayerController.clear()
       poiMarkerLayerRef.current = null
+      setCustomPoiVisibleCount(0)
       return
     }
 
@@ -5775,17 +6010,9 @@ export function Map3DGuideExperience({
         }
       })
 
-    layerManager.removeLayer('poi_route', poiMarkerLayerRef.current)
-    const poiLayer = new window.TMap.MultiMarker({
-      map: targetMap,
-      styles: markerStyles,
-      geometries: poiGeometries
-    })
-    poiMarkerLayerRef.current = poiLayer
-    layerManager.registerLayer('poi_route', poiLayer, targetMap)
     const handlePoiMarkerClick = (event: any) => {
       const poiId = event?.geometry?.id ?? event?.geometryId ?? event?.id
-      if (typeof poiId !== 'string' || !hasLingshanPoiDetail(poiId)) {
+      if (typeof poiId !== 'string' || !hasMapEnabledScenicPoi(poiId)) {
         return
       }
 
@@ -5804,7 +6031,28 @@ export function Map3DGuideExperience({
         presentation: scenicMapPresentation
       })
     }
-    poiLayer.on?.('click', handlePoiMarkerClick)
+    const poiLayer = poiLayerController.update({
+      key: JSON.stringify({
+        routeId: currentRouteId,
+        stopIndex: effectiveRouteStopIndex,
+        routeGuideStage,
+        expanded: routeCardExpanded,
+        layerMode: poiLayerMode,
+        services: serviceFacilitiesEnabled,
+        presentation: scenicMapPresentation,
+        poiIds: poiGeometries.map((item) => item.id)
+      }),
+      build: (map) => ({
+        layer: new window.TMap.MultiMarker({
+          map,
+          styles: markerStyles,
+          geometries: poiGeometries
+        }),
+        onClick: handlePoiMarkerClick
+      })
+    })
+    poiMarkerLayerRef.current = poiLayer
+    setCustomPoiVisibleCount(poiLayer ? poiGeometries.length : 0)
     perfRecorder.markStageEnd('poiInit')
     if (!mapRoutePoiShownRef.current) {
       mapRoutePoiShownRef.current = true
@@ -5815,12 +6063,12 @@ export function Map3DGuideExperience({
     }
 
     return () => {
-      if (isMapInstanceUsable(targetMap)) {
-        poiLayer.off?.('click', handlePoiMarkerClick)
+      if (poiLayerController.getLayer() === poiLayer) {
+        poiLayerController.clear()
       }
-      layerManager.removeLayer('poi_route', poiLayer)
-      if (poiMarkerLayerRef.current === poiLayer) {
+      if (poiMarkerLayerRef.current === poiLayer || !poiLayer) {
         poiMarkerLayerRef.current = null
+        setCustomPoiVisibleCount(0)
       }
     }
   }, [
@@ -5830,11 +6078,11 @@ export function Map3DGuideExperience({
     isMapInstanceCurrent,
     isMapInstanceUsable,
     isRouteGuideView,
-    layerManager,
     mapVisualReadyForOverlays,
     navigate,
     nextStop.nextStopId,
     perfRecorder,
+    poiLayerController,
     poiLayerMode,
     routeCardExpanded,
     routeGuideStage,
@@ -7802,7 +8050,16 @@ export function Map3DGuideExperience({
       data-route-stop-index={effectiveGuideState.stopIndex}
       data-xiaoling-mode={effectiveGuideState.xiaolingMode}
     >
-      <div ref={mapElementRef} className="map-3d-guide-map" />
+      <MapRuntimeErrorBoundary
+        key={`map-runtime-${mapContainerGeneration}`}
+        onError={(error, info) => {
+          console.error('[Map3D] map runtime render error', error, info)
+          setLastMapError(error.message)
+          hardRecoveryRequestRef.current('map-runtime-error-boundary', error)
+        }}
+      >
+        <div key={`tmap-container-${mapContainerGeneration}`} ref={mapElementRef} className="map-3d-guide-map" />
+      </MapRuntimeErrorBoundary>
       {inkTilesEnabled && inkTileDomFallbackActive && !inkTileGroundFallbackActive ? (
         <div
           ref={inkTileDomFallbackLayerRef}
@@ -7938,19 +8195,22 @@ export function Map3DGuideExperience({
           <small>DOM overlay 仅用于正北俯视校验；3D 视角会自动降级或隐藏。</small>
         </div>
       ) : null}
-      {presentationCloudPhase !== 'hidden' ? (
-        <div
-          className={`map-presentation-cloud map-presentation-cloud--${presentationCloudPhase}`}
-          role="status"
-          aria-live="polite"
-          aria-label="地图视角切换中"
-        >
-          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--left" />
-          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--center" />
-          <span className="map-presentation-cloud__bank map-presentation-cloud__bank--right" />
-          <span className="map-presentation-cloud__label">正在切换地图视角</span>
-        </div>
-      ) : null}
+      {presentationCloudPhase !== 'hidden' && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className={`map-presentation-cloud map-presentation-cloud--${presentationCloudPhase}`}
+              role="status"
+              aria-live="polite"
+              aria-label="地图视角切换中"
+            >
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--left" />
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--center" />
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--right" />
+              <span className="map-presentation-cloud__label">正在切换地图视角</span>
+            </div>,
+            document.body
+          )
+        : null}
       <ScenicPoiBillboards
         map={mapRef.current}
         mapReady={
@@ -7970,7 +8230,7 @@ export function Map3DGuideExperience({
           const stopIndex = routeStops.findIndex((stop) => stop.spotId === id)
           const poi = lingshanPois.find((item) => item.id === id)
 
-          if (hasLingshanPoiDetail(id)) {
+          if (hasMapEnabledScenicPoi(id)) {
             setSelectedPoiId(id)
             stopActiveTour('manual')
             if (poi) {
@@ -8002,6 +8262,12 @@ export function Map3DGuideExperience({
             focusLandmarkCamera(id, getBestPoiLocation(poi), false)
           }
         }}
+      />
+      <PoiCoordinateCalibrationPanel
+        enabled={debugPoiCoordinates}
+        map={mapRef.current}
+        mapReady={mapVisualReadyForOverlays}
+        isCurrentMap={isMapInstanceCurrent}
       />
       {exportInkBase && showRoadCheck && !inkExportUiSuppressed ? (
         <div className="map-3d-guide-ink-road-check" aria-hidden="true">
@@ -9773,6 +10039,10 @@ function getPoiBillboardMode({
 }
 
 function getModelOverlayLocation(overlay: LingshanMapModelOverlay): LatLngPoint | null {
+  const catalogCoordinate = getScenicPoiCoordinate(overlay.poiId)
+  if (catalogCoordinate) {
+    return catalogCoordinate
+  }
   const poi = lingshanPois.find((item) => item.id === overlay.poiId)
 
   if (!poi) {
@@ -10550,7 +10820,12 @@ function projectLatLngToMapContainerWithMercator(map: any, point: LatLngPoint, m
 }
 
 function readMapCenterForProjection(map: any): LatLngPoint | null {
-  const center = typeof map?.getCenter === 'function' ? map.getCenter() : undefined
+  let center: any
+  try {
+    center = typeof map?.getCenter === 'function' ? map.getCenter() : undefined
+  } catch {
+    return null
+  }
 
   if (!center) {
     return null
@@ -10567,7 +10842,12 @@ function readMapCenterForProjection(map: any): LatLngPoint | null {
 }
 
 function readMapZoomForProjection(map: any) {
-  const zoom = typeof map?.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+  let zoom = Number.NaN
+  try {
+    zoom = typeof map?.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+  } catch {
+    return null
+  }
   return Number.isFinite(zoom) ? zoom : null
 }
 
@@ -10696,6 +10976,41 @@ function applyInkCleanMapCamera(map: any, TMap: any, center: LatLngPoint, zoom: 
     }
   } catch {
     // The constructor already requests the same clean camera; unsupported setters are safe to ignore.
+  }
+}
+
+function applyLongLivedMapPresentation(
+  map: any,
+  TMap: any,
+  presentation: ScenicMapPresentation,
+  fallbackCenter: LatLngPoint
+) {
+  const currentCenter = readMapCenterForProjection(map) ?? fallbackCenter
+  const currentZoom = readMapZoomForProjection(map) ?? MAP_3D_GUIDE_INITIAL_ZOOM
+  const isInk2D = presentation === 'ink2d'
+  const target = {
+    center: new TMap.LatLng(currentCenter.lat, currentCenter.lng),
+    zoom: isInk2D ? clampNumber(currentZoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM) : clampNumber(currentZoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
+    pitch: isInk2D ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+    rotation: isInk2D ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+    bearing: 0
+  }
+
+  // Current Tencent GL builds differ in whether an explicit view-mode setter
+  // exists. Feature-detect it, while pitch/rotation remains the compatible
+  // equivalent used by this app's existing camera API.
+  try {
+    map.setViewMode?.(isInk2D ? '2D' : '3D')
+  } catch {
+    // Some GL versions expose only camera controls.
+  }
+  try {
+    map.easeTo?.(target, { duration: 0 })
+  } catch {
+    map.setCenter?.(target.center)
+    map.setZoom?.(target.zoom)
+    map.setPitch?.(target.pitch)
+    map.setRotation?.(target.rotation)
   }
 }
 
@@ -12643,14 +12958,24 @@ const map3DGuideCss = `
 }
 
 .map-presentation-cloud {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 2147483000;
   overflow: hidden;
   pointer-events: auto;
   background: rgba(241, 240, 228, .18);
   opacity: 1;
   transition: opacity 360ms ease;
+}
+
+.map-3d-guide-map-runtime-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #e8eadf;
+  color: #365348;
+  font-size: 14px;
 }
 
 .map-presentation-cloud--opening {
