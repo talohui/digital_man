@@ -25,7 +25,10 @@ export function GlobalXiaolingAssistant() {
   const [visualViewport, setVisualViewport] = useState({ height: 0, offsetTop: 0 })
   const [routeAvatarAnchor, setRouteAvatarAnchor] = useState<{ top: number; right: number } | null>(null)
   const context = useGuideSessionStore((state) => state.context)
-  const messages = useGuideSessionStore((state) => state.messages)
+  const activeConversationKey = useGuideSessionStore((state) => state.activeConversationKey)
+  const messages = useGuideSessionStore((state) =>
+    state.getMessagesForConversation(state.activeConversationKey)
+  )
   const status = useGuideSessionStore((state) => state.status)
   const open = useGuideSessionStore((state) => state.isDrawerOpen)
   const setDrawerOpen = useGuideSessionStore((state) => state.setDrawerOpen)
@@ -124,13 +127,10 @@ export function GlobalXiaolingAssistant() {
       if (!location.pathname.startsWith('/map-3d-guide-c')) return
       const request = (event as CustomEvent<GuideAssistantOpenRequest>).detail
       const state = useGuideSessionStore.getState()
-      if (!state.messages.length) {
-        state.addMessage({
-          role: 'assistant',
-          text: resolveGuideAssistantContent(state.context).greeting,
-          status: 'complete'
-        })
-      }
+      state.initializeConversation(
+        state.activeConversationKey,
+        resolveGuideAssistantContent(state.context).greeting
+      )
       state.setDrawerOpen(true)
       if (request?.autoPrompt) void state.sendGuideMessage(request.autoPrompt)
     }
@@ -141,7 +141,7 @@ export function GlobalXiaolingAssistant() {
       window.removeEventListener(guideAssistantEvents.open, handleOpen)
       window.removeEventListener(guideAssistantEvents.close, handleClose)
     }
-  }, [location.pathname])
+  }, [location.pathname, activeConversationKey])
 
   const submit = () => {
     const text = input.trim()

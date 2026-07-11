@@ -1,4 +1,5 @@
 export * from './GuideMessageSchema'
+export * from './guideConversation'
 export * from './GuideRecommendationEngine'
 export * from './GuideMockResponder'
 export * from './GuideActionRegistry'

@@ -13,6 +13,7 @@ import {
 import type { GuideContext, ScenicRouteId } from './GuideMessageSchema'
 import { isScenicRouteId } from './GuideMessageSchema'
 import { useGuideSessionStore } from './useGuideSessionStore'
+import { resolveGuideAssistantContent } from './guideAssistantContent'
 
 const basePath = '/map-3d-guide-c'
 
@@ -85,6 +86,12 @@ export default function GuideContextBridge() {
     setContext(context)
 
     const state = useGuideSessionStore.getState()
+    if (state.isDrawerOpen) {
+      state.initializeConversation(
+        state.activeConversationKey,
+        resolveGuideAssistantContent(context).greeting
+      )
+    }
     if (
       context.page === 'route' &&
       context.stage === 'preview' &&
@@ -93,6 +100,10 @@ export default function GuideContextBridge() {
       !state.continuedRecommendationRouteIds.includes(context.routeId)
     ) {
       const route = getScenicRouteById(context.routeId)
+      state.initializeConversation(
+        state.activeConversationKey,
+        resolveGuideAssistantContent(context).greeting
+      )
       state.addMessage({
         role: 'assistant',
         text: `这就是我刚才为你推荐的${route?.name ?? '路线'}。你可以先浏览路线，准备好后我们就出发。`,

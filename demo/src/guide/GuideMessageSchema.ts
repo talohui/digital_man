@@ -84,6 +84,8 @@ export type GuideUiPayload =
 
 export type GuideMessage = {
   id: string
+  /** Missing only on messages archived from the pre-thread session format. */
+  conversationKey?: string
   role: 'user' | 'assistant' | 'system'
   text: string
   createdAt: number
