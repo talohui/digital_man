@@ -31,7 +31,7 @@ export function XiaolingFloatingCompanion({
         </button>
         <div className="guide-floating-companion__content">
           <button type="button" className="guide-floating-companion__tip" onClick={onOpen}>
-            小灵：想找路线、听讲解，问我吧
+            想找路线、听讲解，问我吧
           </button>
           <button type="button" onClick={onOpen}>问小灵</button>
           <button type="button" className="is-route" onClick={onRoute}>路线</button>

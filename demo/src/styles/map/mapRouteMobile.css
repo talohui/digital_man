@@ -3584,3 +3584,92 @@
     background: #1f4b3c;
   }
 }
+
+/* Final mobile card normalization: one bottom baseline and no preview-only overlays. */
+@media (max-width: 880px) {
+  .map-route-tour-overlay {
+    --route-sheet-bottom: calc(env(safe-area-inset-bottom, 0px) + clamp(14px, 2.8dvh, 22px));
+  }
+
+  .map-route-tour-bottom,
+  .map-route-tour-overlay--preview .map-route-tour-bottom,
+  .map-route-tour-overlay--active .map-route-tour-bottom,
+  .map-route-tour-overlay--arrived .map-route-tour-bottom,
+  .map-route-tour-bottom.is-collapsed {
+    bottom: var(--route-sheet-bottom) !important;
+  }
+
+  .map-route-tour-card--preview .map-route-tour-card__main {
+    grid-template-columns: clamp(64px, 17vw, 78px) minmax(0, 1fr) !important;
+    padding-right: 0 !important;
+  }
+
+  .map-route-tour-card--preview .map-route-tour-card__content,
+  .map-route-tour-card--preview h2,
+  .map-route-tour-card--active > *,
+  .map-route-tour-card--arrived > *,
+  .map-route-tour-arrived-title > * {
+    min-width: 0;
+  }
+
+  .map-route-tour-card--preview h2 {
+    overflow: visible;
+    font-size: clamp(20px, 5.6vw, 24px) !important;
+    line-height: 1.1;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .map-route-tour-stops {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+
+  .map-route-tour-stops span {
+    flex: 0 0 auto;
+    max-width: none;
+    overflow: visible;
+    white-space: nowrap;
+  }
+
+  .map-route-tour-card--active h2,
+  .map-route-tour-card--arrived h2,
+  .map-route-tour-card--active .map-route-tour-meta,
+  .map-route-tour-card--arrived .map-route-tour-meta,
+  .map-route-tour-card--active .map-route-tour-desc,
+  .map-route-tour-card--arrived .map-route-tour-desc {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .map-route-tour-card__tip {
+    display: -webkit-box;
+    max-height: calc(2 * 1.34em + 16px);
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .map-route-tour-card__head,
+  .map-route-tour-arrived-title,
+  .map-route-tour-actions {
+    min-width: 0;
+  }
+
+  .map-route-tour-guide-trigger {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .map-route-tour-actions button {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+}

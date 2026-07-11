@@ -108,17 +108,6 @@ function getRoutePreviewSummary(route: Pick<ScenicRouteConfig, 'id' | 'descripti
   return ROUTE_PREVIEW_SUMMARIES[route.id] ?? route.description
 }
 
-function getRouteRecommendationText(routeId: string) {
-  const recommendations: Record<string, string> = {
-    historical_culture: '这条路线会带你了解灵山的佛教历史与建筑故事，要不要开始？',
-    prayer_meditation: '这条路线适合祈福、礼佛和静心漫步，跟我慢慢走一走吧。',
-    highlights_checkin: '这条路线串起主要地标和拍照打卡点，适合第一次来快速看精华。',
-    natural_scenery: '这条路线沿山水林景展开，适合放慢脚步看看自然风光。',
-    family: '这条路线节奏更轻松，适合亲子同行和趣味体验。'
-  }
-  return recommendations[routeId] ?? '我会陪你按路线看看灵山的重点景点和游览节奏。'
-}
-
 function getRoutePreviewTabs() {
   const options = getScenicRouteOptions()
   const ordered = ROUTE_PREVIEW_TAB_IDS.map((routeId) => options.find((item) => item.id === routeId)).filter(
@@ -126,16 +115,6 @@ function getRoutePreviewTabs() {
   )
   const remaining = options.filter((item) => !ordered.some((route) => route.id === item.id))
   return [...ordered, ...remaining].map((item) => getScenicRouteConfig(item.id))
-}
-
-function getStationShortName(name: string) {
-  return name
-    .replace('入园', '')
-    .replace('灵山大照壁', '照壁')
-    .replace('祥符禅寺', '祥符')
-    .replace('灵山大佛', '大佛')
-    .replace('五印坛城', '坛城')
-    .replace('九龙灌浴', '九龙')
 }
 
 function RouteToolRail({
@@ -291,12 +270,10 @@ function XiaolingInlineEntry({ label = '继续问小灵', onClick }: { label?: s
 function RoutePreviewSlide({
   route,
   selected,
-  onOpenXiaoling,
   onStart
 }: {
   route: ScenicRouteConfig
   selected: boolean
-  onOpenXiaoling: () => void
   onStart: (routeId: string) => void
 }) {
   const tags = route.tags.slice(0, 2)
@@ -307,9 +284,6 @@ function RoutePreviewSlide({
       data-route-preview-id={route.id}
       aria-label={`${getRouteTabLabel(route)}路线预览`}
     >
-      <button type="button" className="map-route-tour-preview-xiaoling" onClick={onOpenXiaoling}>
-        <span>小灵推荐路线：{getRouteRecommendationText(route.id)}</span>
-      </button>
       <div className="map-route-tour-card__inner">
         <div className="map-route-tour-card__main">
           <div className="map-route-tour-cover" aria-hidden="true">
@@ -333,7 +307,7 @@ function RoutePreviewSlide({
           {route.stops.map((stop, index) => (
             <span key={`${stop.id}-${index}`}>
               <i>{index + 1}</i>
-              {getStationShortName(stop.name)}
+              {stop.name}
             </span>
           ))}
         </div>
@@ -353,12 +327,10 @@ function RoutePreviewSlide({
 function RoutePreviewDeck({
   selectedRouteId,
   onSelectRoute,
-  onOpenXiaoling,
   onStart
 }: {
   selectedRouteId: string
   onSelectRoute: (routeId: string) => void
-  onOpenXiaoling: () => void
   onStart: (routeId: string) => void
 }) {
   const routeOptions = getRoutePreviewTabs()
@@ -436,7 +408,6 @@ function RoutePreviewDeck({
             key={route.id}
             route={route}
             selected={route.id === selectedRouteId}
-            onOpenXiaoling={onOpenXiaoling}
             onStart={onStart}
           />
         ))}
@@ -834,7 +805,6 @@ function RouteTourMobileOverlay({
               setSelectedRouteId(routeId)
               goToRoutePreview(navigate, routeId, presentation, { replace: true })
             }}
-            onOpenXiaoling={openXiaoling}
             onStart={(targetRouteId) => goToRouteActive(navigate, targetRouteId, 0, presentation)}
           />
         ) : stage === 'arrived' ? (
