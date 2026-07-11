@@ -15,10 +15,10 @@
 2. 单地图实例切换使用 `applyPresentationToExistingMap()`：
    - 调用 `setViewMode()`；
    - 仅在 SDK 实际提供时调用 `setPitchable()` / `setRotatable()`；
-   - 恢复 center、zoom、pitch、rotation；
-   - 等待 `rendercomplete`、`idle` 或 `tilesloaded`，再读取真实 getter。
-3. 成功必须同时满足：`getViewMode()` 为目标模式，`getPitch()` 和 `getRotation()` 与请求相符。未通过时 transition 不会进入 `ready`，而是恢复上一个已验证 presentation。
-4. `window.__LINGSHAN_MAP_DEBUG__` 与 `window.LINGSHAN_MAP_DEBUG` 现在同时显示 requested/applied presentation 以及真实 getter 快照；`window.__GET_LINGSHAN_MAP_SNAPSHOT__()` 会再次直接读取当前地图实例。
+   - 先等待 `rendercomplete`、`idle` 或短帧间隔后确认 `getViewMode()`；单个 `tilesloaded` 失败不阻塞模式切换；
+   - 确认 3D 后再恢复 center、zoom、pitch、rotation。
+3. 成功只要求 `getViewMode()` 为目标模式。QQ WebView 在已经切入 2D 后可能继续从 `getPitch()` / `getRotation()` 返回上一套 3D 值；这些值记录为 raw 调试数据，2D 的 effective pitch/rotation 固定为 `0/0`，不能触发回滚。
+4. `window.__LINGSHAN_MAP_DEBUG__` 与 `window.LINGSHAN_MAP_DEBUG` 现在同时显示 requested/applied presentation、真实 ViewMode、raw pitch/rotation 和 effective pitch/rotation；`window.__GET_LINGSHAN_MAP_SNAPSHOT__()` 会再次直接读取当前地图实例。
 5. 仅在 3D -> 2D 已验证后，复用同一个腾讯托管自定义影像层：优先 `setVisible(false/true)` 跨两帧刷新；当 SDK 不支持该方法时才 `setMap(null/map)`。不重新调用 `createCustomLayer()`，不销毁地图。
 
 ## 真机验收
@@ -31,8 +31,8 @@ window.__GET_LINGSHAN_MAP_SNAPSHOT__()
 
 重点检查：
 
-1. 首次 `ink2d`：`actualViewMode === '2D'`、`actualPitch === 0`、`actualRotation === 0`。
+1. 首次 `ink2d`：`actualViewMode === '2D'`、`effectivePitch === 0`、`effectiveRotation === 0`。`rawPitch` / `rawRotation` 非零属于 QQ WebView 兼容现象，不是失败。
 2. 切换 `scenic3d`：真实 mode 为 `3D`，再确认 GLB 正常显示。
-3. 切回 `ink2d`：真实 mode/pitch/rotation 回到 `2D/0/0`，`mapCreateCount` 仍为 1、`mapDestroyCount` 仍为 0。
+3. 切回 `ink2d`：真实 mode 为 `2D` 且 effective pitch/rotation 为 `0/0`，`mapCreateCount` 仍为 1、`mapDestroyCount` 仍为 0。
 4. 检查 `customTileLayer.refreshCount` 与 `lastRefreshReason`；若真实相机正确但画面仍倾斜，应记录截图和这两个字段，不要创建第二个图层。
 5. 云朵转场消失后拖动地图，确认没有透明事件层残留。

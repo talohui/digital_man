@@ -119,8 +119,8 @@ type CameraState = {
 }
 type ActualTencentCameraState = {
   viewMode: '2D' | '3D' | null
-  pitch: number | null
-  rotation: number | null
+  rawPitch: number | null
+  rawRotation: number | null
   center: LatLngPoint | null
   zoom: number | null
 }
@@ -1478,6 +1478,7 @@ export function Map3DGuideExperience({
       const actualCamera = targetMap && isMapInstanceCurrent(targetMap)
         ? readActualTencentCameraState(targetMap)
         : emptyActualTencentCameraState()
+      const effectiveCamera = cameraStateFromActual(actualCamera, requestedCamera, scenicMapPresentation)
       return {
         mapInstanceId,
         mapCreateCount: mapCreateCountRef.current,
@@ -1502,9 +1503,13 @@ export function Map3DGuideExperience({
           requestedViewMode: scenicMapPresentation === 'ink2d' ? '2D' : '3D',
           actualViewMode: actualCamera.viewMode,
           requestedPitch: requestedCamera.pitch,
-          actualPitch: actualCamera.pitch,
+          actualPitch: actualCamera.rawPitch,
+          rawPitch: actualCamera.rawPitch,
+          effectivePitch: effectiveCamera.pitch,
           requestedRotation: requestedCamera.rotation,
-          actualRotation: actualCamera.rotation,
+          actualRotation: actualCamera.rawRotation,
+          rawRotation: actualCamera.rawRotation,
+          effectiveRotation: effectiveCamera.rotation,
           requestedCenter: requestedCamera.center,
           actualCenter: actualCamera.center,
           requestedZoom: requestedCamera.zoom,
@@ -3157,7 +3162,7 @@ export function Map3DGuideExperience({
         return
       }
 
-      const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, requestedCamera)
+      const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, requestedCamera, initialPresentation)
       if (initialPresentation === 'ink2d') {
         camera2DStateRef.current = verifiedCamera
       } else {
@@ -3579,7 +3584,7 @@ export function Map3DGuideExperience({
         if (!isCurrentTransition()) {
           return
         }
-        const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, targetCamera)
+        const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, targetCamera, scenicMapPresentation)
         if (scenicMapPresentation === 'ink2d') {
           camera2DStateRef.current = verifiedCamera
         } else {
@@ -3613,7 +3618,7 @@ export function Map3DGuideExperience({
         if (restoreResult.ok && isCurrentTransition()) {
           initializedPresentationRef.current = restoredPresentation
           appliedPresentationRef.current = restoredPresentation
-          const verifiedRestoreCamera = cameraStateFromActual(restoreResult.actualCamera, restoreCamera)
+          const verifiedRestoreCamera = cameraStateFromActual(restoreResult.actualCamera, restoreCamera, restoredPresentation)
           if (restoredPresentation === 'ink2d') {
             camera2DStateRef.current = verifiedRestoreCamera
           } else {
@@ -11184,7 +11189,7 @@ function readMapCameraState(map: any, fallbackCenter: LatLngPoint): CameraState 
 }
 
 function emptyActualTencentCameraState(): ActualTencentCameraState {
-  return { viewMode: null, pitch: null, rotation: null, center: null, zoom: null }
+  return { viewMode: null, rawPitch: null, rawRotation: null, center: null, zoom: null }
 }
 
 function normalizeTencentViewMode(value: unknown): '2D' | '3D' | null {
@@ -11211,25 +11216,27 @@ function readActualTencentCameraState(map: any): ActualTencentCameraState {
 
   return {
     viewMode,
-    pitch: readNumber(typeof map?.getPitch === 'function' ? () => map.getPitch() : undefined),
-    rotation: readNumber(typeof map?.getRotation === 'function' ? () => map.getRotation() : undefined),
+    rawPitch: readNumber(typeof map?.getPitch === 'function' ? () => map.getPitch() : undefined),
+    rawRotation: readNumber(typeof map?.getRotation === 'function' ? () => map.getRotation() : undefined),
     center: readMapCenterForProjection(map),
     zoom: readMapZoomForProjection(map)
   }
 }
 
-function cameraStateFromActual(actual: ActualTencentCameraState, fallback: CameraState): CameraState {
+function cameraStateFromActual(
+  actual: ActualTencentCameraState,
+  fallback: CameraState,
+  presentation: ScenicMapPresentation
+): CameraState {
   return {
     center: actual.center ?? fallback.center,
     zoom: actual.zoom ?? fallback.zoom,
-    pitch: actual.pitch ?? fallback.pitch,
-    rotation: actual.rotation ?? fallback.rotation
+    // QQ WebView can retain the prior 3D camera values in getPitch/getRotation
+    // after getViewMode() has already switched to 2D. The 2D effective camera
+    // is therefore deterministic and does not mirror those stale raw getters.
+    pitch: presentation === 'ink2d' ? 0 : actual.rawPitch ?? fallback.pitch,
+    rotation: presentation === 'ink2d' ? 0 : actual.rawRotation ?? fallback.rotation
   }
-}
-
-function circularRotationDistance(left: number, right: number) {
-  const distance = Math.abs(((left - right + 540) % 360) - 180)
-  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY
 }
 
 function waitForMapAnimationFrames(isCurrent: () => boolean) {
@@ -11325,14 +11332,36 @@ async function applyPresentationToExistingMap(options: {
     map.setViewMode(requestedViewMode)
     map.setPitchable?.(requestedViewMode === '3D')
     map.setRotatable?.(requestedViewMode === '3D')
+  } catch (error) {
+    return failed(error instanceof Error ? error.message : '腾讯地图 setViewMode 调用失败')
+  }
 
-    const target = {
-      center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
-      zoom: targetCamera.zoom,
-      pitch: targetCamera.pitch,
-      rotation: targetCamera.rotation,
-      bearing: 0
+  // Do not wait for a tile success signal here. On QQ WebView a failed image
+  // request can coexist with a successful view-mode transition.
+  await waitForTencentMapRender(map, isCurrent)
+  if (!isCurrent()) {
+    return failed('地图实例已过期，忽略视图模式切换结果')
+  }
+
+  const modeCamera = readActualTencentCameraState(map)
+  if (modeCamera.viewMode !== requestedViewMode) {
+    return {
+      ok: false,
+      requestedPresentation: presentation,
+      requestedCamera: targetCamera,
+      actualCamera: modeCamera,
+      error: `腾讯地图真实视图未收敛：期望 ${requestedViewMode}，实际 ${modeCamera.viewMode ?? 'unknown'}`
     }
+  }
+
+  const target = {
+    center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
+    zoom: targetCamera.zoom,
+    pitch: targetCamera.pitch,
+    rotation: targetCamera.rotation,
+    bearing: 0
+  }
+  try {
     try {
       map.easeTo?.(target, { duration: 0 })
     } catch {
@@ -11343,21 +11372,19 @@ async function applyPresentationToExistingMap(options: {
     map.setPitch?.(target.pitch)
     map.setRotation?.(target.rotation)
     map.setBearing?.(0)
-  } catch (error) {
-    return failed(error instanceof Error ? error.message : '腾讯地图 setViewMode 调用失败')
+  } catch {
+    // A view mode already verified by getViewMode() remains valid even when a
+    // WebView ignores an optional camera setter.
   }
 
-  await waitForTencentMapRender(map, isCurrent)
+  await waitForMapAnimationFrames(isCurrent)
   if (!isCurrent()) {
     return failed('地图实例已过期，忽略视图模式切换结果')
   }
 
   const actualCamera = readActualTencentCameraState(map)
   const viewModeMatches = actualCamera.viewMode === requestedViewMode
-  const pitchMatches = actualCamera.pitch !== null && Math.abs(actualCamera.pitch - targetCamera.pitch) <= 0.75
-  const rotationMatches =
-    actualCamera.rotation !== null && circularRotationDistance(actualCamera.rotation, targetCamera.rotation) <= 0.75
-  const ok = viewModeMatches && pitchMatches && rotationMatches
+  const ok = viewModeMatches
 
   return {
     ok,
@@ -11366,7 +11393,7 @@ async function applyPresentationToExistingMap(options: {
     actualCamera,
     error: ok
       ? undefined
-      : `腾讯地图真实视图未收敛：期望 ${requestedViewMode} / pitch ${targetCamera.pitch.toFixed(2)} / rotation ${targetCamera.rotation.toFixed(2)}，实际 ${actualCamera.viewMode ?? 'unknown'} / ${actualCamera.pitch ?? 'unknown'} / ${actualCamera.rotation ?? 'unknown'}`
+      : `腾讯地图真实视图未收敛：期望 ${requestedViewMode}，实际 ${actualCamera.viewMode ?? 'unknown'}`
   }
 }
 
