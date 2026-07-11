@@ -146,11 +146,29 @@ type CustomTileLayerRuntime = {
 }
 type RouteCameraIntentSource = 'route-overview' | 'route-current'
 type RouteCameraIntentStatus = 'idle' | 'applying' | 'completed' | 'superseded' | 'failed'
+type RouteCameraIntentPhase =
+  | 'idle'
+  | 'applying-full-camera'
+  | 'verifying-camera'
+  | 'correcting-zoom'
+  | 'verifying-final'
+  | 'completed'
+  | 'failed'
 type RouteCameraIntentSnapshot = {
   generation: number
   source: RouteCameraIntentSource | null
   routeId: string | null
   target: CameraState | null
+  rawTargetZoom: number | null
+  effectiveTargetZoom: number | null
+  configuredMinZoom: number | null
+  configuredMaxZoom: number | null
+  actualZoom: number | null
+  zoomCorrectionApplied: boolean
+  zoomCorrectionMethod: 'zoomTo' | 'setZoom' | null
+  zoomCorrectionGeneration: number | null
+  lastZoomWriter: { source: RouteCameraIntentSource; generation: number; value: number } | null
+  phase: RouteCameraIntentPhase
   status: RouteCameraIntentStatus
   lastCompletedGeneration: number
   lastFailure?: string
@@ -1060,6 +1078,16 @@ export function Map3DGuideExperience({
     source: null,
     routeId: null,
     target: null,
+    rawTargetZoom: null,
+    effectiveTargetZoom: null,
+    configuredMinZoom: null,
+    configuredMaxZoom: null,
+    actualZoom: null,
+    zoomCorrectionApplied: false,
+    zoomCorrectionMethod: null,
+    zoomCorrectionGeneration: null,
+    lastZoomWriter: null,
+    phase: 'idle',
     status: 'idle',
     lastCompletedGeneration: 0
   })
@@ -1579,6 +1607,16 @@ export function Map3DGuideExperience({
           routeId: routeCameraIntentRef.current.routeId,
           targetCenter: routeCameraIntentRef.current.target?.center ?? null,
           targetZoom: routeCameraIntentRef.current.target?.zoom ?? null,
+          rawTargetZoom: routeCameraIntentRef.current.rawTargetZoom,
+          effectiveTargetZoom: routeCameraIntentRef.current.effectiveTargetZoom,
+          actualZoom: routeCameraIntentRef.current.actualZoom,
+          configuredMinZoom: routeCameraIntentRef.current.configuredMinZoom,
+          configuredMaxZoom: routeCameraIntentRef.current.configuredMaxZoom,
+          zoomCorrectionApplied: routeCameraIntentRef.current.zoomCorrectionApplied,
+          zoomCorrectionMethod: routeCameraIntentRef.current.zoomCorrectionMethod,
+          zoomCorrectionGeneration: routeCameraIntentRef.current.zoomCorrectionGeneration,
+          lastZoomWriter: routeCameraIntentRef.current.lastZoomWriter,
+          phase: routeCameraIntentRef.current.phase,
           targetPitch: routeCameraIntentRef.current.target?.pitch ?? null,
           targetRotation: routeCameraIntentRef.current.target?.rotation ?? null,
           status: routeCameraIntentRef.current.status,
@@ -6861,9 +6899,15 @@ export function Map3DGuideExperience({
 
     const generation = ++routeCameraIntentGenerationRef.current
     const previousIntent = routeCameraIntentRef.current
+    const zoomConstraints = getRouteCameraZoomConstraints(map)
+    const rawTargetZoom = preset.zoom
+    const effectiveTargetZoom =
+      source === 'route-overview'
+        ? clampNumber(rawTargetZoom, zoomConstraints.minZoom, zoomConstraints.maxZoom)
+        : rawTargetZoom
     const targetCamera: CameraState = {
       center: target,
-      zoom: preset.zoom,
+      zoom: effectiveTargetZoom,
       pitch: preset.pitch,
       rotation: preset.rotation
     }
@@ -6872,10 +6916,21 @@ export function Map3DGuideExperience({
       source,
       routeId,
       target: targetCamera,
+      rawTargetZoom,
+      effectiveTargetZoom,
+      configuredMinZoom: zoomConstraints.minZoom,
+      configuredMaxZoom: zoomConstraints.maxZoom,
+      actualZoom: null,
+      zoomCorrectionApplied: false,
+      zoomCorrectionMethod: null,
+      zoomCorrectionGeneration: null,
+      lastZoomWriter: null,
+      phase: 'applying-full-camera',
       status: 'applying',
       lastCompletedGeneration: previousIntent.lastCompletedGeneration
     }
-    updateRouteCameraIntentSnapshot(intent)
+    let intentSnapshot: RouteCameraIntentSnapshot = intent
+    updateRouteCameraIntentSnapshot(intentSnapshot)
     routeCameraProgrammaticMoveRef.current = true
     // Cancels any delayed second-stage callback left by an earlier generic
     // landmark/overview camera command before this route intent takes over.
@@ -6895,7 +6950,7 @@ export function Map3DGuideExperience({
       try {
         const cameraTarget = {
           center: new window.TMap.LatLng(target.lat, target.lng),
-          zoom: preset.zoom,
+          zoom: effectiveTargetZoom,
           pitch: preset.pitch,
           rotation: preset.rotation
         }
@@ -6907,11 +6962,22 @@ export function Map3DGuideExperience({
           map.setPitch?.(cameraTarget.pitch)
           map.setRotation?.(cameraTarget.rotation)
         }
+        intentSnapshot = {
+          ...intentSnapshot,
+          phase: 'verifying-camera',
+          lastZoomWriter: {
+            source,
+            generation,
+            value: effectiveTargetZoom
+          }
+        }
+        updateRouteCameraIntentSnapshot(intentSnapshot)
 
-        const result = await waitForRouteCameraIntentTarget({
+        let result = await waitForRouteCameraIntentTarget({
           map,
           target: targetCamera,
           requireOrientation: scenicMapPresentation === 'scenic3d',
+          requireZoom: source !== 'route-overview',
           isCurrent: isCurrentIntent,
           timeoutMs: Math.max(1600, preset.durationMs + 900)
         })
@@ -6921,12 +6987,109 @@ export function Map3DGuideExperience({
         if (!result.matched) {
           routeCameraProgrammaticMoveRef.current = false
           updateRouteCameraIntentSnapshot({
-            ...intent,
+            ...intentSnapshot,
+            phase: 'failed',
             status: 'failed',
+            actualZoom: result.camera.zoom,
             lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
             lastFailure: `相机未到达目标：${describeRouteCameraMismatch(result.camera, targetCamera)}`
           })
           return
+        }
+
+        if (
+          source === 'route-overview' &&
+          (result.camera.zoom === null || Math.abs(result.camera.zoom - effectiveTargetZoom) > 0.1)
+        ) {
+          if (!isCurrentIntent()) {
+            return
+          }
+          let correctionMethod: 'zoomTo' | 'setZoom' = 'setZoom'
+          try {
+            // A completed easeTo can retain the previous close-up zoom in QQ
+            // WebView. Stop it before this intent owns the explicit zoom fix.
+            map.stop?.()
+            if (typeof map.zoomTo === 'function') {
+              map.zoomTo(effectiveTargetZoom, { duration: 200 })
+              correctionMethod = 'zoomTo'
+            } else {
+              map.setZoom?.(effectiveTargetZoom)
+            }
+          } catch {
+            correctionMethod = 'setZoom'
+            map.setZoom?.(effectiveTargetZoom)
+          }
+          intentSnapshot = {
+            ...intentSnapshot,
+            phase: 'correcting-zoom',
+            actualZoom: result.camera.zoom,
+            zoomCorrectionApplied: true,
+            zoomCorrectionMethod: correctionMethod,
+            zoomCorrectionGeneration: generation,
+            lastZoomWriter: {
+              source,
+              generation,
+              value: effectiveTargetZoom
+            }
+          }
+          updateRouteCameraIntentSnapshot(intentSnapshot)
+          intentSnapshot = { ...intentSnapshot, phase: 'verifying-final' }
+          updateRouteCameraIntentSnapshot(intentSnapshot)
+          if (correctionMethod === 'zoomTo') {
+            result = await waitForRouteCameraIntentTarget({
+              map,
+              target: targetCamera,
+              requireOrientation: scenicMapPresentation === 'scenic3d',
+              requireZoom: true,
+              isCurrent: isCurrentIntent,
+              timeoutMs: 420
+            })
+            if (!isCurrentIntent()) {
+              return
+            }
+            if (!result.matched) {
+              // Some QQ WebView builds accept zoomTo without applying it. A
+              // single direct setZoom is the terminal fallback for this intent.
+              map.setZoom?.(effectiveTargetZoom)
+              correctionMethod = 'setZoom'
+              intentSnapshot = {
+                ...intentSnapshot,
+                actualZoom: result.camera.zoom,
+                zoomCorrectionMethod: correctionMethod,
+                lastZoomWriter: {
+                  source,
+                  generation,
+                  value: effectiveTargetZoom
+                }
+              }
+              updateRouteCameraIntentSnapshot(intentSnapshot)
+            }
+          }
+          if (!result.matched || correctionMethod === 'setZoom') {
+            result = await waitForRouteCameraIntentTarget({
+              map,
+              target: targetCamera,
+              requireOrientation: scenicMapPresentation === 'scenic3d',
+              requireZoom: true,
+              isCurrent: isCurrentIntent,
+              timeoutMs: 900
+            })
+          }
+          if (!isCurrentIntent()) {
+            return
+          }
+          if (!result.matched) {
+            routeCameraProgrammaticMoveRef.current = false
+            updateRouteCameraIntentSnapshot({
+              ...intentSnapshot,
+              phase: 'failed',
+              status: 'failed',
+              actualZoom: result.camera.zoom,
+              lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+              lastFailure: `缩放修正后未到达目标：${describeRouteCameraMismatch(result.camera, targetCamera)}`
+            })
+            return
+          }
         }
 
         routeCameraProgrammaticMoveRef.current = false
@@ -6942,8 +7105,10 @@ export function Map3DGuideExperience({
         setMapInteractionSnapshot((current) => ({ ...current, currentZoom: actualCamera.zoom }))
         setMapBoundsSnapshot({ center: actualCamera.center, zoom: actualCamera.zoom })
         updateRouteCameraIntentSnapshot({
-          ...intent,
+          ...intentSnapshot,
+          phase: 'completed',
           status: 'completed',
+          actualZoom: result.camera.zoom,
           lastCompletedGeneration: generation
         })
         perfRecorder.recordCameraEvent({
@@ -6959,7 +7124,8 @@ export function Map3DGuideExperience({
         }
         routeCameraProgrammaticMoveRef.current = false
         updateRouteCameraIntentSnapshot({
-          ...intent,
+          ...intentSnapshot,
+          phase: 'failed',
           status: 'failed',
           lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
           lastFailure: error instanceof Error ? error.message : '路线相机命令失败'
@@ -11623,10 +11789,11 @@ function waitForRouteCameraIntentTarget(options: {
   map: any
   target: CameraState
   requireOrientation: boolean
+  requireZoom: boolean
   isCurrent: () => boolean
   timeoutMs: number
 }) {
-  const { map, target, requireOrientation, isCurrent, timeoutMs } = options
+  const { map, target, requireOrientation, requireZoom, isCurrent, timeoutMs } = options
   return new Promise<{ matched: boolean; camera: ActualTencentCameraState }>((resolve) => {
     let settled = false
     let timeoutId: number | undefined
@@ -11661,7 +11828,8 @@ function waitForRouteCameraIntentTarget(options: {
       const camera = readActualTencentCameraState(map)
       const centerMatched =
         camera.center !== null && haversineDistanceMeters(camera.center, target.center) <= 14
-      const zoomMatched = camera.zoom !== null && Math.abs(camera.zoom - target.zoom) <= 0.1
+      const zoomMatched =
+        !requireZoom || (camera.zoom !== null && Math.abs(camera.zoom - target.zoom) <= 0.1)
       const pitchMatched =
         !requireOrientation || (camera.rawPitch !== null && Math.abs(camera.rawPitch - target.pitch) <= 0.9)
       const rotationMatched =
@@ -11693,6 +11861,28 @@ function describeRouteCameraMismatch(camera: ActualTencentCameraState, target: C
   const pitch = camera.rawPitch === null ? 'unknown' : camera.rawPitch.toFixed(2)
   const rotation = camera.rawRotation === null ? 'unknown' : camera.rawRotation.toFixed(2)
   return `center ${centerDistance}m / zoom ${zoom} / pitch ${pitch} / rotation ${rotation}`
+}
+
+function getRouteCameraZoomConstraints(map: any) {
+  const readConstraint = (getter: unknown) => {
+    try {
+      const value = Number(typeof getter === 'function' ? getter() : Number.NaN)
+      return Number.isFinite(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+  // These fallbacks are the values used by the long-lived TMap constructor.
+  // The hosted ImageTileLayer has its own 15–20 coverage range, but it does
+  // not control the map camera's legal zoom interval.
+  const reportedMin = readConstraint(map?.getMinZoom?.bind(map))
+  const reportedMax = readConstraint(map?.getMaxZoom?.bind(map))
+  const minZoom = Math.max(INK_2D_MIN_ZOOM, reportedMin ?? INK_2D_MIN_ZOOM)
+  const maxZoom = Math.min(INK_MAP_MAX_ZOOM, reportedMax ?? INK_MAP_MAX_ZOOM)
+
+  return maxZoom >= minZoom
+    ? { minZoom, maxZoom }
+    : { minZoom: INK_2D_MIN_ZOOM, maxZoom: INK_MAP_MAX_ZOOM }
 }
 
 function waitForTencentMapRender(map: any, isCurrent: () => boolean, timeoutMs = 700) {
