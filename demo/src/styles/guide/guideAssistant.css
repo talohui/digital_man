@@ -16,13 +16,19 @@
 }
 
 .guide-floating-companion--browse {
-  --guide-companion-avatar-size: clamp(50px, 13vw, 58px);
+  --guide-companion-avatar-size: clamp(52px, 14vw, 66px);
   right: max(14px, env(safe-area-inset-right, 0px));
   bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 12px));
   left: max(14px, env(safe-area-inset-left, 0px));
-  display: block;
+  display: grid;
   width: min(calc(100% - 28px), 540px);
-  min-height: clamp(114px, 30vw, 122px);
+  min-height: clamp(108px, 29vw, 118px);
+  grid-template-columns: var(--guide-companion-avatar-size) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "avatar content"
+    "avatar content";
+  column-gap: 10px;
   margin: 0 auto;
   border: 1px solid rgba(201, 168, 106, 0.42);
   border-radius: clamp(22px, 6vw, 30px);
@@ -62,10 +68,9 @@
 }
 
 .guide-floating-companion--browse .guide-floating-companion__avatar {
-  position: absolute;
-  top: 10px;
-  left: 14px;
-  z-index: 1;
+  position: static;
+  grid-area: avatar;
+  align-self: center;
   width: var(--guide-companion-avatar-size);
   height: var(--guide-companion-avatar-size);
 }
@@ -97,7 +102,7 @@
   border: 0;
   grid-column: 1 / -1;
   min-height: clamp(50px, 13vw, 56px);
-  padding: 0 0 0 calc(var(--guide-companion-avatar-size, 50px) + 10px);
+  padding: 0;
   background: transparent;
   color: var(--map-green-deep, #214a3b);
   font-family: var(--map-font-serif, serif);
@@ -110,8 +115,10 @@
 }
 
 .guide-floating-companion__content {
+  grid-area: content;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(50px, auto) minmax(36px, auto);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -191,13 +198,14 @@
 
 @media (max-width: 370px) {
   .guide-floating-companion--browse {
-    --guide-companion-avatar-size: 50px;
+    --guide-companion-avatar-size: 52px;
     padding: 12px;
+    column-gap: 8px;
   }
 
   .guide-floating-companion--browse .guide-floating-companion__avatar {
-    top: 12px;
-    left: 12px;
+    width: var(--guide-companion-avatar-size);
+    height: var(--guide-companion-avatar-size);
   }
 
   .guide-floating-companion__tip {

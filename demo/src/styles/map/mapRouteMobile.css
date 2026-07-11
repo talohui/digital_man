@@ -3372,10 +3372,21 @@
     --map-toolrail-width: clamp(42px, 10.4vw, 48px);
     --map-toolrail-item-height: clamp(39px, 9.5vw, 46px);
     --map-toolrail-padding: clamp(3px, 0.9vw, 5px);
+    --map-top-control-offset: calc(
+      var(--route-vvo-top, 0px) + env(safe-area-inset-top, 0px) + clamp(8px, 2vw, 12px)
+    );
+    --map-control-gap: clamp(92px, 24vw, 104px);
+    --route-right-rail-top: calc(
+      var(--map-top-control-offset) + var(--map-mobile-control-size) + var(--map-control-gap)
+    );
+    --route-right-rail-height: calc(
+      var(--map-toolrail-item-height) + var(--map-toolrail-item-height) + var(--map-toolrail-item-height) +
+        var(--map-toolrail-item-height) + var(--map-toolrail-item-height) + var(--map-toolrail-padding) +
+        var(--map-toolrail-padding)
+    );
     --route-right-rail-center-y: clamp(250px, 36dvh, 302px);
     --route-right-rail-bottom: calc(
-      var(--route-vvh, 100dvh) - var(--route-right-rail-center-y) - var(--map-toolrail-item-height) -
-        var(--map-toolrail-item-height) - var(--map-toolrail-padding) - 1px
+      var(--route-vvh, 100dvh) - var(--route-right-rail-top) - var(--route-right-rail-height)
     );
   }
 
@@ -3671,5 +3682,62 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     white-space: normal;
+  }
+}
+
+/* Final viewport normalization: all route controls share the portal coordinate system. */
+@media (max-width: 880px) {
+  .map-route-tour-overlay {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    --route-tip-offset: -46px;
+  }
+
+  .map-route-tour-topbar {
+    top: var(--map-top-control-offset) !important;
+  }
+
+  .map-route-tour-toolrail.map-mobile-toolrail--right {
+    top: auto !important;
+    bottom: var(--route-right-rail-bottom) !important;
+  }
+
+  .map-route-tour-layer-panel {
+    bottom: var(--route-right-rail-bottom) !important;
+  }
+
+  .map-route-tour-card__tip {
+    top: var(--route-tip-offset) !important;
+    display: block;
+    max-width: 100%;
+    max-height: none;
+    overflow: hidden;
+    padding: 7px 8px;
+    font-size: clamp(10.5px, 2.9vw, 12px);
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: 0;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    -webkit-box-orient: initial;
+    -webkit-line-clamp: unset;
+  }
+
+  .map-route-tour-actions {
+    grid-template-columns: minmax(0, 1.18fr) minmax(0, 1.05fr) minmax(0, 0.85fr);
+  }
+
+  .map-route-tour-actions--arrived {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.84fr) minmax(0, 1.05fr);
+  }
+
+  .map-route-tour-actions button {
+    min-width: 0;
+    padding-inline: clamp(4px, 1.4vw, 7px) !important;
+    font-size: clamp(14px, 3.6vw, 17px) !important;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    white-space: nowrap;
   }
 }
