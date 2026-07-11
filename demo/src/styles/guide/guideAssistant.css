@@ -2,11 +2,15 @@
   position: fixed;
   top: var(--guide-vvo-top, 0px);
   left: 0;
+  right: 0;
   z-index: 26000;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: var(--guide-vvh, 100dvh);
+  box-sizing: border-box;
   color: var(--map-green-deep, #214a3b);
   font-family: var(--map-font-serif, "Songti SC", serif);
+  overflow-x: clip;
   pointer-events: none;
 }
 

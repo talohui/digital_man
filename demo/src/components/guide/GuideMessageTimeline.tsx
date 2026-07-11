@@ -11,7 +11,10 @@ export function GuideMessageTimeline({
   return (
     <div className="guide-message-timeline" aria-live="polite">
       {messages.map((message) => (
-        <article key={message.id} className={`guide-message guide-message--${message.role}`}>
+        <article
+          key={message.id}
+          className={`guide-message guide-message--${message.role}${message.ui ? ' guide-message--with-card' : ''}`}
+        >
           <p>{message.text}</p>
           {message.ui ? <GuideActionCardRenderer payload={message.ui} onAction={onAction} /> : null}
         </article>

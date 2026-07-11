@@ -8,9 +8,9 @@ const STATUS_LABELS: Record<DigitalHumanStatus, string> = {
   offline: '小灵形象准备中'
 }
 
-export function DigitalHumanStage({ status = 'idle', compact = false }: { status?: DigitalHumanStatus; compact?: boolean }) {
+export function DigitalHumanStage({ status = 'idle' }: { status?: DigitalHumanStatus }) {
   return (
-    <section className={`guide-digital-human-stage${compact ? ' is-compact' : ''}`} aria-label={STATUS_LABELS[status]}>
+    <section className="guide-digital-human-stage" aria-label={STATUS_LABELS[status]}>
       <div className="guide-digital-human-stage__mist" aria-hidden="true" />
       <div className="guide-digital-human-stage__halo" aria-hidden="true" />
       <div className={`guide-digital-human-stage__figure is-${status}`} aria-hidden="true">

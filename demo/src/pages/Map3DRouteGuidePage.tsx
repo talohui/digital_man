@@ -6,7 +6,11 @@ import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
 import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail, type MapMobileToolRailItem } from '../components/map/MapMobileToolRail'
 import { getLingshanPoiDetailById } from '../data/lingshanPoiDetails'
-import { getRecommendedStayLabel, hasAvailablePoiGlbModel } from '../data/poiGuideMetadata'
+import {
+  getPoiArrivalSummary,
+  getRecommendedStayLabel,
+  hasAvailablePoiGlbModel
+} from '../data/poiGuideMetadata'
 import {
   getDefaultScenicRouteId,
   getNextRouteStop,
@@ -485,9 +489,11 @@ function RouteArrivedCard({
   const currentStop = getRouteStopByIndex(route.id, currentStopIndex)
   const meta = getStopMeta(currentStop)
   const currentPoiId = getStopPoiId(currentStop)
+  const arrivalSummary = getPoiArrivalSummary(currentPoiId)
+    ?? '当前景点适合结合现场环境和图文介绍继续了解。'
   const arrivedDescription = hasAvailablePoiGlbModel(currentPoiId)
-    ? '这里适合听建筑与灵山历史渊源，也可以进入详情查看图文介绍与 3D 模型。'
-    : '这里适合听建筑与灵山历史渊源，也可以进入详情查看图文介绍。'
+    ? `${arrivalSummary}。可进入详情查看图文介绍与 3D 模型。`
+    : `${arrivalSummary}。可进入详情查看景点介绍与游览建议。`
 
   return (
     <section className="map-route-tour-card map-route-tour-card--arrived" aria-label="已到达景点">

@@ -68,7 +68,7 @@ export function XiaolingGuideDrawer({
           </div>
           <button type="button" onClick={onClose} aria-label="关闭">×</button>
         </header>
-        <DigitalHumanStage status={status} compact={messages.length > 4} />
+        <DigitalHumanStage status={status} />
         {suggestedQuestions.length ? (
           <div className="guide-drawer__quick-prompts" aria-label="推荐提问">
             {suggestedQuestions.map((question) => (

@@ -1,7 +1,9 @@
 .guide-digital-human-stage {
   position: relative;
-  min-height: clamp(150px, 31dvh, 216px);
-  flex: none;
+  height: var(--guide-hero-height);
+  min-height: var(--guide-hero-height);
+  max-height: var(--guide-hero-height);
+  flex: 0 0 var(--guide-hero-height);
   overflow: hidden;
   isolation: isolate;
   border-radius: 22px;
@@ -9,8 +11,6 @@
     linear-gradient(155deg, rgba(215, 238, 210, 0.58), transparent 54%),
     linear-gradient(28deg, rgba(255, 239, 180, 0.42), transparent 60%);
 }
-
-.guide-digital-human-stage.is-compact { min-height: 128px; }
 
 .guide-digital-human-stage__mist,
 .guide-digital-human-stage__halo {

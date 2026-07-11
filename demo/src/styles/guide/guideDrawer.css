@@ -1,9 +1,15 @@
 .guide-drawer-layer {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 2;
   display: grid;
+  width: auto;
+  max-width: 100%;
   align-items: end;
+  box-sizing: border-box;
   pointer-events: auto;
 }
 
@@ -15,18 +21,25 @@
 }
 
 .guide-drawer {
+  --guide-hero-height: clamp(156px, 42vw, 196px);
   position: relative;
   z-index: 1;
   display: flex;
-  width: min(100%, 640px);
+  width: auto;
+  max-width: min(640px, 100%);
+  min-width: 0;
   height: min(86dvh, calc(var(--guide-vvh, 100dvh) - 12px));
   max-height: calc(var(--guide-vvh, 100dvh) - 12px);
   flex-direction: column;
   gap: 10px;
-  margin: 0 auto;
+  justify-self: stretch;
+  margin-inline: auto;
   border: 1px solid rgba(201, 168, 106, 0.45);
   border-radius: 28px 28px 0 0;
-  padding: 9px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-block: 9px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-inline-start: max(14px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(14px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
   background:
     radial-gradient(circle at 10% 10%, rgba(223, 242, 214, 0.88), transparent 31%),
     radial-gradient(circle at 90% 8%, rgba(255, 241, 195, 0.55), transparent 28%),
@@ -53,6 +66,11 @@
   align-items: start;
   justify-content: space-between;
   gap: 14px;
+  min-width: 0;
+}
+
+.guide-drawer__header > div {
+  min-width: 0;
 }
 
 .guide-drawer__header strong {
@@ -69,6 +87,7 @@
   font-family: var(--map-font-sans, sans-serif);
   font-size: clamp(11px, 2.85vw, 13px);
   font-weight: 700;
+  overflow-wrap: break-word;
 }
 
 .guide-drawer__header button {
@@ -86,6 +105,7 @@
 }
 
 .guide-drawer__conversation {
+  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
@@ -100,10 +120,11 @@
   flex: none;
   gap: 7px;
   overflow-x: auto;
-  padding: 1px 1px 2px;
+  padding: 1px 2px 2px;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
+  scroll-padding-inline: 2px;
   touch-action: pan-x;
 }
 
@@ -136,6 +157,7 @@
   display: grid;
   min-height: 48px;
   flex: none;
+  min-width: 0;
   grid-template-columns: 40px minmax(0, 1fr) 42px;
   gap: 8px;
   align-items: center;
@@ -159,6 +181,7 @@
   display: grid;
   width: 40px;
   height: 40px;
+  min-width: 0;
   place-items: center;
   border: 0;
   border-radius: 50%;
