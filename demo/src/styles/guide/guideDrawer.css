@@ -94,6 +94,42 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.guide-drawer__quick-prompts {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 1px 1px 2px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.guide-drawer__quick-prompts::-webkit-scrollbar {
+  display: none;
+}
+
+.guide-drawer__quick-prompts button {
+  min-width: max-content;
+  border: 1px solid rgba(63, 111, 90, 0.2);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(255, 253, 244, 0.76);
+  box-shadow: 0 3px 9px rgba(31, 59, 49, 0.08);
+  color: #315a49;
+  font: 700 clamp(11px, 2.9vw, 13px)/1.2 var(--map-font-serif, serif);
+  white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.guide-drawer__quick-prompts button:active {
+  background: rgba(220, 236, 215, 0.92);
+  transform: translateY(1px);
+}
+
 .guide-input-composer {
   position: relative;
   z-index: 2;

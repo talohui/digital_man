@@ -9,24 +9,30 @@ import type { GuideAssistantMode } from './guideAssistantEvents'
 export function XiaolingGuideDrawer({
   open,
   mode,
+  title,
   summary,
+  suggestedQuestions,
   messages,
   input,
   status,
   onClose,
   onInputChange,
   onSend,
+  onSuggestedQuestion,
   onAction
 }: {
   open: boolean
   mode: GuideAssistantMode
+  title: string
   summary: string
+  suggestedQuestions: string[]
   messages: GuideMessage[]
   input: string
   status: DigitalHumanStatus
   onClose: () => void
   onInputChange: (value: string) => void
   onSend: () => void
+  onSuggestedQuestion: (question: string) => void
   onAction: (action: GuideAction) => void
 }) {
   const dragStartYRef = useRef<number | null>(null)
@@ -57,12 +63,21 @@ export function XiaolingGuideDrawer({
         />
         <header className="guide-drawer__header">
           <div>
-            <strong>小灵导览</strong>
+            <strong>{title}</strong>
             <p>{summary}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="关闭">×</button>
         </header>
         <DigitalHumanStage status={status} compact={messages.length > 4} />
+        {suggestedQuestions.length ? (
+          <div className="guide-drawer__quick-prompts" aria-label="推荐提问">
+            {suggestedQuestions.map((question) => (
+              <button key={question} type="button" onClick={() => onSuggestedQuestion(question)}>
+                {question}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="guide-drawer__conversation" ref={timelineRef}>
           <GuideMessageTimeline messages={messages} onAction={onAction} />
         </div>

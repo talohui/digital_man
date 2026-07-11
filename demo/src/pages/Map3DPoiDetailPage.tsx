@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getScenicRouteConfig } from '../data/lingshanScenicRoutes'
 import { getLingshanPoiDetailById, lingshanPoiDetails, type LingshanPoiDetail } from '../data/lingshanPoiDetails'
 import { getPoiDetailContent, type PoiDetailContent } from '../data/poiDetailContent'
+import { getRecommendedStayLabel } from '../data/poiGuideMetadata'
 import { guideSpots } from '../data/guideData'
 import { lingshanPois } from '../data/lingshanMapData'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
@@ -317,8 +318,7 @@ function getFallbackCategory(poiId: string): LingshanPoiDetail['category'] {
 }
 
 function getStayTimeLabel(detail: LingshanPoiDetail) {
-  const matched = detail.visitTips.join(' ').match(/建议(?:停留)?\s*(\d+\s*[-~至]?\s*\d*)\s*分钟/)
-  return matched ? `建议停留${matched[1]}分钟` : '建议停留15分钟'
+  return getRecommendedStayLabel(detail.id)
 }
 
 function getPrimaryTag(detail: LingshanPoiDetail) {

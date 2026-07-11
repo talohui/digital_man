@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { getRouteStopByIndex, getScenicRouteById, getRouteStops } from '../data/lingshanScenicRoutes'
 import { lingshanPoiDetails } from '../data/lingshanPoiDetails'
+import { getPoiGuideDisplayName } from '../data/poiGuideMetadata'
 import {
   isPoiEntrySource,
   isPoiReturnStage,
@@ -61,7 +62,7 @@ function buildContext(pathname: string, search: string): GuideContext | undefine
       page: 'poi', pathname, presentation, routeId,
       routeName: routeId ? getScenicRouteById(routeId)?.name : undefined,
       selectedPoiId,
-      selectedPoiName: detail?.name ?? selectedPoiId,
+      selectedPoiName: detail?.name ?? getPoiGuideDisplayName(selectedPoiId) ?? selectedPoiId,
       poiSource: isPoiEntrySource(source) ? source : 'browse',
       poiReturnStage: isPoiReturnStage(returnStage) ? returnStage : undefined,
       poiReturnStopIndex: parseStopParam(params.get('returnStop'), routeId ? getRouteStops(routeId).length : undefined),

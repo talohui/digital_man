@@ -106,7 +106,7 @@
   background: transparent;
   color: var(--map-green-deep, #214a3b);
   font-family: var(--map-font-serif, serif);
-  font-size: clamp(14px, 3.55vw, 16px);
+  font-size: clamp(16px, 4.1vw, 19px);
   font-weight: 700;
   line-height: 1.3;
   text-align: left;
@@ -209,7 +209,7 @@
   }
 
   .guide-floating-companion__tip {
-    font-size: clamp(13px, 3.55vw, 14px);
+    font-size: 15px;
   }
 
   .guide-floating-companion__content > button:not(.guide-floating-companion__tip) {

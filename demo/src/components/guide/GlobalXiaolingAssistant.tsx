@@ -5,9 +5,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   executeGuideAction,
   type GuideAction,
-  type GuideContext,
   useGuideSessionStore
 } from '../../guide'
+import { resolveGuideAssistantContent } from '../../guide/guideAssistantContent'
 import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAssistantEvents'
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
 import { XiaolingGuideDrawer } from './XiaolingGuideDrawer'
@@ -15,27 +15,6 @@ import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
 import '../../styles/guide/guideCards.css'
-
-function getContextSummary(context: GuideContext) {
-  if (context.page === 'poi') return `正在了解 · ${context.selectedPoiName ?? '当前景点'}`
-  if (context.page === 'route') {
-    const stopText = context.currentStopIndex === undefined ? '' : ` · 第 ${context.currentStopIndex + 1} 站`
-    return context.stage === 'arrived'
-      ? `已到达${stopText}${context.currentStopName ? ` · ${context.currentStopName}` : ''}`
-      : `${context.routeName ?? '路线游览'}${stopText}`
-  }
-  return '灵山胜境自由导览'
-}
-
-function getGreeting(context: GuideContext) {
-  if (context.page === 'poi') {
-    return `我是小灵。关于${context.selectedPoiName ?? '当前景点'}的故事、看点和拍照建议，都可以问我。`
-  }
-  if (context.page === 'route') {
-    return `我会陪你走${context.routeName ?? '当前路线'}，可以问下一站、路线节奏或游览建议。`
-  }
-  return '我是小灵。想找路线、听景点故事、问服务点，都可以问我。'
-}
 
 /** Persistent map-only assistant. Pages only publish UI intents. */
 export function GlobalXiaolingAssistant() {
@@ -58,6 +37,7 @@ export function GlobalXiaolingAssistant() {
     : location.pathname.includes('/poi/')
       ? 'poi'
       : 'browse'
+  const assistantContent = resolveGuideAssistantContent(context)
 
   useEffect(() => setMounted(true), [])
 
@@ -145,7 +125,11 @@ export function GlobalXiaolingAssistant() {
       const request = (event as CustomEvent<GuideAssistantOpenRequest>).detail
       const state = useGuideSessionStore.getState()
       if (!state.messages.length) {
-        state.addMessage({ role: 'assistant', text: getGreeting(state.context), status: 'complete' })
+        state.addMessage({
+          role: 'assistant',
+          text: resolveGuideAssistantContent(state.context).greeting,
+          status: 'complete'
+        })
       }
       state.setDrawerOpen(true)
       if (request?.autoPrompt) void state.sendGuideMessage(request.autoPrompt)
@@ -164,6 +148,10 @@ export function GlobalXiaolingAssistant() {
     if (!text) return
     setInput('')
     void sendGuideMessage(text)
+  }
+
+  const askSuggestedQuestion = (question: string) => {
+    void sendGuideMessage(question)
   }
 
   const runAction = (action: GuideAction) => {
@@ -210,13 +198,16 @@ export function GlobalXiaolingAssistant() {
       <XiaolingGuideDrawer
         open={open}
         mode={context.page}
-        summary={getContextSummary(context)}
+        title={assistantContent.title}
+        summary={assistantContent.subtitle}
+        suggestedQuestions={assistantContent.suggestedQuestions}
         messages={messages}
         input={input}
         status={digitalStatus}
         onClose={() => setDrawerOpen(false)}
         onInputChange={setInput}
         onSend={submit}
+        onSuggestedQuestion={askSuggestedQuestion}
         onAction={runAction}
       />
     </div>,

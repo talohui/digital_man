@@ -6,6 +6,7 @@ import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
 import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail, type MapMobileToolRailItem } from '../components/map/MapMobileToolRail'
 import { getLingshanPoiDetailById } from '../data/lingshanPoiDetails'
+import { getRecommendedStayLabel, hasAvailablePoiGlbModel } from '../data/poiGuideMetadata'
 import {
   getDefaultScenicRouteId,
   getNextRouteStop,
@@ -54,9 +55,11 @@ function getStopDescription(stop: ScenicRouteStop | undefined) {
   return detail?.intro ?? '沿路线继续前行，可在这一站了解灵山胜境的人文线索与景区空间节奏。'
 }
 
-function getStopMeta(stop: ScenicRouteStop | undefined, fallbackStayTime = '建议停留20分钟') {
+function getStopMeta(stop: ScenicRouteStop | undefined) {
   const detail = getLingshanPoiDetailById(getStopPoiId(stop))
-  return detail ? `${detail.category} · ${fallbackStayTime}` : `路线节点 · ${fallbackStayTime}`
+  return detail
+    ? `${detail.category} · ${getRecommendedStayLabel(getStopPoiId(stop))}`
+    : `路线节点 · ${getRecommendedStayLabel(getStopPoiId(stop))}`
 }
 
 const ROUTE_TAB_LABELS: Record<string, string> = {
@@ -439,6 +442,7 @@ function RouteActiveCard({
   const nextStopIndex = Math.min(currentStopIndex + 1, route.stops.length - 1)
   const nextStop = getNextRouteStop(route.id, currentStopIndex)
   const description = getStopDescription(nextStop)
+  const stayLabel = getRecommendedStayLabel(getStopPoiId(nextStop))
 
   return (
     <section className="map-route-tour-card map-route-tour-card--active" aria-label="路线进行中">
@@ -448,7 +452,7 @@ function RouteActiveCard({
         <XiaolingInlineEntry onClick={onOpenXiaoling} />
       </div>
       <h2>{nextStop?.name ?? '下一站'}</h2>
-      <p className="map-route-tour-meta">距你320m · 步行约6分钟 · 建议停留20分钟</p>
+      <p className="map-route-tour-meta">距你320m · 步行约6分钟 · {stayLabel}</p>
       <p className="map-route-tour-desc">{description}</p>
       <div className="map-route-tour-actions">
         <button type="button" className="map-route-tour-primary" onClick={onNavigate}>
@@ -480,6 +484,10 @@ function RouteArrivedCard({
 }) {
   const currentStop = getRouteStopByIndex(route.id, currentStopIndex)
   const meta = getStopMeta(currentStop)
+  const currentPoiId = getStopPoiId(currentStop)
+  const arrivedDescription = hasAvailablePoiGlbModel(currentPoiId)
+    ? '这里适合听建筑与灵山历史渊源，也可以进入详情查看图文介绍与 3D 模型。'
+    : '这里适合听建筑与灵山历史渊源，也可以进入详情查看图文介绍。'
 
   return (
     <section className="map-route-tour-card map-route-tour-card--arrived" aria-label="已到达景点">
@@ -495,7 +503,7 @@ function RouteArrivedCard({
         </div>
         <span className="map-route-tour-arrived-badge">到达</span>
       </div>
-      <p className="map-route-tour-desc">这里适合听建筑与灵山历史渊源，也可以进入详情查看图文介绍与 3D 模型。</p>
+      <p className="map-route-tour-desc">{arrivedDescription}</p>
       <div className="map-route-tour-actions map-route-tour-actions--arrived">
         <button type="button" className="map-route-tour-primary" onClick={onOpenXiaoling}>
           听小灵讲解
