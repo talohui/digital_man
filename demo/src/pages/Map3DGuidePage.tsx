@@ -102,6 +102,13 @@ export type MapPresentationTransition =
   | 'initializing'
   | 'ready'
   | 'failed'
+type CameraTransitionPhase =
+  | 'idle'
+  | 'flattening-3d'
+  | 'switching-view-mode'
+  | 'refreshing-tile-layer'
+  | 'ready'
+  | 'failed'
 
 export type MapPresentationTransitionSnapshot = {
   presentation: ScenicMapPresentation
@@ -1263,6 +1270,7 @@ export function Map3DGuideExperience({
   }, [debugGarden])
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [presentationTransition, setPresentationTransition] = useState<MapPresentationTransition>('idle')
+  const [cameraTransitionPhase, setCameraTransitionPhase] = useState<CameraTransitionPhase>('idle')
   const [presentationSwitchError, setPresentationSwitchError] = useState<string | undefined>()
   const [presentationCloudPhase, setPresentationCloudPhase] = useState<'hidden' | 'covering' | 'opening'>('hidden')
   const [isMapCreated, setIsMapCreated] = useState(false)
@@ -1491,6 +1499,7 @@ export function Map3DGuideExperience({
           initialized: initializedPresentationRef.current,
           transitionState: presentationTransition
         },
+        cameraTransitionPhase,
         contextLostCount: contextLostCountRef.current,
         hardRecoveryCount: hardRecoveryCountRef.current,
         currentPoiLayerMode: poiVisibilityMode,
@@ -1533,6 +1542,7 @@ export function Map3DGuideExperience({
     poiVisibilityMode,
     presentationSwitchError,
     presentationTransition,
+    cameraTransitionPhase,
     requestedScenicMapPresentation,
     sceneArbiter,
     scenicMapPresentation
@@ -3146,7 +3156,8 @@ export function Map3DGuideExperience({
         TMap: window.TMap,
         presentation: initialPresentation,
         requestedCamera,
-        isCurrent: () => isCurrentGeneration() && Boolean(createdMap) && isMapInstanceCurrent(createdMap)
+        isCurrent: () => isCurrentGeneration() && Boolean(createdMap) && isMapInstanceCurrent(createdMap),
+        onPhase: setCameraTransitionPhase
       })
 
       presentationValidationInProgress = false
@@ -3158,6 +3169,7 @@ export function Map3DGuideExperience({
         setLastMapError(message)
         setPresentationSwitchError(message)
         setPresentationTransition('failed')
+        setCameraTransitionPhase('failed')
         setPageMessage(message)
         return
       }
@@ -3183,6 +3195,7 @@ export function Map3DGuideExperience({
       initializedPresentationRef.current = initialPresentation
       appliedPresentationRef.current = initialPresentation
       setPresentationTransition('ready')
+      setCameraTransitionPhase('ready')
       if (!presentationFallback) {
         setPresentationSwitchError(undefined)
       }
@@ -3253,6 +3266,7 @@ export function Map3DGuideExperience({
           ? 'destroying'
           : 'waiting-container'
       )
+      setCameraTransitionPhase('idle')
       if (!presentationFallback) {
         setPresentationSwitchError(undefined)
       }
@@ -3488,6 +3502,7 @@ export function Map3DGuideExperience({
       setPageMessage(message)
       setPresentationSwitchError(message)
       setPresentationTransition('failed')
+      setCameraTransitionPhase('failed')
       perfRecorder.recordMapVisualEvent({
         type: 'mapReadyTimedOut',
         reason: 'map-load-error'
@@ -3573,12 +3588,14 @@ export function Map3DGuideExperience({
           TMap: window.TMap,
           presentation: scenicMapPresentation,
           requestedCamera: targetCamera,
-          isCurrent: isCurrentTransition
+          isCurrent: isCurrentTransition,
+          onPhase: setCameraTransitionPhase
         })
         if (!presentationResult.ok) {
           throw new Error(presentationResult.error ?? '腾讯地图视图模式验证失败')
         }
         if (scenicMapPresentation === 'ink2d') {
+          setCameraTransitionPhase('refreshing-tile-layer')
           await refreshHostedCustomTileLayer(targetMap, 'presentation-verified-2d', isCurrentTransition)
         }
         if (!isCurrentTransition()) {
@@ -3593,6 +3610,7 @@ export function Map3DGuideExperience({
         initializedPresentationRef.current = scenicMapPresentation
         appliedPresentationRef.current = scenicMapPresentation
         setPresentationTransition('ready')
+        setCameraTransitionPhase('ready')
         perfRecorder.recordMapVisualEvent({
           type: 'scenicMapPresentationChanged',
           scenicMapPresentation,
@@ -3606,6 +3624,7 @@ export function Map3DGuideExperience({
         setLastMapError(message)
         setPresentationSwitchError(message)
         setPresentationTransition('failed')
+        setCameraTransitionPhase('failed')
         const restoredPresentation = previousPresentation
         const restoreCamera = previousPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
         const restoreResult = await applyPresentationToExistingMap({
@@ -3613,7 +3632,8 @@ export function Map3DGuideExperience({
           TMap: window.TMap,
           presentation: restoredPresentation,
           requestedCamera: restoreCamera,
-          isCurrent: isCurrentTransition
+          isCurrent: isCurrentTransition,
+          onPhase: () => undefined
         })
         if (restoreResult.ok && isCurrentTransition()) {
           initializedPresentationRef.current = restoredPresentation
@@ -11251,6 +11271,68 @@ function waitForMapAnimationFrames(isCurrent: () => boolean) {
   })
 }
 
+function circularRotationDistance(left: number, right: number) {
+  const distance = Math.abs(((left - right + 540) % 360) - 180)
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY
+}
+
+function waitForCameraFlatten(map: any, isCurrent: () => boolean, timeoutMs = 900) {
+  return new Promise<{ flattened: boolean; camera: ActualTencentCameraState }>((resolve) => {
+    let settled = false
+    let timer: number | undefined
+    let pollTimer: number | undefined
+    const eventNames = ['pitchend', 'rotateend', 'idle']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (flattened: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+      }
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The map can be destroyed while this presentation transition exits.
+        }
+      })
+      resolve({ flattened, camera: readActualTencentCameraState(map) })
+    }
+    const check = () => {
+      if (!isCurrent()) {
+        finish(false)
+        return
+      }
+      const camera = readActualTencentCameraState(map)
+      const pitchFlattened = camera.rawPitch !== null && Math.abs(camera.rawPitch) <= 0.75
+      const rotationFlattened =
+        camera.rawRotation !== null && circularRotationDistance(camera.rawRotation, 0) <= 0.75
+      if (pitchFlattened && rotationFlattened) {
+        finish(true)
+      }
+    }
+
+    eventNames.forEach((eventName) => {
+      const handler = () => check()
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // Polling below is the portable fallback for embedded WebViews.
+      }
+    })
+    pollTimer = window.setInterval(check, 48)
+    timer = window.setTimeout(() => finish(false), timeoutMs)
+    void waitForMapAnimationFrames(isCurrent).then(() => check())
+    check()
+  })
+}
+
 function waitForTencentMapRender(map: any, isCurrent: () => boolean, timeoutMs = 700) {
   return new Promise<boolean>((resolve) => {
     let settled = false
@@ -11302,8 +11384,9 @@ async function applyPresentationToExistingMap(options: {
   presentation: ScenicMapPresentation
   requestedCamera: CameraState
   isCurrent: () => boolean
+  onPhase?: (phase: CameraTransitionPhase) => void
 }): Promise<PresentationApplyResult> {
-  const { map, TMap, presentation, requestedCamera, isCurrent } = options
+  const { map, TMap, presentation, requestedCamera, isCurrent, onPhase } = options
   const requestedViewMode = presentation === 'ink2d' ? '2D' : '3D'
   const targetCamera: CameraState = {
     center: requestedCamera.center,
@@ -11328,6 +11411,53 @@ async function applyPresentationToExistingMap(options: {
     return failed('当前腾讯地图 SDK 未提供可验证的 setViewMode/getViewMode API')
   }
 
+  const currentCamera = readActualTencentCameraState(map)
+  if (requestedViewMode === '2D' && currentCamera.viewMode === '3D') {
+    onPhase?.('flattening-3d')
+    const flattenTarget = {
+      center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
+      zoom: targetCamera.zoom,
+      pitch: 0,
+      rotation: 0,
+      bearing: 0
+    }
+    let usedEaseTo = false
+    try {
+      if (typeof map.easeTo === 'function') {
+        map.easeTo(flattenTarget, { duration: 280 })
+        usedEaseTo = true
+      }
+    } catch {
+      usedEaseTo = false
+    }
+    if (!usedEaseTo) {
+      try {
+        map.setCenter?.(flattenTarget.center)
+        map.setZoom?.(flattenTarget.zoom)
+        map.setPitch?.(0)
+        map.setRotation?.(0)
+        map.setBearing?.(0)
+      } catch {
+        // The verification below decides whether the 3D camera actually flattened.
+      }
+    }
+
+    const flattened = await waitForCameraFlatten(map, isCurrent)
+    if (!isCurrent()) {
+      return failed('地图实例已过期，忽略 3D 相机拍平结果')
+    }
+    if (!flattened.flattened) {
+      return {
+        ok: false,
+        requestedPresentation: presentation,
+        requestedCamera: targetCamera,
+        actualCamera: flattened.camera,
+        error: `3D 相机拍平超时：raw pitch ${flattened.camera.rawPitch ?? 'unknown'} / raw rotation ${flattened.camera.rawRotation ?? 'unknown'}`
+      }
+    }
+  }
+
+  onPhase?.('switching-view-mode')
   try {
     map.setViewMode(requestedViewMode)
     map.setPitchable?.(requestedViewMode === '3D')
@@ -11362,16 +11492,20 @@ async function applyPresentationToExistingMap(options: {
     bearing: 0
   }
   try {
-    try {
-      map.easeTo?.(target, { duration: 0 })
-    } catch {
-      // Direct setters remain the portable path for the embedded WebView.
-    }
     map.setCenter?.(target.center)
     map.setZoom?.(target.zoom)
-    map.setPitch?.(target.pitch)
-    map.setRotation?.(target.rotation)
-    map.setBearing?.(0)
+    // QQ WebView ignores pitch changes after entering 2D. The 3D -> 2D path
+    // above applies and verifies those values while the map is still 3D.
+    if (requestedViewMode === '3D') {
+      try {
+        map.easeTo?.(target, { duration: 0 })
+      } catch {
+        // Direct setters below are the portable fallback.
+      }
+      map.setPitch?.(target.pitch)
+      map.setRotation?.(target.rotation)
+      map.setBearing?.(0)
+    }
   } catch {
     // A view mode already verified by getViewMode() remains valid even when a
     // WebView ignores an optional camera setter.

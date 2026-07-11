@@ -20,6 +20,8 @@
 3. 成功只要求 `getViewMode()` 为目标模式。QQ WebView 在已经切入 2D 后可能继续从 `getPitch()` / `getRotation()` 返回上一套 3D 值；这些值记录为 raw 调试数据，2D 的 effective pitch/rotation 固定为 `0/0`，不能触发回滚。
 4. `window.__LINGSHAN_MAP_DEBUG__` 与 `window.LINGSHAN_MAP_DEBUG` 现在同时显示 requested/applied presentation、真实 ViewMode、raw pitch/rotation 和 effective pitch/rotation；`window.__GET_LINGSHAN_MAP_SNAPSHOT__()` 会再次直接读取当前地图实例。
 5. 仅在 3D -> 2D 已验证后，复用同一个腾讯托管自定义影像层：优先 `setVisible(false/true)` 跨两帧刷新；当 SDK 不支持该方法时才 `setMap(null/map)`。不重新调用 `createCustomLayer()`，不销毁地图。
+6. 3D -> 2D 不再先切 `viewMode`：先在仍为 3D 的实例上执行 `easeTo({ pitch: 0, rotation: 0 }, { duration: 280 })`，监听 `pitchend`、`rotateend`、`idle` 并短轮询 raw getter。只有 raw pitch/rotation 均接近零时才调用 `setViewMode('2D')`；拍平超时则保留原 3D 状态。
+7. `cameraTransitionPhase` 会暴露 `flattening-3d`、`switching-view-mode`、`refreshing-tile-layer`、`ready` 或 `failed`，便于区分相机拍平、模式切换和影像层刷新问题。
 
 ## 真机验收
 
@@ -35,4 +37,5 @@ window.__GET_LINGSHAN_MAP_SNAPSHOT__()
 2. 切换 `scenic3d`：真实 mode 为 `3D`，再确认 GLB 正常显示。
 3. 切回 `ink2d`：真实 mode 为 `2D` 且 effective pitch/rotation 为 `0/0`，`mapCreateCount` 仍为 1、`mapDestroyCount` 仍为 0。
 4. 检查 `customTileLayer.refreshCount` 与 `lastRefreshReason`；若真实相机正确但画面仍倾斜，应记录截图和这两个字段，不要创建第二个图层。
-5. 云朵转场消失后拖动地图，确认没有透明事件层残留。
+5. 3D -> 2D 过程中观察 `cameraTransitionPhase`：应依次出现 `flattening-3d`、`switching-view-mode`、`refreshing-tile-layer`、`ready`。如停在 `failed`，记录 raw pitch/rotation；此时地图应保持原 3D，不能半完成。
+6. 云朵转场消失后拖动地图，确认没有透明事件层残留。
