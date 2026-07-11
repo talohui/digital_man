@@ -117,7 +117,7 @@
   z-index: 2;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(18, 37, 31, 0.04) 0%, rgba(18, 37, 31, 0.22) 44%, rgba(18, 37, 31, 0.86) 100%),
+    linear-gradient(180deg, rgba(18, 37, 31, 0.02) 0%, rgba(18, 37, 31, 0.10) 48%, rgba(18, 37, 31, 0.62) 76%, rgba(18, 37, 31, 0.88) 100%),
     radial-gradient(circle at 14% 10%, rgba(255, 248, 226, 0.20), transparent 30%);
   content: "";
 }
@@ -161,10 +161,10 @@
   position: absolute;
   left: 20px;
   right: 20px;
-  bottom: 104px;
+  bottom: clamp(16px, 4.8vw, 20px);
   z-index: 5;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .map-poi-detail__tags {
@@ -201,6 +201,8 @@
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
   font-size: clamp(40px, 12vw, 54px);
   line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   text-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
 }
 
@@ -210,6 +212,7 @@
   font-size: 14px;
   font-weight: 860;
   line-height: 1.45;
+  max-width: 34ch;
   text-shadow: 0 8px 24px rgba(0, 0, 0, 0.20);
 }
 
