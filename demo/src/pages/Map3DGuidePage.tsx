@@ -867,11 +867,19 @@ const guideCameraPresets: Map3DCameraPreset[] = [
   MAP_3D_GUIDE_CAMERA_PRESETS.closeInspect
 ]
 
+export type Map3DGuideMapRuntime = {
+  map: any
+  TMap: any
+  mapInstanceId: number
+}
+
 type Map3DGuideExperienceProps = {
   variant?: Map3DGuideVariant
   guideState?: MapGuideState
   presentation?: ScenicMapPresentation
   onPresentationTransitionChange?: (snapshot: MapPresentationTransitionSnapshot) => void
+  /** Optional extension point for prototype-only map overlays. */
+  onMapRuntimeChange?: (runtime: Map3DGuideMapRuntime | null) => void
 }
 
 function resolveScenicMapPresentation(
@@ -1009,7 +1017,8 @@ export function Map3DGuideExperience({
   variant = 'default',
   guideState,
   presentation,
-  onPresentationTransitionChange
+  onPresentationTransitionChange,
+  onMapRuntimeChange
 }: Map3DGuideExperienceProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
@@ -1029,6 +1038,7 @@ export function Map3DGuideExperience({
   const isInk2DPresentation = scenicMapPresentation === 'ink2d'
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
+  const onMapRuntimeChangeRef = useRef(onMapRuntimeChange)
   const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
   const camera2DStateRef = useRef<CameraState>({
     center: scenicCenter,
@@ -1071,6 +1081,10 @@ export function Map3DGuideExperience({
     requested: false,
     applied: false
   })
+
+  useEffect(() => {
+    onMapRuntimeChangeRef.current = onMapRuntimeChange
+  }, [onMapRuntimeChange])
   const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
   const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
   const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
@@ -3324,6 +3338,7 @@ export function Map3DGuideExperience({
       }
 
       if (mapRef.current === map) {
+        onMapRuntimeChangeRef.current?.(null)
         mapRef.current = null
       }
 
@@ -3617,6 +3632,7 @@ export function Map3DGuideExperience({
         mapInstanceGenerationsRef.current.set(map, mapInstanceGeneration)
         activeMapInstanceGenerationRef.current = mapInstanceGeneration
         mapRef.current = map
+        onMapRuntimeChangeRef.current?.({ map, TMap, mapInstanceId: mapInstanceGeneration })
         layerManager.init(map)
         poiLayerController.init(map)
         glbSpatialController.init(map)

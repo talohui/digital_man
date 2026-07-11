@@ -526,6 +526,102 @@
     padding-bottom: 2px;
   }
 
+  .navigation-prototype-card {
+    display: grid;
+    gap: 9px;
+    border: 1px dashed rgba(36, 107, 253, 0.48);
+    border-radius: 16px;
+    padding: 11px;
+    background: rgba(239, 245, 255, 0.9);
+    color: #18335f;
+  }
+
+  .navigation-prototype-card__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .navigation-prototype-card__head span {
+    color: #246bfd;
+    font-size: 12px;
+    font-weight: 950;
+  }
+
+  .navigation-prototype-card__head small {
+    color: rgba(24, 51, 95, 0.68);
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .navigation-prototype-card__primary,
+  .navigation-prototype-card__error button {
+    min-height: 38px;
+    border: 0;
+    border-radius: 12px;
+    background: #246bfd;
+    color: #fff;
+    font-weight: 950;
+  }
+
+  .navigation-prototype-card__status,
+  .navigation-prototype-card__instruction,
+  .navigation-prototype-card__arrived,
+  .navigation-prototype-card__error p,
+  .navigation-prototype-card__details > p {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.45;
+  }
+
+  .navigation-prototype-card__details {
+    display: grid;
+    gap: 8px;
+  }
+
+  .navigation-prototype-card__details dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin: 0;
+  }
+
+  .navigation-prototype-card__details dl div {
+    display: grid;
+    gap: 1px;
+    border-radius: 9px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.72);
+  }
+
+  .navigation-prototype-card__details dt {
+    color: rgba(24, 51, 95, 0.6);
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .navigation-prototype-card__details dd {
+    margin: 0;
+    color: #18335f;
+    font-size: 13px;
+    font-weight: 950;
+  }
+
+  .navigation-prototype-card__arrived {
+    border-radius: 9px;
+    padding: 8px;
+    background: rgba(61, 156, 91, 0.14);
+    color: #24613b;
+  }
+
+  .navigation-prototype-card__error {
+    display: grid;
+    gap: 8px;
+    color: #9b3026;
+  }
+
   .map-route-tour-service,
   .map-route-tour-sheet {
     position: fixed;

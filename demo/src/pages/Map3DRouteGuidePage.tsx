@@ -34,9 +34,12 @@ import {
 import { parseRouteNavigationState, type MapGuideState } from '../types/mapGuide'
 import {
   Map3DGuideExperience,
+  type Map3DGuideMapRuntime,
   type MapPresentationTransitionSnapshot,
   type ScenicMapPresentation
 } from './Map3DGuidePage'
+import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
+import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
@@ -469,6 +472,7 @@ function RouteActiveCard({
           预览讲解
         </button>
       </div>
+      <NavigationPrototypeCard />
     </section>
   )
 }
@@ -571,12 +575,14 @@ function RouteTourMobileOverlay({
   route,
   guideState,
   presentation,
-  presentationSwitching
+  presentationSwitching,
+  mapRuntime
 }: {
   route: ScenicRouteConfig
   guideState: MapGuideState
   presentation: ScenicMapPresentation
   presentationSwitching: boolean
+  mapRuntime: Map3DGuideMapRuntime | null
 }) {
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
@@ -754,8 +760,10 @@ function RouteTourMobileOverlay({
     return null
   }
 
-  return createPortal(
-    <div
+  return <>
+    <NavigationPrototypeMapLayer runtime={mapRuntime} />
+    {createPortal(
+      <div
       className={`map-route-tour-overlay map-route-tour-overlay--portal map-route-tour-overlay--${stage}`}
       style={overlayStyle}
       aria-label="路线游览移动端覆盖层"
@@ -870,9 +878,10 @@ function RouteTourMobileOverlay({
           </section>
         </div>
       ) : null}
-    </div>,
-    document.body
-  )
+      </div>,
+      document.body
+    )}
+  </>
 }
 
 function Map3DRouteGuidePage() {
@@ -904,6 +913,10 @@ function Map3DRouteGuidePage() {
     transition: 'idle',
     isPresentationSwitching: false
   })
+  const [mapRuntime, setMapRuntime] = useState<Map3DGuideMapRuntime | null>(null)
+  const handleMapRuntimeChange = useCallback((runtime: Map3DGuideMapRuntime | null) => {
+    setMapRuntime(runtime)
+  }, [])
 
   return (
     <>
@@ -912,12 +925,14 @@ function Map3DRouteGuidePage() {
         guideState={guideState}
         presentation={routePresentation}
         onPresentationTransitionChange={setPresentationTransition}
+        onMapRuntimeChange={handleMapRuntimeChange}
       />
       <RouteTourMobileOverlay
         route={route}
         guideState={guideState}
         presentation={routePresentation}
         presentationSwitching={presentationTransition.isPresentationSwitching}
+        mapRuntime={mapRuntime}
       />
     </>
   )
