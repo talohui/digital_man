@@ -22,6 +22,7 @@
 5. 仅在 3D -> 2D 已验证后，复用同一个腾讯托管自定义影像层：优先 `setVisible(false/true)` 跨两帧刷新；当 SDK 不支持该方法时才 `setMap(null/map)`。不重新调用 `createCustomLayer()`，不销毁地图。
 6. 3D -> 2D 不再先切 `viewMode`：先在仍为 3D 的实例上执行 `easeTo({ pitch: 0, rotation: 0 }, { duration: 280 })`，监听 `pitchend`、`rotateend`、`idle` 并短轮询 raw getter。只有 raw pitch/rotation 均接近零时才调用 `setViewMode('2D')`；拍平超时则保留原 3D 状态。
 7. `cameraTransitionPhase` 会暴露 `flattening-3d`、`switching-view-mode`、`refreshing-tile-layer`、`ready` 或 `failed`，便于区分相机拍平、模式切换和影像层刷新问题。
+8. `lastMeaningful3DCamera` 在 3D -> 2D 拍平前从腾讯实例 getter 保存。拍平、切换和 2D 影像层刷新期间会启用 persistence suppression，避免 `idle` 等相机事件把临时的 `0/0` 覆盖进 3D 快照。2D -> 3D 先验证 mode，再以约 280ms 恢复该快照；GLB 只在真实 3D 相机恢复并进入 `ready` 后重启。
 
 ## 真机验收
 
