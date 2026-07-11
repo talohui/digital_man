@@ -7,6 +7,7 @@ export type MapMobileToolRailItem = {
   label: string
   icon?: ReactNode
   active?: boolean
+  expanded?: boolean
   danger?: boolean
   vertical?: boolean
   disabled?: boolean
@@ -52,6 +53,7 @@ export function MapMobileToolRail({ side, items, ariaLabel, className, assistant
           onClick={item.onClick}
           disabled={item.disabled}
           aria-pressed={item.active}
+          aria-expanded={item.expanded}
           aria-label={item.label}
         >
           {item.icon ? <span className="map-mobile-toolrail__icon" aria-hidden="true">{item.icon}</span> : null}

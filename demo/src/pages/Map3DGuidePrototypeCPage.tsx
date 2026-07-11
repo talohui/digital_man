@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
+import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail } from '../components/map/MapMobileToolRail'
 import { toggleMapPresentation } from '../lib/mapGuideNavigation'
-import { useMapGuideUiStore, type PoiVisibilityMode } from '../store/useMapGuideUiStore'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { type MapGuideState } from '../types/mapGuide'
 import {
   Map3DGuideExperience,
@@ -147,45 +148,6 @@ function BrowseServicePanel({
   )
 }
 
-function BrowseLayerPanel({
-  open,
-  mode,
-  serviceVisible,
-  onModeChange,
-  onServiceVisibleChange
-}: {
-  open: boolean
-  mode: PoiVisibilityMode
-  serviceVisible: boolean
-  onModeChange: (mode: PoiVisibilityMode) => void
-  onServiceVisibleChange: (visible: boolean) => void
-}) {
-  if (!open) {
-    return null
-  }
-
-  return (
-    <section className="map-browse-layer-panel" aria-label="地图图层">
-      <strong>地图图层</strong>
-      <button type="button" className={mode === 'core' ? 'is-active' : ''} onClick={() => onModeChange('core')}>
-        核心景点
-      </button>
-      <button type="button" className={mode === 'all' ? 'is-active' : ''} onClick={() => onModeChange('all')}>
-        全部景点
-      </button>
-      <label>
-        <input
-          type="checkbox"
-          checked={serviceVisible}
-          onChange={(event) => onServiceVisibleChange(event.target.checked)}
-        />
-        服务设施
-      </label>
-      {serviceVisible ? <small>服务设施数据建设中</small> : null}
-    </section>
-  )
-}
-
 function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentationChange }: {
   presentation: ScenicMapPresentation
   presentationSwitching: boolean
@@ -194,19 +156,18 @@ function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentati
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
   const [serviceOpen, setServiceOpen] = useState(false)
-  const [layerOpen, setLayerOpen] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof BROWSE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const [feedbackText, setFeedbackText] = useState('')
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
-  const layerMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
-  const setLayerMode = useMapGuideUiStore((state) => state.setPoiVisibilityMode)
-  const serviceFacilitiesVisible = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
-  const setServiceFacilitiesVisible = useMapGuideUiStore((state) => state.setServiceFacilitiesEnabled)
+  const layerPanelOpen = useMapGuideUiStore((state) => state.layerPanelOpen)
+  const setLayerPanelOpen = useMapGuideUiStore((state) => state.setLayerPanelOpen)
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => () => setLayerPanelOpen(false), [setLayerPanelOpen])
 
   useEffect(() => {
     const updateVisualViewport = () => {
@@ -255,14 +216,14 @@ function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentati
     setServiceOpen((open) => {
       if (!open) {
         closeGlobalXiaoling()
-        setLayerOpen(false)
+        setLayerPanelOpen(false)
       }
       return !open
     })
   }
   const toggleLayer = () => {
     closeService()
-    setLayerOpen((open) => !open)
+    setLayerPanelOpen(!layerPanelOpen)
   }
   if (!mounted || typeof document === 'undefined') {
     return null
@@ -277,7 +238,7 @@ function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentati
       <BrowseToolRail
         is3dActive={presentation === 'scenic3d'}
         is3dSwitching={presentationSwitching}
-        isLayerOpen={layerOpen}
+        isLayerOpen={layerPanelOpen}
         onLocate={() => setFeedbackText('已回到当前位置附近')}
         onToggle3d={() => {
           onPresentationChange(presentation === 'scenic3d' ? 'ink2d' : 'scenic3d')
@@ -286,14 +247,11 @@ function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentati
         onLayer={toggleLayer}
       />
       {feedbackText ? <div className="map-browse-toast">{feedbackText}</div> : null}
-      <BrowseLayerPanel
-        open={layerOpen}
-        mode={layerMode}
-        serviceVisible={serviceFacilitiesVisible}
-        onModeChange={setLayerMode}
-        onServiceVisibleChange={(visible) => {
-          setServiceFacilitiesVisible(visible)
-          if (visible) {
+      <MapLayerPanel
+        open={layerPanelOpen}
+        className="map-browse-layer-panel"
+        onServiceFacilitiesChange={(enabled) => {
+          if (enabled) {
             setFeedbackText('服务设施数据建设中')
           }
         }}

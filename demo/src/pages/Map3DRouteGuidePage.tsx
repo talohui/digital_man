@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
+import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail, type MapMobileToolRailItem } from '../components/map/MapMobileToolRail'
 import { getLingshanPoiDetailById } from '../data/lingshanPoiDetails'
 import {
@@ -147,7 +148,9 @@ function RouteToolRail({
   onToggle3d,
   onLocate,
   onExit,
-  onService
+  onService,
+  onLayer,
+  isLayerOpen
 }: {
   side: 'left' | 'right'
   stage: MapGuideState['routeStage']
@@ -159,6 +162,8 @@ function RouteToolRail({
   onLocate: () => void
   onExit: () => void
   onService: () => void
+  onLayer: () => void
+  isLayerOpen: boolean
 }) {
   const locateItem: MapMobileToolRailItem = {
     id: 'locate',
@@ -179,6 +184,14 @@ function RouteToolRail({
     label: '服务',
     icon: '⌂',
     onClick: onService
+  }
+  const layerItem: MapMobileToolRailItem = {
+    id: 'layers',
+    label: '图层',
+    icon: '▧',
+    active: isLayerOpen,
+    expanded: isLayerOpen,
+    onClick: onLayer
   }
   const exitItem: MapMobileToolRailItem = {
     id: 'exit',
@@ -239,7 +252,7 @@ function RouteToolRail({
       className="map-route-tour-toolrail"
       ariaLabel="地图工具"
       assistantAnchor="route"
-      items={stage === 'preview' ? [locateItem, threeDItem, serviceItem] : [locateItem, threeDItem, serviceItem, exitItem]}
+      items={[locateItem, threeDItem, serviceItem, layerItem, exitItem]}
     />
   )
 }
@@ -586,6 +599,8 @@ function RouteTourMobileOverlay({
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
   const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
+  const layerPanelOpen = useMapGuideUiStore((state) => state.layerPanelOpen)
+  const setLayerPanelOpen = useMapGuideUiStore((state) => state.setLayerPanelOpen)
   const overviewMode = useMapGuideUiStore((state) => state.mapFocusMode)
   const setOverviewMode = useMapGuideUiStore((state) => state.setMapFocusMode)
   const [selectedRouteId, setSelectedRouteId] = useState(route.id)
@@ -602,6 +617,8 @@ function RouteTourMobileOverlay({
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => () => setLayerPanelOpen(false), [setLayerPanelOpen])
 
   useEffect(() => {
     setRouteCardExpanded(true)
@@ -725,6 +742,17 @@ function RouteTourMobileOverlay({
     })
   }
 
+  const toggleService = () => {
+    closeGlobalXiaoling()
+    setLayerPanelOpen(false)
+    setServiceOpen((open) => !open)
+  }
+
+  const toggleLayer = () => {
+    setServiceOpen(false)
+    setLayerPanelOpen(!layerPanelOpen)
+  }
+
   const handleCollapsedPrimary = () => {
     if (stage === 'preview') {
       goToRouteActive(navigate, route.id, 0)
@@ -763,10 +791,9 @@ function RouteTourMobileOverlay({
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
         onExit={() => goToMapBrowse(navigate, presentation)}
-        onService={() => {
-          closeGlobalXiaoling()
-          setServiceOpen(true)
-        }}
+        onService={toggleService}
+        onLayer={toggleLayer}
+        isLayerOpen={layerPanelOpen}
       />
       <RouteToolRail
         side="right"
@@ -778,10 +805,9 @@ function RouteTourMobileOverlay({
         onToggle3d={handleToggle3d}
         onLocate={handleLocate}
         onExit={() => goToMapBrowse(navigate, presentation)}
-        onService={() => {
-          closeGlobalXiaoling()
-          setServiceOpen(true)
-        }}
+        onService={toggleService}
+        onLayer={toggleLayer}
+        isLayerOpen={layerPanelOpen}
       />
       <div className={`map-route-tour-bottom${cardCollapsed ? ' is-collapsed' : ''}`}>
         <button
@@ -831,6 +857,7 @@ function RouteTourMobileOverlay({
         )}
       </div>
       {feedbackText ? <div className="map-route-tour-toast">{feedbackText}</div> : null}
+      <MapLayerPanel open={layerPanelOpen} className="map-route-tour-layer-panel" />
       {serviceOpen ? (
         <div className="map-route-tour-service" role="dialog" aria-modal="true" aria-label="游园服务占位">
           <button type="button" className="map-route-tour-service__scrim" onClick={() => setServiceOpen(false)} aria-label="关闭服务" />
