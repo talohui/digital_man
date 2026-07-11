@@ -5,6 +5,7 @@ interface Window {
   __tmapLoader?: Promise<any>
   __LINGSHAN_MAP_DEBUG__?: Record<string, unknown>
   LINGSHAN_MAP_DEBUG?: Record<string, unknown>
+  __GET_LINGSHAN_MAP_SNAPSHOT__?: () => Record<string, unknown>
 }
 
 interface ImportMetaEnv {

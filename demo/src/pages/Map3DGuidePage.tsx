@@ -117,6 +117,26 @@ type CameraState = {
   pitch: number
   rotation: number
 }
+type ActualTencentCameraState = {
+  viewMode: '2D' | '3D' | null
+  pitch: number | null
+  rotation: number | null
+  center: LatLngPoint | null
+  zoom: number | null
+}
+type PresentationApplyResult = {
+  ok: boolean
+  requestedPresentation: ScenicMapPresentation
+  requestedCamera: CameraState
+  actualCamera: ActualTencentCameraState
+  error?: string
+}
+type CustomTileLayerRuntime = {
+  attached: boolean
+  visible: boolean
+  refreshCount: number
+  lastRefreshReason: string
+}
 type GardenLodState = {
   opacity: number
   visibleTier: 'none' | 'reduced' | 'full'
@@ -440,7 +460,6 @@ const INK_2D_CAMERA_PRESET: Map3DCameraPreset = {
   rotation: 0,
   durationMs: 520
 }
-const MAP_3D_RETRY_DELAY_MS = 360
 const MAP_PRESENTATION_CLOUD_MIN_MS = 650
 
 // 仅调试备用，默认不用。正式页面使用腾讯地图平台托管自定义图层，不再依赖本地切片或自建瓦片服务。
@@ -951,6 +970,7 @@ export function Map3DGuideExperience({
   const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
   const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
   const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
+  const appliedPresentationRef = useRef<ScenicMapPresentation | null>(null)
   const initializedPresentationRef = useRef<ScenicMapPresentation | null>(null)
   const presentationCloudStartedAtRef = useRef(0)
   const presentationCloudHideTimerRef = useRef<number | null>(null)
@@ -980,6 +1000,15 @@ export function Map3DGuideExperience({
   const inkOverlayLayerRef = useRef<HTMLDivElement | null>(null)
   const inkTileLayerRef = useRef<any>(null)
   const tencentCustomLayerInitKeyRef = useRef('')
+  const customTileLayerRuntimeRef = useRef<CustomTileLayerRuntime>({
+    attached: false,
+    visible: false,
+    refreshCount: 0,
+    lastRefreshReason: ''
+  })
+  const [customTileLayerRuntime, setCustomTileLayerRuntime] = useState<CustomTileLayerRuntime>(
+    customTileLayerRuntimeRef.current
+  )
   const inkTileGroundFallbackLayerRef = useRef<any>(null)
   const inkTileDomFallbackLayerRef = useRef<HTMLDivElement | null>(null)
   const formalInkBoundsMarkerLayerRef = useRef<any>(null)
@@ -1079,6 +1108,62 @@ export function Map3DGuideExperience({
   const shouldRedirectLocalTMapHost = useMemo(() => shouldUseCanonicalLocalhostForTMap(), [])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
   const layerManager = useMemo(() => new LayerManager(), [])
+  const updateCustomTileLayerRuntime = useCallback((next: Partial<CustomTileLayerRuntime>) => {
+    const snapshot = { ...customTileLayerRuntimeRef.current, ...next }
+    customTileLayerRuntimeRef.current = snapshot
+    setCustomTileLayerRuntime(snapshot)
+  }, [])
+  const refreshHostedCustomTileLayer = useCallback(
+    async (targetMap: any, reason: string, isCurrent: () => boolean) => {
+      const layer = inkTileLayerRef.current
+      if (!layer || !isCurrent() || layerManager.getLayer('custom_tile') !== layer) {
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: `${reason}:layer-unavailable` })
+        return false
+      }
+
+      try {
+        if (typeof layer.setVisible === 'function') {
+          layer.setVisible(false)
+          await waitForMapAnimationFrames(isCurrent)
+          if (!isCurrent()) {
+            return false
+          }
+          layer.setVisible(true)
+          updateCustomTileLayerRuntime({
+            attached: true,
+            visible: true,
+            refreshCount: customTileLayerRuntimeRef.current.refreshCount + 1,
+            lastRefreshReason: `${reason}:visibility-toggle`
+          })
+          return true
+        }
+
+        if (typeof layer.setMap === 'function') {
+          layer.setMap(null)
+          await waitForMapAnimationFrames(isCurrent)
+          if (!isCurrent()) {
+            return false
+          }
+          layer.setMap(targetMap)
+          updateCustomTileLayerRuntime({
+            attached: true,
+            visible: true,
+            refreshCount: customTileLayerRuntimeRef.current.refreshCount + 1,
+            lastRefreshReason: `${reason}:map-reattach`
+          })
+          return true
+        }
+      } catch (error) {
+        if (debugPerf) {
+          console.warn('[Map3D] Tencent custom tile refresh failed', error)
+        }
+      }
+
+      updateCustomTileLayerRuntime({ attached: true, visible: true, lastRefreshReason: `${reason}:unsupported` })
+      return false
+    },
+    [debugPerf, layerManager, updateCustomTileLayerRuntime]
+  )
   const poiLayerController = useMemo(
     () => new PoiLayerController(layerManager, isMapInstanceCurrent),
     [isMapInstanceCurrent, layerManager]
@@ -1387,31 +1472,66 @@ export function Map3DGuideExperience({
     if (typeof window === 'undefined') {
       return
     }
-    const camera = {
-      currentViewMode: isInk2DPresentation ? '2D' : '3D',
-      center: isInk2DPresentation ? camera2DStateRef.current.center : camera3DStateRef.current.center,
-      zoom: isInk2DPresentation ? camera2DStateRef.current.zoom : camera3DStateRef.current.zoom,
-      pitch: isInk2DPresentation ? camera2DStateRef.current.pitch : camera3DStateRef.current.pitch,
-      rotation: isInk2DPresentation ? camera2DStateRef.current.rotation : camera3DStateRef.current.rotation
+    const createDebugSnapshot = () => {
+      const targetMap = mapRef.current
+      const requestedCamera = scenicMapPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
+      const actualCamera = targetMap && isMapInstanceCurrent(targetMap)
+        ? readActualTencentCameraState(targetMap)
+        : emptyActualTencentCameraState()
+      return {
+        mapInstanceId,
+        mapCreateCount: mapCreateCountRef.current,
+        mapDestroyCount: mapDestroyCountRef.current,
+        currentViewMode: actualCamera.viewMode,
+        currentPresentation: scenicMapPresentation,
+        presentation: {
+          requested: requestedScenicMapPresentation,
+          applied: appliedPresentationRef.current,
+          initialized: initializedPresentationRef.current,
+          transitionState: presentationTransition
+        },
+        contextLostCount: contextLostCountRef.current,
+        hardRecoveryCount: hardRecoveryCountRef.current,
+        currentPoiLayerMode: poiVisibilityMode,
+        customPoiVisibleCount,
+        tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
+        activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
+        lastMapError,
+        presentationSwitchError,
+        camera: {
+          requestedViewMode: scenicMapPresentation === 'ink2d' ? '2D' : '3D',
+          actualViewMode: actualCamera.viewMode,
+          requestedPitch: requestedCamera.pitch,
+          actualPitch: actualCamera.pitch,
+          requestedRotation: requestedCamera.rotation,
+          actualRotation: actualCamera.rotation,
+          requestedCenter: requestedCamera.center,
+          actualCenter: actualCamera.center,
+          requestedZoom: requestedCamera.zoom,
+          actualZoom: actualCamera.zoom
+        },
+        customTileLayer: customTileLayerRuntimeRef.current
+      }
     }
-    const debugSnapshot = {
-      mapInstanceId,
-      mapCreateCount: mapCreateCountRef.current,
-      mapDestroyCount: mapDestroyCountRef.current,
-      currentViewMode: camera.currentViewMode,
-      currentPresentation: scenicMapPresentation,
-      contextLostCount: contextLostCountRef.current,
-      hardRecoveryCount: hardRecoveryCountRef.current,
-      currentPoiLayerMode: poiVisibilityMode,
-      customPoiVisibleCount,
-      tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
-      activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
-      lastMapError,
-      camera
-    }
+    const debugSnapshot = createDebugSnapshot()
     window.__LINGSHAN_MAP_DEBUG__ = debugSnapshot
     window.LINGSHAN_MAP_DEBUG = debugSnapshot
-  }, [customPoiVisibleCount, glbRuntimeSnapshot.updatedAt, isInk2DPresentation, lastMapError, mapBoundsSnapshot, mapInstanceId, poiVisibilityMode, sceneArbiter, scenicMapPresentation])
+    window.__GET_LINGSHAN_MAP_SNAPSHOT__ = createDebugSnapshot
+  }, [
+    customPoiVisibleCount,
+    customTileLayerRuntime,
+    glbRuntimeSnapshot.updatedAt,
+    isMapInstanceCurrent,
+    lastMapError,
+    mapBoundsSnapshot,
+    mapInstanceId,
+    poiVisibilityMode,
+    presentationSwitchError,
+    presentationTransition,
+    requestedScenicMapPresentation,
+    sceneArbiter,
+    scenicMapPresentation
+  ])
   const landmarkInspector = useLandmarkModelInspector({
     active: (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) && !isInkCleanMode && !isInk2DPresentation,
     layerManager,
@@ -2889,10 +3009,9 @@ export function Map3DGuideExperience({
     let visualReadyFallbackTimer: number | null = null
     let visualTimeoutTimer: number | null = null
     let curtainHideTimer: number | null = null
-    let retryDelayTimer: number | null = null
-    let retryDelayResolve: ((ready: boolean) => void) | null = null
     let visualReadyRafIds: number[] = []
     let visualReadyScheduled = false
+    let presentationValidationInProgress = false
     let mapCreatedAt = 0
     let lastHandledFailureAttempt = -1
     const mapVisualEventCleanups: Array<() => void> = []
@@ -2903,14 +3022,10 @@ export function Map3DGuideExperience({
       if (visualReadyFallbackTimer !== null) window.clearTimeout(visualReadyFallbackTimer)
       if (visualTimeoutTimer !== null) window.clearTimeout(visualTimeoutTimer)
       if (curtainHideTimer !== null) window.clearTimeout(curtainHideTimer)
-      if (retryDelayTimer !== null) window.clearTimeout(retryDelayTimer)
-      retryDelayResolve?.(false)
       visualReadyTimer = null
       visualReadyFallbackTimer = null
       visualTimeoutTimer = null
       curtainHideTimer = null
-      retryDelayTimer = null
-      retryDelayResolve = null
       visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
       visualReadyRafIds = []
       mapVisualEventCleanups.splice(0).forEach((cleanup) => cleanup())
@@ -2940,17 +3055,8 @@ export function Map3DGuideExperience({
       inkTileLayerRef.current = null
       inkTileGroundFallbackLayerRef.current = null
       tencentCustomLayerInitKeyRef.current = ''
+      updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'map-destroyed' })
     }
-
-    const waitForRetryDelay = () =>
-      new Promise<boolean>((resolve) => {
-        retryDelayResolve = resolve
-        retryDelayTimer = window.setTimeout(() => {
-          retryDelayTimer = null
-          retryDelayResolve = null
-          resolve(isCurrentGeneration())
-        }, MAP_3D_RETRY_DELAY_MS)
-      })
 
     const disposeCreatedMap = (preserveViewport: boolean) => {
       const map = createdMap
@@ -3012,9 +3118,50 @@ export function Map3DGuideExperience({
       })
     }
 
-    const markMapVisualReady = (reason: string) => {
-      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current) {
+    const markMapVisualReady = async (reason: string) => {
+      if (
+        !isCurrentGeneration() ||
+        !createdMap ||
+        !isMapInstanceCurrent(createdMap) ||
+        mapVisualReadyRef.current ||
+        presentationValidationInProgress
+      ) {
         return
+      }
+
+      presentationValidationInProgress = true
+      const currentCamera = readMapCameraState(createdMap, scenicCenter)
+      const requestedCamera: CameraState = {
+        ...currentCamera,
+        pitch: initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+        rotation: initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation
+      }
+      const presentationResult = await applyPresentationToExistingMap({
+        map: createdMap,
+        TMap: window.TMap,
+        presentation: initialPresentation,
+        requestedCamera,
+        isCurrent: () => isCurrentGeneration() && Boolean(createdMap) && isMapInstanceCurrent(createdMap)
+      })
+
+      presentationValidationInProgress = false
+      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap)) {
+        return
+      }
+      if (!presentationResult.ok) {
+        const message = presentationResult.error ?? '腾讯地图视图模式验证失败'
+        setLastMapError(message)
+        setPresentationSwitchError(message)
+        setPresentationTransition('failed')
+        setPageMessage(message)
+        return
+      }
+
+      const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, requestedCamera)
+      if (initialPresentation === 'ink2d') {
+        camera2DStateRef.current = verifiedCamera
+      } else {
+        camera3DStateRef.current = verifiedCamera
       }
 
       mapVisualReadyRef.current = true
@@ -3029,6 +3176,7 @@ export function Map3DGuideExperience({
       setIsMapVisualReady(true)
       setMapReadyTimedOut(false)
       initializedPresentationRef.current = initialPresentation
+      appliedPresentationRef.current = initialPresentation
       setPresentationTransition('ready')
       if (!presentationFallback) {
         setPresentationSwitchError(undefined)
@@ -3078,7 +3226,7 @@ export function Map3DGuideExperience({
         visualReadyRafIds = [
           window.requestAnimationFrame(() => {
             const secondRafId = window.requestAnimationFrame(() => {
-              markMapVisualReady(reason)
+              void markMapVisualReady(reason)
             })
             visualReadyRafIds = [...visualReadyRafIds, secondRafId]
           })
@@ -3142,11 +3290,6 @@ export function Map3DGuideExperience({
           return
         }
 
-        if (initialPresentation === 'scenic3d' && attempt === 0) {
-          void handleMapAttemptFailure(new Error('3D 地图底图就绪超时'), attempt)
-          return
-        }
-
         setMapReadyTimedOut(true)
         setPageMessage('地图底图加载较慢，正在继续展开佛境沙盘')
         recordStartupStage('slow', 'visual-ready-timeout')
@@ -3181,6 +3324,7 @@ export function Map3DGuideExperience({
           : null
         const preservedViewport = presentationViewportRef.current
         const exportMapCenter = inkExportCamera?.center ?? preservedViewport?.center ?? (isRouteGuideView ? currentRouteCenter : scenicCenter)
+        const initialViewMode = isInkCleanMode || initialPresentation === 'ink2d' ? '2D' : '3D'
         const map = new TMap.Map(mapElementRef.current, {
           center: new TMap.LatLng(exportMapCenter.lat, exportMapCenter.lng),
           zoom: inkExportCamera?.zoom ?? preservedViewport?.zoom ?? (initialPresentation === 'ink2d' ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
@@ -3188,8 +3332,9 @@ export function Map3DGuideExperience({
           // camera constraints are applied later without reconstructing TMap.
           minZoom: INK_2D_MIN_ZOOM,
           maxZoom: INK_MAP_MAX_ZOOM,
-          pitch: isInkCleanMode || initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-          rotation: isInkCleanMode || initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+          viewMode: initialViewMode,
+          pitch: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+          rotation: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
           baseMap: getMapBaseMapConfig({
             clean: isInkCleanMode,
@@ -3329,23 +3474,6 @@ export function Map3DGuideExperience({
       const message = error instanceof Error ? error.message : '腾讯地图加载失败'
       disposeCreatedMap(true)
 
-      if (initialPresentation === 'scenic3d' && attempt === 0) {
-        setPresentationTransition('destroying')
-        setPresentationSwitchError(`${message}，正在自动重试`)
-        setPageMessage('3D 地图初始化波动，正在自动重试...')
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapSlow',
-          reason: 'scenic3d-auto-retry'
-        })
-
-        const retryReady = await waitForRetryDelay()
-        if (retryReady && isCurrentGeneration()) {
-          setPresentationTransition('waiting-container')
-          await initMap(1)
-        }
-        return
-      }
-
       perfRecorder.markStageEnd('mapInit')
       setMapStatus('error')
       setMapReadyTimedOut(true)
@@ -3383,7 +3511,7 @@ export function Map3DGuideExperience({
       stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
       disposeCreatedMap(true)
     }
-  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapRuntimeGeneration, perfRecorder, poiLayerController, sceneWindowManager, shouldRedirectLocalTMapHost])
+  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapRuntimeGeneration, perfRecorder, poiLayerController, sceneWindowManager, shouldRedirectLocalTMapHost, updateCustomTileLayerRuntime])
 
   useEffect(() => {
     const targetMap = mapRef.current
@@ -3409,7 +3537,7 @@ export function Map3DGuideExperience({
       isMapInstanceCurrent(targetMap) &&
       mapInstanceGenerationsRef.current.get(targetMap) === targetGeneration
 
-    const apply = async (attempt: 0 | 1) => {
+    const apply = async () => {
       setPresentationTransition('waiting-container')
       setPresentationSwitchError(undefined)
       const container = mapElementRef.current
@@ -3435,16 +3563,30 @@ export function Map3DGuideExperience({
           pitch: scenicMapPresentation === 'ink2d' ? 0 : modeCamera.pitch,
           rotation: scenicMapPresentation === 'ink2d' ? 0 : modeCamera.rotation
         }
-        applyLongLivedMapPresentation(targetMap, window.TMap, scenicMapPresentation, targetCamera, scenicCenter)
+        const presentationResult = await applyPresentationToExistingMap({
+          map: targetMap,
+          TMap: window.TMap,
+          presentation: scenicMapPresentation,
+          requestedCamera: targetCamera,
+          isCurrent: isCurrentTransition
+        })
+        if (!presentationResult.ok) {
+          throw new Error(presentationResult.error ?? '腾讯地图视图模式验证失败')
+        }
         if (scenicMapPresentation === 'ink2d') {
-          camera2DStateRef.current = targetCamera
-        } else {
-          camera3DStateRef.current = targetCamera
+          await refreshHostedCustomTileLayer(targetMap, 'presentation-verified-2d', isCurrentTransition)
         }
         if (!isCurrentTransition()) {
           return
         }
+        const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, targetCamera)
+        if (scenicMapPresentation === 'ink2d') {
+          camera2DStateRef.current = verifiedCamera
+        } else {
+          camera3DStateRef.current = verifiedCamera
+        }
         initializedPresentationRef.current = scenicMapPresentation
+        appliedPresentationRef.current = scenicMapPresentation
         setPresentationTransition('ready')
         perfRecorder.recordMapVisualEvent({
           type: 'scenicMapPresentationChanged',
@@ -3455,39 +3597,41 @@ export function Map3DGuideExperience({
         if (!isCurrentTransition()) {
           return
         }
-        if (attempt === 0) {
-          window.setTimeout(() => {
-            if (isCurrentTransition()) {
-              void apply(1)
-            }
-          }, 360)
-          return
-        }
         const message = error instanceof Error ? error.message : '地图视角切换失败'
         setLastMapError(message)
         setPresentationSwitchError(message)
         setPresentationTransition('failed')
-        if (scenicMapPresentation === 'scenic3d') {
-          const fallbackCamera: CameraState = {
-            ...readMapCameraState(targetMap, scenicCenter),
-            pitch: 0,
-            rotation: 0
+        const restoredPresentation = previousPresentation
+        const restoreCamera = previousPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
+        const restoreResult = await applyPresentationToExistingMap({
+          map: targetMap,
+          TMap: window.TMap,
+          presentation: restoredPresentation,
+          requestedCamera: restoreCamera,
+          isCurrent: isCurrentTransition
+        })
+        if (restoreResult.ok && isCurrentTransition()) {
+          initializedPresentationRef.current = restoredPresentation
+          appliedPresentationRef.current = restoredPresentation
+          const verifiedRestoreCamera = cameraStateFromActual(restoreResult.actualCamera, restoreCamera)
+          if (restoredPresentation === 'ink2d') {
+            camera2DStateRef.current = verifiedRestoreCamera
+          } else {
+            camera3DStateRef.current = verifiedRestoreCamera
           }
-          applyLongLivedMapPresentation(targetMap, window.TMap, 'ink2d', fallbackCamera, scenicCenter)
-          camera2DStateRef.current = fallbackCamera
-          setPresentationFallback('ink2d')
-          replaceMapPresentationInUrl(navigate, 'ink2d')
+          setPresentationFallback(restoredPresentation)
+          replaceMapPresentationInUrl(navigate, restoredPresentation)
         }
       }
     }
 
-    void apply(0)
+    void apply()
     return () => {
       cancelled = true
       abortController.abort()
       presentationSwitchGenerationRef.current += 1
     }
-  }, [isMapInstanceCurrent, mapStatus, navigate, perfRecorder, scenicMapPresentation])
+  }, [isMapInstanceCurrent, mapStatus, navigate, perfRecorder, refreshHostedCustomTileLayer, scenicMapPresentation])
 
   useEffect(() => {
     if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden || isInkCleanMode) {
@@ -3927,6 +4071,7 @@ export function Map3DGuideExperience({
       const layer = ownedLayer ?? (isTargetMapCurrent() ? inkTileLayerRef.current : null)
 
       if (!layer) {
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'layer-cleanup' })
         return
       }
 
@@ -3935,6 +4080,7 @@ export function Map3DGuideExperience({
           inkTileLayerRef.current = null
           tencentCustomLayerInitKeyRef.current = ''
         }
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'stale-layer-cleanup' })
         ownedLayer = null
         return
       }
@@ -3971,6 +4117,7 @@ export function Map3DGuideExperience({
         inkTileLayerRef.current = null
         tencentCustomLayerInitKeyRef.current = ''
       }
+      updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'layer-cleanup' })
       ownedLayer = null
     }
 
@@ -4087,6 +4234,7 @@ export function Map3DGuideExperience({
           inkTileLayerRef.current = layer
           tencentCustomLayerInitKeyRef.current = customLayerInitKey
           layerManager.registerLayer('custom_tile', layer, targetMap)
+          updateCustomTileLayerRuntime({ attached: true, visible: true, lastRefreshReason: 'custom-layer-attached' })
 
           try {
             layer.setOpacity?.(TENCENT_CUSTOM_LAYER_CONFIG.opacity)
@@ -4258,7 +4406,7 @@ export function Map3DGuideExperience({
     }
 
     return cleanupLayer
-  }, [inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapVisualReadyForOverlays, noInkTilesOverride, perfRecorder])
+  }, [inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapVisualReadyForOverlays, noInkTilesOverride, perfRecorder, updateCustomTileLayerRuntime])
 
   useEffect(() => {
     if (!inkTilesEnabled) {
@@ -11035,45 +11183,191 @@ function readMapCameraState(map: any, fallbackCenter: LatLngPoint): CameraState 
   }
 }
 
-function applyLongLivedMapPresentation(
-  map: any,
-  TMap: any,
-  presentation: ScenicMapPresentation,
-  requestedCamera: CameraState,
-  fallbackCenter: LatLngPoint
-) {
-  const isInk2D = presentation === 'ink2d'
-  const currentCamera = readMapCameraState(map, fallbackCenter)
-  const target = {
-    center: new TMap.LatLng(requestedCamera.center?.lat ?? currentCamera.center.lat, requestedCamera.center?.lng ?? currentCamera.center.lng),
-    zoom: isInk2D
-      ? clampNumber(requestedCamera.zoom ?? currentCamera.zoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM)
-      : clampNumber(requestedCamera.zoom ?? currentCamera.zoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
-    pitch: isInk2D ? 0 : requestedCamera.pitch ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-    rotation: isInk2D ? 0 : requestedCamera.rotation ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
-    bearing: 0
+function emptyActualTencentCameraState(): ActualTencentCameraState {
+  return { viewMode: null, pitch: null, rotation: null, center: null, zoom: null }
+}
+
+function normalizeTencentViewMode(value: unknown): '2D' | '3D' | null {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  return normalized === '2D' || normalized === '3D' ? normalized : null
+}
+
+function readActualTencentCameraState(map: any): ActualTencentCameraState {
+  const readNumber = (getter: (() => unknown) | undefined) => {
+    try {
+      const value = Number(getter?.())
+      return Number.isFinite(value) ? value : null
+    } catch {
+      return null
+    }
   }
 
-  // Current Tencent GL builds differ in whether an explicit view-mode setter
-  // exists. Feature-detect it, while pitch/rotation remains the compatible
-  // equivalent used by this app's existing camera API.
+  let viewMode: '2D' | '3D' | null = null
   try {
-    map.setViewMode?.(isInk2D ? '2D' : '3D')
+    viewMode = typeof map?.getViewMode === 'function' ? normalizeTencentViewMode(map.getViewMode()) : null
   } catch {
-    // Some GL versions expose only camera controls.
+    viewMode = null
   }
+
+  return {
+    viewMode,
+    pitch: readNumber(typeof map?.getPitch === 'function' ? () => map.getPitch() : undefined),
+    rotation: readNumber(typeof map?.getRotation === 'function' ? () => map.getRotation() : undefined),
+    center: readMapCenterForProjection(map),
+    zoom: readMapZoomForProjection(map)
+  }
+}
+
+function cameraStateFromActual(actual: ActualTencentCameraState, fallback: CameraState): CameraState {
+  return {
+    center: actual.center ?? fallback.center,
+    zoom: actual.zoom ?? fallback.zoom,
+    pitch: actual.pitch ?? fallback.pitch,
+    rotation: actual.rotation ?? fallback.rotation
+  }
+}
+
+function circularRotationDistance(left: number, right: number) {
+  const distance = Math.abs(((left - right + 540) % 360) - 180)
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY
+}
+
+function waitForMapAnimationFrames(isCurrent: () => boolean) {
+  return new Promise<boolean>((resolve) => {
+    if (!isCurrent()) {
+      resolve(false)
+      return
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve(isCurrent()))
+    })
+  })
+}
+
+function waitForTencentMapRender(map: any, isCurrent: () => boolean, timeoutMs = 700) {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    let timer: number | undefined
+    const eventNames = ['rendercomplete', 'idle', 'tilesloaded']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (rendered: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The owner generation may have been destroyed during transition.
+        }
+      })
+      resolve(rendered && isCurrent())
+    }
+    if (!isCurrent()) {
+      finish(false)
+      return
+    }
+    eventNames.forEach((eventName) => {
+      const handler = () => finish(true)
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // A short frame/timeout fallback still validates real getters below.
+      }
+    })
+    void waitForMapAnimationFrames(isCurrent).then((current) => {
+      if (!current) {
+        finish(false)
+      }
+    })
+    timer = window.setTimeout(() => finish(isCurrent()), timeoutMs)
+  })
+}
+
+async function applyPresentationToExistingMap(options: {
+  map: any
+  TMap: any
+  presentation: ScenicMapPresentation
+  requestedCamera: CameraState
+  isCurrent: () => boolean
+}): Promise<PresentationApplyResult> {
+  const { map, TMap, presentation, requestedCamera, isCurrent } = options
+  const requestedViewMode = presentation === 'ink2d' ? '2D' : '3D'
+  const targetCamera: CameraState = {
+    center: requestedCamera.center,
+    zoom: requestedViewMode === '2D'
+      ? clampNumber(requestedCamera.zoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM)
+      : clampNumber(requestedCamera.zoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
+    pitch: requestedViewMode === '2D' ? 0 : requestedCamera.pitch,
+    rotation: requestedViewMode === '2D' ? 0 : requestedCamera.rotation
+  }
+  const failed = (error: string): PresentationApplyResult => ({
+    ok: false,
+    requestedPresentation: presentation,
+    requestedCamera: targetCamera,
+    actualCamera: readActualTencentCameraState(map),
+    error
+  })
+
+  if (!map || !TMap?.LatLng || !isCurrent()) {
+    return failed('地图实例在视图模式切换前不可用')
+  }
+  if (typeof map.setViewMode !== 'function' || typeof map.getViewMode !== 'function') {
+    return failed('当前腾讯地图 SDK 未提供可验证的 setViewMode/getViewMode API')
+  }
+
   try {
-    map.easeTo?.(target, { duration: 0 })
-  } catch {
-    // Direct setters below cover older Tencent GL builds.
+    map.setViewMode(requestedViewMode)
+    map.setPitchable?.(requestedViewMode === '3D')
+    map.setRotatable?.(requestedViewMode === '3D')
+
+    const target = {
+      center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
+      zoom: targetCamera.zoom,
+      pitch: targetCamera.pitch,
+      rotation: targetCamera.rotation,
+      bearing: 0
+    }
+    try {
+      map.easeTo?.(target, { duration: 0 })
+    } catch {
+      // Direct setters remain the portable path for the embedded WebView.
+    }
+    map.setCenter?.(target.center)
+    map.setZoom?.(target.zoom)
+    map.setPitch?.(target.pitch)
+    map.setRotation?.(target.rotation)
+    map.setBearing?.(0)
+  } catch (error) {
+    return failed(error instanceof Error ? error.message : '腾讯地图 setViewMode 调用失败')
   }
-  // `easeTo` is not consistently authoritative after setViewMode in Android
-  // WebViews. Apply the complete state again so 3D -> 2D cannot retain tilt.
-  map.setCenter?.(target.center)
-  map.setZoom?.(target.zoom)
-  map.setPitch?.(target.pitch)
-  map.setRotation?.(target.rotation)
-  map.setBearing?.(0)
+
+  await waitForTencentMapRender(map, isCurrent)
+  if (!isCurrent()) {
+    return failed('地图实例已过期，忽略视图模式切换结果')
+  }
+
+  const actualCamera = readActualTencentCameraState(map)
+  const viewModeMatches = actualCamera.viewMode === requestedViewMode
+  const pitchMatches = actualCamera.pitch !== null && Math.abs(actualCamera.pitch - targetCamera.pitch) <= 0.75
+  const rotationMatches =
+    actualCamera.rotation !== null && circularRotationDistance(actualCamera.rotation, targetCamera.rotation) <= 0.75
+  const ok = viewModeMatches && pitchMatches && rotationMatches
+
+  return {
+    ok,
+    requestedPresentation: presentation,
+    requestedCamera: targetCamera,
+    actualCamera,
+    error: ok
+      ? undefined
+      : `腾讯地图真实视图未收敛：期望 ${requestedViewMode} / pitch ${targetCamera.pitch.toFixed(2)} / rotation ${targetCamera.rotation.toFixed(2)}，实际 ${actualCamera.viewMode ?? 'unknown'} / ${actualCamera.pitch ?? 'unknown'} / ${actualCamera.rotation ?? 'unknown'}`
+  }
 }
 
 function inspectMapStyleSupport(map: any, TMap?: any): MapStyleSupportReport {
