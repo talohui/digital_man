@@ -1,27 +1,41 @@
 import type { LayerManager } from './LayerManager'
 
+export type PoiLayerKind = 'generic' | 'routeStops' | 'routeState'
+
 type PoiLayerBuildResult = {
   layer: any
   onClick?: (event: any) => void
 }
 
 type PoiLayerUpdateOptions = {
+  kind: PoiLayerKind
   key: string
   build: (map: any) => PoiLayerBuildResult | null
 }
 
+type PoiLayerRecord = {
+  layer: any
+  clickHandler?: (event: any) => void
+  renderKey: string
+}
+
+const layerNameByKind: Record<PoiLayerKind, string> = {
+  generic: 'poi_generic',
+  routeStops: 'poi_route_stops',
+  routeState: 'poi_route_state'
+}
+const poiLayerKinds: PoiLayerKind[] = ['generic', 'routeStops', 'routeState']
+
 /**
- * Single owner for the map's custom POI marker layer.
+ * Owns the three semantically distinct custom POI layers.
  *
- * It deliberately does not know route/UI semantics. Map3DGuidePage supplies a
- * stable render key and the existing marker factory; this controller only
- * guarantees one layer, one click handler and idempotent cleanup per map.
+ * Generic browse labels may be hidden for 3D/all modes without affecting
+ * route numbering or current/next-state markers. Each kind retains its own
+ * render key and click listener so an update is idempotent per layer.
  */
 export class PoiLayerController {
   private map: any = null
-  private layer: any = null
-  private clickHandler?: (event: any) => void
-  private renderKey = ''
+  private records = new Map<PoiLayerKind, PoiLayerRecord>()
 
   constructor(
     private readonly layerManager: LayerManager,
@@ -36,59 +50,68 @@ export class PoiLayerController {
     this.map = map
   }
 
-  update({ key, build }: PoiLayerUpdateOptions) {
+  update({ kind, key, build }: PoiLayerUpdateOptions) {
     const map = this.map
     if (!map || !this.isCurrentMap(map)) {
       return null
     }
 
-    if (key === this.renderKey && this.layer) {
-      return this.layer
+    const current = this.records.get(kind)
+    if (key === current?.renderKey && current.layer) {
+      return current.layer
     }
 
-    this.clear()
+    this.clear(kind)
     const result = build(map)
     if (!result || !this.isCurrentMap(map)) {
       result?.layer?.setMap?.(null)
       return null
     }
 
-    this.layer = result.layer
-    this.clickHandler = result.onClick
-    this.renderKey = key
-    if (this.clickHandler) {
-      this.layer?.on?.('click', this.clickHandler)
+    const record: PoiLayerRecord = {
+      layer: result.layer,
+      clickHandler: result.onClick,
+      renderKey: key
     }
-    this.layerManager.registerLayer('poi_route', this.layer, map)
-    return this.layer
+    this.records.set(kind, record)
+    if (record.clickHandler) {
+      record.layer?.on?.('click', record.clickHandler)
+    }
+    this.layerManager.registerLayer(layerNameByKind[kind], record.layer, map)
+    return record.layer
   }
 
-  getLayer() {
-    return this.layer
+  getLayer(kind: PoiLayerKind) {
+    return this.records.get(kind)?.layer ?? null
   }
 
-  clear() {
-    const layer = this.layer
-    if (!layer) {
-      this.renderKey = ''
+  clear(kind?: PoiLayerKind) {
+    if (kind) {
+      this.clearKind(kind)
       return
     }
-
-    if (this.clickHandler) {
-      try {
-        layer.off?.('click', this.clickHandler)
-      } catch {
-        // Tencent layer may already be detached during a hard map recovery.
-      }
-    }
-    this.layerManager.removeLayer('poi_route', layer)
-    this.layer = null
-    this.clickHandler = undefined
-    this.renderKey = ''
+    poiLayerKinds.forEach((layerKind) => this.clearKind(layerKind))
   }
 
   destroy() {
     this.clear()
     this.map = null
+  }
+
+  private clearKind(kind: PoiLayerKind) {
+    const record = this.records.get(kind)
+    if (!record) {
+      return
+    }
+
+    if (record.clickHandler) {
+      try {
+        record.layer?.off?.('click', record.clickHandler)
+      } catch {
+        // Tencent can detach a layer during hard map recovery.
+      }
+    }
+    this.layerManager.removeLayer(layerNameByKind[kind], record.layer)
+    this.records.delete(kind)
   }
 }

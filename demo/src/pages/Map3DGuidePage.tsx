@@ -62,7 +62,7 @@ import {
 import { GLBMemoryManager } from '../lib/map/GLBMemoryManager'
 import { GLBSpatialController } from '../lib/map/GLBSpatialController'
 import { LayerManager } from '../lib/map/LayerManager'
-import { PoiLayerController } from '../lib/map/PoiLayerController'
+import { PoiLayerController, type PoiLayerKind } from '../lib/map/PoiLayerController'
 import { SceneArbiter } from '../lib/map/SceneArbiter'
 import { SceneStateManager, type SceneStateRecord } from '../lib/map/SceneStateManager'
 import { SceneWindowManager } from '../lib/map/SceneWindowManager'
@@ -148,6 +148,11 @@ type TencentPoiModeRuntime = {
   requested: boolean
   applied: boolean
   lastError?: string
+}
+type PoiLayerVisibility = {
+  showGenericCustomPoi: boolean
+  showRouteStopMarkers: boolean
+  showRouteStateMarkers: boolean
 }
 type RouteCameraIntentSource = 'route-overview' | 'route-current'
 type RouteCameraIntentStatus = 'idle' | 'applying' | 'completed' | 'superseded' | 'failed'
@@ -934,6 +939,44 @@ function applyTencentBaseMapPoiMode(
   }
 }
 
+const TENCENT_NATIVE_CONTROL_SELECTOR = [
+  '.tmap-control',
+  '.tmap-control-container',
+  '.tmap-zoom-control',
+  '.tmap-rotate-control',
+  '.tmap-compass',
+  '.tmap-scale-control',
+  '.TMap-control',
+  '.TMap-zoom',
+  '.TMap-compass',
+  '[class*="tmap" i][class*="zoom" i]',
+  '[class*="tmap" i][class*="compass" i]',
+  '[class*="tmap" i][class*="rotate" i]'
+].join(', ')
+
+function countVisibleTencentNativeMapControls(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(TENCENT_NATIVE_CONTROL_SELECTOR)).filter((element) => {
+    const style = window.getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+  }).length
+}
+
+function resolvePoiLayerVisibility(input: {
+  presentation: ScenicMapPresentation
+  poiVisibilityMode: 'core' | 'all'
+  isRouteGuideView: boolean
+  routeStage?: string
+}): PoiLayerVisibility {
+  const showGenericCustomPoi =
+    input.poiVisibilityMode === 'core' && input.presentation === 'ink2d'
+
+  return {
+    showGenericCustomPoi,
+    showRouteStopMarkers: input.isRouteGuideView,
+    showRouteStateMarkers: input.isRouteGuideView
+  }
+}
+
 type MapRuntimeErrorBoundaryProps = {
   children: ReactNode
   onError: (error: Error, info: ErrorInfo) => void
@@ -1020,7 +1063,10 @@ export function Map3DGuideExperience({
   const [mapContainerGeneration, setMapContainerGeneration] = useState(0)
   const [mapInstanceId, setMapInstanceId] = useState(0)
   const [lastMapError, setLastMapError] = useState('')
-  const [customPoiVisibleCount, setCustomPoiVisibleCount] = useState(0)
+  const [genericCustomPoiVisibleCount, setGenericCustomPoiVisibleCount] = useState(0)
+  const [routeStopMarkerCount, setRouteStopMarkerCount] = useState(0)
+  const [routeStateMarkerCount, setRouteStateMarkerCount] = useState(0)
+  const [nativeMapControlVisibleCount, setNativeMapControlVisibleCount] = useState(0)
   const [tencentPoiMode, setTencentPoiMode] = useState<TencentPoiModeRuntime>({
     requested: false,
     applied: false
@@ -1585,9 +1631,20 @@ export function Map3DGuideExperience({
         contextLostCount: contextLostCountRef.current,
         hardRecoveryCount: hardRecoveryCountRef.current,
         currentPoiLayerMode: poiVisibilityMode,
-        customPoiVisibleCount,
+        poiLayers: {
+          mode: poiVisibilityMode,
+          genericCustomPoiVisibleCount,
+          routeStopMarkerCount,
+          routeStateMarkerCount,
+          tencentNativePoiRequested: tencentPoiMode.requested,
+          tencentNativePoiApplied: tencentPoiMode.applied
+        },
         tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
         tencentPoiMode,
+        nativeMapControls: {
+          requestedVisible: false,
+          detectedVisibleCount: nativeMapControlVisibleCount
+        },
         activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
         lastMapError,
         presentationSwitchError,
@@ -1653,24 +1710,64 @@ export function Map3DGuideExperience({
     window.LINGSHAN_MAP_DEBUG = debugSnapshot
     window.__GET_LINGSHAN_MAP_SNAPSHOT__ = createDebugSnapshot
   }, [
-    customPoiVisibleCount,
     customTileLayerRuntime,
+    genericCustomPoiVisibleCount,
     glbRuntimeSnapshot.updatedAt,
     isMapInstanceCurrent,
     lastMapError,
     mapBoundsSnapshot,
     mapInstanceId,
+    nativeMapControlVisibleCount,
     poiVisibilityMode,
     presentationSwitchError,
     presentationTransition,
     cameraTransitionPhase,
     requestedScenicMapPresentation,
     routeCameraIntentSnapshot,
+    routeStateMarkerCount,
+    routeStopMarkerCount,
     sceneArbiter,
     selectedStopIndex,
     scenicMapPresentation,
     tencentPoiMode
   ])
+
+  useEffect(() => {
+    const container = mapElementRef.current
+    if (mapStatus !== 'ready' || !container || typeof MutationObserver === 'undefined') {
+      setNativeMapControlVisibleCount(0)
+      return
+    }
+
+    let frameId: number | undefined
+    const syncVisibleCount = () => {
+      frameId = undefined
+      const nextCount = countVisibleTencentNativeMapControls(container)
+      setNativeMapControlVisibleCount((current) => (current === nextCount ? current : nextCount))
+    }
+    const scheduleSync = () => {
+      if (frameId !== undefined) {
+        return
+      }
+      frameId = window.requestAnimationFrame(syncVisibleCount)
+    }
+    const observer = new MutationObserver(scheduleSync)
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden']
+    })
+    scheduleSync()
+
+    return () => {
+      observer.disconnect()
+      if (frameId !== undefined) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [mapInstanceId, mapStatus])
+
   const landmarkInspector = useLandmarkModelInspector({
     active:
       (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) &&
@@ -3494,6 +3591,10 @@ export function Map3DGuideExperience({
           pitch: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
           rotation: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
           mapStyleId: MAP_3D_GUIDE_STYLE_ID,
+          // TMap GLJS exposes showControl/getShowControl/setShowControl. The
+          // application owns its tool rail, so native zoom and compass UI
+          // must never be mounted for either presentation.
+          showControl: false,
           baseMap: getMapBaseMapConfig({
             clean: isInkCleanMode,
             showNativePoiLabels: poiLayerMode === 'all'
@@ -6292,7 +6393,9 @@ export function Map3DGuideExperience({
     if (isInkCleanMode) {
       poiLayerController.clear()
       poiMarkerLayerRef.current = null
-      setCustomPoiVisibleCount(0)
+      setGenericCustomPoiVisibleCount(0)
+      setRouteStopMarkerCount(0)
+      setRouteStateMarkerCount(0)
       return
     }
 
@@ -6305,15 +6408,20 @@ export function Map3DGuideExperience({
     const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
+    const layerVisibility = resolvePoiLayerVisibility({
+      presentation: scenicMapPresentation,
+      poiVisibilityMode,
+      isRouteGuideView,
+      routeStage: routeGuideStage
+    })
     // Expanded active/arrived cards intentionally narrow the marker field;
     // collapsed cards restore every numbered station without moving the map.
     const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
     const routeContextPois = routeProgressMode
       ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
       : []
-    const browsePois = poiLayerMode === 'all'
-      ? []
-      : Array.from(
+    const genericPois = !isRouteGuideView
+      ? Array.from(
           new Map(
             [
               ...getLingshanPoisForLayer(poiLayerMode),
@@ -6321,102 +6429,89 @@ export function Map3DGuideExperience({
             ].map((poi) => [poi.id, poi])
           ).values()
         )
-    const renderedPois = !isRouteGuideView
-      ? browsePois
-      : routeProgressMode
-        ? routeContextPois
-        : lingshanPois.filter((poi) => routeStopIds.has(poi.id))
-    const markerStyles: Record<string, any> = {}
+      : routeContextPois.filter((poi) => !routeStopIds.has(poi.id))
 
-    if (!isRouteGuideView && poiLayerMode === 'all') {
-      poiLayerController.clear()
-      poiMarkerLayerRef.current = null
-      setCustomPoiVisibleCount(0)
-      return
-    }
-
-    routeStops.forEach((stop, index) => {
-      const state =
-        stop.spotId === terminalStopId
-          ? 'terminal'
-          : stop.spotId === currentStopId
-            ? 'current'
-            : stop.spotId === nextStopId
-              ? 'next'
-              : 'route'
-      const styleId = `poi-${index}-${state}`
-      const size = state === 'current' ? 44 : state === 'next' ? 40 : state === 'terminal' ? 42 : 34
-
-      markerStyles[styleId] = new window.TMap.MarkerStyle({
-        width: size,
-        height: size + 8,
-        anchor: { x: size / 2, y: size + 6 },
-        src: createSvgDataUrl(routePoiMarkerSvg(state, index + 1))
-      })
-    })
-
-    if (!isRouteGuideView) {
-      renderedPois.forEach((poi) => {
-        const styleId = `browse-${poi.id}`
-        markerStyles[styleId] = new window.TMap.MarkerStyle({
-          width: 96,
-          height: 42,
-          anchor: { x: 48, y: 37 },
-          src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, poi.assetBindingPriority === 'core_3d'))
-        })
-      })
-    } else if (routeProgressMode) {
-      routeContextPois
-        .filter((poi) => !routeStopIds.has(poi.id))
-        .forEach((poi) => {
-          const styleId = `context-${poi.id}`
-          markerStyles[styleId] = new window.TMap.MarkerStyle({
-            width: 92,
-            height: 38,
-            anchor: { x: 46, y: 34 },
-            src: createSvgDataUrl(browsePoiMarkerSvg(poi.name, false, true))
+    const genericStyles: Record<string, any> = {}
+    const genericGeometries = layerVisibility.showGenericCustomPoi
+      ? genericPois.map((poi) => {
+          const styleId = isRouteGuideView ? `context-${poi.id}` : `browse-${poi.id}`
+          const isContextPoi = isRouteGuideView
+          genericStyles[styleId] = new window.TMap.MarkerStyle({
+            width: isContextPoi ? 92 : 96,
+            height: isContextPoi ? 38 : 42,
+            anchor: isContextPoi ? { x: 46, y: 34 } : { x: 48, y: 37 },
+            src: createSvgDataUrl(
+              browsePoiMarkerSvg(poi.name, !isContextPoi && poi.assetBindingPriority === 'core_3d', isContextPoi)
+            )
           })
-        })
-    }
-
-    const poiGeometries = renderedPois.map((poi) => {
-      if (!isRouteGuideView) {
-        return {
-          id: poi.id,
-          styleId: `browse-${poi.id}`,
-          position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: { title: poi.name }
-        }
-      }
-
-      if (routeProgressMode && !routeStopIds.has(poi.id)) {
-        return {
-          id: poi.id,
-          styleId: `context-${poi.id}`,
-          position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: { title: poi.name }
-        }
-      }
-
-        const stopIndex = routeStops.findIndex((stop) => stop.spotId === poi.id)
-        const state =
-          poi.id === terminalStopId
-            ? 'terminal'
-            : poi.id === currentStopId
-              ? 'current'
-              : poi.id === nextStopId
-                ? 'next'
-                : 'route'
-
-        return {
-          id: poi.id,
-          styleId: `poi-${stopIndex}-${state}`,
-          position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: {
-            title: `${stopIndex + 1}. ${poi.name}`
+          return {
+            id: poi.id,
+            styleId,
+            position: toTMapLatLng(getBestPoiLocation(poi)),
+            rank: 50,
+            properties: { title: poi.name }
           }
-        }
-      })
+        })
+      : []
+
+    const routeStopStyles: Record<string, any> = {}
+    const routeStopGeometries = layerVisibility.showRouteStopMarkers
+      ? routeStops.flatMap((stop, index) => {
+          const location = getRouteStopLocation(stop.spotId)
+          if (!location) {
+            return []
+          }
+          const display = getPoiDisplay(stop.spotId)
+          const styleId = `route-stop-${index}`
+          const size = stop.spotId === terminalStopId ? 42 : 34
+          routeStopStyles[styleId] = new window.TMap.MarkerStyle({
+            width: size,
+            height: size + 8,
+            anchor: { x: size / 2, y: size + 6 },
+            src: createSvgDataUrl(routePoiMarkerSvg(stop.spotId === terminalStopId ? 'terminal' : 'route', index + 1))
+          })
+          return [{
+            id: stop.spotId,
+            styleId,
+            position: toTMapLatLng(location),
+            rank: 70,
+            properties: { title: `${index + 1}. ${display?.name ?? stop.spotId}` }
+          }]
+        })
+      : []
+
+    const routeStateStyles: Record<string, any> = {}
+    const routeStateMarkers = [
+      { poiId: currentStopId, state: 'current' as const },
+      { poiId: nextStopId, state: 'next' as const }
+    ].filter((item, index, items) => Boolean(item.poiId) && items.findIndex((candidate) => candidate.poiId === item.poiId) === index)
+    const routeStateGeometries = layerVisibility.showRouteStateMarkers
+      ? routeStateMarkers.flatMap(({ poiId, state }) => {
+          if (!poiId) {
+            return []
+          }
+          const stopIndex = routeStops.findIndex((stop) => stop.spotId === poiId)
+          const location = getRouteStopLocation(poiId)
+          if (stopIndex < 0 || !location) {
+            return []
+          }
+          const size = state === 'current' ? 44 : 40
+          const styleId = `route-state-${state}-${stopIndex}`
+          routeStateStyles[styleId] = new window.TMap.MarkerStyle({
+            width: size,
+            height: size + 8,
+            anchor: { x: size / 2, y: size + 6 },
+            src: createSvgDataUrl(routePoiMarkerSvg(state, stopIndex + 1))
+          })
+          return [{
+            id: poiId,
+            styleId,
+            position: toTMapLatLng(location),
+            rank: 90,
+            properties: { title: `${stopIndex + 1}. ${getPoiDisplay(poiId)?.name ?? poiId}` }
+          }]
+        })
+      : []
 
     const handlePoiMarkerClick = (event: any) => {
       const poiId = event?.geometry?.id ?? event?.geometryId ?? event?.id
@@ -6439,28 +6534,60 @@ export function Map3DGuideExperience({
         presentation: scenicMapPresentation
       })
     }
-    const poiLayer = poiLayerController.update({
-      key: JSON.stringify({
-        routeId: currentRouteId,
-        stopIndex: effectiveRouteStopIndex,
-        routeGuideStage,
-        expanded: routeCardExpanded,
-        layerMode: poiLayerMode,
-        services: serviceFacilitiesEnabled,
-        presentation: scenicMapPresentation,
-        poiIds: poiGeometries.map((item) => item.id)
-      }),
-      build: (map) => ({
-        layer: new window.TMap.MultiMarker({
-          map,
-          styles: markerStyles,
-          geometries: poiGeometries
-        }),
-        onClick: handlePoiMarkerClick
+    const updatePoiLayer = (
+      kind: PoiLayerKind,
+      key: Record<string, unknown>,
+      styles: Record<string, any>,
+      geometries: any[]
+    ) => {
+      if (!geometries.length) {
+        poiLayerController.clear(kind)
+        return null
+      }
+      return poiLayerController.update({
+        kind,
+        key: JSON.stringify(key),
+        build: (map) => ({
+          layer: new window.TMap.MultiMarker({ map, styles, geometries }),
+          onClick: handlePoiMarkerClick
+        })
       })
-    })
-    poiMarkerLayerRef.current = poiLayer
-    setCustomPoiVisibleCount(poiLayer ? poiGeometries.length : 0)
+    }
+
+    const genericPoiLayer = updatePoiLayer(
+      'generic',
+      {
+        mode: poiLayerMode,
+        presentation: scenicMapPresentation,
+        route: isRouteGuideView,
+        services: serviceFacilitiesEnabled,
+        poiIds: genericGeometries.map((item) => item.id)
+      },
+      genericStyles,
+      genericGeometries
+    )
+    const routeStopLayer = updatePoiLayer(
+      'routeStops',
+      { routeId: currentRouteId, poiIds: routeStopGeometries.map((item) => item.id) },
+      routeStopStyles,
+      routeStopGeometries
+    )
+    const routeStateLayer = updatePoiLayer(
+      'routeState',
+      {
+        routeId: currentRouteId,
+        currentStopId,
+        nextStopId,
+        stage: routeGuideStage,
+        poiIds: routeStateGeometries.map((item) => item.id)
+      },
+      routeStateStyles,
+      routeStateGeometries
+    )
+    poiMarkerLayerRef.current = genericPoiLayer
+    setGenericCustomPoiVisibleCount(genericPoiLayer ? genericGeometries.length : 0)
+    setRouteStopMarkerCount(routeStopLayer ? routeStopGeometries.length : 0)
+    setRouteStateMarkerCount(routeStateLayer ? routeStateGeometries.length : 0)
     perfRecorder.markStageEnd('poiInit')
     if (!mapRoutePoiShownRef.current) {
       mapRoutePoiShownRef.current = true
@@ -6469,22 +6596,11 @@ export function Map3DGuideExperience({
         reason: 'visual-ready'
       })
     }
-
-    return () => {
-      if (poiLayerController.getLayer() === poiLayer) {
-        poiLayerController.clear()
-      }
-      if (poiMarkerLayerRef.current === poiLayer || !poiLayer) {
-        poiMarkerLayerRef.current = null
-        setCustomPoiVisibleCount(0)
-      }
-    }
   }, [
     currentRouteId,
     effectiveRouteStopIndex,
     isInkCleanMode,
     isMapInstanceCurrent,
-    isMapInstanceUsable,
     isRouteGuideView,
     mapVisualReadyForOverlays,
     navigate,
@@ -6499,7 +6615,8 @@ export function Map3DGuideExperience({
     setSelectedPoiId,
     serviceFacilitiesEnabled,
     shouldRenderRouteProgress,
-    terminalStopId
+    terminalStopId,
+    poiVisibilityMode
   ])
 
   useEffect(() => {
@@ -14559,18 +14676,22 @@ const map3DGuideCss = `
   filter: none;
 }
 
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-control,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-control-container,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-zoom-control,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-rotate-control,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-compass,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .tmap-scale-control,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-control,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-zoom,
-.map-3d-guide-shell--ink2d .map-3d-guide-map .TMap-compass,
-.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="zoom" i],
-.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="compass" i],
-.map-3d-guide-shell--ink2d .map-3d-guide-map [class*="rotate" i] {
+/* showControl:false is the primary API-level switch. QQ WebView can still
+   inject its own TMap control DOM, so this map-container-only fallback keeps
+   native zoom/compass chrome out of both 2D and 3D without touching the
+   application's portal-based tool rail. */
+.map-3d-guide-map .tmap-control,
+.map-3d-guide-map .tmap-control-container,
+.map-3d-guide-map .tmap-zoom-control,
+.map-3d-guide-map .tmap-rotate-control,
+.map-3d-guide-map .tmap-compass,
+.map-3d-guide-map .tmap-scale-control,
+.map-3d-guide-map .TMap-control,
+.map-3d-guide-map .TMap-zoom,
+.map-3d-guide-map .TMap-compass,
+.map-3d-guide-map [class*="tmap" i][class*="zoom" i],
+.map-3d-guide-map [class*="tmap" i][class*="compass" i],
+.map-3d-guide-map [class*="tmap" i][class*="rotate" i] {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
