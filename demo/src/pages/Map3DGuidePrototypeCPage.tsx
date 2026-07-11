@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
 import { MapMobileToolRail } from '../components/map/MapMobileToolRail'
 import { toggleMapPresentation } from '../lib/mapGuideNavigation'
+import { useMapGuideUiStore, type PoiVisibilityMode } from '../store/useMapGuideUiStore'
 import { type MapGuideState } from '../types/mapGuide'
 import {
   Map3DGuideExperience,
@@ -41,8 +42,6 @@ const BROWSE_SERVICE_CATEGORIES = [
     description: '服务点位建设中。后续会结合景区动线提示最近出口或返程方向。'
   }
 ] as const
-
-type BrowseLayerMode = 'core' | 'all'
 
 function BrowseTopbar({ onBack, onMore }: { onBack: () => void; onMore: () => void }) {
   return (
@@ -156,9 +155,9 @@ function BrowseLayerPanel({
   onServiceVisibleChange
 }: {
   open: boolean
-  mode: BrowseLayerMode
+  mode: PoiVisibilityMode
   serviceVisible: boolean
-  onModeChange: (mode: BrowseLayerMode) => void
+  onModeChange: (mode: PoiVisibilityMode) => void
   onServiceVisibleChange: (visible: boolean) => void
 }) {
   if (!open) {
@@ -196,12 +195,14 @@ function BrowseMobileOverlay({ presentation, presentationSwitching, onPresentati
   const [mounted, setMounted] = useState(false)
   const [serviceOpen, setServiceOpen] = useState(false)
   const [layerOpen, setLayerOpen] = useState(false)
-  const [layerMode, setLayerMode] = useState<BrowseLayerMode>('core')
-  const [serviceFacilitiesVisible, setServiceFacilitiesVisible] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof BROWSE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const [feedbackText, setFeedbackText] = useState('')
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
+  const layerMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
+  const setLayerMode = useMapGuideUiStore((state) => state.setPoiVisibilityMode)
+  const serviceFacilitiesVisible = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
+  const setServiceFacilitiesVisible = useMapGuideUiStore((state) => state.setServiceFacilitiesEnabled)
 
   useEffect(() => {
     setMounted(true)

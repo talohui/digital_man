@@ -144,6 +144,11 @@ type CustomTileLayerRuntime = {
   refreshCount: number
   lastRefreshReason: string
 }
+type TencentPoiModeRuntime = {
+  requested: boolean
+  applied: boolean
+  lastError?: string
+}
 type RouteCameraIntentSource = 'route-overview' | 'route-current'
 type RouteCameraIntentStatus = 'idle' | 'applying' | 'completed' | 'superseded' | 'failed'
 type RouteCameraIntentPhase =
@@ -909,17 +914,23 @@ function getMapBaseMapConfig(options: { clean: boolean; showNativePoiLabels: boo
   return options.showNativePoiLabels ? MAP_3D_GUIDE_BASE_MAP : MAP_3D_GUIDE_CORE_BASE_MAP
 }
 
-function applyTencentBaseMapPoiMode(map: any, options: { clean: boolean; showNativePoiLabels: boolean }) {
+function applyTencentBaseMapPoiMode(
+  map: any,
+  options: { clean: boolean; showNativePoiLabels: boolean }
+): { applied: boolean; lastError?: string } {
   if (!map || typeof map.setBaseMap !== 'function') {
-    return false
+    return { applied: false, lastError: 'Tencent map setBaseMap is unavailable' }
   }
 
   try {
     map.setBaseMap(getMapBaseMapConfig(options))
-    return true
+    return { applied: true }
   } catch (error) {
     console.warn('[Map3D] Tencent base-map POI label switch unavailable', error)
-    return false
+    return {
+      applied: false,
+      lastError: error instanceof Error ? error.message : 'Tencent map setBaseMap failed'
+    }
   }
 }
 
@@ -1010,6 +1021,10 @@ export function Map3DGuideExperience({
   const [mapInstanceId, setMapInstanceId] = useState(0)
   const [lastMapError, setLastMapError] = useState('')
   const [customPoiVisibleCount, setCustomPoiVisibleCount] = useState(0)
+  const [tencentPoiMode, setTencentPoiMode] = useState<TencentPoiModeRuntime>({
+    requested: false,
+    applied: false
+  })
   const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
   const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
   const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
@@ -1572,6 +1587,7 @@ export function Map3DGuideExperience({
         currentPoiLayerMode: poiVisibilityMode,
         customPoiVisibleCount,
         tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
+        tencentPoiMode,
         activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
         lastMapError,
         presentationSwitchError,
@@ -1652,7 +1668,8 @@ export function Map3DGuideExperience({
     routeCameraIntentSnapshot,
     sceneArbiter,
     selectedStopIndex,
-    scenicMapPresentation
+    scenicMapPresentation,
+    tencentPoiMode
   ])
   const landmarkInspector = useLandmarkModelInspector({
     active:
@@ -3869,9 +3886,15 @@ export function Map3DGuideExperience({
       return
     }
 
-    applyTencentBaseMapPoiMode(targetMap, {
+    const showNativePoiLabels = poiLayerMode === 'all'
+    const poiModeResult = applyTencentBaseMapPoiMode(targetMap, {
       clean: isInkCleanMode,
-      showNativePoiLabels: poiLayerMode === 'all'
+      showNativePoiLabels
+    })
+    setTencentPoiMode({
+      requested: showNativePoiLabels,
+      applied: showNativePoiLabels && poiModeResult.applied,
+      lastError: poiModeResult.lastError
     })
 
     if (isRouteGuideView || poiLayerMode !== 'all') {
