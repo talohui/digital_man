@@ -144,6 +144,17 @@ type CustomTileLayerRuntime = {
   refreshCount: number
   lastRefreshReason: string
 }
+type RouteCameraIntentSource = 'route-overview' | 'route-current'
+type RouteCameraIntentStatus = 'idle' | 'applying' | 'completed' | 'superseded' | 'failed'
+type RouteCameraIntentSnapshot = {
+  generation: number
+  source: RouteCameraIntentSource | null
+  routeId: string | null
+  target: CameraState | null
+  status: RouteCameraIntentStatus
+  lastCompletedGeneration: number
+  lastFailure?: string
+}
 type GardenLodState = {
   opacity: number
   visibleTier: 'none' | 'reduced' | 'full'
@@ -1042,6 +1053,16 @@ export function Map3DGuideExperience({
   const landmarkLastLoadAllowReasonRef = useRef<Map<string, string>>(new Map())
   const landmarkLastLoadDenyReasonRef = useRef<Map<string, string>>(new Map())
   const cameraSequenceRef = useRef(0)
+  const routeCameraIntentGenerationRef = useRef(0)
+  const routeCameraProgrammaticMoveRef = useRef(false)
+  const routeCameraIntentRef = useRef<RouteCameraIntentSnapshot>({
+    generation: 0,
+    source: null,
+    routeId: null,
+    target: null,
+    status: 'idle',
+    lastCompletedGeneration: 0
+  })
   const tourPlaybackRef = useRef<Map3DTourPlaybackRef['current']>(null)
   const buddhaTourUiFrameRef = useRef(0)
   const buddhaTourProgressBucketRef = useRef(-1)
@@ -1283,6 +1304,13 @@ export function Map3DGuideExperience({
     setCameraTransitionPhase(phase)
   }, [])
   const [presentationSwitchError, setPresentationSwitchError] = useState<string | undefined>()
+  const [routeCameraIntentSnapshot, setRouteCameraIntentSnapshot] = useState<RouteCameraIntentSnapshot>(
+    routeCameraIntentRef.current
+  )
+  const updateRouteCameraIntentSnapshot = useCallback((next: RouteCameraIntentSnapshot) => {
+    routeCameraIntentRef.current = next
+    setRouteCameraIntentSnapshot(next)
+  }, [])
   const [presentationCloudPhase, setPresentationCloudPhase] = useState<'hidden' | 'covering' | 'opening'>('hidden')
   const [isMapCreated, setIsMapCreated] = useState(false)
   const [isMapIdle, setIsMapIdle] = useState(false)
@@ -1545,6 +1573,24 @@ export function Map3DGuideExperience({
           lastPersistReason: cameraPersistenceDiagnosticsRef.current.lastPersistReason,
           lastRejectedPersistReason: cameraPersistenceDiagnosticsRef.current.lastRejectedPersistReason
         },
+        routeCameraIntent: {
+          generation: routeCameraIntentRef.current.generation,
+          source: routeCameraIntentRef.current.source,
+          routeId: routeCameraIntentRef.current.routeId,
+          targetCenter: routeCameraIntentRef.current.target?.center ?? null,
+          targetZoom: routeCameraIntentRef.current.target?.zoom ?? null,
+          targetPitch: routeCameraIntentRef.current.target?.pitch ?? null,
+          targetRotation: routeCameraIntentRef.current.target?.rotation ?? null,
+          status: routeCameraIntentRef.current.status,
+          lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+          lastFailure: routeCameraIntentRef.current.lastFailure
+        },
+        routeFocusContext: {
+          mapFocusMode,
+          currentStopIndex: selectedStopIndex,
+          currentStopPoiId: currentRouteConfig.stops[selectedStopIndex]?.spotId,
+          resolvedCurrentCoordinate: getRouteStopLocation(currentRouteConfig.stops[selectedStopIndex]?.spotId)
+        },
         customTileLayer: customTileLayerRuntimeRef.current
       }
     }
@@ -1565,7 +1611,9 @@ export function Map3DGuideExperience({
     presentationTransition,
     cameraTransitionPhase,
     requestedScenicMapPresentation,
+    routeCameraIntentSnapshot,
     sceneArbiter,
+    selectedStopIndex,
     scenicMapPresentation
   ])
   const landmarkInspector = useLandmarkModelInspector({
@@ -1635,13 +1683,9 @@ export function Map3DGuideExperience({
       return
     }
 
-    const currentLocation = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
-    if (currentLocation) {
-      moveMapCamera(currentLocation, isInk2DPresentation ? INK_2D_CAMERA_PRESET : MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus, {
-        targetPoiId: routeStops[effectiveRouteStopIndex]?.spotId
-      })
-    }
+    focusRouteCurrent(currentRouteConfig.id, effectiveRouteStopIndex)
   }, [
+    currentRouteConfig.id,
     currentRoutePath,
     effectiveRouteStopIndex,
     isInk2DPresentation,
@@ -4591,7 +4635,8 @@ export function Map3DGuideExperience({
           appliedPresentationRef.current === 'scenic3d' &&
           actualCamera.viewMode === '3D' &&
           cameraTransitionPhaseRef.current === 'ready' &&
-          !suppress3DCameraPersistenceRef.current
+          !suppress3DCameraPersistenceRef.current &&
+          !routeCameraProgrammaticMoveRef.current
         ) {
           camera3DStateRef.current = cameraState
           lastMeaningful3DCameraRef.current = cameraState
@@ -4599,6 +4644,8 @@ export function Map3DGuideExperience({
         } else if (initializedPresentationRef.current === 'scenic3d') {
           cameraPersistenceDiagnosticsRef.current.lastRejectedPersistReason = suppress3DCameraPersistenceRef.current
             ? `${reason}:suppressed`
+            : routeCameraProgrammaticMoveRef.current
+              ? `${reason}:route-camera-intent`
             : actualCamera.viewMode !== '3D'
               ? `${reason}:view-mode-${actualCamera.viewMode ?? 'unknown'}`
               : cameraTransitionPhaseRef.current !== 'ready'
@@ -6711,7 +6758,7 @@ export function Map3DGuideExperience({
     setActiveCameraMode('routeOverview')
     setActiveTourStepId(undefined)
     setPageMessage(`${nextRouteConfig.name}已就绪`)
-    focusRouteOverview(nextRoutePath, nextInitialPosition)
+    focusRouteOverview(nextRoutePath, nextInitialPosition, nextRouteConfig.id)
   }
 
   useEffect(() => {
@@ -6801,10 +6848,157 @@ export function Map3DGuideExperience({
     })
   }
 
-  const focusRouteOverview = (path = currentRoutePath, fallback = currentInitialPosition) => {
+  function applyRouteCameraIntent(
+    source: RouteCameraIntentSource,
+    routeId: string,
+    target: LatLngPoint,
+    preset: Map3DCameraPreset
+  ) {
+    const map = mapRef.current
+    if (!map || !window.TMap) {
+      return
+    }
+
+    const generation = ++routeCameraIntentGenerationRef.current
+    const previousIntent = routeCameraIntentRef.current
+    const targetCamera: CameraState = {
+      center: target,
+      zoom: preset.zoom,
+      pitch: preset.pitch,
+      rotation: preset.rotation
+    }
+    const intent: RouteCameraIntentSnapshot = {
+      generation,
+      source,
+      routeId,
+      target: targetCamera,
+      status: 'applying',
+      lastCompletedGeneration: previousIntent.lastCompletedGeneration
+    }
+    updateRouteCameraIntentSnapshot(intent)
+    routeCameraProgrammaticMoveRef.current = true
+    // Cancels any delayed second-stage callback left by an earlier generic
+    // landmark/overview camera command before this route intent takes over.
+    cameraSequenceRef.current += 1
+    stopActiveTour('manual')
+
+    try {
+      map.stop?.()
+    } catch {
+      // Tencent GL does not expose stop() in every WebView build; generation
+      // checks below remain the authoritative cancellation mechanism.
+    }
+
+    const isCurrentIntent = () =>
+      routeCameraIntentGenerationRef.current === generation && isMapInstanceCurrent(map)
+    const complete = async () => {
+      try {
+        const cameraTarget = {
+          center: new window.TMap.LatLng(target.lat, target.lng),
+          zoom: preset.zoom,
+          pitch: preset.pitch,
+          rotation: preset.rotation
+        }
+        if (typeof map.easeTo === 'function') {
+          map.easeTo(cameraTarget, { duration: preset.durationMs })
+        } else {
+          map.setCenter?.(cameraTarget.center)
+          map.setZoom?.(cameraTarget.zoom)
+          map.setPitch?.(cameraTarget.pitch)
+          map.setRotation?.(cameraTarget.rotation)
+        }
+
+        const result = await waitForRouteCameraIntentTarget({
+          map,
+          target: targetCamera,
+          requireOrientation: scenicMapPresentation === 'scenic3d',
+          isCurrent: isCurrentIntent,
+          timeoutMs: Math.max(1600, preset.durationMs + 900)
+        })
+        if (!isCurrentIntent()) {
+          return
+        }
+        if (!result.matched) {
+          routeCameraProgrammaticMoveRef.current = false
+          updateRouteCameraIntentSnapshot({
+            ...intent,
+            status: 'failed',
+            lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+            lastFailure: `相机未到达目标：${describeRouteCameraMismatch(result.camera, targetCamera)}`
+          })
+          return
+        }
+
+        routeCameraProgrammaticMoveRef.current = false
+        const actualCamera = cameraStateFromActual(result.camera, targetCamera, scenicMapPresentation)
+        if (scenicMapPresentation === 'scenic3d' && result.camera.viewMode === '3D') {
+          camera3DStateRef.current = actualCamera
+          lastMeaningful3DCameraRef.current = actualCamera
+          cameraPersistenceDiagnosticsRef.current.lastPersistReason = `route-camera-intent:${source}:${generation}`
+        } else if (scenicMapPresentation === 'ink2d') {
+          camera2DStateRef.current = actualCamera
+        }
+        currentZoomRef.current = actualCamera.zoom
+        setMapInteractionSnapshot((current) => ({ ...current, currentZoom: actualCamera.zoom }))
+        setMapBoundsSnapshot({ center: actualCamera.center, zoom: actualCamera.zoom })
+        updateRouteCameraIntentSnapshot({
+          ...intent,
+          status: 'completed',
+          lastCompletedGeneration: generation
+        })
+        perfRecorder.recordCameraEvent({
+          cameraPreset: preset.id,
+          targetPoiId: source === 'route-current' ? currentRouteConfig.stops[effectiveRouteStopIndex]?.spotId : undefined,
+          durationMs: preset.durationMs,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString()
+        })
+      } catch (error) {
+        if (!isCurrentIntent()) {
+          return
+        }
+        routeCameraProgrammaticMoveRef.current = false
+        updateRouteCameraIntentSnapshot({
+          ...intent,
+          status: 'failed',
+          lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+          lastFailure: error instanceof Error ? error.message : '路线相机命令失败'
+        })
+      }
+    }
+
+    void complete()
+  }
+
+  const focusRouteOverview = (
+    path = currentRoutePath,
+    fallback = currentInitialPosition,
+    routeId = currentRouteConfig.id
+  ) => {
     const routePath = path.length >= 2 ? path : getRouteStopLocations(currentGuideRoute)
     setActiveCameraMode('routeOverview')
-    moveMapCamera(getRouteOverviewTarget(routePath) ?? fallback, getRouteOverviewPreset(routePath))
+    applyRouteCameraIntent(
+      'route-overview',
+      routeId,
+      getRouteOverviewTarget(routePath) ?? fallback,
+      getRouteOverviewPreset(routePath)
+    )
+  }
+
+  const focusRouteCurrent = (routeId = currentRouteConfig.id, stopIndex = effectiveRouteStopIndex) => {
+    const route = getScenicRouteConfig(routeId)
+    const stop = route.stops[clampRouteStopIndex(stopIndex, route.stops.length)]
+    const target = stop?.location ?? getRouteStopLocation(stop?.spotId)
+    if (!target) {
+      return
+    }
+    setActiveCameraMode('landmarkFocus')
+    applyRouteCameraIntent(
+      'route-current',
+      route.id,
+      target,
+      isInk2DPresentation ? getInk2DCameraPreset(MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus) : MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus
+    )
   }
 
   const focusMap = (position: LatLngPoint, zoom?: number, targetPoiId?: string) => {
@@ -6992,7 +7186,7 @@ export function Map3DGuideExperience({
   function clampScenicCameraBounds(reason: string) {
     const map = mapRef.current
 
-    if (!map || !window.TMap || !mapBoundsEnabled || tourMode === 'buddhaRealmTour') {
+    if (!map || !window.TMap || !mapBoundsEnabled || tourMode === 'buddhaRealmTour' || routeCameraProgrammaticMoveRef.current) {
       return
     }
 
@@ -11423,6 +11617,82 @@ function waitForCameraOrientation(
     void waitForMapAnimationFrames(isCurrent).then(() => check())
     check()
   })
+}
+
+function waitForRouteCameraIntentTarget(options: {
+  map: any
+  target: CameraState
+  requireOrientation: boolean
+  isCurrent: () => boolean
+  timeoutMs: number
+}) {
+  const { map, target, requireOrientation, isCurrent, timeoutMs } = options
+  return new Promise<{ matched: boolean; camera: ActualTencentCameraState }>((resolve) => {
+    let settled = false
+    let timeoutId: number | undefined
+    let pollId: number | undefined
+    const eventNames = ['idle', 'moveend', 'zoomend', 'pitchend', 'rotateend']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (matched: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
+      if (pollId !== undefined) {
+        window.clearInterval(pollId)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The current intent owns cleanup even if Tencent has already detached the map.
+        }
+      })
+      resolve({ matched, camera: readActualTencentCameraState(map) })
+    }
+    const check = () => {
+      if (!isCurrent()) {
+        finish(false)
+        return
+      }
+      const camera = readActualTencentCameraState(map)
+      const centerMatched =
+        camera.center !== null && haversineDistanceMeters(camera.center, target.center) <= 14
+      const zoomMatched = camera.zoom !== null && Math.abs(camera.zoom - target.zoom) <= 0.1
+      const pitchMatched =
+        !requireOrientation || (camera.rawPitch !== null && Math.abs(camera.rawPitch - target.pitch) <= 0.9)
+      const rotationMatched =
+        !requireOrientation ||
+        (camera.rawRotation !== null && circularRotationDistance(camera.rawRotation, target.rotation) <= 0.9)
+      if (centerMatched && zoomMatched && pitchMatched && rotationMatched) {
+        finish(true)
+      }
+    }
+
+    eventNames.forEach((eventName) => {
+      const handler = () => check()
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // Polling covers embedded SDK builds with incomplete event support.
+      }
+    })
+    pollId = window.setInterval(check, 48)
+    timeoutId = window.setTimeout(() => finish(false), timeoutMs)
+    check()
+  })
+}
+
+function describeRouteCameraMismatch(camera: ActualTencentCameraState, target: CameraState) {
+  const centerDistance = camera.center ? Math.round(haversineDistanceMeters(camera.center, target.center)) : 'unknown'
+  const zoom = camera.zoom === null ? 'unknown' : camera.zoom.toFixed(2)
+  const pitch = camera.rawPitch === null ? 'unknown' : camera.rawPitch.toFixed(2)
+  const rotation = camera.rawRotation === null ? 'unknown' : camera.rawRotation.toFixed(2)
+  return `center ${centerDistance}m / zoom ${zoom} / pitch ${pitch} / rotation ${rotation}`
 }
 
 function waitForTencentMapRender(map: any, isCurrent: () => boolean, timeoutMs = 700) {
