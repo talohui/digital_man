@@ -50,10 +50,13 @@ export function NavigationPrototypeCard({
   const lastRerouteError = useNavigationPrototypeStore((state) => state.lastRerouteError)
   const requestGeneration = useNavigationPrototypeStore((state) => state.requestGeneration)
   const session = useNavigationPrototypeStore((state) => state.session)
+  const restoredFromSessionStorage = useNavigationPrototypeStore((state) => state.restoredFromSessionStorage)
   const routeStageCommitReason = useNavigationPrototypeStore((state) => state.routeStageCommitReason)
   const error = useNavigationPrototypeStore((state) => state.error)
   const startTarget = useNavigationPrototypeStore((state) => state.startTarget)
   const cancelNavigation = useNavigationPrototypeStore((state) => state.cancelNavigation)
+  const pauseNavigation = useNavigationPrototypeStore((state) => state.pauseNavigation)
+  const resumeNavigation = useNavigationPrototypeStore((state) => state.resumeNavigation)
   const reroute = useNavigationPrototypeStore((state) => state.reroute)
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const simulateDeviation = useNavigationPrototypeStore((state) => state.simulateDeviation)
@@ -85,16 +88,17 @@ export function NavigationPrototypeCard({
 
       {targetError ? <p className="navigation-prototype-card__error">{targetError}</p> : null}
 
-      {status === 'idle' && target ? (
+      {(status === 'idle' || status === 'cancelled') && target ? (
         <button type="button" className="navigation-prototype-card__primary" onClick={() => startTarget(target)}>
           {target.mode === 'joining' ? '导航到加入点' : '开始导航'}
         </button>
       ) : null}
 
       {status === 'locating' ? <p className="navigation-prototype-card__status">正在获取当前位置并调用腾讯步行路线…</p> : null}
+      {status === 'planning' ? <p className="navigation-prototype-card__status">正在调用腾讯步行路线…</p> : null}
       {status === 'rerouting' ? <p className="navigation-prototype-card__status">正在重新规划步行路线…</p> : null}
 
-      {route && (status === 'locating' || status === 'navigating' || status === 'rerouting' || status === 'arrived' || status === 'error') ? (
+      {route && (status === 'locating' || status === 'planning' || status === 'navigating' || status === 'paused' || status === 'rerouting' || status === 'arrived' || status === 'error') ? (
         <div className="navigation-prototype-card__details">
           <p>正在前往：<strong>{route.destination.name}</strong></p>
           <dl>
@@ -151,10 +155,19 @@ export function NavigationPrototypeCard({
               步骤 {Math.min((progress?.currentStepIndex ?? 0) + 1, Math.max(route.steps.length, 1))} / {route.steps.length || 1} · 到达确认：{arrivalLocationHits}/3
             </p>
           ) : null}
-          {status !== 'arrived' ? (
+          {status === 'paused' ? (
+            <div className="navigation-prototype-card__deviation">
+              <p>{restoredFromSessionStorage ? `检测到上一次导航 · 目标：${route.destination.name}` : '导航已暂停'}</p>
+              <div className="navigation-prototype-card__deviation-actions">
+                <button type="button" onClick={resumeNavigation}>{restoredFromSessionStorage ? '继续上一次导航' : '继续导航'}</button>
+                <button type="button" onClick={cancelNavigation}>结束导航</button>
+              </div>
+            </div>
+          ) : status !== 'arrived' ? (
             <div className="navigation-prototype-card__deviation-actions">
-              <button type="button" className="navigation-prototype-card__primary" onClick={simulateArrival}>模拟到达</button>
+              <button type="button" className="navigation-prototype-card__primary" onClick={pauseNavigation} disabled={status !== 'navigating'}>暂停导航</button>
               <button type="button" onClick={cancelNavigation}>取消导航</button>
+              {import.meta.env.DEV ? <button type="button" onClick={simulateArrival}>模拟到达</button> : null}
             </div>
           ) : (
             <div className="navigation-prototype-card__arrival">

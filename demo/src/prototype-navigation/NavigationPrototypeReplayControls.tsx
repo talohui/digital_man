@@ -8,12 +8,13 @@ export function NavigationPrototypeReplayControls() {
   const [open, setOpen] = useState(false)
   const [jumpStepIndex, setJumpStepIndex] = useState(0)
   const route = useNavigationPrototypeStore((state) => state.route)
+  const navigationStatus = useNavigationPrototypeStore((state) => state.status)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
   const lastAnnouncedStepIndex = useNavigationPrototypeStore((state) => state.lastAnnouncedStepIndex)
   const acceptReplayFix = useNavigationPrototypeStore((state) => state.acceptSimulatedGcj02Location)
   const setReplayActive = useNavigationPrototypeStore((state) => state.setReplayActive)
-  const replay = useTrackReplay({ route, acceptReplayFix, setReplayActive })
+  const replay = useTrackReplay({ route, suspended: navigationStatus === 'paused', acceptReplayFix, setReplayActive })
 
   if (!import.meta.env.DEV || !route) return null
 

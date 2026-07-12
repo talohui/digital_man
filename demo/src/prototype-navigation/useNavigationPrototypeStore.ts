@@ -8,7 +8,7 @@ import {
   toConvertedGcj02Location
 } from './coordinateTransform'
 import { buildNavigationPrototypeProgress, resolveStepIndexFromPolylineIndex } from './navigationProgress'
-import { formatPrototypeNavigationPrompt } from './prototypeNavigationPrompt'
+import { formatPrototypeNavigationPrompt, getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { projectPointToPolyline } from './routeDeviation'
 import { requestPrototypeWalkingRoute } from './tencentWalkingRoute'
 import { haversineDistanceMeters } from '../lib/routeProgress'
@@ -24,6 +24,7 @@ import type {
   NavigationPrototypeLocationSource,
   PrototypeNavigationSession,
   PrototypeNavigationTarget,
+  PrototypeRouteProgressMetadata,
   PrototypeDeviation,
   ReplayFix,
   ReplayScenario
@@ -47,6 +48,8 @@ const COORDINATE_TRANSFORM_MIN_DISTANCE_METERS = 5
 const COORDINATE_TRANSFORM_MAX_INTERVAL_MS = 4_000
 const LOCATION_STALE_MS = 15_000
 const MAX_TRAJECTORY_RECORDS = 300
+const SESSION_STORAGE_KEY = 'lingshan-navigation-prototype-session-v1'
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1_000
 
 let stopLocationWatch: (() => void) | null = null
 let requestGeneration = 0
@@ -54,11 +57,43 @@ let coordinateConversionGeneration = 0
 let navigationSessionSequence = 0
 const coordinateTransformProvider = createPrototypeCoordinateTransformProvider()
 
+type PersistedNavigationSession = {
+  version: 1
+  savedAt: number
+  lifecycle: NavigationPrototypeStatus
+  session: PrototypeNavigationSession
+  routeBinding: PrototypeNavigationTarget
+  routePlan: NavigationPrototypeRoute
+  currentStepIndex?: number
+  lastAnnouncedStepIndex?: number
+  routeProgress: PrototypeRouteProgressMetadata
+}
+
+function readPersistedNavigationSession(): PersistedNavigationSession | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(SESSION_STORAGE_KEY) ?? '') as PersistedNavigationSession
+    if (parsed.version !== 1 || Date.now() - parsed.savedAt > SESSION_MAX_AGE_MS || !parsed.session || !parsed.routePlan) {
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
+      return undefined
+    }
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+function clearPersistedNavigationSession() {
+  if (typeof window !== 'undefined') window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
+}
+
 type NavigationPrototypeStore = {
   status: NavigationPrototypeStatus
   route?: NavigationPrototypeRoute
   session?: PrototypeNavigationSession
   routeStageCommitReason?: string
+  routeProgress: PrototypeRouteProgressMetadata
+  restoredFromSessionStorage: boolean
   routeRequestPending: boolean
   rawWgs84Position?: BrowserWgs84Location
   convertedGcj02Position?: ConvertedGcj02Location
@@ -90,6 +125,8 @@ type NavigationPrototypeStore = {
   startTarget: (target: PrototypeNavigationTarget) => void
   syncTarget: (target?: PrototypeNavigationTarget) => void
   cancelNavigation: () => void
+  pauseNavigation: () => void
+  resumeNavigation: () => void
   markRouteStageCommitted: (sessionId: string) => boolean
   setRouteStageCommitReason: (reason?: string) => void
   acceptRawWgs84Location: (location: BrowserWgs84Location) => void
@@ -108,6 +145,26 @@ type NavigationPrototypeStore = {
 }
 
 export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set, get) => {
+  const persisted = readPersistedNavigationSession()
+  const persistSession = () => {
+    const state = get()
+    if (!state.session || !state.route || state.status === 'idle' || state.status === 'cancelled') {
+      clearPersistedNavigationSession()
+      return
+    }
+    const payload: PersistedNavigationSession = {
+      version: 1,
+      savedAt: Date.now(),
+      lifecycle: state.status,
+      session: state.session,
+      routeBinding: state.session.target,
+      routePlan: state.route,
+      currentStepIndex: state.progress?.currentStepIndex,
+      lastAnnouncedStepIndex: state.lastAnnouncedStepIndex,
+      routeProgress: state.routeProgress
+    }
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload))
+  }
   const requestTargetRoute = async (target: PrototypeNavigationTarget, location: ConvertedGcj02Location, sessionId: string) => {
     const generation = nextRequestGeneration()
     const origin: NavigationPrototypeEndpoint = {
@@ -120,14 +177,14 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       name: target.name,
       ...target.coordinate
     }
-    set({ status: 'locating', requestGeneration: generation, routeRequestPending: true, error: undefined })
+    set({ status: 'planning', requestGeneration: generation, routeRequestPending: true, error: undefined })
     try {
       const route = await requestPrototypeWalkingRoute(origin, destination)
       const state = get()
       if (generation !== requestGeneration || state.session?.id !== sessionId) return
       const initialStepIndex = 0
       set({
-        status: 'navigating',
+        status: state.status === 'paused' ? 'paused' : 'navigating',
         route,
         progress: buildNavigationPrototypeProgress(route, location, initialStepIndex),
         candidateStepIndex: initialStepIndex,
@@ -137,6 +194,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         latestStepPrompt: formatPrototypeNavigationPrompt({ currentStep: route.steps[initialStepIndex], nextStep: route.steps[initialStepIndex + 1] }),
         routeRequestPending: false
       })
+      persistSession()
     } catch (error) {
       const state = get()
       if (generation !== requestGeneration || state.session?.id !== sessionId) return
@@ -182,7 +240,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
 
   const acceptConvertedGcj02Location = (location: ConvertedGcj02Location, raw?: BrowserWgs84Location) => {
     const state = get()
-    if (state.status === 'arrived' || !isAcceptedPrototypeLocation(location)) return
+    if (state.status === 'arrived' || state.status === 'paused' || !isAcceptedPrototypeLocation(location)) return
 
     // Converted fixes arriving late are visible for diagnosis but never feed
     // route progress, arrival or deviation decisions.
@@ -246,6 +304,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         reroutePending: false
       })
       appendTrajectoryRecord(raw, location)
+      persistSession()
       return
     }
 
@@ -265,10 +324,30 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         : state.latestStepPrompt
     })
     appendTrajectoryRecord(raw, location)
+    persistSession()
   }
 
   return {
-    status: 'idle',
+    status: persisted ? (persisted.lifecycle === 'arrived' ? 'arrived' : 'paused') : 'idle',
+    route: persisted?.routePlan,
+    session: persisted?.session,
+    routeProgress: persisted?.routeProgress ?? { reachedStopIndices: [], skippedBeforeJoin: [] },
+    restoredFromSessionStorage: Boolean(persisted),
+    progress: persisted?.routePlan
+      ? {
+          distanceRemainingMeters: persisted.routePlan.distanceMeters,
+          distanceToDestinationMeters: persisted.routePlan.distanceMeters,
+          durationRemainingMinutes: persisted.routePlan.durationMinutes,
+          currentStepIndex: persisted.currentStepIndex ?? 0,
+          currentInstruction: getPrototypeStepInstruction(persisted.routePlan.steps[persisted.currentStepIndex ?? 0]),
+          nextInstruction: persisted.routePlan.steps[(persisted.currentStepIndex ?? 0) + 1]
+            ? getPrototypeStepInstruction(persisted.routePlan.steps[(persisted.currentStepIndex ?? 0) + 1])
+            : undefined,
+          nearestPolylineIndex: 0
+        }
+      : undefined,
+    lastConfirmedStepIndex: persisted?.currentStepIndex,
+    lastAnnouncedStepIndex: persisted?.lastAnnouncedStepIndex,
     arrivalLocationHits: 0,
     candidateStepHitCount: 0,
     deviation: createOnRouteDeviation(),
@@ -343,6 +422,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     startTarget(target) {
       const priorLocation = get().convertedGcj02Position
+      const priorRouteProgress = get().routeProgress
       const session: PrototypeNavigationSession = {
         id: `prototype-navigation-${++navigationSessionSequence}`,
         target,
@@ -357,6 +437,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         status: 'locating',
         route: undefined,
         session,
+        routeProgress: priorRouteProgress.routeId === target.routeId
+          ? priorRouteProgress
+          : { routeId: target.routeId, reachedStopIndices: [], skippedBeforeJoin: [] },
+        restoredFromSessionStorage: false,
         routeStageCommitReason: undefined,
         routeRequestPending: false,
         progress: undefined,
@@ -391,10 +475,11 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       stopLocationWatch?.()
       stopLocationWatch = null
       set({
-        status: 'idle',
+        status: 'cancelled',
         route: undefined,
         session: undefined,
         routeStageCommitReason: undefined,
+        restoredFromSessionStorage: false,
         routeRequestPending: false,
         progress: undefined,
         arrivalLocationHits: 0,
@@ -409,11 +494,41 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         lastRerouteError: undefined,
         error: undefined
       })
+      clearPersistedNavigationSession()
+    },
+    pauseNavigation() {
+      const state = get()
+      if (state.status !== 'navigating' && state.status !== 'planning' && state.status !== 'locating' && state.status !== 'rerouting') return
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({ status: 'paused', routeRequestPending: false })
+      persistSession()
+    },
+    resumeNavigation() {
+      const state = get()
+      if (state.status !== 'paused' || !state.session || !state.route) return
+      set({ status: 'locating', restoredFromSessionStorage: false, lastConversionInputWgs84Position: undefined })
+      startGeolocationWatch()
     },
     markRouteStageCommitted(sessionId) {
       const state = get()
       if (state.status !== 'arrived' || !state.session || state.session.id !== sessionId || state.session.committed) return false
-      set({ session: { ...state.session, committed: true }, routeStageCommitReason: '已提交路线阶段' })
+      const targetStopIndex = state.session.target.targetStopIndex
+      const prior = state.routeProgress
+      const routeProgress = state.session.target.mode === 'joining' && targetStopIndex !== undefined
+        ? {
+            routeId: state.session.target.routeId,
+            reachedStopIndices: prior.reachedStopIndices,
+            skippedBeforeJoin: Array.from(new Set([...prior.skippedBeforeJoin, ...Array.from({ length: targetStopIndex }, (_, index) => index)]))
+          }
+        : state.session.target.mode === 'route-segment' && targetStopIndex !== undefined
+          ? {
+              ...prior,
+              reachedStopIndices: Array.from(new Set([...prior.reachedStopIndices, targetStopIndex]))
+            }
+          : prior
+      set({ session: { ...state.session, committed: true }, routeProgress, routeStageCommitReason: '已提交路线阶段' })
+      clearPersistedNavigationSession()
       return true
     },
     setRouteStageCommitReason(reason) {
@@ -607,6 +722,8 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         route: undefined,
         session: undefined,
         routeStageCommitReason: undefined,
+        routeProgress: { reachedStopIndices: [], skippedBeforeJoin: [] },
+        restoredFromSessionStorage: false,
         routeRequestPending: false,
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
@@ -634,6 +751,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         trajectoryRecording: false,
         trajectory: []
       })
+      clearPersistedNavigationSession()
     }
   }
 })

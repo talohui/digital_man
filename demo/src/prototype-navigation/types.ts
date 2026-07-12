@@ -1,4 +1,4 @@
-export type NavigationPrototypeStatus = 'idle' | 'locating' | 'navigating' | 'rerouting' | 'arrived' | 'error'
+export type NavigationPrototypeStatus = 'idle' | 'locating' | 'planning' | 'navigating' | 'paused' | 'rerouting' | 'arrived' | 'cancelled' | 'error'
 
 /** Browser Geolocation's original, unshifted GPS coordinate. */
 export type Wgs84Position = {
@@ -30,6 +30,12 @@ export type PrototypeNavigationSession = {
   originStage?: 'joining' | 'active'
   committed: boolean
   targetChangedAt: number
+}
+
+export type PrototypeRouteProgressMetadata = {
+  routeId?: string
+  reachedStopIndices: number[]
+  skippedBeforeJoin: number[]
 }
 
 export type BrowserWgs84Location = Wgs84Position & {

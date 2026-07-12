@@ -15,11 +15,12 @@ export type TrackReplayStatus = 'idle' | 'playing' | 'paused' | 'completed'
 
 type UseTrackReplayInput = {
   route?: NavigationPrototypeRoute
+  suspended?: boolean
   acceptReplayFix: (fix: ReplayFix) => void
   setReplayActive: (active: boolean) => void
 }
 
-export function useTrackReplay({ route, acceptReplayFix, setReplayActive }: UseTrackReplayInput) {
+export function useTrackReplay({ route, suspended = false, acceptReplayFix, setReplayActive }: UseTrackReplayInput) {
   const [status, setStatus] = useState<TrackReplayStatus>('idle')
   const [speed, setSpeed] = useState<ReplaySpeed>(4)
   const [noiseMode, setNoiseMode] = useState<ReplayNoiseMode>('clean')
@@ -151,6 +152,12 @@ export function useTrackReplay({ route, acceptReplayFix, setReplayActive }: UseT
     clearTimer()
     setReplayActive(false)
   }, [clearTimer, setReplayActive])
+
+  useEffect(() => {
+    if (!suspended) return
+    clearTimer()
+    if (framesRef.current.length) setStatus('paused')
+  }, [clearTimer, suspended])
 
   return {
     status,

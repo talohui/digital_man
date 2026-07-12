@@ -28,6 +28,7 @@ import {
   goToPoiFromRoute,
   goToRouteActive,
   goToRouteArrived,
+  goToRouteCompleted,
   goToRoutePreview,
   toggleMapPresentation
 } from '../lib/mapGuideNavigation'
@@ -481,8 +482,8 @@ function RouteActiveCard({
       <p className="map-route-tour-desc">{description}</p>
       <div className="map-route-tour-actions">
         {nextStop && prototypeTarget ? (
-          <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error'}>
-            {prototypeStatus === 'idle' || prototypeStatus === 'error' ? '导航到下一站' : '导航进行中'}
+          <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error' && prototypeStatus !== 'cancelled'}>
+            {prototypeStatus === 'idle' || prototypeStatus === 'error' || prototypeStatus === 'cancelled' ? '导航到下一站' : '导航进行中'}
           </button>
         ) : null}
         <button type="button" onClick={() => onPoiDetail(nextStopIndex)}>
@@ -548,11 +549,20 @@ function RouteArrivedCard({
           景点详情
         </button>
         <button type="button" onClick={onContinue}>
-          继续下一站
+          {currentStopIndex >= route.stops.length - 1 ? '完成路线' : '继续下一站'}
         </button>
       </div>
     </section>
   )
+}
+
+function RouteCompletedCard({ route, onBack }: { route: ScenicRouteConfig; onBack: () => void }) {
+  return <section className="map-route-tour-card map-route-tour-card--arrived" aria-label="路线已完成">
+    <div className="map-route-tour-card__tip">恭喜完成{route.name}，可以继续自由浏览灵山胜境。</div>
+    <h2>路线已完成</h2>
+    <p className="map-route-tour-desc">本次路线的到达确认均由你手动完成。</p>
+    <div className="map-route-tour-actions"><button type="button" className="map-route-tour-primary" onClick={onBack}>返回地图</button></div>
+  </section>
 }
 
 function RouteJoiningCard({
@@ -586,8 +596,8 @@ function RouteJoiningCard({
     <h2>{stop?.name ?? '加入点'}</h2>
     <p className="map-route-tour-desc">到达加入点前，不会标记此前站点已完成。</p>
     <div className="map-route-tour-actions">
-      {target ? <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error'}>
-        {prototypeStatus === 'idle' || prototypeStatus === 'error' ? '导航到加入点' : '导航进行中'}
+      {target ? <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error' && prototypeStatus !== 'cancelled'}>
+        {prototypeStatus === 'idle' || prototypeStatus === 'error' || prototypeStatus === 'cancelled' ? '导航到加入点' : '导航进行中'}
       </button> : null}
       <button type="button" onClick={() => onPoiDetail(joinStopIndex)}>加入点详情</button>
     </div>
@@ -780,7 +790,7 @@ function RouteTourMobileOverlay({
 
   const handleContinue = () => {
     if (currentStopIndex >= stopCount - 1) {
-      setFeedbackText('路线已完成')
+      goToRouteCompleted(navigate, route.id, currentStopIndex, presentation)
       return
     }
 
@@ -981,6 +991,8 @@ function RouteTourMobileOverlay({
             onPoiDetail={handlePoiDetail}
             onContinue={handleContinue}
           />
+        ) : stage === 'completed' ? (
+          <RouteCompletedCard route={route} onBack={() => goToMapBrowse(navigate, presentation)} />
         ) : stage === 'joining' ? (
           <RouteJoiningCard
             route={route}

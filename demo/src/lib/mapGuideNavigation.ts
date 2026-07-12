@@ -332,6 +332,24 @@ export function goContinueNextStop(
   goToRouteActive(navigate, routeId, nextStopIndex, presentation, options)
 }
 
+/** Complete a route only after the visitor explicitly finishes its last stop. */
+export function goToRouteCompleted(
+  navigate: NavigateFunction,
+  routeId: string,
+  stopIndex: number,
+  presentation?: ScenicMapPresentation,
+  options?: MapGuideNavigationOptions
+) {
+  if (!isSafeIdentifier(routeId)) {
+    goToMapBrowse(navigate, presentation, options)
+    return
+  }
+  const params = routeParams(presentation)
+  params.set('stage', 'completed')
+  params.set('stop', formatStopParam(normaliseStopIndex(stopIndex)))
+  navigateTo(navigate, routePath(routeId.trim(), params), options)
+}
+
 /** Updates only presentation, preserving pathname and every existing query parameter. */
 export function setMapPresentation(
   navigate: NavigateFunction,
