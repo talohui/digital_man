@@ -821,6 +821,29 @@
     overflow-wrap: anywhere;
   }
 
+  .navigation-prototype-multi-replay {
+    position: fixed;
+    z-index: 75;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(118px + env(safe-area-inset-bottom));
+    width: min(330px, calc(100vw - 24px));
+    max-height: min(62svh, 520px);
+    overflow: auto;
+    border-style: solid;
+    background: rgba(255, 253, 244, 0.96);
+    box-shadow: 0 12px 28px rgba(24, 51, 95, 0.2);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+  }
+
+  .navigation-prototype-multi-replay > summary {
+    list-style-position: inside;
+  }
+
+  .navigation-prototype-multi-replay .navigation-prototype-replay__controls small {
+    white-space: pre-line;
+  }
+
   .navigation-prototype-card__deviation-actions button:disabled {
     opacity: 0.52;
   }

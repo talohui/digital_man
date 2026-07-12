@@ -40,6 +40,7 @@ import {
   type ScenicMapPresentation
 } from './Map3DGuidePage'
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
+import { NavigationPrototypeMultiStopReplayControls } from '../prototype-navigation/NavigationPrototypeReplayControls'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
 import { createNavigationBetaViewModel, type NavigationBetaViewModel } from '../prototype-navigation/navigationBetaViewModel'
@@ -47,6 +48,7 @@ import { isNavigationDebugEnabled } from '../prototype-navigation/navigationDebu
 import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
 import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentTarget'
 import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
+import { useMultiStopReplayStore } from '../prototype-navigation/multiStopReplay'
 import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
@@ -682,6 +684,7 @@ function RouteTourMobileOverlay({
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const continueAfterArrivalDetection = useNavigationPrototypeStore((state) => state.continueAfterArrivalDetection)
   const raiseNavigationError = useNavigationPrototypeStore((state) => state.raiseNavigationError)
+  const multiStopReplaySession = useMultiStopReplayStore((state) => state.session)
   const prototypeResolution = useMemo(() => {
     if (stage === 'active') {
       return resolveRouteSegmentTarget({ route, stage: 'active', currentStopIndex })
@@ -785,7 +788,11 @@ function RouteTourMobileOverlay({
       return
     }
 
-    const nextStopIndex = currentStopIndex + 1
+    const continuesMultiStopReplay = navigationDebugEnabled
+      && multiStopReplaySession?.routeId === route.id
+      && multiStopReplaySession.status === 'awaiting-route-continue'
+      && multiStopReplaySession.currentTargetStopIndex === currentStopIndex
+    const nextStopIndex = continuesMultiStopReplay ? currentStopIndex : currentStopIndex + 1
     goContinueNextStop(navigate, route.id, nextStopIndex, presentation)
   }
 
@@ -1011,6 +1018,17 @@ function RouteTourMobileOverlay({
           />
         )}
       </div>
+      {navigationDebugEnabled ? (
+        <NavigationPrototypeMultiStopReplayControls
+          debugEnabled
+          route={route}
+          stage={stage}
+          currentStopIndex={currentStopIndex}
+          joinStopIndex={joinStopIndex}
+          confirmArrival={handleCommitPrototypeArrival}
+          continueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
+        />
+      ) : null}
       {feedbackText ? <div className="map-route-tour-toast">{feedbackText}</div> : null}
       <MapLayerPanel open={layerPanelOpen} className="map-route-tour-layer-panel" />
       {serviceOpen ? (

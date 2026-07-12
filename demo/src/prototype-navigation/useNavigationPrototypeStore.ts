@@ -129,6 +129,7 @@ type NavigationPrototypeStore = {
   error?: string
   start: (origin: NavigationPrototypeEndpoint, destination: NavigationPrototypeEndpoint) => Promise<void>
   startTarget: (target: PrototypeNavigationTarget) => void
+  startReplayTarget: (target: PrototypeNavigationTarget, origin: ConvertedGcj02Location) => void
   prepareTarget: (target: PrototypeNavigationTarget) => void
   requestPreparedNavigation: () => void
   dismissPreparedNavigation: () => void
@@ -137,6 +138,7 @@ type NavigationPrototypeStore = {
   cancelNavigation: () => void
   pauseNavigation: () => void
   resumeNavigation: () => void
+  resumeReplayNavigation: () => void
   continueAfterArrivalDetection: () => void
   pauseForBackground: () => void
   markResumePrompt: () => void
@@ -479,6 +481,31 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       startGeolocationWatch()
       if (priorLocation) void requestTargetRoute(target, priorLocation, session.id)
     },
+    startReplayTarget(target, origin) {
+      if (!import.meta.env.DEV) return
+      const priorRouteProgress = get().routeProgress
+      const session: PrototypeNavigationSession = {
+        id: `prototype-navigation-${++navigationSessionSequence}`,
+        target,
+        originStage: target.mode === 'joining' ? 'joining' : target.mode === 'route-segment' ? 'active' : undefined,
+        committed: false,
+        targetChangedAt: Date.now()
+      }
+      nextRequestGeneration()
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({
+        status: 'locating', route: undefined, session,
+        routeProgress: priorRouteProgress.routeId === target.routeId ? priorRouteProgress : { routeId: target.routeId, reachedStopIndices: [], skippedBeforeJoin: [] },
+        restoredFromSessionStorage: false, routeStageCommitReason: undefined, preparedTarget: undefined,
+        errorKind: undefined, backgroundPaused: false, permissionRequestInFlight: false, routeRequestPending: false,
+        convertedGcj02Position: origin, locationSource: 'replay-gcj02', progress: undefined,
+        arrivalLocationHits: 0, candidateStepIndex: undefined, candidateStepHitCount: 0,
+        lastConfirmedStepIndex: undefined, lastAnnouncedStepIndex: undefined, latestStepPrompt: undefined,
+        deviation: createOnRouteDeviation(), reroutePending: false, lastRerouteError: undefined, error: undefined
+      })
+      void requestTargetRoute(target, origin, session.id)
+    },
     prepareTarget(target) {
       if (!target.coordinate || !Number.isFinite(target.coordinate.lat) || !Number.isFinite(target.coordinate.lng)) {
         set({ status: 'error', errorKind: 'target-location-missing', error: '该站点导航位置尚未完善' })
@@ -556,6 +583,11 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       if (state.status !== 'paused' || !state.session || !state.route) return
       set({ status: 'locating', restoredFromSessionStorage: false, backgroundPaused: false, lastConversionInputWgs84Position: undefined, permissionRequestInFlight: true, permissionRequestedAt: Date.now() })
       startGeolocationWatch()
+    },
+    resumeReplayNavigation() {
+      const state = get()
+      if (!import.meta.env.DEV || state.status !== 'paused' || !state.session || !state.route) return
+      set({ status: 'navigating', restoredFromSessionStorage: false, backgroundPaused: false, permissionRequestInFlight: false, locationSource: 'replay-gcj02' })
     },
     continueAfterArrivalDetection() {
       const state = get()

@@ -31,6 +31,7 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
   const framesRef = useRef<ReplayFix[]>([])
   const indexRef = useRef(0)
   const timerRef = useRef<number | null>(null)
+  const speedRef = useRef<ReplaySpeed>(speed)
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
@@ -52,8 +53,8 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
       setStatus('completed')
       return
     }
-    timerRef.current = window.setTimeout(emitNext, REPLAY_TICK_MS / speed)
-  }, [acceptReplayFix, clearTimer, speed])
+    timerRef.current = window.setTimeout(emitNext, REPLAY_TICK_MS / speedRef.current)
+  }, [acceptReplayFix, clearTimer])
 
   const loadFrames = useCallback((nextFrames: ReplayFix[], nextScenario: ReplayScenario, autoPlay: boolean) => {
     clearTimer()
@@ -72,10 +73,23 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     }
   }, [clearTimer, emitNext, setReplayActive])
 
-  const playFromStart = useCallback(() => {
+  const playRoute = useCallback((options?: { speed?: ReplaySpeed; noiseMode?: ReplayNoiseMode; seed?: number }) => {
     if (!route) return
-    loadFrames(createRouteReplay(route, { noiseMode, seed, startTimestamp: Date.now() }), 'route', true)
+    const nextSpeed = options?.speed ?? speed
+    const nextNoiseMode = options?.noiseMode ?? noiseMode
+    const nextSeed = options?.seed ?? seed
+    speedRef.current = nextSpeed
+    setSpeed(nextSpeed)
+    setNoiseMode(nextNoiseMode)
+    setSeed(nextSeed)
+    loadFrames(createRouteReplay(route, { noiseMode: nextNoiseMode, seed: nextSeed, startTimestamp: Date.now() }), 'route', true)
   }, [loadFrames, noiseMode, route, seed])
+
+  const playFromStart = useCallback(() => playRoute(), [playRoute])
+
+  useEffect(() => {
+    speedRef.current = speed
+  }, [speed])
 
   const pause = useCallback(() => {
     clearTimer()
@@ -170,6 +184,7 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     frameIndex,
     frameCount,
     scenario,
+    playRoute,
     playFromStart,
     pause,
     resume,
