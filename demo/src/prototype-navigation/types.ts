@@ -8,7 +8,8 @@ export type NavigationPrototypeEndpoint = LatLngPoint & {
 }
 
 export type NavigationPrototypeStep = {
-  instruction: string
+  /** Tencent `instruction`; absent only when the route response omitted it. */
+  instruction?: string
   distanceMeters: number
   roadName?: string
   directionDescription?: string
@@ -32,9 +33,11 @@ export type NavigationPrototypeLocation = LatLngPoint & {
 
 export type NavigationPrototypeProgress = {
   distanceRemainingMeters: number
+  distanceToDestinationMeters: number
   durationRemainingMinutes: number
   currentStepIndex: number
-  currentInstruction?: string
+  currentInstruction: string
+  nextInstruction?: string
   nearestPolylineIndex: number
 }
 

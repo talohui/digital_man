@@ -67,12 +67,15 @@ export async function requestPrototypeWalkingRoute(
 
 function toPrototypeStep(step: TencentWalkingStep): NavigationPrototypeStep {
   return {
-    instruction: step.instruction?.trim() || '沿当前步行路线前行',
+    instruction: step.instruction?.trim() || undefined,
     distanceMeters: step.distance ?? 0,
     roadName: step.road_name ?? step.road,
     directionDescription: step.dir_desc ?? step.dir,
     actionDescription: step.act_desc,
-    polylineIndexes: step.polyline_idx
+    // Tencent walking responses use `polyline_idx` to identify the route
+    // points owned by this step. Keep the decoded indexes untouched so the
+    // progress prototype can map a nearest route point back to a step.
+    polylineIndexes: step.polyline_idx?.filter((index) => Number.isInteger(index))
   }
 }
 

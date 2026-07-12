@@ -41,6 +41,7 @@ import {
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
+import { isScenicRouteId, useGuideSessionStore } from '../guide'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
@@ -438,7 +439,9 @@ function RouteActiveCard({
   onOpenXiaoling,
   onPreviewGuide,
   onNavigate,
-  onPoiDetail
+  onPoiDetail,
+  onPrototypeArrivalGuide,
+  onPrototypeArrivalDetail
 }: {
   route: ScenicRouteConfig
   currentStopIndex: number
@@ -446,6 +449,8 @@ function RouteActiveCard({
   onPreviewGuide: (stop: ScenicRouteStop | undefined) => void
   onNavigate: () => void
   onPoiDetail: (stopIndex: number) => void
+  onPrototypeArrivalGuide: (poiId: string, poiName: string) => void
+  onPrototypeArrivalDetail: (poiId: string) => void
 }) {
   const nextStopIndex = Math.min(currentStopIndex + 1, route.stops.length - 1)
   const nextStop = getNextRouteStop(route.id, currentStopIndex)
@@ -473,7 +478,10 @@ function RouteActiveCard({
           预览讲解
         </button>
       </div>
-      <NavigationPrototypeCard />
+      <NavigationPrototypeCard
+        onListenToArrivalGuide={(destination) => onPrototypeArrivalGuide(destination.poiId, destination.name)}
+        onViewArrivalPoiDetail={(destination) => onPrototypeArrivalDetail(destination.poiId)}
+      />
     </section>
   )
 }
@@ -724,6 +732,45 @@ function RouteTourMobileOverlay({
     openGlobalXiaoling({ mode: 'route' })
   }
 
+  const handlePrototypeArrivalGuide = (poiId: string, poiName: string) => {
+    if (!isScenicRouteId(route.id)) {
+      setFeedbackText('当前景点讲解建设中')
+      return
+    }
+
+    const session = useGuideSessionStore.getState()
+    session.setContext({
+      page: 'poi',
+      pathname: window.location.pathname,
+      presentation,
+      routeId: route.id,
+      routeName: route.name,
+      selectedPoiId: poiId,
+      selectedPoiName: poiName,
+      poiSource: 'route',
+      poiReturnStage: 'active',
+      poiReturnStopIndex: currentStopIndex,
+      location: { available: false }
+    })
+    openGlobalXiaoling({ mode: 'poi' })
+  }
+
+  const handlePrototypeArrivalPoiDetail = (poiId: string) => {
+    const destinationStopIndex = route.stops.findIndex((stop) => getStopPoiId(stop) === poiId)
+    if (destinationStopIndex < 0) {
+      setFeedbackText('当前景点详情建设中')
+      return
+    }
+
+    goToPoiFromRoute(navigate, poiId, {
+      routeId: route.id,
+      poiStopIndex: destinationStopIndex,
+      returnStage: 'active',
+      returnStopIndex: currentStopIndex,
+      presentation
+    })
+  }
+
   const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
     const stopName = stop?.name ?? '下一站'
     setServiceOpen(false)
@@ -847,6 +894,8 @@ function RouteTourMobileOverlay({
             onPreviewGuide={handlePreviewGuide}
             onNavigate={handleNavigateNext}
             onPoiDetail={handlePoiDetail}
+            onPrototypeArrivalGuide={handlePrototypeArrivalGuide}
+            onPrototypeArrivalDetail={handlePrototypeArrivalPoiDetail}
           />
         )}
       </div>

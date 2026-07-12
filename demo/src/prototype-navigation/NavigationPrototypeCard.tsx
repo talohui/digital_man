@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { guideSpots } from '../data/guideData'
 import { getPoiArrivalSummary } from '../data/poiGuideMetadata'
+import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 import type { NavigationPrototypeEndpoint } from './types'
 
@@ -31,17 +32,28 @@ function formatDuration(durationMinutes: number) {
   return durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}小时${durationMinutes % 60}分钟` : `${durationMinutes}分钟`
 }
 
-export function NavigationPrototypeCard() {
+type NavigationPrototypeCardProps = {
+  onListenToArrivalGuide?: (destination: NavigationPrototypeEndpoint) => void
+  onViewArrivalPoiDetail?: (destination: NavigationPrototypeEndpoint) => void
+}
+
+export function NavigationPrototypeCard({
+  onListenToArrivalGuide,
+  onViewArrivalPoiDetail
+}: NavigationPrototypeCardProps) {
   const status = useNavigationPrototypeStore((state) => state.status)
   const route = useNavigationPrototypeStore((state) => state.route)
   const location = useNavigationPrototypeStore((state) => state.location)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const arrivalLocationHits = useNavigationPrototypeStore((state) => state.arrivalLocationHits)
+  const latestStepPrompt = useNavigationPrototypeStore((state) => state.latestStepPrompt)
   const error = useNavigationPrototypeStore((state) => state.error)
   const start = useNavigationPrototypeStore((state) => state.start)
   const simulateArrival = useNavigationPrototypeStore((state) => state.simulateArrival)
   const reset = useNavigationPrototypeStore((state) => state.reset)
-  const instruction = progress?.currentInstruction ?? route?.steps[0]?.instruction
+  const currentInstruction = progress?.currentInstruction ?? getPrototypeStepInstruction(route?.steps[0])
+  const nextInstruction = progress?.nextInstruction
+    ?? (route?.steps[1] ? getPrototypeStepInstruction(route.steps[1]) : undefined)
   const distanceMeters = progress?.distanceRemainingMeters ?? route?.distanceMeters ?? 0
   const durationMinutes = progress?.durationRemainingMinutes ?? route?.durationMinutes ?? 0
   const arrivalSummary = route ? getPoiArrivalSummary(route.destination.poiId) : undefined
@@ -82,9 +94,23 @@ export function NavigationPrototypeCard() {
               <dd>{route.steps.length} 步</dd>
             </div>
           </dl>
-          {instruction ? <p className="navigation-prototype-card__instruction">下一步：{instruction}</p> : null}
+          <p className="navigation-prototype-card__instruction">
+            <strong>当前指引</strong>
+            <span>{currentInstruction}</span>
+          </p>
+          {nextInstruction ? (
+            <p className="navigation-prototype-card__next-instruction">
+              <strong>下一步</strong>
+              <span>{nextInstruction}</span>
+            </p>
+          ) : null}
+          {latestStepPrompt ? <p className="navigation-prototype-card__prompt">{latestStepPrompt}</p> : null}
           {location ? <p className="navigation-prototype-card__location">定位精度：约{Math.round(location.accuracy)}m</p> : null}
-          {status === 'navigating' ? <p className="navigation-prototype-card__location">到达确认：{arrivalLocationHits}/3</p> : null}
+          {status === 'navigating' ? (
+            <p className="navigation-prototype-card__location">
+              步骤 {Math.min((progress?.currentStepIndex ?? 0) + 1, Math.max(route.steps.length, 1))} / {route.steps.length || 1} · 到达确认：{arrivalLocationHits}/3
+            </p>
+          ) : null}
           {status !== 'arrived' ? (
             <button type="button" className="navigation-prototype-card__primary" onClick={simulateArrival}>
               模拟到达
@@ -93,9 +119,20 @@ export function NavigationPrototypeCard() {
             <div className="navigation-prototype-card__arrival">
               <p className="navigation-prototype-card__arrived">已到达{route.destination.name}</p>
               {arrivalSummary ? <p>{arrivalSummary}</p> : null}
-              <Link to={`/map-3d-guide-c/poi/${route.destination.poiId}?from=browse`}>
-                查看景点介绍
-              </Link>
+              <div className="navigation-prototype-card__arrival-actions">
+                <button type="button" onClick={() => onListenToArrivalGuide?.(route.destination)}>
+                  听小灵讲解
+                </button>
+                {onViewArrivalPoiDetail ? (
+                  <button type="button" onClick={() => onViewArrivalPoiDetail(route.destination)}>
+                    查看景点详情
+                  </button>
+                ) : (
+                  <Link to={`/map-3d-guide-c/poi/${route.destination.poiId}?from=browse`}>
+                    查看景点详情
+                  </Link>
+                )}
+              </div>
             </div>
           )}
         </div>
