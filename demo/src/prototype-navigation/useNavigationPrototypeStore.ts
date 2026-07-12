@@ -11,6 +11,7 @@ import { buildNavigationPrototypeProgress, resolveStepIndexFromPolylineIndex } f
 import { formatPrototypeNavigationPrompt, getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { projectPointToPolyline } from './routeDeviation'
 import { requestPrototypeWalkingRoute } from './tencentWalkingRoute'
+import { classifyNavigationError, type NavigationBetaErrorKind } from './navigationBetaErrors'
 import { haversineDistanceMeters } from '../lib/routeProgress'
 import type {
   BrowserWgs84Location,
@@ -92,6 +93,11 @@ type NavigationPrototypeStore = {
   route?: NavigationPrototypeRoute
   session?: PrototypeNavigationSession
   routeStageCommitReason?: string
+  preparedTarget?: PrototypeNavigationTarget
+  errorKind?: NavigationBetaErrorKind
+  backgroundPaused: boolean
+  permissionRequestInFlight: boolean
+  permissionRequestedAt?: number
   routeProgress: PrototypeRouteProgressMetadata
   restoredFromSessionStorage: boolean
   routeRequestPending: boolean
@@ -123,10 +129,17 @@ type NavigationPrototypeStore = {
   error?: string
   start: (origin: NavigationPrototypeEndpoint, destination: NavigationPrototypeEndpoint) => Promise<void>
   startTarget: (target: PrototypeNavigationTarget) => void
+  prepareTarget: (target: PrototypeNavigationTarget) => void
+  requestPreparedNavigation: () => void
+  dismissPreparedNavigation: () => void
+  raiseNavigationError: (kind: NavigationBetaErrorKind, message?: string) => void
   syncTarget: (target?: PrototypeNavigationTarget) => void
   cancelNavigation: () => void
   pauseNavigation: () => void
   resumeNavigation: () => void
+  continueAfterArrivalDetection: () => void
+  pauseForBackground: () => void
+  markResumePrompt: () => void
   markRouteStageCommitted: (sessionId: string) => boolean
   setRouteStageCommitReason: (reason?: string) => void
   acceptRawWgs84Location: (location: BrowserWgs84Location) => void
@@ -198,7 +211,8 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     } catch (error) {
       const state = get()
       if (generation !== requestGeneration || state.session?.id !== sessionId) return
-      set({ status: 'error', routeRequestPending: false, error: error instanceof Error ? error.message : '腾讯步行路线请求失败。' })
+      const message = error instanceof Error ? error.message : '腾讯步行路线请求失败。'
+      set({ status: 'error', routeRequestPending: false, error: message, errorKind: classifyNavigationError(message) })
     }
   }
 
@@ -212,7 +226,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       },
       onError: ({ message }) => {
         if (generation === requestGeneration && get().locationSource !== 'replay-gcj02') {
-          set({ status: 'error', error: message })
+          set({ status: 'error', error: message, errorKind: classifyNavigationError(message), permissionRequestInFlight: false })
         }
       }
     })
@@ -333,6 +347,8 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     session: persisted?.session,
     routeProgress: persisted?.routeProgress ?? { reachedStopIndices: [], skippedBeforeJoin: [] },
     restoredFromSessionStorage: Boolean(persisted),
+    backgroundPaused: false,
+    permissionRequestInFlight: false,
     progress: persisted?.routePlan
       ? {
           distanceRemainingMeters: persisted.routePlan.distanceMeters,
@@ -442,6 +458,11 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
           : { routeId: target.routeId, reachedStopIndices: [], skippedBeforeJoin: [] },
         restoredFromSessionStorage: false,
         routeStageCommitReason: undefined,
+        preparedTarget: undefined,
+        errorKind: undefined,
+        backgroundPaused: false,
+        permissionRequestInFlight: true,
+        permissionRequestedAt: Date.now(),
         routeRequestPending: false,
         progress: undefined,
         arrivalLocationHits: 0,
@@ -457,6 +478,28 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       })
       startGeolocationWatch()
       if (priorLocation) void requestTargetRoute(target, priorLocation, session.id)
+    },
+    prepareTarget(target) {
+      if (!target.coordinate || !Number.isFinite(target.coordinate.lat) || !Number.isFinite(target.coordinate.lng)) {
+        set({ status: 'error', errorKind: 'target-location-missing', error: '该站点导航位置尚未完善' })
+        return
+      }
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        set({ status: 'error', errorKind: 'insecure-context', error: '浏览器需要在安全连接下才能使用实时定位。' })
+        return
+      }
+      set({ preparedTarget: target, error: undefined, errorKind: undefined, backgroundPaused: false })
+    },
+    requestPreparedNavigation() {
+      const target = get().preparedTarget
+      if (!target) return
+      get().startTarget(target)
+    },
+    dismissPreparedNavigation() {
+      set({ preparedTarget: undefined, error: undefined, errorKind: undefined })
+    },
+    raiseNavigationError(kind, message) {
+      set({ status: 'error', errorKind: kind, error: message })
     },
     syncTarget(target) {
       const session = get().session
@@ -479,6 +522,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         route: undefined,
         session: undefined,
         routeStageCommitReason: undefined,
+        preparedTarget: undefined,
+        errorKind: undefined,
+        backgroundPaused: false,
+        permissionRequestInFlight: false,
         restoredFromSessionStorage: false,
         routeRequestPending: false,
         progress: undefined,
@@ -501,14 +548,33 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       if (state.status !== 'navigating' && state.status !== 'planning' && state.status !== 'locating' && state.status !== 'rerouting') return
       stopLocationWatch?.()
       stopLocationWatch = null
-      set({ status: 'paused', routeRequestPending: false })
+      set({ status: 'paused', routeRequestPending: false, permissionRequestInFlight: false })
       persistSession()
     },
     resumeNavigation() {
       const state = get()
       if (state.status !== 'paused' || !state.session || !state.route) return
-      set({ status: 'locating', restoredFromSessionStorage: false, lastConversionInputWgs84Position: undefined })
+      set({ status: 'locating', restoredFromSessionStorage: false, backgroundPaused: false, lastConversionInputWgs84Position: undefined, permissionRequestInFlight: true, permissionRequestedAt: Date.now() })
       startGeolocationWatch()
+    },
+    continueAfterArrivalDetection() {
+      const state = get()
+      if (state.status !== 'arrived' || !state.route || !state.session || state.session.committed) return
+      set({ status: 'navigating', arrivalLocationHits: 0, routeStageCommitReason: '已继续当前导航，尚未提交路线阶段' })
+      startGeolocationWatch()
+      persistSession()
+    },
+    pauseForBackground() {
+      const status = get().status
+      if (status !== 'navigating' && status !== 'rerouting' && status !== 'locating' && status !== 'planning') return
+      if (get().permissionRequestInFlight && Date.now() - (get().permissionRequestedAt ?? 0) < 2_000) return
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({ status: 'paused', backgroundPaused: true, permissionRequestInFlight: false })
+      persistSession()
+    },
+    markResumePrompt() {
+      if (get().status === 'paused') set({ backgroundPaused: true })
     },
     markRouteStageCommitted(sessionId) {
       const state = get()
@@ -722,6 +788,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         route: undefined,
         session: undefined,
         routeStageCommitReason: undefined,
+        preparedTarget: undefined,
+        errorKind: undefined,
+        backgroundPaused: false,
+        permissionRequestInFlight: false,
         routeProgress: { reachedStopIndices: [], skippedBeforeJoin: [] },
         restoredFromSessionStorage: false,
         routeRequestPending: false,

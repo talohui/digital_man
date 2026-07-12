@@ -42,6 +42,8 @@ import {
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
+import { createNavigationBetaViewModel, type NavigationBetaViewModel } from '../prototype-navigation/navigationBetaViewModel'
+import { isNavigationDebugEnabled } from '../prototype-navigation/navigationDebug'
 import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
 import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentTarget'
 import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
@@ -493,13 +495,6 @@ function RouteActiveCard({
           预览讲解
         </button>
       </div>
-      <NavigationPrototypeCard
-        target={prototypeTarget}
-        targetError={prototypeTargetError}
-        onCommitArrival={onCommitPrototypeArrival}
-        onListenToArrivalGuide={(destination) => onPrototypeArrivalGuide(destination.poiId, destination.name)}
-        onViewArrivalPoiDetail={(destination) => onPrototypeArrivalDetail(destination.poiId)}
-      />
     </section>
   )
 }
@@ -601,13 +596,6 @@ function RouteJoiningCard({
       </button> : null}
       <button type="button" onClick={() => onPoiDetail(joinStopIndex)}>加入点详情</button>
     </div>
-    <NavigationPrototypeCard
-      target={target}
-      targetError={targetError}
-      onCommitArrival={onCommitArrival}
-      onListenToArrivalGuide={(destination) => onOpenXiaoling()}
-      onViewArrivalPoiDetail={(destination) => onPoiDetail(joinStopIndex)}
-    />
   </section>
 }
 
@@ -692,6 +680,17 @@ function RouteTourMobileOverlay({
   const syncPrototypeTarget = useNavigationPrototypeStore((state) => state.syncTarget)
   const markRouteStageCommitted = useNavigationPrototypeStore((state) => state.markRouteStageCommitted)
   const setRouteStageCommitReason = useNavigationPrototypeStore((state) => state.setRouteStageCommitReason)
+  const navigationStoreSnapshot = useNavigationPrototypeStore()
+  const prepareNavigationTarget = useNavigationPrototypeStore((state) => state.prepareTarget)
+  const requestPreparedNavigation = useNavigationPrototypeStore((state) => state.requestPreparedNavigation)
+  const dismissPreparedNavigation = useNavigationPrototypeStore((state) => state.dismissPreparedNavigation)
+  const pauseNavigation = useNavigationPrototypeStore((state) => state.pauseNavigation)
+  const resumeNavigation = useNavigationPrototypeStore((state) => state.resumeNavigation)
+  const cancelNavigation = useNavigationPrototypeStore((state) => state.cancelNavigation)
+  const rerouteNavigation = useNavigationPrototypeStore((state) => state.reroute)
+  const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
+  const continueAfterArrivalDetection = useNavigationPrototypeStore((state) => state.continueAfterArrivalDetection)
+  const raiseNavigationError = useNavigationPrototypeStore((state) => state.raiseNavigationError)
   const prototypeResolution = useMemo(() => {
     if (stage === 'active') {
       return resolveRouteSegmentTarget({ route, stage: 'active', currentStopIndex })
@@ -703,6 +702,7 @@ function RouteTourMobileOverlay({
   }, [currentStopIndex, joinStopIndex, route, stage])
   const prototypeTarget = 'target' in prototypeResolution ? prototypeResolution.target : undefined
   const prototypeTargetError = 'error' in prototypeResolution ? prototypeResolution.error || undefined : undefined
+  const navigationDebugEnabled = isNavigationDebugEnabled()
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
 
   useEffect(() => {
@@ -808,11 +808,12 @@ function RouteTourMobileOverlay({
 
   const handleNavigateNext = () => {
     if (!prototypeTarget) {
+      raiseNavigationError('target-location-missing', prototypeTargetError)
       setFeedbackText(prototypeTargetError || '该站点导航位置尚未完善')
       return
     }
-    startPrototypeTarget(prototypeTarget)
-    setFeedbackText('正在调用腾讯步行路线')
+    prepareNavigationTarget(prototypeTarget)
+    setFeedbackText('请确认定位说明')
   }
 
   const handleCommitPrototypeArrival = () => {
@@ -831,6 +832,42 @@ function RouteTourMobileOverlay({
     setRouteStageCommitReason(result.reason)
     setFeedbackText(result.reason)
   }
+
+  const navigationBetaViewModel = useMemo<NavigationBetaViewModel>(() => createNavigationBetaViewModel({
+    ...navigationStoreSnapshot,
+    debugEnabled: navigationDebugEnabled
+  }, {
+    enterPermissionIntro: () => prototypeTarget && prepareNavigationTarget(prototypeTarget),
+    requestPermissionAndStart: requestPreparedNavigation,
+    dismissPermissionIntro: dismissPreparedNavigation,
+    retryLocation: resumeNavigation,
+    retryPlanning: requestPreparedNavigation,
+    pause: pauseNavigation,
+    resume: resumeNavigation,
+    cancel: cancelNavigation,
+    reroute: () => void rerouteNavigation(),
+    continueCurrentRoute,
+    confirmArrival: handleCommitPrototypeArrival,
+    continueAfterArrivalDetection,
+    continueRestoredSession: resumeNavigation,
+    discardRestoredSession: cancelNavigation
+  }), [navigationStoreSnapshot, navigationDebugEnabled, prototypeTarget, prepareNavigationTarget, requestPreparedNavigation, dismissPreparedNavigation, resumeNavigation, pauseNavigation, cancelNavigation, rerouteNavigation, continueCurrentRoute, handleCommitPrototypeArrival, continueAfterArrivalDetection])
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) useNavigationPrototypeStore.getState().pauseForBackground()
+      else useNavigationPrototypeStore.getState().markResumePrompt()
+    }
+    const handlePageHide = () => useNavigationPrototypeStore.getState().pauseForBackground()
+    window.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('pageshow', handleVisibility)
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('pageshow', handleVisibility)
+    }
+  }, [])
 
   const openXiaoling = () => {
     setServiceOpen(false)
@@ -966,7 +1003,16 @@ function RouteTourMobileOverlay({
         >
           <span aria-hidden="true" />
         </button>
-        {cardCollapsed ? (
+        {navigationBetaViewModel.shouldReplaceRouteSheet ? (
+          <NavigationPrototypeCard
+            viewModel={navigationBetaViewModel}
+            target={prototypeSession?.target ?? navigationStoreSnapshot.preparedTarget ?? prototypeTarget}
+            targetError={prototypeTargetError}
+            onCommitArrival={handleCommitPrototypeArrival}
+            onListenToArrivalGuide={(destination) => handlePrototypeArrivalGuide(destination.poiId, destination.name)}
+            onViewArrivalPoiDetail={(destination) => handlePrototypeArrivalPoiDetail(destination.poiId)}
+          />
+        ) : cardCollapsed ? (
           <RouteCollapsedBar
             route={route}
             stage={stage}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { getPoiArrivalSummary } from '../data/poiGuideMetadata'
 import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { NavigationPrototypeReplayControls } from './NavigationPrototypeReplayControls'
+import type { NavigationBetaViewModel } from './navigationBetaViewModel'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 import type { NavigationPrototypeEndpoint, PrototypeNavigationTarget } from './types'
 
@@ -15,6 +16,7 @@ function formatDuration(durationMinutes: number) {
 }
 
 type NavigationPrototypeCardProps = {
+  viewModel?: NavigationBetaViewModel
   target?: PrototypeNavigationTarget
   targetError?: string
   onCommitArrival?: () => void
@@ -23,6 +25,7 @@ type NavigationPrototypeCardProps = {
 }
 
 export function NavigationPrototypeCard({
+  viewModel,
   target,
   targetError,
   onCommitArrival,
@@ -78,6 +81,18 @@ export function NavigationPrototypeCard({
   const isLowAccuracy = Boolean(location && location.accuracy > 50)
   const showDeviationNotice = status !== 'arrived' && !isLowAccuracy
   const locationAgeSeconds = location ? Math.max(0, Math.round((Date.now() - location.timestamp) / 1000)) : undefined
+  const debugEnabled = viewModel?.debugEnabled ?? false
+
+  if (viewModel?.state === 'permission-intro') {
+    return <section className="navigation-prototype-card" aria-label="导航定位说明">
+      <div className="navigation-prototype-card__head"><span>实时导航</span><small>定位说明</small></div>
+      <p className="navigation-prototype-card__status">为了规划步行路线，需要使用你的当前位置。定位仅用于本次导航。</p>
+      <div className="navigation-prototype-card__deviation-actions">
+        <button type="button" className="navigation-prototype-card__primary" onClick={viewModel.actions.requestPermissionAndStart}>允许定位并开始导航</button>
+        <button type="button" onClick={viewModel.actions.dismissPermissionIntro}>暂不导航</button>
+      </div>
+    </section>
+  }
 
   return (
     <section className={`navigation-prototype-card is-${status}`} aria-label="腾讯步行导航原型">
@@ -94,6 +109,7 @@ export function NavigationPrototypeCard({
         </button>
       ) : null}
 
+      {viewModel?.state === 'recoverable-error' && viewModel.error ? <div className="navigation-prototype-card__error"><p>{viewModel.error.title}：{viewModel.error.message}</p></div> : null}
       {status === 'locating' ? <p className="navigation-prototype-card__status">正在获取当前位置并调用腾讯步行路线…</p> : null}
       {status === 'planning' ? <p className="navigation-prototype-card__status">正在调用腾讯步行路线…</p> : null}
       {status === 'rerouting' ? <p className="navigation-prototype-card__status">正在重新规划步行路线…</p> : null}
@@ -159,42 +175,39 @@ export function NavigationPrototypeCard({
             <div className="navigation-prototype-card__deviation">
               <p>{restoredFromSessionStorage ? `检测到上一次导航 · 目标：${route.destination.name}` : '导航已暂停'}</p>
               <div className="navigation-prototype-card__deviation-actions">
-                <button type="button" onClick={resumeNavigation}>{restoredFromSessionStorage ? '继续上一次导航' : '继续导航'}</button>
-                <button type="button" onClick={cancelNavigation}>结束导航</button>
+                <button type="button" onClick={viewModel?.actions.continueRestoredSession ?? resumeNavigation}>{restoredFromSessionStorage ? '继续上一次导航' : '继续导航'}</button>
+                <button type="button" onClick={viewModel?.actions.discardRestoredSession ?? cancelNavigation}>结束导航</button>
               </div>
             </div>
           ) : status !== 'arrived' ? (
             <div className="navigation-prototype-card__deviation-actions">
               <button type="button" className="navigation-prototype-card__primary" onClick={pauseNavigation} disabled={status !== 'navigating'}>暂停导航</button>
               <button type="button" onClick={cancelNavigation}>取消导航</button>
-              {import.meta.env.DEV ? <button type="button" onClick={simulateArrival}>模拟到达</button> : null}
+              {debugEnabled ? <button type="button" onClick={simulateArrival}>模拟到达</button> : null}
             </div>
           ) : (
             <div className="navigation-prototype-card__arrival">
               <p className="navigation-prototype-card__arrived">已到达{route.destination.name}</p>
               {arrivalSummary ? <p>{arrivalSummary}</p> : null}
               <div className="navigation-prototype-card__arrival-actions">
-                {session && session.target.mode !== 'free-poi' && onCommitArrival ? (
-                  <button type="button" onClick={onCommitArrival}>
-                    {session.target.mode === 'joining' ? '确认加入路线' : '确认到达并查看讲解'}
+                {viewModel?.state === 'arrival-confirm' ? <>
+                  <button type="button" onClick={viewModel.actions.confirmArrival}>
+                    {viewModel.arrival?.kind === 'joining-arrival' ? '确认加入路线' : '确认到达并查看讲解'}
                   </button>
-                ) : null}
-                <button type="button" onClick={() => onListenToArrivalGuide?.(route.destination)}>
-                  听小灵讲解
-                </button>
-                {onViewArrivalPoiDetail ? (
-                  <button type="button" onClick={() => onViewArrivalPoiDetail(route.destination)}>
-                    查看景点详情
-                  </button>
-                ) : (
-                  <Link to={`/map-3d-guide-c/poi/${route.destination.poiId}?from=browse`}>
-                    查看景点详情
-                  </Link>
-                )}
+                  <button type="button" onClick={viewModel.actions.continueAfterArrivalDetection}>继续当前导航</button>
+                </> : <>
+                  {session && session.target.mode !== 'free-poi' && onCommitArrival ? (
+                    <button type="button" onClick={onCommitArrival}>
+                      {session.target.mode === 'joining' ? '确认加入路线' : '确认到达并查看讲解'}
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => onListenToArrivalGuide?.(route.destination)}>听小灵讲解</button>
+                  {onViewArrivalPoiDetail ? <button type="button" onClick={() => onViewArrivalPoiDetail(route.destination)}>查看景点详情</button> : <Link to={`/map-3d-guide-c/poi/${route.destination.poiId}?from=browse`}>查看景点详情</Link>}
+                </>}
               </div>
             </div>
           )}
-          {import.meta.env.DEV ? (
+          {debugEnabled ? (
             <div className="navigation-prototype-card__debug" aria-label="导航原型开发调试">
               <div className="navigation-prototype-card__debug-actions">
                 <button type="button" onClick={simulateDeviation}>模拟偏航</button>

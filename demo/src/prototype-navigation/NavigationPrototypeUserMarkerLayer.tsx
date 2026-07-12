@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
+import { isNavigationDebugEnabled } from './navigationDebug'
 import type { Gcj02Position, NavigationPrototypeMapRuntime, Wgs84Position } from './types'
 
 function createSvgDataUrl(svg: string) {
@@ -40,7 +41,7 @@ export function NavigationPrototypeUserMarkerLayer({ runtime }: { runtime: Navig
     if (!runtime || !converted || !runtime.TMap?.MultiMarker || !runtime.TMap?.MarkerStyle) return undefined
 
     const { TMap, map } = runtime
-    const showRawDebug = import.meta.env.DEV && locationSource === 'geolocation' && Boolean(raw)
+    const showRawDebug = isNavigationDebugEnabled() && locationSource === 'geolocation' && Boolean(raw)
     const markerLayer = new TMap.MultiMarker({
       map,
       zIndex: 760,

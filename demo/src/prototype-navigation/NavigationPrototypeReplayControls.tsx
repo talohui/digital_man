@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 import { useTrackReplay } from './useTrackReplay'
+import { isNavigationDebugEnabled } from './navigationDebug'
 import type { ReplayNoiseMode, ReplaySpeed } from './types'
 
 export function NavigationPrototypeReplayControls() {
@@ -16,7 +17,7 @@ export function NavigationPrototypeReplayControls() {
   const setReplayActive = useNavigationPrototypeStore((state) => state.setReplayActive)
   const replay = useTrackReplay({ route, suspended: navigationStatus === 'paused', acceptReplayFix, setReplayActive })
 
-  if (!import.meta.env.DEV || !route) return null
+  if (!isNavigationDebugEnabled() || !route) return null
 
   const totalSteps = route.steps.length
   return <details className="navigation-prototype-replay" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
