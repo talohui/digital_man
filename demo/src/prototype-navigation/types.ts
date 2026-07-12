@@ -1,6 +1,23 @@
 import type { LatLngPoint } from '../data/guideData'
 
-export type NavigationPrototypeStatus = 'idle' | 'locating' | 'navigating' | 'arrived' | 'error'
+export type NavigationPrototypeStatus = 'idle' | 'locating' | 'navigating' | 'rerouting' | 'arrived' | 'error'
+
+export type PrototypeDeviationState = 'on_route' | 'suspected_off_route' | 'confirmed_off_route'
+
+export type PrototypeDeviation = {
+  state: PrototypeDeviationState
+  distanceToRouteMeters?: number
+  nearestSegmentIndex?: number
+  suspectedThreshold?: number
+  confirmedThreshold?: number
+  suspectedHitCount: number
+  confirmedHitCount: number
+  recoveryHitCount: number
+  suspectedSince?: number
+  confirmedSince?: number
+  confirmedAt?: number
+  dismissedAt?: number
+}
 
 export type NavigationPrototypeEndpoint = LatLngPoint & {
   name: string

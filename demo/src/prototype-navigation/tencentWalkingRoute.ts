@@ -25,6 +25,9 @@ type TencentWalkingRouteResponse = {
       duration: number
       polyline: number[]
       steps?: TencentWalkingStep[]
+      fallback?: boolean
+      estimated?: boolean
+      straight_line?: boolean
     }>
   }
 }
@@ -53,6 +56,12 @@ export async function requestPrototypeWalkingRoute(
 
   if (payload.status !== 0 || !route?.polyline?.length) {
     throw new Error(payload.message || '腾讯步行路线未返回可绘制 polyline。')
+  }
+  // The production WebService response normally omits these flags. If a
+  // gateway ever returns an estimated/fallback route, do not present it as a
+  // successful manual reroute in the prototype.
+  if (route.fallback || route.estimated || route.straight_line) {
+    throw new Error('腾讯步行路线未返回可用于导航的真实路径。')
   }
 
   return {

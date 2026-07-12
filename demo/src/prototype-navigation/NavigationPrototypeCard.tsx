@@ -46,9 +46,21 @@ export function NavigationPrototypeCard({
   const location = useNavigationPrototypeStore((state) => state.location)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const arrivalLocationHits = useNavigationPrototypeStore((state) => state.arrivalLocationHits)
+  const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
+  const candidateStepHitCount = useNavigationPrototypeStore((state) => state.candidateStepHitCount)
+  const lastConfirmedStepIndex = useNavigationPrototypeStore((state) => state.lastConfirmedStepIndex)
+  const lastAnnouncedStepIndex = useNavigationPrototypeStore((state) => state.lastAnnouncedStepIndex)
   const latestStepPrompt = useNavigationPrototypeStore((state) => state.latestStepPrompt)
+  const deviation = useNavigationPrototypeStore((state) => state.deviation)
+  const reroutePending = useNavigationPrototypeStore((state) => state.reroutePending)
+  const lastRerouteError = useNavigationPrototypeStore((state) => state.lastRerouteError)
+  const requestGeneration = useNavigationPrototypeStore((state) => state.requestGeneration)
   const error = useNavigationPrototypeStore((state) => state.error)
   const start = useNavigationPrototypeStore((state) => state.start)
+  const reroute = useNavigationPrototypeStore((state) => state.reroute)
+  const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
+  const simulateDeviation = useNavigationPrototypeStore((state) => state.simulateDeviation)
+  const simulateRouteRecovery = useNavigationPrototypeStore((state) => state.simulateRouteRecovery)
   const simulateArrival = useNavigationPrototypeStore((state) => state.simulateArrival)
   const reset = useNavigationPrototypeStore((state) => state.reset)
   const currentInstruction = progress?.currentInstruction ?? getPrototypeStepInstruction(route?.steps[0])
@@ -57,6 +69,8 @@ export function NavigationPrototypeCard({
   const distanceMeters = progress?.distanceRemainingMeters ?? route?.distanceMeters ?? 0
   const durationMinutes = progress?.durationRemainingMinutes ?? route?.durationMinutes ?? 0
   const arrivalSummary = route ? getPoiArrivalSummary(route.destination.poiId) : undefined
+  const isLowAccuracy = Boolean(location && location.accuracy > 50)
+  const showDeviationNotice = status !== 'arrived' && !isLowAccuracy
 
   return (
     <section className={`navigation-prototype-card is-${status}`} aria-label="腾讯步行导航原型">
@@ -72,8 +86,9 @@ export function NavigationPrototypeCard({
       ) : null}
 
       {status === 'locating' ? <p className="navigation-prototype-card__status">正在获取当前位置并调用腾讯步行路线…</p> : null}
+      {status === 'rerouting' ? <p className="navigation-prototype-card__status">正在重新规划步行路线…</p> : null}
 
-      {route && (status === 'locating' || status === 'navigating' || status === 'arrived' || status === 'error') ? (
+      {route && (status === 'locating' || status === 'navigating' || status === 'rerouting' || status === 'arrived' || status === 'error') ? (
         <div className="navigation-prototype-card__details">
           <p>正在前往：<strong>{route.destination.name}</strong></p>
           <dl>
@@ -106,6 +121,22 @@ export function NavigationPrototypeCard({
           ) : null}
           {latestStepPrompt ? <p className="navigation-prototype-card__prompt">{latestStepPrompt}</p> : null}
           {location ? <p className="navigation-prototype-card__location">定位精度：约{Math.round(location.accuracy)}m</p> : null}
+          {isLowAccuracy ? <p className="navigation-prototype-card__low-accuracy">定位精度较低，暂不判断是否偏航</p> : null}
+          {showDeviationNotice && deviation.state === 'suspected_off_route' ? (
+            <p className="navigation-prototype-card__deviation navigation-prototype-card__deviation--suspected">
+              当前位置可能偏离路线，正在继续确认。
+            </p>
+          ) : null}
+          {showDeviationNotice && deviation.state === 'confirmed_off_route' ? (
+            <div className="navigation-prototype-card__deviation navigation-prototype-card__deviation--confirmed">
+              <p>你似乎已偏离当前步行路线。</p>
+              <div className="navigation-prototype-card__deviation-actions">
+                <button type="button" onClick={() => void reroute()} disabled={reroutePending}>重新规划</button>
+                <button type="button" onClick={continueCurrentRoute} disabled={reroutePending}>继续当前路线</button>
+              </div>
+            </div>
+          ) : null}
+          {lastRerouteError ? <p className="navigation-prototype-card__reroute-error">{lastRerouteError}</p> : null}
           {status === 'navigating' ? (
             <p className="navigation-prototype-card__location">
               步骤 {Math.min((progress?.currentStepIndex ?? 0) + 1, Math.max(route.steps.length, 1))} / {route.steps.length || 1} · 到达确认：{arrivalLocationHits}/3
@@ -135,6 +166,19 @@ export function NavigationPrototypeCard({
               </div>
             </div>
           )}
+          {import.meta.env.DEV && status !== 'arrived' ? (
+            <div className="navigation-prototype-card__debug" aria-label="导航原型开发调试">
+              <div className="navigation-prototype-card__debug-actions">
+                <button type="button" onClick={simulateDeviation}>模拟偏航</button>
+                <button type="button" onClick={simulateRouteRecovery}>模拟回到路线</button>
+              </div>
+              <small>
+                偏航 {deviation.state} · 距线 {deviation.distanceToRouteMeters ?? '-'}m · 段 {deviation.nearestSegmentIndex ?? '-'} ·
+                命中 {deviation.suspectedHitCount}/{deviation.confirmedHitCount}/{deviation.recoveryHitCount} ·
+                步骤 {candidateStepIndex ?? '-'}/{lastConfirmedStepIndex ?? '-'} · 提示 {lastAnnouncedStepIndex ?? '-'} · 请求 {requestGeneration}
+              </small>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

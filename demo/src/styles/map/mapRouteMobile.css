@@ -654,6 +654,92 @@
     color: #244f9c;
   }
 
+  .navigation-prototype-card__low-accuracy,
+  .navigation-prototype-card__reroute-error {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.4;
+  }
+
+  .navigation-prototype-card__low-accuracy {
+    color: #8d651d;
+  }
+
+  .navigation-prototype-card__reroute-error {
+    color: #9b3026;
+  }
+
+  .navigation-prototype-card__deviation {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    border-radius: 10px;
+    padding: 8px;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.4;
+  }
+
+  .navigation-prototype-card__deviation--suspected {
+    background: rgba(227, 171, 45, 0.16);
+    color: #7d5812;
+  }
+
+  .navigation-prototype-card__deviation--confirmed {
+    background: rgba(212, 87, 54, 0.13);
+    color: #8e3020;
+  }
+
+  .navigation-prototype-card__deviation--confirmed p {
+    margin: 0;
+  }
+
+  .navigation-prototype-card__deviation-actions,
+  .navigation-prototype-card__debug-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .navigation-prototype-card__debug {
+    display: grid;
+    gap: 6px;
+  }
+
+  .navigation-prototype-card__debug small {
+    color: rgba(24, 51, 95, 0.62);
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .navigation-prototype-card__deviation-actions button,
+  .navigation-prototype-card__debug-actions button {
+    min-width: 0;
+    min-height: 34px;
+    border: 0;
+    border-radius: 9px;
+    padding: 6px 8px;
+    background: #8e3020;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  .navigation-prototype-card__deviation-actions button:last-child,
+  .navigation-prototype-card__debug-actions button {
+    background: rgba(24, 51, 95, 0.12);
+    color: #18335f;
+  }
+
+  .navigation-prototype-card__deviation-actions button:disabled {
+    opacity: 0.52;
+  }
+
   .navigation-prototype-card__arrival {
     display: grid;
     gap: 7px;
