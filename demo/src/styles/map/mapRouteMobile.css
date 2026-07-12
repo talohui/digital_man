@@ -4641,16 +4641,96 @@
     font-weight: 700;
   }
 
+  .navigation-beta-debug-capsule {
+    position: fixed;
+    top: calc(var(--map-top-control-offset) + clamp(50px, 13vw, 58px));
+    left: max(14px, env(safe-area-inset-left, 0px));
+    z-index: 119;
+    display: flex;
+    width: max-content;
+    max-width: min(72vw, 290px);
+    height: clamp(38px, 10.5vw, 44px);
+    align-items: stretch;
+    overflow: hidden;
+    border: 1px solid rgba(201, 168, 106, 0.52);
+    border-radius: 999px;
+    background: rgba(255, 253, 244, 0.96);
+    box-shadow: 0 8px 20px rgba(22, 55, 43, 0.18);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+    animation: navigation-debug-enter 180ms ease-out;
+  }
+
+  .navigation-beta-debug-capsule.is-error {
+    border-color: rgba(171, 78, 45, 0.48);
+  }
+
+  .navigation-beta-debug-capsule__summary,
+  .navigation-beta-debug-capsule__expand,
+  .navigation-beta-debug-capsule__close {
+    min-width: 0;
+    border: 0;
+    padding: 0 11px;
+    background: transparent;
+    color: #315d4c;
+    font-family: inherit;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+
+  .navigation-beta-debug-capsule__summary {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .navigation-beta-debug-capsule__summary strong {
+    flex: 0 0 auto;
+    font-size: clamp(11px, 3vw, 13px);
+    font-weight: 800;
+  }
+
+  .navigation-beta-debug-capsule__summary span {
+    overflow: hidden;
+    color: rgba(49, 93, 76, 0.72);
+    font-size: clamp(10px, 2.75vw, 12px);
+    font-weight: 650;
+    text-overflow: ellipsis;
+  }
+
+  .navigation-beta-debug-capsule.is-error .navigation-beta-debug-capsule__summary span {
+    color: #8a3f28;
+  }
+
+  .navigation-beta-debug-capsule__expand {
+    flex: 0 0 auto;
+    border-left: 1px solid rgba(201, 168, 106, 0.3);
+    font-size: clamp(10px, 2.75vw, 12px);
+    font-weight: 750;
+  }
+
+  .navigation-beta-debug-capsule__close {
+    flex: 0 0 34px;
+    border-left: 1px solid rgba(201, 168, 106, 0.3);
+    padding: 0;
+    font-size: 18px;
+    font-weight: 500;
+  }
+
   .navigation-beta-debug-panel {
     position: fixed;
     top: calc(var(--map-top-control-offset) + 56px);
     right: max(12px, env(safe-area-inset-right, 0px));
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    bottom: auto;
     left: max(12px, env(safe-area-inset-left, 0px));
     z-index: 130;
     display: flex;
+    width: auto;
+    height: min(60dvh, 560px);
     max-width: 520px;
-    max-height: min(72dvh, 650px);
+    max-height: min(60dvh, 560px);
     margin-left: auto;
     flex-direction: column;
     overflow: hidden;
@@ -4660,6 +4740,11 @@
     box-shadow: 0 18px 40px rgba(22, 55, 43, 0.24);
     backdrop-filter: blur(12px);
     pointer-events: auto;
+    animation: navigation-debug-enter 180ms ease-out;
+  }
+
+  .navigation-beta-debug-panel[hidden] {
+    display: none !important;
   }
 
   .navigation-beta-debug-panel__header {
@@ -4672,9 +4757,16 @@
     padding: 10px 12px;
   }
 
-  .navigation-beta-debug-panel__header > div {
+  .navigation-beta-debug-panel__header > div:first-child {
     display: grid;
     gap: 1px;
+  }
+
+  .navigation-beta-debug-panel__header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
   }
 
   .navigation-beta-debug-panel__header small {
@@ -4690,14 +4782,20 @@
 
   .navigation-beta-debug-panel__header button {
     display: grid;
-    width: 36px;
+    width: auto;
+    min-width: 48px;
     height: 36px;
     place-items: center;
     border: 1px solid rgba(201, 168, 106, 0.36);
-    border-radius: 50%;
+    border-radius: 999px;
+    padding: 0 10px;
     background: rgba(255, 253, 244, 0.9);
     color: #315d4c;
-    font-size: 22px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 750;
+    white-space: nowrap;
+    touch-action: manipulation;
   }
 
   .navigation-beta-debug-panel__body {
@@ -4750,6 +4848,17 @@
   }
 }
 
+@keyframes navigation-debug-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 380px) {
   .navigation-beta-card__compact-duration {
     display: none;
@@ -4767,6 +4876,11 @@
 @media (prefers-reduced-motion: reduce) {
   .navigation-beta-card {
     transition: none;
+  }
+
+  .navigation-beta-debug-panel,
+  .navigation-beta-debug-capsule {
+    animation: none;
   }
 
   .navigation-beta-card__copy--loading::before {

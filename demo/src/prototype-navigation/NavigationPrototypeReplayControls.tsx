@@ -1,14 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 import { useTrackReplay } from './useTrackReplay'
 import { useMultiStopReplay } from './useMultiStopReplay'
-import { exportMultiStopReplayJson, type MultiStopReplayMode, type MultiStopReplayRange } from './multiStopReplay'
+import {
+  exportMultiStopReplayJson,
+  type MultiStopReplayMode,
+  type MultiStopReplayRange,
+  type MultiStopReplayStatus
+} from './multiStopReplay'
 import { isNavigationDebugEnabled } from './navigationDebug'
 import type { ReplayNoiseMode, ReplaySpeed } from './types'
 import type { ScenicRouteConfig } from '../data/lingshanScenicRoutes'
 
-export function NavigationPrototypeReplayControls() {
+export type NavigationSingleReplayUiState = {
+  status: 'idle' | 'playing' | 'paused' | 'completed'
+  speed: ReplaySpeed
+}
+
+export type NavigationMultiStopReplayUiState = {
+  status?: MultiStopReplayStatus
+  currentSegment?: number
+  totalSegments?: number
+}
+
+export function NavigationPrototypeReplayControls({
+  onStateChange,
+  onStarted
+}: {
+  onStateChange?: (state: NavigationSingleReplayUiState) => void
+  onStarted?: () => void
+} = {}) {
   const [open, setOpen] = useState(false)
   const [jumpStepIndex, setJumpStepIndex] = useState(0)
   const route = useNavigationPrototypeStore((state) => state.route)
@@ -22,6 +44,19 @@ export function NavigationPrototypeReplayControls() {
   const acceptReplayFix = useNavigationPrototypeStore((state) => state.acceptSimulatedGcj02Location)
   const setReplayActive = useNavigationPrototypeStore((state) => state.setReplayActive)
   const replay = useTrackReplay({ route, suspended: navigationStatus === 'paused', acceptReplayFix, setReplayActive })
+  const previousStatusRef = useRef(replay.status)
+
+  useEffect(() => {
+    onStateChange?.({ status: replay.status, speed: replay.speed })
+  }, [onStateChange, replay.speed, replay.status])
+
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current
+    if (replay.status === 'playing' && previousStatus !== 'playing' && previousStatus !== 'paused') {
+      onStarted?.()
+    }
+    previousStatusRef.current = replay.status
+  }, [onStarted, replay.status])
 
   if (!isNavigationDebugEnabled() || !route) return null
 
@@ -87,6 +122,8 @@ export function NavigationPrototypeMultiStopReplayControls(props: {
   joinStopIndex: number
   confirmArrival: () => void
   continueToActive: (stopIndex: number) => void
+  onStateChange?: (state: NavigationMultiStopReplayUiState) => void
+  onStarted?: () => void
 }) {
   const replay = useMultiStopReplay({
     enabled: props.debugEnabled && isNavigationDebugEnabled(),
@@ -97,6 +134,22 @@ export function NavigationPrototypeMultiStopReplayControls(props: {
     confirmArrival: props.confirmArrival,
     continueToActive: props.continueToActive
   })
+  const previousCoordinatorIdRef = useRef(replay.session?.coordinatorId)
+
+  useEffect(() => {
+    props.onStateChange?.({
+      status: replay.session?.status,
+      currentSegment: replay.session?.currentSegmentOrdinal,
+      totalSegments: replay.session?.totalSegmentCount
+    })
+  }, [props.onStateChange, replay.session?.currentSegmentOrdinal, replay.session?.status, replay.session?.totalSegmentCount])
+
+  useEffect(() => {
+    const coordinatorId = replay.session?.coordinatorId
+    if (coordinatorId && coordinatorId !== previousCoordinatorIdRef.current) props.onStarted?.()
+    previousCoordinatorIdRef.current = coordinatorId
+  }, [props.onStarted, replay.session?.coordinatorId])
+
   if (!props.debugEnabled || !isNavigationDebugEnabled()) return null
 
   const anchorIndex = props.stage === 'joining' ? props.joinStopIndex : props.currentStopIndex

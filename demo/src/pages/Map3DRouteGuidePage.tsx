@@ -40,7 +40,10 @@ import {
   type ScenicMapPresentation
 } from './Map3DGuidePage'
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
-import { NavigationBetaDebugPanel } from '../prototype-navigation/NavigationBetaDebugPanel'
+import {
+  NavigationBetaDebugPanel,
+  type NavigationDebugPanelDisplay
+} from '../prototype-navigation/NavigationBetaDebugPanel'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
 import { createNavigationBetaViewModel, type NavigationBetaViewModel } from '../prototype-navigation/navigationBetaViewModel'
@@ -651,7 +654,7 @@ function RouteTourMobileOverlay({
   const [mounted, setMounted] = useState(false)
   const [serviceOpen, setServiceOpen] = useState(false)
   const [debugMenuOpen, setDebugMenuOpen] = useState(false)
-  const [debugPanelOpen, setDebugPanelOpen] = useState(false)
+  const [debugPanelDisplay, setDebugPanelDisplay] = useState<NavigationDebugPanelDisplay>('closed')
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
   const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
@@ -874,7 +877,7 @@ function RouteTourMobileOverlay({
   const openXiaoling = () => {
     setServiceOpen(false)
     setDebugMenuOpen(false)
-    setDebugPanelOpen(false)
+    setDebugPanelDisplay('closed')
     openGlobalXiaoling({ mode: 'route' })
   }
 
@@ -890,7 +893,7 @@ function RouteTourMobileOverlay({
     setDebugMenuOpen(false)
     setServiceOpen(false)
     setLayerPanelOpen(false)
-    setDebugPanelOpen(true)
+    setDebugPanelDisplay('expanded')
   }
 
   const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
@@ -906,14 +909,14 @@ function RouteTourMobileOverlay({
   const toggleService = () => {
     closeGlobalXiaoling()
     setDebugMenuOpen(false)
-    setDebugPanelOpen(false)
+    setDebugPanelDisplay('closed')
     setLayerPanelOpen(false)
     setServiceOpen((open) => !open)
   }
 
   const toggleLayer = () => {
     setDebugMenuOpen(false)
-    setDebugPanelOpen(false)
+    setDebugPanelDisplay('closed')
     setServiceOpen(false)
     setLayerPanelOpen(!layerPanelOpen)
   }
@@ -1050,13 +1053,13 @@ function RouteTourMobileOverlay({
       </div>
       {navigationDebugEnabled ? (
         <NavigationBetaDebugPanel
-          open={debugPanelOpen}
+          display={debugPanelDisplay}
           route={route}
           stage={stage}
           currentStopIndex={currentStopIndex}
           joinStopIndex={joinStopIndex}
           mapRuntime={mapRuntime}
-          onClose={() => setDebugPanelOpen(false)}
+          onDisplayChange={setDebugPanelDisplay}
           onConfirmArrival={handleCommitPrototypeArrival}
           onContinueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
         />

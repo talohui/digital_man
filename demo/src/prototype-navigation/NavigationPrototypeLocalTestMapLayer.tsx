@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { haversineDistanceMeters } from '../lib/routeProgress'
 import { isNavigationDebugEnabled } from './navigationDebug'
-import type { Gcj02Position, NavigationPrototypeMapRuntime } from './types'
+import type { Gcj02Position, LocalNavigationTestState, NavigationPrototypeMapRuntime } from './types'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 
 type SavedCamera = {
@@ -38,7 +38,15 @@ function temporaryTargetSvg() {
   </svg>`)}`
 }
 
-export function NavigationPrototypeLocalTestMapLayer({ runtime }: { runtime: NavigationPrototypeMapRuntime | null }) {
+export function NavigationPrototypeLocalTestMapLayer({
+  runtime,
+  onStateChange,
+  onStarted
+}: {
+  runtime: NavigationPrototypeMapRuntime | null
+  onStateChange?: (phase?: LocalNavigationTestState['phase']) => void
+  onStarted?: () => void
+}) {
   const localTest = useNavigationPrototypeStore((state) => state.localNavigationTest)
   const prepare = useNavigationPrototypeStore((state) => state.prepareLocalNavigationTest)
   const start = useNavigationPrototypeStore((state) => state.startLocalNavigationTest)
@@ -48,6 +56,7 @@ export function NavigationPrototypeLocalTestMapLayer({ runtime }: { runtime: Nav
   const savedCameraRef = useRef<SavedCamera | undefined>()
   const targetMarkerRef = useRef<any>(null)
   const selectionWasActiveRef = useRef(false)
+  const previousPhaseRef = useRef(localTest?.phase)
   const enabled = isNavigationDebugEnabled()
   const displayTarget = selectedTarget ?? localTest?.target
   const markerTarget = localTest?.phase === 'arrived' || localTest?.phase === 'error' ? undefined : displayTarget
@@ -55,6 +64,18 @@ export function NavigationPrototypeLocalTestMapLayer({ runtime }: { runtime: Nav
     if (!localTest?.origin || !displayTarget) return undefined
     return Math.round(haversineDistanceMeters(localTest.origin, displayTarget.coordinate))
   }, [displayTarget, localTest?.origin])
+
+  useEffect(() => {
+    onStateChange?.(localTest?.phase)
+  }, [localTest?.phase, onStateChange])
+
+  useEffect(() => {
+    const phase = localTest?.phase
+    if ((phase === 'planning' || phase === 'navigating') && previousPhaseRef.current === 'awaiting-target') {
+      onStarted?.()
+    }
+    previousPhaseRef.current = phase
+  }, [localTest?.phase, onStarted])
 
   useEffect(() => {
     if (!enabled || !runtime || localTest?.phase !== 'awaiting-target' || !localTest.origin) return
