@@ -2,7 +2,7 @@ import { findNearestRoutePoint, haversineDistanceMeters } from '../lib/routeProg
 import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 
 import type {
-  NavigationPrototypeLocation,
+  ConvertedGcj02Location,
   NavigationPrototypeProgress,
   NavigationPrototypeRoute,
   NavigationPrototypeStep
@@ -16,7 +16,7 @@ type StepRange = {
 
 export function buildNavigationPrototypeProgress(
   route: NavigationPrototypeRoute,
-  location: NavigationPrototypeLocation,
+  location: ConvertedGcj02Location,
   confirmedStepIndex?: number
 ): NavigationPrototypeProgress {
   const nearest = findNearestRoutePoint(location, route.polyline)

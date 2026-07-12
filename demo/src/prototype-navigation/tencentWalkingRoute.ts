@@ -1,5 +1,5 @@
-import type { LatLngPoint } from '../data/guideData'
 import type {
+  Gcj02Position,
   NavigationPrototypeEndpoint,
   NavigationPrototypeRoute,
   NavigationPrototypeStep
@@ -98,23 +98,24 @@ function getRouteKey() {
   return key
 }
 
-function formatLatLng(point: LatLngPoint) {
+function formatLatLng(point: Pick<Gcj02Position, 'lat' | 'lng'>) {
   return `${point.lat},${point.lng}`
 }
 
-function decodeTencentPolyline(compressedPolyline: number[]): LatLngPoint[] {
+function decodeTencentPolyline(compressedPolyline: number[]): Gcj02Position[] {
   const coordinates = [...compressedPolyline]
 
   for (let index = 2; index < coordinates.length; index += 1) {
     coordinates[index] = coordinates[index - 2] + coordinates[index] / 1_000_000
   }
 
-  const path: LatLngPoint[] = []
+  const path: Gcj02Position[] = []
 
   for (let index = 0; index < coordinates.length - 1; index += 2) {
     path.push({
       lat: Number(coordinates[index].toFixed(6)),
-      lng: Number(coordinates[index + 1].toFixed(6))
+      lng: Number(coordinates[index + 1].toFixed(6)),
+      coordinateSystem: 'GCJ-02'
     })
   }
 

@@ -4,6 +4,7 @@ import { guideSpots } from '../data/guideData'
 import { getPoiArrivalSummary } from '../data/poiGuideMetadata'
 import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
+import { toGcj02Position } from './coordinateTransform'
 import type { NavigationPrototypeEndpoint } from './types'
 
 const SOUTH_GATE = toEndpoint('south_gate')
@@ -19,8 +20,7 @@ function toEndpoint(poiId: string): NavigationPrototypeEndpoint {
   return {
     poiId: spot.id,
     name: spot.name,
-    lat: spot.lat,
-    lng: spot.lng
+    ...toGcj02Position(spot)
   }
 }
 
@@ -43,7 +43,12 @@ export function NavigationPrototypeCard({
 }: NavigationPrototypeCardProps) {
   const status = useNavigationPrototypeStore((state) => state.status)
   const route = useNavigationPrototypeStore((state) => state.route)
-  const location = useNavigationPrototypeStore((state) => state.location)
+  const rawWgs84Position = useNavigationPrototypeStore((state) => state.rawWgs84Position)
+  const location = useNavigationPrototypeStore((state) => state.convertedGcj02Position)
+  const conversionStatus = useNavigationPrototypeStore((state) => state.conversionStatus)
+  const conversionProvider = useNavigationPrototypeStore((state) => state.conversionProvider)
+  const conversionError = useNavigationPrototypeStore((state) => state.conversionError)
+  const coordinateOffsetMeters = useNavigationPrototypeStore((state) => state.coordinateOffsetMeters)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const arrivalLocationHits = useNavigationPrototypeStore((state) => state.arrivalLocationHits)
   const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
@@ -61,6 +66,12 @@ export function NavigationPrototypeCard({
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const simulateDeviation = useNavigationPrototypeStore((state) => state.simulateDeviation)
   const simulateRouteRecovery = useNavigationPrototypeStore((state) => state.simulateRouteRecovery)
+  const startTrajectoryRecording = useNavigationPrototypeStore((state) => state.startTrajectoryRecording)
+  const stopTrajectoryRecording = useNavigationPrototypeStore((state) => state.stopTrajectoryRecording)
+  const clearTrajectory = useNavigationPrototypeStore((state) => state.clearTrajectory)
+  const exportTrajectory = useNavigationPrototypeStore((state) => state.exportTrajectory)
+  const trajectoryRecording = useNavigationPrototypeStore((state) => state.trajectoryRecording)
+  const trajectoryRecordCount = useNavigationPrototypeStore((state) => state.trajectory.length)
   const simulateArrival = useNavigationPrototypeStore((state) => state.simulateArrival)
   const reset = useNavigationPrototypeStore((state) => state.reset)
   const currentInstruction = progress?.currentInstruction ?? getPrototypeStepInstruction(route?.steps[0])
@@ -71,6 +82,7 @@ export function NavigationPrototypeCard({
   const arrivalSummary = route ? getPoiArrivalSummary(route.destination.poiId) : undefined
   const isLowAccuracy = Boolean(location && location.accuracy > 50)
   const showDeviationNotice = status !== 'arrived' && !isLowAccuracy
+  const locationAgeSeconds = location ? Math.max(0, Math.round((Date.now() - location.timestamp) / 1000)) : undefined
 
   return (
     <section className={`navigation-prototype-card is-${status}`} aria-label="腾讯步行导航原型">
@@ -121,6 +133,8 @@ export function NavigationPrototypeCard({
           ) : null}
           {latestStepPrompt ? <p className="navigation-prototype-card__prompt">{latestStepPrompt}</p> : null}
           {location ? <p className="navigation-prototype-card__location">定位精度：约{Math.round(location.accuracy)}m</p> : null}
+          {conversionStatus === 'converting' ? <p className="navigation-prototype-card__location">正在转换 GPS 坐标…</p> : null}
+          {conversionStatus === 'failed' ? <p className="navigation-prototype-card__reroute-error">坐标转换暂不可用{conversionError ? `：${conversionError}` : ''}</p> : null}
           {isLowAccuracy ? <p className="navigation-prototype-card__low-accuracy">定位精度较低，暂不判断是否偏航</p> : null}
           {showDeviationNotice && deviation.state === 'suspected_off_route' ? (
             <p className="navigation-prototype-card__deviation navigation-prototype-card__deviation--suspected">
@@ -173,10 +187,22 @@ export function NavigationPrototypeCard({
                 <button type="button" onClick={simulateRouteRecovery}>模拟回到路线</button>
               </div>
               <small>
+                WGS84 {rawWgs84Position ? `${rawWgs84Position.lat.toFixed(6)}, ${rawWgs84Position.lng.toFixed(6)}` : '-'} ·
+                GCJ-02 {location ? `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}` : '-'} · 偏移 {coordinateOffsetMeters ?? '-'}m ·
+                精度 {location?.accuracy ?? '-'}m · 坐标龄 {locationAgeSeconds ?? '-'}s · 转换 {conversionStatus}/{conversionProvider} · 原始点（琥珀）/ 导航点（蓝） ·
                 偏航 {deviation.state} · 距线 {deviation.distanceToRouteMeters ?? '-'}m · 段 {deviation.nearestSegmentIndex ?? '-'} ·
                 命中 {deviation.suspectedHitCount}/{deviation.confirmedHitCount}/{deviation.recoveryHitCount} ·
                 步骤 {candidateStepIndex ?? '-'}/{lastConfirmedStepIndex ?? '-'} · 提示 {lastAnnouncedStepIndex ?? '-'} · 请求 {requestGeneration}
               </small>
+              <div className="navigation-prototype-card__debug-actions">
+                <button type="button" onClick={trajectoryRecording ? stopTrajectoryRecording : startTrajectoryRecording}>
+                  {trajectoryRecording ? '停止记录' : '开始记录'}
+                </button>
+                <button type="button" onClick={clearTrajectory}>清空记录（{trajectoryRecordCount}）</button>
+              </div>
+              <button type="button" className="navigation-prototype-card__debug-export" onClick={exportTrajectory} disabled={!trajectoryRecordCount}>
+                导出 JSON
+              </button>
             </div>
           ) : null}
         </div>

@@ -1,4 +1,4 @@
-import type { NavigationPrototypeLocation } from './types'
+import type { BrowserWgs84Location } from './types'
 
 export type PrototypeGeolocationError = {
   message: string
@@ -6,7 +6,7 @@ export type PrototypeGeolocationError = {
 
 /** Minimal Browser Geolocation adapter for the navigation prototype only. */
 export function watchPrototypeLocation(input: {
-  onLocation: (location: NavigationPrototypeLocation) => void
+  onLocation: (location: BrowserWgs84Location) => void
   onError: (error: PrototypeGeolocationError) => void
 }) {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
@@ -22,6 +22,7 @@ export function watchPrototypeLocation(input: {
         input.onLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
+          coordinateSystem: 'WGS84',
           accuracy: position.coords.accuracy,
           timestamp: position.timestamp
         })

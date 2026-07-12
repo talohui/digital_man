@@ -1,11 +1,11 @@
 import { haversineDistanceMeters } from '../lib/routeProgress'
 
-import type { LatLngPoint } from '../data/guideData'
+import type { Gcj02Position } from './types'
 
 export type RouteProjection = {
   distanceToRouteMeters: number
   nearestSegmentIndex: number
-  nearestPoint: LatLngPoint
+  nearestPoint: Gcj02Position
   segmentProgress: number
 }
 
@@ -15,8 +15,8 @@ export type RouteProjection = {
  * projection is both stable and easier to test than comparing route vertices.
  */
 export function projectPointToPolyline(input: {
-  position: LatLngPoint
-  polyline: LatLngPoint[]
+  position: Gcj02Position
+  polyline: Gcj02Position[]
 }): RouteProjection | undefined {
   const { position, polyline } = input
   if (!isValidPoint(position)) return undefined
@@ -37,7 +37,7 @@ export function projectPointToPolyline(input: {
   const latitudeRadians = toRadians(position.lat)
   const metersPerLatitudeDegree = 111_320
   const metersPerLongitudeDegree = Math.max(1, metersPerLatitudeDegree * Math.cos(latitudeRadians))
-  const toLocalMeters = (point: LatLngPoint) => ({
+  const toLocalMeters = (point: Gcj02Position) => ({
     x: (point.lng - position.lng) * metersPerLongitudeDegree,
     y: (point.lat - position.lat) * metersPerLatitudeDegree
   })
@@ -59,7 +59,8 @@ export function projectPointToPolyline(input: {
     const segmentProgress = clamp(unclampedProgress, 0, 1)
     const nearestPoint = {
       lat: start.lat + (end.lat - start.lat) * segmentProgress,
-      lng: start.lng + (end.lng - start.lng) * segmentProgress
+      lng: start.lng + (end.lng - start.lng) * segmentProgress,
+      coordinateSystem: 'GCJ-02' as const
     }
     const distanceToRouteMeters = Math.hypot(
       startMeters.x + dx * segmentProgress,
@@ -78,7 +79,7 @@ export function projectPointToPolyline(input: {
   const closestPoint = validPoints.reduce((closest, candidate) => {
     const distance = haversineDistanceMeters(position, candidate.point)
     return !closest || distance < closest.distance ? { ...candidate, distance } : closest
-  }, undefined as { point: LatLngPoint; index: number; distance: number } | undefined)
+  }, undefined as { point: Gcj02Position; index: number; distance: number } | undefined)
 
   return closestPoint
     ? {
@@ -90,7 +91,7 @@ export function projectPointToPolyline(input: {
     : undefined
 }
 
-function isValidPoint(point: LatLngPoint) {
+function isValidPoint(point: Gcj02Position) {
   return Number.isFinite(point.lat) && Number.isFinite(point.lng)
 }
 
