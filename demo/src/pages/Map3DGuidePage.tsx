@@ -9390,7 +9390,7 @@ export function Map3DGuideExperience({
           <h1>{visualVariant.title}</h1>
           <p>{currentRouteConfig.name} · {visualVariant.subtitle}</p>
           <div className="map-3d-guide-top-actions">
-            <button type="button" onClick={() => navigate('/map')}>
+            <button type="button" onClick={() => navigate('/map-3d-guide-c')}>
               进入真实地图
             </button>
             <button type="button" onClick={() => navigate('/scenic-3d-map-prototype')}>
