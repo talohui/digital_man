@@ -14,6 +14,24 @@ export type Gcj02Position = {
   coordinateSystem: 'GCJ-02'
 }
 
+export type PrototypeNavigationTarget = {
+  mode: 'route-segment' | 'joining' | 'free-poi'
+  routeId?: string
+  fromStopIndex?: number
+  targetStopIndex?: number
+  poiId: string
+  name: string
+  coordinate: Gcj02Position
+}
+
+export type PrototypeNavigationSession = {
+  id: string
+  target: PrototypeNavigationTarget
+  originStage?: 'joining' | 'active'
+  committed: boolean
+  targetChangedAt: number
+}
+
 export type BrowserWgs84Location = Wgs84Position & {
   accuracy: number
   timestamp: number

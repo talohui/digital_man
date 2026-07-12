@@ -6,6 +6,7 @@ import type { ReplayNoiseMode, ReplaySpeed } from './types'
 
 export function NavigationPrototypeReplayControls() {
   const [open, setOpen] = useState(false)
+  const [jumpStepIndex, setJumpStepIndex] = useState(0)
   const route = useNavigationPrototypeStore((state) => state.route)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
@@ -41,9 +42,14 @@ export function NavigationPrototypeReplayControls() {
         <button type="button" onClick={replay.reset}>重置</button>
       </div>
       <div className="navigation-prototype-replay__buttons">
-        <button type="button" onClick={() => replay.jumpToStep(0)}>跳到 step 0</button>
-        <button type="button" onClick={() => replay.jumpToStep(1)}>跳到 step 1</button>
-        <button type="button" onClick={() => replay.jumpToStep(Math.max(totalSteps - 1, 0))}>跳到最后一步</button>
+        <button type="button" onClick={() => setJumpStepIndex((index) => Math.max(0, index - 1))}>上一步</button>
+        <button type="button" onClick={() => replay.jumpToStep(jumpStepIndex)}>跳到 step {Math.min(jumpStepIndex, Math.max(totalSteps - 1, 0))}</button>
+        <button type="button" onClick={() => setJumpStepIndex((index) => Math.min(Math.max(totalSteps - 1, 0), index + 1))}>下一步</button>
+        <button type="button" onClick={() => {
+          const last = Math.max(totalSteps - 1, 0)
+          setJumpStepIndex(last)
+          replay.jumpToStep(last)
+        }}>跳到最后一步</button>
         <button type="button" onClick={replay.jumpNearDestination}>跳到终点附近</button>
       </div>
       <div className="navigation-prototype-replay__buttons">

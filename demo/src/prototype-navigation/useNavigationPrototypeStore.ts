@@ -22,6 +22,8 @@ import type {
   NavigationPrototypeStatus,
   NavigationPrototypeTraceRecord,
   NavigationPrototypeLocationSource,
+  PrototypeNavigationSession,
+  PrototypeNavigationTarget,
   PrototypeDeviation,
   ReplayFix,
   ReplayScenario
@@ -49,11 +51,15 @@ const MAX_TRAJECTORY_RECORDS = 300
 let stopLocationWatch: (() => void) | null = null
 let requestGeneration = 0
 let coordinateConversionGeneration = 0
+let navigationSessionSequence = 0
 const coordinateTransformProvider = createPrototypeCoordinateTransformProvider()
 
 type NavigationPrototypeStore = {
   status: NavigationPrototypeStatus
   route?: NavigationPrototypeRoute
+  session?: PrototypeNavigationSession
+  routeStageCommitReason?: string
+  routeRequestPending: boolean
   rawWgs84Position?: BrowserWgs84Location
   convertedGcj02Position?: ConvertedGcj02Location
   locationSource?: NavigationPrototypeLocationSource
@@ -81,6 +87,11 @@ type NavigationPrototypeStore = {
   trajectory: NavigationPrototypeTraceRecord[]
   error?: string
   start: (origin: NavigationPrototypeEndpoint, destination: NavigationPrototypeEndpoint) => Promise<void>
+  startTarget: (target: PrototypeNavigationTarget) => void
+  syncTarget: (target?: PrototypeNavigationTarget) => void
+  cancelNavigation: () => void
+  markRouteStageCommitted: (sessionId: string) => boolean
+  setRouteStageCommitReason: (reason?: string) => void
   acceptRawWgs84Location: (location: BrowserWgs84Location) => void
   acceptSimulatedGcj02Location: (location: ConvertedGcj02Location) => void
   setReplayActive: (active: boolean) => void
@@ -97,8 +108,45 @@ type NavigationPrototypeStore = {
 }
 
 export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set, get) => {
+  const requestTargetRoute = async (target: PrototypeNavigationTarget, location: ConvertedGcj02Location, sessionId: string) => {
+    const generation = nextRequestGeneration()
+    const origin: NavigationPrototypeEndpoint = {
+      poiId: 'prototype-current-location',
+      name: '当前位置',
+      ...toGcj02Position(location)
+    }
+    const destination: NavigationPrototypeEndpoint = {
+      poiId: target.poiId,
+      name: target.name,
+      ...target.coordinate
+    }
+    set({ status: 'locating', requestGeneration: generation, routeRequestPending: true, error: undefined })
+    try {
+      const route = await requestPrototypeWalkingRoute(origin, destination)
+      const state = get()
+      if (generation !== requestGeneration || state.session?.id !== sessionId) return
+      const initialStepIndex = 0
+      set({
+        status: 'navigating',
+        route,
+        progress: buildNavigationPrototypeProgress(route, location, initialStepIndex),
+        candidateStepIndex: initialStepIndex,
+        candidateStepHitCount: 0,
+        lastConfirmedStepIndex: initialStepIndex,
+        lastAnnouncedStepIndex: initialStepIndex,
+        latestStepPrompt: formatPrototypeNavigationPrompt({ currentStep: route.steps[initialStepIndex], nextStep: route.steps[initialStepIndex + 1] }),
+        routeRequestPending: false
+      })
+    } catch (error) {
+      const state = get()
+      if (generation !== requestGeneration || state.session?.id !== sessionId) return
+      set({ status: 'error', routeRequestPending: false, error: error instanceof Error ? error.message : '腾讯步行路线请求失败。' })
+    }
+  }
+
   const startGeolocationWatch = () => {
-    if (stopLocationWatch || get().status === 'arrived') return
+    const status = get().status
+    if (stopLocationWatch || (status !== 'locating' && status !== 'navigating' && status !== 'rerouting')) return
     const generation = requestGeneration
     stopLocationWatch = watchPrototypeLocation({
       onLocation: (location) => {
@@ -146,6 +194,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     if (!state.route) {
       set({ convertedGcj02Position: location, locationSource: location.source, arrivalLocationHits: 0 })
       appendTrajectoryRecord(raw, location)
+      if (state.session && !state.routeRequestPending) {
+        void requestTargetRoute(state.session.target, location, state.session.id)
+      }
       return
     }
 
@@ -225,6 +276,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     conversionProvider: coordinateTransformProvider.id,
     conversionGeneration: coordinateConversionGeneration,
     requestGeneration,
+    routeRequestPending: false,
     reroutePending: false,
     trajectoryRecording: false,
     trajectory: [],
@@ -236,6 +288,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       set({
         status: 'locating',
         route: undefined,
+        session: undefined,
+        routeStageCommitReason: undefined,
+        routeRequestPending: false,
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
         locationSource: undefined,
@@ -285,6 +340,84 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         if (generation !== requestGeneration) return
         set({ status: 'error', error: error instanceof Error ? error.message : '腾讯步行路线请求失败。' })
       }
+    },
+    startTarget(target) {
+      const priorLocation = get().convertedGcj02Position
+      const session: PrototypeNavigationSession = {
+        id: `prototype-navigation-${++navigationSessionSequence}`,
+        target,
+        originStage: target.mode === 'joining' ? 'joining' : target.mode === 'route-segment' ? 'active' : undefined,
+        committed: false,
+        targetChangedAt: Date.now()
+      }
+      nextRequestGeneration()
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({
+        status: 'locating',
+        route: undefined,
+        session,
+        routeStageCommitReason: undefined,
+        routeRequestPending: false,
+        progress: undefined,
+        arrivalLocationHits: 0,
+        candidateStepIndex: undefined,
+        candidateStepHitCount: 0,
+        lastConfirmedStepIndex: undefined,
+        lastAnnouncedStepIndex: undefined,
+        latestStepPrompt: undefined,
+        deviation: createOnRouteDeviation(),
+        reroutePending: false,
+        lastRerouteError: undefined,
+        error: undefined
+      })
+      startGeolocationWatch()
+      if (priorLocation) void requestTargetRoute(target, priorLocation, session.id)
+    },
+    syncTarget(target) {
+      const session = get().session
+      if (!session) return
+      const current = session.target
+      const unchanged = target
+        && current.mode === target.mode
+        && current.routeId === target.routeId
+        && current.targetStopIndex === target.targetStopIndex
+        && current.poiId === target.poiId
+      if (unchanged) return
+      get().cancelNavigation()
+    },
+    cancelNavigation() {
+      const generation = nextRequestGeneration()
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({
+        status: 'idle',
+        route: undefined,
+        session: undefined,
+        routeStageCommitReason: undefined,
+        routeRequestPending: false,
+        progress: undefined,
+        arrivalLocationHits: 0,
+        candidateStepIndex: undefined,
+        candidateStepHitCount: 0,
+        lastConfirmedStepIndex: undefined,
+        lastAnnouncedStepIndex: undefined,
+        latestStepPrompt: undefined,
+        deviation: createOnRouteDeviation(),
+        requestGeneration: generation,
+        reroutePending: false,
+        lastRerouteError: undefined,
+        error: undefined
+      })
+    },
+    markRouteStageCommitted(sessionId) {
+      const state = get()
+      if (state.status !== 'arrived' || !state.session || state.session.id !== sessionId || state.session.committed) return false
+      set({ session: { ...state.session, committed: true }, routeStageCommitReason: '已提交路线阶段' })
+      return true
+    },
+    setRouteStageCommitReason(reason) {
+      set({ routeStageCommitReason: reason })
     },
     acceptRawWgs84Location(location) {
       const state = get()
@@ -472,6 +605,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       set({
         status: 'idle',
         route: undefined,
+        session: undefined,
+        routeStageCommitReason: undefined,
+        routeRequestPending: false,
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
         locationSource: undefined,

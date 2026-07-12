@@ -1,29 +1,10 @@
 import { Link } from 'react-router-dom'
 
-import { guideSpots } from '../data/guideData'
 import { getPoiArrivalSummary } from '../data/poiGuideMetadata'
 import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
 import { NavigationPrototypeReplayControls } from './NavigationPrototypeReplayControls'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
-import { toGcj02Position } from './coordinateTransform'
-import type { NavigationPrototypeEndpoint } from './types'
-
-const SOUTH_GATE = toEndpoint('south_gate')
-const LINGSHAN_WALL = toEndpoint('lingshan_wall')
-
-function toEndpoint(poiId: string): NavigationPrototypeEndpoint {
-  const spot = guideSpots.find((item) => item.id === poiId)
-
-  if (!spot) {
-    throw new Error(`缺少原型导航 POI：${poiId}`)
-  }
-
-  return {
-    poiId: spot.id,
-    name: spot.name,
-    ...toGcj02Position(spot)
-  }
-}
+import type { NavigationPrototypeEndpoint, PrototypeNavigationTarget } from './types'
 
 function formatDistance(distanceMeters: number) {
   return distanceMeters >= 1000 ? `${(distanceMeters / 1000).toFixed(1)} km` : `${distanceMeters} m`
@@ -34,11 +15,17 @@ function formatDuration(durationMinutes: number) {
 }
 
 type NavigationPrototypeCardProps = {
+  target?: PrototypeNavigationTarget
+  targetError?: string
+  onCommitArrival?: () => void
   onListenToArrivalGuide?: (destination: NavigationPrototypeEndpoint) => void
   onViewArrivalPoiDetail?: (destination: NavigationPrototypeEndpoint) => void
 }
 
 export function NavigationPrototypeCard({
+  target,
+  targetError,
+  onCommitArrival,
   onListenToArrivalGuide,
   onViewArrivalPoiDetail
 }: NavigationPrototypeCardProps) {
@@ -62,8 +49,11 @@ export function NavigationPrototypeCard({
   const reroutePending = useNavigationPrototypeStore((state) => state.reroutePending)
   const lastRerouteError = useNavigationPrototypeStore((state) => state.lastRerouteError)
   const requestGeneration = useNavigationPrototypeStore((state) => state.requestGeneration)
+  const session = useNavigationPrototypeStore((state) => state.session)
+  const routeStageCommitReason = useNavigationPrototypeStore((state) => state.routeStageCommitReason)
   const error = useNavigationPrototypeStore((state) => state.error)
-  const start = useNavigationPrototypeStore((state) => state.start)
+  const startTarget = useNavigationPrototypeStore((state) => state.startTarget)
+  const cancelNavigation = useNavigationPrototypeStore((state) => state.cancelNavigation)
   const reroute = useNavigationPrototypeStore((state) => state.reroute)
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const simulateDeviation = useNavigationPrototypeStore((state) => state.simulateDeviation)
@@ -90,12 +80,14 @@ export function NavigationPrototypeCard({
     <section className={`navigation-prototype-card is-${status}`} aria-label="腾讯步行导航原型">
       <div className="navigation-prototype-card__head">
         <span>Prototype Navigation</span>
-        <small>南门入园 → 灵山大照壁</small>
+        <small>{target ? `前往 ${target.name}` : '等待路线导航目标'}</small>
       </div>
 
-      {status === 'idle' ? (
-        <button type="button" className="navigation-prototype-card__primary" onClick={() => void start(SOUTH_GATE, LINGSHAN_WALL)}>
-          开始导航
+      {targetError ? <p className="navigation-prototype-card__error">{targetError}</p> : null}
+
+      {status === 'idle' && target ? (
+        <button type="button" className="navigation-prototype-card__primary" onClick={() => startTarget(target)}>
+          {target.mode === 'joining' ? '导航到加入点' : '开始导航'}
         </button>
       ) : null}
 
@@ -160,14 +152,20 @@ export function NavigationPrototypeCard({
             </p>
           ) : null}
           {status !== 'arrived' ? (
-            <button type="button" className="navigation-prototype-card__primary" onClick={simulateArrival}>
-              模拟到达
-            </button>
+            <div className="navigation-prototype-card__deviation-actions">
+              <button type="button" className="navigation-prototype-card__primary" onClick={simulateArrival}>模拟到达</button>
+              <button type="button" onClick={cancelNavigation}>取消导航</button>
+            </div>
           ) : (
             <div className="navigation-prototype-card__arrival">
               <p className="navigation-prototype-card__arrived">已到达{route.destination.name}</p>
               {arrivalSummary ? <p>{arrivalSummary}</p> : null}
               <div className="navigation-prototype-card__arrival-actions">
+                {session && session.target.mode !== 'free-poi' && onCommitArrival ? (
+                  <button type="button" onClick={onCommitArrival}>
+                    {session.target.mode === 'joining' ? '确认加入路线' : '确认到达并查看讲解'}
+                  </button>
+                ) : null}
                 <button type="button" onClick={() => onListenToArrivalGuide?.(route.destination)}>
                   听小灵讲解
                 </button>
@@ -183,7 +181,7 @@ export function NavigationPrototypeCard({
               </div>
             </div>
           )}
-          {import.meta.env.DEV && status !== 'arrived' ? (
+          {import.meta.env.DEV ? (
             <div className="navigation-prototype-card__debug" aria-label="导航原型开发调试">
               <div className="navigation-prototype-card__debug-actions">
                 <button type="button" onClick={simulateDeviation}>模拟偏航</button>
@@ -196,6 +194,8 @@ export function NavigationPrototypeCard({
                 偏航 {deviation.state} · 距线 {deviation.distanceToRouteMeters ?? '-'}m · 段 {deviation.nearestSegmentIndex ?? '-'} ·
                 命中 {deviation.suspectedHitCount}/{deviation.confirmedHitCount}/{deviation.recoveryHitCount} ·
                 步骤 {candidateStepIndex ?? '-'}/{lastConfirmedStepIndex ?? '-'} · 提示 {lastAnnouncedStepIndex ?? '-'} · 请求 {requestGeneration}
+                <br />目标 {session ? `${session.target.mode}/${session.target.routeId ?? '-'}#${session.target.targetStopIndex ?? '-'} · ${session.target.poiId}` : '-'} ·
+                会话 {session?.id ?? '-'} · 提交 {session ? `${status === 'arrived' && !session.committed}/${session.committed}/${routeStageCommitReason ?? '-'}` : '-'} · 目标变更 {session?.targetChangedAt ?? '-'}
               </small>
               <div className="navigation-prototype-card__debug-actions">
                 <button type="button" onClick={trajectoryRecording ? stopTrajectoryRecording : startTrajectoryRecording}>

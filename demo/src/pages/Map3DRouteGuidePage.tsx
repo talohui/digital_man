@@ -41,6 +41,10 @@ import {
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
+import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
+import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentTarget'
+import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
+import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
 import { isScenicRouteId, useGuideSessionStore } from '../guide'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
@@ -440,6 +444,10 @@ function RouteActiveCard({
   onPreviewGuide,
   onNavigate,
   onPoiDetail,
+  prototypeTarget,
+  prototypeTargetError,
+  prototypeStatus,
+  onCommitPrototypeArrival,
   onPrototypeArrivalGuide,
   onPrototypeArrivalDetail
 }: {
@@ -449,6 +457,10 @@ function RouteActiveCard({
   onPreviewGuide: (stop: ScenicRouteStop | undefined) => void
   onNavigate: () => void
   onPoiDetail: (stopIndex: number) => void
+  prototypeTarget?: PrototypeNavigationTarget
+  prototypeTargetError?: string
+  prototypeStatus: string
+  onCommitPrototypeArrival: () => void
   onPrototypeArrivalGuide: (poiId: string, poiName: string) => void
   onPrototypeArrivalDetail: (poiId: string) => void
 }) {
@@ -468,9 +480,11 @@ function RouteActiveCard({
       <p className="map-route-tour-meta">距你320m · 步行约6分钟 · {stayLabel}</p>
       <p className="map-route-tour-desc">{description}</p>
       <div className="map-route-tour-actions">
-        <button type="button" className="map-route-tour-primary" onClick={onNavigate}>
-          导航到下一站
-        </button>
+        {nextStop && prototypeTarget ? (
+          <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error'}>
+            {prototypeStatus === 'idle' || prototypeStatus === 'error' ? '导航到下一站' : '导航进行中'}
+          </button>
+        ) : null}
         <button type="button" onClick={() => onPoiDetail(nextStopIndex)}>
           下一站详情
         </button>
@@ -479,6 +493,9 @@ function RouteActiveCard({
         </button>
       </div>
       <NavigationPrototypeCard
+        target={prototypeTarget}
+        targetError={prototypeTargetError}
+        onCommitArrival={onCommitPrototypeArrival}
         onListenToArrivalGuide={(destination) => onPrototypeArrivalGuide(destination.poiId, destination.name)}
         onViewArrivalPoiDetail={(destination) => onPrototypeArrivalDetail(destination.poiId)}
       />
@@ -536,6 +553,52 @@ function RouteArrivedCard({
       </div>
     </section>
   )
+}
+
+function RouteJoiningCard({
+  route,
+  joinStopIndex,
+  target,
+  targetError,
+  prototypeStatus,
+  onNavigate,
+  onCommitArrival,
+  onOpenXiaoling,
+  onPoiDetail
+}: {
+  route: ScenicRouteConfig
+  joinStopIndex: number
+  target?: PrototypeNavigationTarget
+  targetError?: string
+  prototypeStatus: string
+  onNavigate: () => void
+  onCommitArrival: () => void
+  onOpenXiaoling: () => void
+  onPoiDetail: (stopIndex: number) => void
+}) {
+  const stop = getRouteStopByIndex(route.id, joinStopIndex)
+  return <section className="map-route-tour-card map-route-tour-card--active" aria-label="加入路线">
+    <div className="map-route-tour-card__tip">先前往加入点{stop?.name ?? '当前站点'}，确认后才会进入正式路线进度。</div>
+    <div className="map-route-tour-card__head">
+      <span className="map-route-tour-kicker">加入路线 · 第{joinStopIndex + 1}站</span>
+      <XiaolingInlineEntry onClick={onOpenXiaoling} />
+    </div>
+    <h2>{stop?.name ?? '加入点'}</h2>
+    <p className="map-route-tour-desc">到达加入点前，不会标记此前站点已完成。</p>
+    <div className="map-route-tour-actions">
+      {target ? <button type="button" className="map-route-tour-primary" onClick={onNavigate} disabled={prototypeStatus !== 'idle' && prototypeStatus !== 'error'}>
+        {prototypeStatus === 'idle' || prototypeStatus === 'error' ? '导航到加入点' : '导航进行中'}
+      </button> : null}
+      <button type="button" onClick={() => onPoiDetail(joinStopIndex)}>加入点详情</button>
+    </div>
+    <NavigationPrototypeCard
+      target={target}
+      targetError={targetError}
+      onCommitArrival={onCommitArrival}
+      onListenToArrivalGuide={(destination) => onOpenXiaoling()}
+      onViewArrivalPoiDetail={(destination) => onPoiDetail(joinStopIndex)}
+    />
+  </section>
 }
 
 function RouteCollapsedBar({
@@ -612,6 +675,24 @@ function RouteTourMobileOverlay({
   const cardCollapsed = !routeCardExpanded
   const stopCount = route.stops.length
   const currentStopIndex = clampStopIndex(stage === 'preview' ? DEFAULT_STOP_INDEX : guideState.stopIndex, stopCount)
+  const joinStopIndex = clampStopIndex(guideState.joinStopIndex, stopCount)
+  const prototypeStatus = useNavigationPrototypeStore((state) => state.status)
+  const prototypeSession = useNavigationPrototypeStore((state) => state.session)
+  const startPrototypeTarget = useNavigationPrototypeStore((state) => state.startTarget)
+  const syncPrototypeTarget = useNavigationPrototypeStore((state) => state.syncTarget)
+  const markRouteStageCommitted = useNavigationPrototypeStore((state) => state.markRouteStageCommitted)
+  const setRouteStageCommitReason = useNavigationPrototypeStore((state) => state.setRouteStageCommitReason)
+  const prototypeResolution = useMemo(() => {
+    if (stage === 'active') {
+      return resolveRouteSegmentTarget({ route, stage: 'active', currentStopIndex })
+    }
+    if (stage === 'joining') {
+      return resolveRouteSegmentTarget({ route, stage: 'joining', currentStopIndex, joinStopIndex })
+    }
+    return { error: '' }
+  }, [currentStopIndex, joinStopIndex, route, stage])
+  const prototypeTarget = 'target' in prototypeResolution ? prototypeResolution.target : undefined
+  const prototypeTargetError = 'error' in prototypeResolution ? prototypeResolution.error || undefined : undefined
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
 
   useEffect(() => {
@@ -627,6 +708,10 @@ function RouteTourMobileOverlay({
   useEffect(() => {
     setSelectedRouteId(route.id)
   }, [route.id])
+
+  useEffect(() => {
+    syncPrototypeTarget(prototypeTarget)
+  }, [prototypeTarget, syncPrototypeTarget])
 
   useEffect(() => () => {
     if (navigateTimerRef.current !== null) {
@@ -712,19 +797,29 @@ function RouteTourMobileOverlay({
   }
 
   const handleNavigateNext = () => {
-    if (currentStopIndex >= stopCount - 1) {
-      setFeedbackText('路线已完成')
+    if (!prototypeTarget) {
+      setFeedbackText(prototypeTargetError || '该站点导航位置尚未完善')
       return
     }
+    startPrototypeTarget(prototypeTarget)
+    setFeedbackText('正在调用腾讯步行路线')
+  }
 
-    const nextStopIndex = currentStopIndex + 1
-    setFeedbackText('正在为你规划路线')
-    if (navigateTimerRef.current !== null) {
-      window.clearTimeout(navigateTimerRef.current)
-    }
-    navigateTimerRef.current = window.setTimeout(() => {
-      goToRouteArrived(navigate, route.id, nextStopIndex, presentation)
-    }, 1400)
+  const handleCommitPrototypeArrival = () => {
+    const expectedTargetStopIndex = stage === 'joining' ? joinStopIndex : currentStopIndex + 1
+    const expectedStop = getRouteStopByIndex(route.id, expectedTargetStopIndex)
+    const result = commitPrototypeArrivalToRouteStage({
+      session: prototypeSession,
+      currentRouteId: route.id,
+      currentStage: stage === 'joining' ? 'joining' : 'active',
+      expectedTargetStopIndex,
+      expectedTargetPoiId: getStopPoiId(expectedStop) ?? '',
+      navigate,
+      presentation,
+      markCommitted: markRouteStageCommitted
+    })
+    setRouteStageCommitReason(result.reason)
+    setFeedbackText(result.reason)
   }
 
   const openXiaoling = () => {
@@ -886,6 +981,18 @@ function RouteTourMobileOverlay({
             onPoiDetail={handlePoiDetail}
             onContinue={handleContinue}
           />
+        ) : stage === 'joining' ? (
+          <RouteJoiningCard
+            route={route}
+            joinStopIndex={joinStopIndex}
+            target={prototypeTarget}
+            targetError={prototypeTargetError}
+            prototypeStatus={prototypeStatus}
+            onNavigate={handleNavigateNext}
+            onCommitArrival={handleCommitPrototypeArrival}
+            onOpenXiaoling={openXiaoling}
+            onPoiDetail={handlePoiDetail}
+          />
         ) : (
           <RouteActiveCard
             route={route}
@@ -894,6 +1001,10 @@ function RouteTourMobileOverlay({
             onPreviewGuide={handlePreviewGuide}
             onNavigate={handleNavigateNext}
             onPoiDetail={handlePoiDetail}
+            prototypeTarget={prototypeTarget}
+            prototypeTargetError={prototypeTargetError}
+            prototypeStatus={prototypeStatus}
+            onCommitPrototypeArrival={handleCommitPrototypeArrival}
             onPrototypeArrivalGuide={handlePrototypeArrivalGuide}
             onPrototypeArrivalDetail={handlePrototypeArrivalPoiDetail}
           />
