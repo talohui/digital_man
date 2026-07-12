@@ -69,16 +69,23 @@ public class DashboardService {
     }
 
     public Map<String, Object> overview() {
+        return overview(5);
+    }
+
+    public Map<String, Object> overview(int activeWindowMinutes) {
+        int activeWindow = normalizeActiveWindowMinutes(activeWindowMinutes);
         List<AnalyticsEvent> today = todayEvents();
         List<Double> lats = latencies(today);
         long totalMessages = count(today, "user_message");
         long voiceStartCount = count(today, "voice_start");
         long voiceMessageCount = today.stream().filter(e -> "user_message".equals(e.getEvent()) && Boolean.TRUE.equals(e.getIsVoice())).count();
+        Map<String, Long> feedbackSentiment = feedbackSentiment(today);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("totalMessages", totalMessages);
         out.put("totalAiReplies", count(today, "ai_reply"));
-        out.put("activeSessions5min", activeSessions(5));
+        out.put("activeSessions5min", activeSessions(activeWindow));
+        out.put("activeWindowMinutes", activeWindow);
         out.put("positiveRatio", ratio(today.stream().filter(e -> "positive".equals(e.getSentiment())).count(), totalMessages));
         out.put("avgLatencyMs", avg(lats));
         out.put("p90LatencyMs", percentile(lats, 0.90));
@@ -86,6 +93,9 @@ public class DashboardService {
         out.put("voiceUseCount", Math.max(voiceStartCount, voiceMessageCount));
         out.put("routeClickCount", count(today, "route_click"));
         out.put("feedbackCount", count(today, "rate_route") + count(today, "rate_spot"));
+        out.put("feedbackPositiveCount", feedbackSentiment.get("positive"));
+        out.put("feedbackNegativeCount", feedbackSentiment.get("negative"));
+        out.put("feedbackNeutralCount", feedbackSentiment.get("neutral"));
         return out;
     }
 
@@ -97,7 +107,7 @@ public class DashboardService {
                 .filter(s -> s != null && !s.isBlank())
                 .toList();
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("topQuestions", topStrings(questions, "question", 10));
+        out.put("topQuestions", topQuestionTopics(questions, 10));
         out.put("keywordStats", keywordStats(questions, 20));
         out.put("intentDistribution", intentDistribution(questions));
         out.put("spotMentionStats", spotMentionStats(questions));
@@ -280,9 +290,15 @@ public class DashboardService {
     }
 
     public Map<String, Object> realtime() {
+        return realtime(5);
+    }
+
+    public Map<String, Object> realtime(int activeWindowMinutes) {
+        int activeWindow = normalizeActiveWindowMinutes(activeWindowMinutes);
         List<AnalyticsEvent> recent = repository.findByTsAfterOrderByTsDesc(LocalDateTime.now().minusMinutes(30));
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("activeSessions5min", activeSessions(5));
+        out.put("activeSessions5min", activeSessions(activeWindow));
+        out.put("activeWindowMinutes", activeWindow);
         out.put("recentEvents", recent.stream().limit(16).map(this::eventRow).toList());
         out.put("alerts", alerts(recent));
         return out;
@@ -298,6 +314,40 @@ public class DashboardService {
                 .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .count();
+    }
+
+    private int normalizeActiveWindowMinutes(int minutes) {
+        return Math.max(1, Math.min(120, minutes));
+    }
+
+    private Map<String, Long> feedbackSentiment(List<AnalyticsEvent> events) {
+        long positive = 0;
+        long negative = 0;
+        long neutral = 0;
+
+        for (AnalyticsEvent event : events) {
+            if (!"rate_route".equals(event.getEvent()) && !"rate_spot".equals(event.getEvent())) continue;
+            Double value = event.getRatingValue();
+            if (value == null) {
+                neutral++;
+            } else if ("rate_route".equals(event.getEvent())) {
+                if (value >= 4.0) positive++;
+                else if (value <= 2.0) negative++;
+                else neutral++;
+            } else if (value > 0) {
+                positive++;
+            } else if (value < 0) {
+                negative++;
+            } else {
+                neutral++;
+            }
+        }
+
+        Map<String, Long> out = new LinkedHashMap<>();
+        out.put("positive", positive);
+        out.put("negative", negative);
+        out.put("neutral", neutral);
+        return out;
     }
 
     private List<Double> latencies(List<AnalyticsEvent> events) {
@@ -318,6 +368,69 @@ public class DashboardService {
                 .collect(Collectors.groupingBy(s -> s, Collectors.counting()))
                 .entrySet().stream().sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(limit).map(e -> item(keyName, desensitize(e.getKey()), "count", e.getValue())).toList();
+    }
+
+    private List<Map<String, Object>> topQuestionTopics(List<String> questions, int limit) {
+        Map<String, Long> counts = new HashMap<>();
+        for (String question : questions) {
+            String topic = questionTopic(question);
+            if (topic != null && !topic.isBlank()) counts.merge(topic, 1L, Long::sum);
+        }
+        return counts.entrySet().stream().sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(limit).map(e -> item("question", e.getKey(), "count", e.getValue())).toList();
+    }
+
+    private String questionTopic(String question) {
+        if (question == null) return "";
+        String text = desensitize(question).trim();
+        String spot = mentionedSpotName(text);
+
+        if (containsAny(text, List.of("多高", "高度", "几米", "多少米"))) {
+            return spot == null ? "景点高度咨询" : spot + "高度咨询";
+        }
+        if (containsAny(text, List.of("几点", "时间", "开放", "开始", "演出", "表演", "什么时候"))) {
+            return spot == null ? "开放演出时间咨询" : spot + "时间/演出咨询";
+        }
+        if (containsAny(text, List.of("怎么走", "怎么去", "过去", "在哪", "哪里", "位置", "入口", "出口", "路线"))) {
+            if (containsAny(text, List.of("停车", "车位", "停车场"))) return "停车交通咨询";
+            return spot == null ? "路线位置咨询" : spot + "路线位置咨询";
+        }
+        if (containsAny(text, List.of("门票", "票价", "买票", "预约", "入园", "检票"))) return "门票入园咨询";
+        if (containsAny(text, List.of("停车", "车位", "停车场"))) return "停车交通咨询";
+        if (containsAny(text, List.of("吃", "餐饮", "素面", "饭", "茶", "饮品"))) return "餐饮茶歇咨询";
+        if (containsAny(text, List.of("文创", "纪念品", "商店", "购物", "买"))) return "文创购物咨询";
+        if (containsAny(text, List.of("祈福", "许愿", "拜佛", "礼佛", "香", "祈福牌"))) return "祈福礼佛咨询";
+        if (containsAny(text, List.of("亲子", "孩子", "小朋友", "带娃", "宝宝"))) return "亲子路线咨询";
+        if (containsAny(text, List.of("拍照", "打卡", "出片", "机位"))) return "拍照打卡咨询";
+        if (spot != null) return spot + "介绍咨询";
+
+        String intent = INTENT_KEYWORDS.entrySet().stream()
+                .filter(e -> containsAny(text, e.getValue()))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+        if (intent != null) return intent + "咨询";
+
+        return compactQuestionText(text);
+    }
+
+    private String mentionedSpotName(String text) {
+        if (text == null) return null;
+        for (String name : SPOT_NAMES.values()) if (text.contains(name)) return name;
+        if (text.contains("大佛")) return "灵山大佛";
+        if (text.contains("梵宫")) return "梵宫";
+        if (text.contains("坛城") || text.contains("五印")) return "五印坛城";
+        if (text.contains("九龙")) return "九龙灌浴";
+        if (text.contains("祥符") || text.contains("寺")) return "祥符禅寺";
+        return null;
+    }
+
+    private String compactQuestionText(String text) {
+        String compact = text.replaceAll("[\\s，。！？、,.!?：:；;“”\"'（）()【】\\[\\]]+", "")
+                .replaceAll("^(请问|想问|问一下|麻烦问下)", "")
+                .replaceAll("(吗|呢|啊|呀|吧)$", "");
+        if (compact.length() > 12) compact = compact.substring(0, 12);
+        return compact.isBlank() ? "其他咨询" : compact;
     }
 
     private List<Map<String, Object>> keywordStats(List<String> questions, int limit) {

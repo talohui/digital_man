@@ -22,6 +22,20 @@ export interface FayMessage {
     audio?: string
     [k: string]: any
   }
+  Data?: {
+    Key?: string
+    Value?: string
+    HttpValue?: string
+    Text?: string
+    [k: string]: any
+  }
+  data?: {
+    key?: string
+    value?: string
+    httpValue?: string
+    text?: string
+    [k: string]: any
+  }
   [key: string]: any
 }
 
@@ -30,6 +44,7 @@ export interface FayMessage {
  * Fay 推送的音频字段位置在不同版本里不太稳定:
  *   - 顶层 audio / audioUrl
  *   - panelReply.audio
+ *   - Fay 数字人音频帧 Data.HttpValue / Data.Value
  *   - 形如 "samples/sample-xxx.wav" 的相对路径(需要拼到 /audio/ 下)
  */
 export function extractAudioUrl(message: FayMessage): string | null {
@@ -38,6 +53,10 @@ export function extractAudioUrl(message: FayMessage): string | null {
     message.audio,
     message.url,
     message.panelReply?.audio,
+    message.Data?.HttpValue,
+    message.Data?.Value,
+    message.data?.httpValue,
+    message.data?.value,
     typeof message.panelReply?.content === 'string' && /\.(wav|mp3)$/i.test(message.panelReply.content)
       ? message.panelReply.content
       : undefined

@@ -7,6 +7,8 @@ import {
   appendAssistantChunkToScene,
   appendMessageToScene,
   createInitialSessions,
+  createMessage,
+  DEFAULT_ASSISTANT_GREETING,
   getSession,
   normalizeSceneId,
   setGuideContextForScene,
@@ -15,6 +17,7 @@ import {
   type ChatSessions,
   type GuideContext
 } from './chatSessions'
+import { useGuideStore } from './useGuideStore'
 import {
   capture, EVENT,
   captureSessionStart, captureSessionEnd,
@@ -40,6 +43,7 @@ interface ChatState {
   handleFayMessage: (message: FayMessage) => void
   sendMessage: (value?: string, sceneId?: string) => Promise<void>
   sendQuickAsk: (question: string, sceneId?: string) => Promise<void>
+  clearSession: (sceneId?: string) => void
   startRecord: (sceneId?: string) => void
   stopRecord: (sceneId?: string) => void
   setGuideContext: (context: GuideContext, sceneId?: string) => void
@@ -398,6 +402,22 @@ export const useChatStore = create<ChatState>((set, get) => {
       captureQuickAsk(question)
       await get().sendMessage(question, sceneId)
     },
+    clearSession: (sceneId) => {
+      const id = targetScene(sceneId)
+      // 轮换匿名会话段：下一次发送将用新的 Fay username，后端查不到旧历史 ⇒ 上下文清空
+      useGuideStore.getState().bumpConversationEpoch(id)
+      set((state) => ({
+        sessions: updateSession(state.sessions, id, (session) => ({
+          ...session,
+          messages: [createMessage('assistant', DEFAULT_ASSISTANT_GREETING)],
+          inputText: '',
+          isRecording: false,
+          isSending: false,
+          robotState: 'normal',
+          lastError: ''
+        }))
+      }))
+    },
     startRecord: (sceneId) => {
       const id = targetScene(sceneId)
       if (getSession(get().sessions, id).isRecording) {
@@ -440,8 +460,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       capture(EVENT.AUDIO_PLAY_START, {})
       queue.chain = queue.chain
         .then(() =>
-          playWithLipsync(url, (v) => {
-            get().setMouthOpen(v, id)
+          playWithLipsync(url, (open, form) => {
+            // 每帧同时更新张开度与嘴形(粗略元音);合并为一次 patch,少一次 store 写入
+            patchSession(id, (session) => ({ ...session, mouthOpen: open, mouthForm: form }))
           })
         )
         .catch((err) => {
@@ -451,7 +472,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           queue.pending -= 1
           if (queue.pending <= 0) {
             queue.pending = 0
-            patchSession(id, (session) => ({ ...session, mouthOpen: 0, robotState: 'normal' }))
+            patchSession(id, (session) => ({ ...session, mouthOpen: 0, mouthForm: 0, robotState: 'normal' }))
             capture(EVENT.AUDIO_PLAY_END, {})
           }
         })

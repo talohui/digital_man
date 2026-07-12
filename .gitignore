@@ -1,6 +1,8 @@
 # ===== 根目录草稿文件（不上传）=====
 *.zip
 *.png
+!demo/public/icons/
+!demo/public/icons/*.png
 分析.md
 地图/
 开源项目分析/

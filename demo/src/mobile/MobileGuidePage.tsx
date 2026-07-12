@@ -1,5 +1,4 @@
 import {
-  ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
   CompassOutlined,
@@ -44,13 +43,18 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
 
   const route = getGuideRouteById(activeRouteId)
   const hasSpotScene = Boolean(spotId && route.stops.some((stop) => stop.spotId === spotId))
+  const routeHasSelectedSpot = Boolean(
+    selectedSpotId && route.stops.some((stop) => stop.spotId === selectedSpotId)
+  )
   const currentSpotId = hasSpotScene
     ? spotId as string
-    : selectedSpotId || getDefaultSpotId(route.id)
+    : routeHasSelectedSpot
+      ? selectedSpotId as string
+      : getDefaultSpotId(route.id)
   const spot = getGuideSpotById(currentSpotId)
   const { stop, stopIndex, nextStop } = getRouteStop(route.id, currentSpotId)
   const nextSpot = nextStop ? getGuideSpotById(nextStop.spotId) : null
-  const sceneId = hasSpotScene ? `spot:${route.id}:${spot.id}` : `map:${route.id}`
+  const sceneId = `spot:${route.id}:${spot.id}`
   const narrative = stop?.narrative ?? spot.intro
   const hasLikedSpot = Boolean(likedSpots[spot.id])
   const hasListened = listenedStops.includes(spot.id)
@@ -58,11 +62,11 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
   const questions = useMemo(() => {
     if (hasSpotScene) return buildSpotQuestions(route.id, spot.id)
     return [
-      `${route.name}最适合从哪一站开始？`,
-      `这条路线有哪些不能错过的点？`,
-      `按我当前偏好怎么逛更舒服？`
+      `${spot.name}现在最值得听什么？`,
+      `${route.name}为什么安排到${spot.name}？`,
+      `从${spot.name}接下来怎么走更顺？`
     ]
-  }, [hasSpotScene, route.id, route.name, spot.id])
+  }, [hasSpotScene, route.id, route.name, spot.id, spot.name])
 
   useEffect(() => {
     if (hasSpotScene) {
@@ -83,9 +87,9 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
 
     setActiveScene(sceneId, {
       routeName: route.name,
-      spotName: '',
-      spotIntro: '',
-      spotNarrative: ''
+      spotName: spot.name,
+      spotIntro: spot.intro,
+      spotNarrative: narrative
     })
     return undefined
   }, [
@@ -129,55 +133,55 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
 
   return (
     <div className="mobile-guide-page">
-      <section className="mobile-guide-hero">
-        <button type="button" className="mobile-round-button" onClick={() => navigate('/map')}>
-          <ArrowLeftOutlined />
-        </button>
-        <div>
-          <span className="mobile-section-kicker">
-            {hasSpotScene ? `第 ${stopIndex + 1} 站 / 共 ${route.stops.length} 站` : '路线场景'}
-          </span>
-          <h2>{hasSpotScene ? spot.name : '和小灵聊当前路线'}</h2>
-          <p>{hasSpotScene ? spot.intro : route.description}</p>
-        </div>
-      </section>
+      <div className="mobile-guide-avatar">
+        <Suspense fallback={<RouteSkeleton variant="inline" />}>
+          <Live2DStage
+            sceneId={sceneId}
+            variant="embedded"
+            eager
+            highlightsOverride={[
+              { title: '当前路线', value: route.name, icon: <CompassOutlined /> },
+              { title: '当前景点', value: spot.name, icon: <EnvironmentOutlined /> },
+              { title: '建议停留', value: `${spot.stayMinutes} 分钟`, icon: <ClockCircleOutlined /> }
+            ]}
+          />
+        </Suspense>
+      </div>
 
-      <Suspense fallback={<RouteSkeleton variant="inline" />}>
-        <Live2DStage
+      <div className="mobile-guide-chat-stack">
+        <QuickAsks
           sceneId={sceneId}
-          variant="embedded"
-          eager
-          highlightsOverride={[
-            { title: '当前路线', value: route.name, icon: <CompassOutlined /> },
-            { title: '当前景点', value: hasSpotScene ? spot.name : '路线总览', icon: <EnvironmentOutlined /> },
-            { title: '建议停留', value: hasSpotScene ? `${spot.stayMinutes} 分钟` : route.durationLabel, icon: <ClockCircleOutlined /> }
-          ]}
+          title={hasSpotScene ? '继续追问这一站' : '继续追问这条路线'}
+          subtitle="快捷问题"
+          questions={questions}
         />
-      </Suspense>
 
-      <section className="mobile-panel mobile-guide-context">
-        <div className="mobile-panel__head">
-          <div>
-            <span className="mobile-section-kicker">当前上下文</span>
-            <h3>{hasSpotScene ? '这一站讲解重点' : '路线讲解重点'}</h3>
+        <Suspense fallback={<RouteSkeleton variant="inline" />}>
+          <ChatPanel sceneId={sceneId} />
+        </Suspense>
+      </div>
+
+      {hasSpotScene ? (
+        <section className="mobile-panel mobile-guide-context">
+          <div className="mobile-panel__head">
+            <div>
+              <span className="mobile-section-kicker">当前上下文</span>
+              <h3>这一站讲解重点</h3>
+            </div>
+            {hasListened ? (
+              <span className="mobile-guide-context__listened">
+                <CheckCircleFilled /> 已听讲解
+              </span>
+            ) : (
+              <MessageOutlined />
+            )}
           </div>
-          {hasSpotScene && hasListened ? (
-            <span className="mobile-guide-context__listened">
-              <CheckCircleFilled /> 已听讲解
-            </span>
-          ) : (
-            <MessageOutlined />
-          )}
-        </div>
-        <p>{hasSpotScene ? narrative : '小灵会围绕当前路线、已选偏好和景区知识回答，聊天记录与其他路线/景点互相隔离。'}</p>
-        {hasSpotScene ? (
+          <p>{narrative}</p>
           <button type="button" className="mobile-guide-narrate" onClick={handleNarrate}>
             <SoundOutlined />
             {hasListened ? '让小灵再讲一遍' : '让小灵讲这一段'}
           </button>
-        ) : null}
-        <div className="mobile-guide-context__actions">
-          {hasSpotScene ? (
+          <div className="mobile-guide-context__actions">
             <button
               type="button"
               onClick={submitSpotLike}
@@ -188,24 +192,13 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
               <LikeOutlined />
               {hasLikedSpot ? '已反馈' : '喜欢这一站'}
             </button>
-          ) : null}
-          <button type="button" onClick={handleNext}>
-            {hasSpotScene ? (nextSpot ? `下一站：${nextSpot.name}` : '回到地图') : '回到地图'}
-            <RightOutlined />
-          </button>
-        </div>
-      </section>
-
-      <QuickAsks
-        sceneId={sceneId}
-        title={hasSpotScene ? '继续追问这一站' : '继续追问这条路线'}
-        subtitle="快捷问题"
-        questions={questions}
-      />
-
-      <Suspense fallback={<RouteSkeleton variant="inline" />}>
-        <ChatPanel sceneId={sceneId} />
-      </Suspense>
+            <button type="button" onClick={handleNext}>
+              {nextSpot ? `下一站：${nextSpot.name}` : '回到地图'}
+              <RightOutlined />
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }

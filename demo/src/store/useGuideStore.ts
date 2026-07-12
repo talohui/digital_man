@@ -21,10 +21,14 @@ type GuideState = {
   // 轻量当日轨迹：已到达 / 已听讲解的站点（仅用于行程回顾展示，不参与推荐计算）
   visitedStops: string[]
   listenedStops: string[]
+  // 每个场景的会话轮换序号：清空当前会话时 +1，叠加进 Fay username 形成新的匿名会话段，
+  // 使 Fay 按新 username 查不到旧历史 ⇒ 上下文真正清空。
+  conversationEpochs: Record<string, number>
   isLoading: boolean
   lastError: string
   ensureUserId: () => string
   ensureSessionId: () => string
+  bumpConversationEpoch: (sceneId: string) => void
   toggleTag: (tag: string) => void
   refreshRecommendations: () => Promise<void>
   setActiveRouteId: (routeId: string) => void
@@ -56,6 +60,7 @@ export const useGuideStore = create<GuideState>()(
       selectedSpotId: getDefaultSpotId(defaultRouteId),
       visitedStops: [],
       listenedStops: [],
+      conversationEpochs: {},
       isLoading: false,
       lastError: '',
       ensureUserId: () => {
@@ -76,6 +81,13 @@ export const useGuideStore = create<GuideState>()(
         set({ sessionId: next })
         return next
       },
+      bumpConversationEpoch: (sceneId) =>
+        set((state) => ({
+          conversationEpochs: {
+            ...state.conversationEpochs,
+            [sceneId]: (state.conversationEpochs[sceneId] ?? 0) + 1
+          }
+        })),
       toggleTag: (tag) => {
         if (!GUIDE_TAGS.includes(tag as (typeof GUIDE_TAGS)[number])) {
           return
@@ -154,7 +166,8 @@ export const useGuideStore = create<GuideState>()(
         activeRouteId: state.activeRouteId,
         selectedSpotId: state.selectedSpotId,
         visitedStops: state.visitedStops,
-        listenedStops: state.listenedStops
+        listenedStops: state.listenedStops,
+        conversationEpochs: state.conversationEpochs
       })
     }
   )

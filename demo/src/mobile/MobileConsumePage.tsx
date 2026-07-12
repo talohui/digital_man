@@ -1,11 +1,8 @@
 import {
-  CarOutlined,
   CheckCircleFilled,
-  CoffeeOutlined,
+  CreditCardOutlined,
   EnvironmentOutlined,
-  GiftOutlined,
   MinusOutlined,
-  PlayCircleOutlined,
   PlusOutlined,
   ShoppingCartOutlined,
 } from '@ant-design/icons'
@@ -22,12 +19,17 @@ import {
   type OrderItem,
   type PurchaseCategory,
 } from '../store/useTicketStore'
+import PaymentSheet from './PaymentSheet'
+
+const catIcon = (name: string) => (
+  <img src={`/icons/${name}.png`} className="mobile-consume-cat-icon" alt="" />
+)
 
 const categoryMeta: Array<{ id: PurchaseCategory; icon: ReactNode; title: string }> = [
-  { id: 'food', icon: <CoffeeOutlined />, title: '餐饮' },
-  { id: 'shopping', icon: <GiftOutlined />, title: '文创' },
-  { id: 'transport', icon: <CarOutlined />, title: '交通' },
-  { id: 'entertainment', icon: <PlayCircleOutlined />, title: '演艺' },
+  { id: 'food', icon: catIcon('cat-food'), title: '餐饮' },
+  { id: 'shopping', icon: catIcon('cat-culture'), title: '文创' },
+  { id: 'transport', icon: catIcon('cat-transport'), title: '交通' },
+  { id: 'entertainment', icon: catIcon('cat-show'), title: '演艺' },
 ]
 
 function formatMoney(value: number) {
@@ -70,6 +72,7 @@ function MobileConsumePage() {
   // 购物车为临时态：{ productId: 数量 }，结算后清空。
   const [cart, setCart] = useState<Record<string, number>>({})
   const [lastOrderId, setLastOrderId] = useState('')
+  const [showPay, setShowPay] = useState(false)
   const activeRoute = getGuideRouteById(activeRouteId)
   const activeSpot = selectedSpotId ? getGuideSpotById(selectedSpotId) : null
 
@@ -117,6 +120,12 @@ function MobileConsumePage() {
 
   const handleCheckout = () => {
     if (!ticket || cartLines.length === 0) return
+    setShowPay(true)
+  }
+
+  // 支付成功后才真正下单记账
+  const handlePaid = () => {
+    if (!ticket) return
     const items: OrderItem[] = cartLines.map((line) => ({
       productId: line.product.id,
       name: line.product.name,
@@ -132,6 +141,7 @@ function MobileConsumePage() {
     records.forEach((record) => capturePurchase(record))
     setCart({})
     setLastOrderId(order.id)
+    setShowPay(false)
   }
 
   if (!ticket) {
@@ -190,7 +200,16 @@ function MobileConsumePage() {
           <h2>边逛边点单</h2>
           <p>{activeSpot ? `当前位置：${activeSpot.name}` : `当前路线：${activeRoute.name}`}</p>
         </div>
-        <ShoppingCartOutlined />
+        <img className="mobile-illus mobile-illus--hero" src="/icons/icon-cart.png" alt="" />
+      </section>
+
+      <section className="mobile-ticket-entry">
+        <img className="mobile-illus mobile-illus--entry" src="/icons/icon-ticket.png" alt="" />
+        <div>
+          <span className="mobile-section-kicker">本次票务</span>
+          <h3>{ticket.visitDate} · {ticket.groupSize} 人入园</h3>
+          <p>票务已锁定，消费会自动计入本次游览画像。</p>
+        </div>
       </section>
 
       <section className="mobile-consume-summary">
@@ -339,6 +358,10 @@ function MobileConsumePage() {
           ))}
         </div>
       </section>
+
+      {showPay && (
+        <PaymentSheet amount={cartTotal} onClose={() => setShowPay(false)} onPaid={handlePaid} />
+      )}
     </div>
   )
 }

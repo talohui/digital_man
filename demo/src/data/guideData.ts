@@ -30,6 +30,8 @@ export type GuideRoute = {
   durationLabel: string
   tags: GuideTag[]
   description: string
+  // 路线封面图（灵山实拍），用于图卡式路线展示
+  cover: string
   stops: GuideRouteStop[]
   experiences: string[]
   walkIntensity: WalkIntensity
@@ -232,6 +234,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '6 小时深度游',
     tags: ['文化探秘', '祈福静心'],
     description: '适合喜欢佛教历史、建筑艺术与沉浸式讲解的游客，覆盖灵山最有代表性的人文主线。',
+    cover: '/intro/splash/splash-01.webp',
     stops: [
       { spotId: 'south_gate', narrative: '从南门开始建立整体认知，这条路线会以佛教历史、建筑艺术和文化轴线为主线展开。' },
       { spotId: 'lingshan_wall', narrative: '灵山大照壁最适合先铺开景区的文化门面，帮助游客快速进入整座景区的历史语境。' },
@@ -313,6 +316,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '5 小时全景游',
     tags: ['轻松漫步', '拍照打卡'],
     description: '适合偏好慢节奏漫游、园林禅意和太湖视野的游客，整体更轻松也更适合拍照。',
+    cover: '/intro/splash/splash-05.webp',
     stops: [
       { spotId: 'south_gate', narrative: '自然风光线从南门开始，重点不是赶景点，而是沿着更开阔的观景动线感受太湖与园林空间。' },
       { spotId: 'fozu_tan', narrative: '佛足坛适合做礼佛开场，也能把游览节奏从入园的喧闹自然过渡到更平静的观景状态。' },
@@ -338,6 +342,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '4 小时轻松游',
     tags: ['亲子游', '拍照打卡'],
     description: '适合带孩子边玩边逛，侧重互动体验、故事表达和视觉冲击，节奏更友好。',
+    cover: '/intro/splash/splash-04.webp',
     stops: [
       { spotId: 'south_gate', narrative: '从南门开始把整条路线讲成一场轻松探索，让孩子先知道今天会有表演、互动和很多好看的艺术空间。' },
       { spotId: 'jiulong_guanyu', narrative: '九龙灌浴适合用生动语言讲释迦牟尼诞生的故事，让孩子先从有画面感的内容进入佛教文化。' },
@@ -407,6 +412,7 @@ export function getRouteItineraryMeta(routeId?: string | null) {
     stopCount: route.stops.length,
     walkIntensity: route.walkIntensity,
     tags: route.tags,
+    cover: route.cover,
     highlights: route.experiences.slice(0, 2)
   }
 }

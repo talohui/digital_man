@@ -24,6 +24,7 @@ export interface ChatSession {
   messages: ChatMessage[]
   robotState: RobotState
   mouthOpen: number
+  mouthForm: number
   guideContext: GuideContext | null
   lastError: string
   _lastSendTime: number
@@ -59,6 +60,7 @@ export function createChatSession(
     messages: [createMessage('assistant', DEFAULT_ASSISTANT_GREETING)],
     robotState: 'normal',
     mouthOpen: 0,
+    mouthForm: 0,
     guideContext,
     lastError: '',
     _lastSendTime: 0
