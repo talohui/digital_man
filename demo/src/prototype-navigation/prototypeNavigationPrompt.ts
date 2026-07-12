@@ -35,3 +35,50 @@ export function formatPrototypeNavigationPrompt(input: {
 
   return `小灵提醒：${withPunctuation}`
 }
+
+/**
+ * Tencent instruction stays the factual source. This view-only formatter
+ * removes its static step distance so UI can pair the action with the actual
+ * projected distance remaining in the current step.
+ */
+export function formatNavigationAction(step?: NavigationPrototypeStep) {
+  return formatNavigationActionText(getPrototypeStepInstruction(step))
+}
+
+export function formatNavigationActionText(rawInstruction: string) {
+  const withoutLeadingDistance = rawInstruction
+    .replace(/^从起点/, '')
+    .replace(/^(?:行进|前行|直行|步行|沿[^，。；;]*?行进)\s*\d+(?:\.\d+)?\s*米\s*/, '')
+    .replace(/\d+(?:\.\d+)?\s*米后?/, '')
+    .trim()
+  if (!withoutLeadingDistance || withoutLeadingDistance === rawInstruction) {
+    if (/^(直行|前行|继续)/.test(rawInstruction)) return rawInstruction.replace(/^直行/, '继续直行')
+    return rawInstruction
+  }
+  return withoutLeadingDistance.replace(/^直行/, '继续直行')
+}
+
+export function formatNavigationInstructionData(input: {
+  currentStep?: NavigationPrototypeStep
+  nextStep?: NavigationPrototypeStep
+  distanceToCurrentStepEndMeters: number
+  isLastStep: boolean
+}) {
+  const currentActionText = formatNavigationAction(input.currentStep)
+  const rounded = Math.max(0, Math.round(input.distanceToCurrentStepEndMeters))
+  const dynamicDistanceText = input.isLastStep && rounded <= 5
+    ? '即将到达目的地'
+    : rounded <= 5
+      ? '即将进入下一步'
+      : rounded <= 20
+        ? `前方约 ${rounded} 米`
+        : `距下一动作约 ${rounded} 米`
+  const nextAction = input.nextStep ? formatNavigationAction(input.nextStep) : undefined
+  return {
+    currentActionText,
+    dynamicDistanceText,
+    nextActionText: nextAction ? `前方${nextAction.replace(/^前方/, '')}` : undefined,
+    rawCurrentInstruction: getPrototypeStepInstruction(input.currentStep),
+    rawNextInstruction: input.nextStep ? getPrototypeStepInstruction(input.nextStep) : undefined
+  }
+}

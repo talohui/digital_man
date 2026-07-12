@@ -7,11 +7,14 @@ import {
   toGcj02Position,
   toConvertedGcj02Location
 } from './coordinateTransform'
-import { buildNavigationPrototypeProgress, resolveStepIndexFromPolylineIndex } from './navigationProgress'
-import { formatPrototypeNavigationPrompt, getPrototypeStepInstruction } from './prototypeNavigationPrompt'
+import { buildNavigationPrototypeProgress } from './navigationProgress'
+import { formatPrototypeNavigationPrompt } from './prototypeNavigationPrompt'
 import { projectPointToPolyline } from './routeDeviation'
 import { requestPrototypeWalkingRoute } from './tencentWalkingRoute'
 import { classifyNavigationError, type NavigationBetaErrorKind } from './navigationBetaErrors'
+import { resolveNavigationHeading } from './navigationHeading'
+import { requestDeviceOrientationPermission, startDeviceOrientation, stopDeviceOrientation, subscribeDeviceOrientation, type DeviceOrientationPermissionState } from './deviceOrientation'
+import { isNavigationDebugEnabled } from './navigationDebug'
 import { haversineDistanceMeters } from '../lib/routeProgress'
 import type {
   BrowserWgs84Location,
@@ -23,6 +26,9 @@ import type {
   NavigationPrototypeStatus,
   NavigationPrototypeTraceRecord,
   NavigationPrototypeLocationSource,
+  NavigationHeadingSnapshot,
+  LocalNavigationTestState,
+  LocalNavigationTestTarget,
   PrototypeNavigationSession,
   PrototypeNavigationTarget,
   PrototypeRouteProgressMetadata,
@@ -36,6 +42,7 @@ const REQUIRED_ARRIVAL_LOCATION_HITS = 3
 const MAX_ACCEPTED_ACCURACY_METERS = 100
 const MAX_DEVIATION_ACCURACY_METERS = 50
 const REQUIRED_FORWARD_STEP_HITS = 2
+const STEP_BOUNDARY_FORCE_ADVANCE_METERS = 4
 const ON_ROUTE_DISTANCE_METERS = 30
 const REQUIRED_SUSPECTED_HITS = 3
 const REQUIRED_CONFIRMED_HITS = 4
@@ -56,6 +63,7 @@ let stopLocationWatch: (() => void) | null = null
 let requestGeneration = 0
 let coordinateConversionGeneration = 0
 let navigationSessionSequence = 0
+let stopDeviceOrientationSubscription: (() => void) | null = null
 const coordinateTransformProvider = createPrototypeCoordinateTransformProvider()
 
 type PersistedNavigationSession = {
@@ -104,6 +112,10 @@ type NavigationPrototypeStore = {
   rawWgs84Position?: BrowserWgs84Location
   convertedGcj02Position?: ConvertedGcj02Location
   locationSource?: NavigationPrototypeLocationSource
+  heading?: NavigationHeadingSnapshot
+  deviceHeading?: number
+  deviceOrientationPermission: DeviceOrientationPermissionState
+  localNavigationTest?: LocalNavigationTestState
   replayScenario?: ReplayScenario
   replayProgress?: number
   replaySeed?: number
@@ -118,6 +130,8 @@ type NavigationPrototypeStore = {
   candidateStepIndex?: number
   candidateStepHitCount: number
   lastConfirmedStepIndex?: number
+  stepBoundaryPassedMeters?: number
+  acceptedFixTimestamp?: number
   lastAnnouncedStepIndex?: number
   latestStepPrompt?: string
   deviation: PrototypeDeviation
@@ -146,6 +160,10 @@ type NavigationPrototypeStore = {
   setRouteStageCommitReason: (reason?: string) => void
   acceptRawWgs84Location: (location: BrowserWgs84Location) => void
   acceptSimulatedGcj02Location: (location: ConvertedGcj02Location) => void
+  prepareLocalNavigationTest: () => void
+  setLocalNavigationTestTarget: (target: LocalNavigationTestTarget) => void
+  startLocalNavigationTest: () => void
+  cancelLocalNavigationTest: () => void
   setReplayActive: (active: boolean) => void
   reroute: () => Promise<void>
   continueCurrentRoute: () => void
@@ -161,6 +179,26 @@ type NavigationPrototypeStore = {
 
 export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set, get) => {
   const persisted = readPersistedNavigationSession()
+  const enableDeviceOrientation = async () => {
+    const permission = await requestDeviceOrientationPermission()
+    set({ deviceOrientationPermission: permission })
+    if (permission !== 'granted') return
+    startDeviceOrientation()
+    stopDeviceOrientationSubscription?.()
+    stopDeviceOrientationSubscription = subscribeDeviceOrientation((reading) => {
+      const state = get()
+      const location = state.convertedGcj02Position
+      if (!location) {
+        set({ deviceHeading: reading.degrees })
+        return
+      }
+      const routeBearing = state.progress?.routeBearingDegrees
+      set({
+        deviceHeading: reading.degrees,
+        heading: resolveNavigationHeading({ location, deviceHeading: reading.degrees, routeBearing })
+      })
+    })
+  }
   const persistSession = () => {
     const state = get()
     if (!state.session || !state.route || state.status === 'idle' || state.status === 'cancelled') {
@@ -198,23 +236,29 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       const state = get()
       if (generation !== requestGeneration || state.session?.id !== sessionId) return
       const initialStepIndex = 0
+      const progress = buildNavigationPrototypeProgress(route, location, initialStepIndex)
       set({
         status: state.status === 'paused' ? 'paused' : 'navigating',
         route,
-        progress: buildNavigationPrototypeProgress(route, location, initialStepIndex),
+        progress,
+        heading: resolveNavigationHeading({ location, deviceHeading: state.deviceHeading, routeBearing: progress.routeBearingDegrees }),
         candidateStepIndex: initialStepIndex,
         candidateStepHitCount: 0,
         lastConfirmedStepIndex: initialStepIndex,
         lastAnnouncedStepIndex: initialStepIndex,
         latestStepPrompt: formatPrototypeNavigationPrompt({ currentStep: route.steps[initialStepIndex], nextStep: route.steps[initialStepIndex + 1] }),
-        routeRequestPending: false
+        routeRequestPending: false,
+        permissionRequestInFlight: false,
+        localNavigationTest: state.session?.target.mode === 'local-test' && state.localNavigationTest
+          ? { ...state.localNavigationTest, phase: 'navigating' }
+          : state.localNavigationTest
       })
       persistSession()
     } catch (error) {
       const state = get()
       if (generation !== requestGeneration || state.session?.id !== sessionId) return
       const message = error instanceof Error ? error.message : '腾讯步行路线请求失败。'
-      set({ status: 'error', routeRequestPending: false, error: message, errorKind: classifyNavigationError(message) })
+      set({ status: 'error', routeRequestPending: false, error: message, errorKind: classifyNavigationError(message), localNavigationTest: state.localNavigationTest ? { ...state.localNavigationTest, phase: 'error' } : undefined })
     }
   }
 
@@ -249,7 +293,22 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       locationSource: converted.source,
       replayScenario: state.replayScenario,
       replayProgress: state.replayProgress,
-      seed: state.replaySeed
+      seed: state.replaySeed,
+      speedMps: converted.speedMps,
+      geolocationHeading: state.heading?.geolocationHeading,
+      deviceHeading: state.heading?.deviceHeading,
+      routeBearing: state.heading?.routeBearing,
+      selectedHeading: state.heading?.selectedHeading,
+      headingSource: state.heading?.source,
+      nearestSegmentIndex: state.progress?.nearestSegmentIndex,
+      segmentProgress: state.progress?.segmentProgress,
+      alongRouteMeters: state.progress?.alongRouteMeters,
+      remainingRouteMeters: state.progress?.remainingRouteMeters,
+      candidateStepIndex: state.candidateStepIndex,
+      currentStepEndAlongMeters: state.progress?.currentStepEndAlongMeters,
+      distanceToCurrentStepEndMeters: state.progress?.distanceToCurrentStepEndMeters,
+      currentInstruction: state.progress?.currentInstruction,
+      nextInstruction: state.progress?.nextInstruction
     }
     set({ trajectory: [...state.trajectory, record].slice(-MAX_TRAJECTORY_RECORDS) })
   }
@@ -266,8 +325,27 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     }
 
     if (!state.route) {
-      set({ convertedGcj02Position: location, locationSource: location.source, arrivalLocationHits: 0 })
+      const heading = resolveNavigationHeading({ location, deviceHeading: state.deviceHeading })
+      set({
+        convertedGcj02Position: location,
+        locationSource: location.source,
+        arrivalLocationHits: 0,
+        heading,
+        permissionRequestInFlight: false,
+        localNavigationTest: state.localNavigationTest?.phase === 'locating'
+          ? { ...state.localNavigationTest, phase: 'awaiting-target', origin: location }
+          : state.localNavigationTest
+      })
       appendTrajectoryRecord(raw, location)
+      if (state.localNavigationTest?.target && !state.session) {
+        get().startTarget({
+          mode: 'local-test',
+          poiId: 'local-navigation-test-target',
+          name: state.localNavigationTest.target.name,
+          coordinate: state.localNavigationTest.target.coordinate
+        })
+        return
+      }
       if (state.session && !state.routeRequestPending) {
         void requestTargetRoute(state.session.target, location, state.session.id)
       }
@@ -276,21 +354,19 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
 
     const route = state.route
     const rawProgress = buildNavigationPrototypeProgress(route, location)
-    const candidateStepIndex = resolveStepIndexFromPolylineIndex({
-      nearestPolylineIndex: rawProgress.nearestPolylineIndex,
-      steps: route.steps,
-      polylinePointCount: route.polyline.length
-    })
+    const candidateStepIndex = rawProgress.currentStepIndex
     const confirmedStep = resolveConfirmedStep({
       candidateStepIndex,
       candidateStepHitCount: state.candidateStepHitCount,
       priorCandidateStepIndex: state.candidateStepIndex,
       lastConfirmedStepIndex: state.lastConfirmedStepIndex ?? 0,
       totalSteps: route.steps.length,
-      nearArrival: rawProgress.distanceToDestinationMeters < ARRIVAL_DISTANCE_METERS
+      nearArrival: rawProgress.distanceToDestinationMeters < ARRIVAL_DISTANCE_METERS,
+      boundaryPassedMeters: rawProgress.alongRouteMeters - (state.progress?.currentStepEndAlongMeters ?? rawProgress.currentStepEndAlongMeters)
     })
     const progress = buildNavigationPrototypeProgress(route, location, confirmedStep.stepIndex)
     const deviation = evaluateDeviation({ prior: state.deviation, location, route, timestamp: location.timestamp })
+    const heading = resolveNavigationHeading({ location, deviceHeading: state.deviceHeading, routeBearing: progress.routeBearingDegrees })
     const isWithinArrivalRadius = progress.distanceToDestinationMeters < ARRIVAL_DISTANCE_METERS
     // Poor fixes may still move the marker, but cannot advance arrival.
     const arrivalLocationHits = isWithinArrivalRadius && location.accuracy <= MAX_DEVIATION_ACCURACY_METERS
@@ -306,12 +382,17 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         status: 'arrived',
         convertedGcj02Position: location,
         locationSource: location.source,
+        permissionRequestInFlight: false,
         progress,
+        heading,
+        localNavigationTest: state.localNavigationTest?.phase === 'navigating' ? { ...state.localNavigationTest, phase: 'arrived' } : state.localNavigationTest,
         deviation: createOnRouteDeviation(),
         arrivalLocationHits,
         candidateStepIndex: confirmedStep.candidateStepIndex,
         candidateStepHitCount: confirmedStep.candidateStepHitCount,
         lastConfirmedStepIndex: confirmedStep.stepIndex,
+        stepBoundaryPassedMeters: rawProgress.alongRouteMeters - (state.progress?.currentStepEndAlongMeters ?? rawProgress.currentStepEndAlongMeters),
+        acceptedFixTimestamp: location.timestamp,
         lastAnnouncedStepIndex: shouldAnnounce ? confirmedStep.stepIndex : state.lastAnnouncedStepIndex,
         latestStepPrompt: shouldAnnounce
           ? formatPrototypeNavigationPrompt({ currentStep: route.steps[confirmedStep.stepIndex], nextStep: route.steps[confirmedStep.stepIndex + 1] })
@@ -329,11 +410,14 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       convertedGcj02Position: location,
       locationSource: location.source,
       progress,
+      heading,
       deviation,
       arrivalLocationHits,
       candidateStepIndex: confirmedStep.candidateStepIndex,
       candidateStepHitCount: confirmedStep.candidateStepHitCount,
       lastConfirmedStepIndex: confirmedStep.stepIndex,
+      stepBoundaryPassedMeters: rawProgress.alongRouteMeters - (state.progress?.currentStepEndAlongMeters ?? rawProgress.currentStepEndAlongMeters),
+      acceptedFixTimestamp: location.timestamp,
       lastAnnouncedStepIndex: shouldAnnounce ? confirmedStep.stepIndex : state.lastAnnouncedStepIndex,
       latestStepPrompt: shouldAnnounce
         ? formatPrototypeNavigationPrompt({ currentStep: route.steps[confirmedStep.stepIndex], nextStep: route.steps[confirmedStep.stepIndex + 1] })
@@ -351,19 +435,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     restoredFromSessionStorage: Boolean(persisted),
     backgroundPaused: false,
     permissionRequestInFlight: false,
-    progress: persisted?.routePlan
-      ? {
-          distanceRemainingMeters: persisted.routePlan.distanceMeters,
-          distanceToDestinationMeters: persisted.routePlan.distanceMeters,
-          durationRemainingMinutes: persisted.routePlan.durationMinutes,
-          currentStepIndex: persisted.currentStepIndex ?? 0,
-          currentInstruction: getPrototypeStepInstruction(persisted.routePlan.steps[persisted.currentStepIndex ?? 0]),
-          nextInstruction: persisted.routePlan.steps[(persisted.currentStepIndex ?? 0) + 1]
-            ? getPrototypeStepInstruction(persisted.routePlan.steps[(persisted.currentStepIndex ?? 0) + 1])
-            : undefined,
-          nearestPolylineIndex: 0
-        }
-      : undefined,
+    // A restored session must obtain a fresh accepted location before exposing
+    // projected progress; persisted route totals are not live user progress.
+    progress: undefined,
     lastConfirmedStepIndex: persisted?.currentStepIndex,
     lastAnnouncedStepIndex: persisted?.lastAnnouncedStepIndex,
     arrivalLocationHits: 0,
@@ -374,6 +448,8 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     conversionGeneration: coordinateConversionGeneration,
     requestGeneration,
     routeRequestPending: false,
+    deviceOrientationPermission: 'unknown',
+    localNavigationTest: undefined,
     reroutePending: false,
     trajectoryRecording: false,
     trajectory: [],
@@ -391,6 +467,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
         locationSource: undefined,
+        heading: undefined,
+        deviceHeading: undefined,
+        localNavigationTest: undefined,
         replayScenario: undefined,
         replayProgress: undefined,
         replaySeed: undefined,
@@ -413,6 +492,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         error: undefined
       })
 
+      void enableDeviceOrientation()
       startGeolocationWatch()
 
       try {
@@ -473,11 +553,15 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         lastConfirmedStepIndex: undefined,
         lastAnnouncedStepIndex: undefined,
         latestStepPrompt: undefined,
+        localNavigationTest: target.mode === 'local-test'
+          ? { ...(get().localNavigationTest ?? { phase: 'planning' }), phase: 'planning', target: { coordinate: target.coordinate, name: target.name } }
+          : undefined,
         deviation: createOnRouteDeviation(),
         reroutePending: false,
         lastRerouteError: undefined,
         error: undefined
       })
+      void enableDeviceOrientation()
       startGeolocationWatch()
       if (priorLocation) void requestTargetRoute(target, priorLocation, session.id)
     },
@@ -499,7 +583,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         routeProgress: priorRouteProgress.routeId === target.routeId ? priorRouteProgress : { routeId: target.routeId, reachedStopIndices: [], skippedBeforeJoin: [] },
         restoredFromSessionStorage: false, routeStageCommitReason: undefined, preparedTarget: undefined,
         errorKind: undefined, backgroundPaused: false, permissionRequestInFlight: false, routeRequestPending: false,
-        convertedGcj02Position: origin, locationSource: 'replay-gcj02', progress: undefined,
+        convertedGcj02Position: origin, locationSource: 'replay-gcj02', progress: undefined, heading: undefined, deviceHeading: undefined, localNavigationTest: undefined,
         arrivalLocationHits: 0, candidateStepIndex: undefined, candidateStepHitCount: 0,
         lastConfirmedStepIndex: undefined, lastAnnouncedStepIndex: undefined, latestStepPrompt: undefined,
         deviation: createOnRouteDeviation(), reroutePending: false, lastRerouteError: undefined, error: undefined
@@ -520,6 +604,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     requestPreparedNavigation() {
       const target = get().preparedTarget
       if (!target) return
+      void enableDeviceOrientation()
       get().startTarget(target)
     },
     dismissPreparedNavigation() {
@@ -527,6 +612,43 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     raiseNavigationError(kind, message) {
       set({ status: 'error', errorKind: kind, error: message })
+    },
+    prepareLocalNavigationTest() {
+      if (!isNavigationDebugEnabled()) return
+      set({ localNavigationTest: { phase: 'permission-intro' }, error: undefined, errorKind: undefined })
+    },
+    startLocalNavigationTest() {
+      const localTest = get().localNavigationTest
+      if (!isNavigationDebugEnabled() || !localTest || localTest.phase !== 'permission-intro') return
+      nextRequestGeneration()
+      stopLocationWatch?.()
+      stopLocationWatch = null
+      set({
+        status: 'locating', route: undefined, session: undefined, progress: undefined,
+        convertedGcj02Position: undefined, locationSource: undefined, heading: undefined,
+        localNavigationTest: { ...localTest, phase: 'locating' },
+        arrivalLocationHits: 0, candidateStepIndex: undefined, candidateStepHitCount: 0,
+        lastConfirmedStepIndex: undefined, lastAnnouncedStepIndex: undefined,
+        deviation: createOnRouteDeviation(), error: undefined, errorKind: undefined,
+        permissionRequestInFlight: true, permissionRequestedAt: Date.now(), routeRequestPending: false
+      })
+      void enableDeviceOrientation()
+      startGeolocationWatch()
+    },
+    setLocalNavigationTestTarget(target) {
+      const localTest = get().localNavigationTest
+      if (!isNavigationDebugEnabled() || !localTest || !Number.isFinite(target.coordinate.lat) || !Number.isFinite(target.coordinate.lng)) return
+      const next = { ...localTest, target }
+      set({ localNavigationTest: next })
+      const origin = next.origin ?? get().convertedGcj02Position
+      if (!origin) return
+      get().startTarget({
+        mode: 'local-test', poiId: 'local-navigation-test-target', name: target.name, coordinate: target.coordinate
+      })
+    },
+    cancelLocalNavigationTest() {
+      if (get().session?.target.mode === 'local-test' || get().localNavigationTest) get().cancelNavigation()
+      set({ localNavigationTest: undefined })
     },
     syncTarget(target) {
       const session = get().session
@@ -544,6 +666,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       const generation = nextRequestGeneration()
       stopLocationWatch?.()
       stopLocationWatch = null
+      stopDeviceOrientationSubscription?.()
+      stopDeviceOrientationSubscription = null
+      stopDeviceOrientation()
       set({
         status: 'cancelled',
         route: undefined,
@@ -562,6 +687,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         lastConfirmedStepIndex: undefined,
         lastAnnouncedStepIndex: undefined,
         latestStepPrompt: undefined,
+        heading: undefined,
+        deviceHeading: undefined,
+        localNavigationTest: undefined,
         deviation: createOnRouteDeviation(),
         requestGeneration: generation,
         reroutePending: false,
@@ -611,6 +739,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     markRouteStageCommitted(sessionId) {
       const state = get()
       if (state.status !== 'arrived' || !state.session || state.session.id !== sessionId || state.session.committed) return false
+      if (state.session.target.mode === 'local-test') return false
       const targetStopIndex = state.session.target.targetStopIndex
       const prior = state.routeProgress
       const routeProgress = state.session.target.mode === 'joining' && targetStopIndex !== undefined
@@ -815,6 +944,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       const conversionGeneration = nextCoordinateConversionGeneration()
       stopLocationWatch?.()
       stopLocationWatch = null
+      stopDeviceOrientationSubscription?.()
+      stopDeviceOrientationSubscription = null
+      stopDeviceOrientation()
       set({
         status: 'idle',
         route: undefined,
@@ -830,6 +962,9 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
         locationSource: undefined,
+        heading: undefined,
+        deviceHeading: undefined,
+        localNavigationTest: undefined,
         replayScenario: undefined,
         replayProgress: undefined,
         replaySeed: undefined,
@@ -925,13 +1060,19 @@ function resolveConfirmedStep(input: {
   lastConfirmedStepIndex: number
   totalSteps: number
   nearArrival: boolean
+  boundaryPassedMeters: number
 }) {
-  const { candidateStepIndex, priorCandidateStepIndex, candidateStepHitCount, lastConfirmedStepIndex, totalSteps, nearArrival } = input
+  const { candidateStepIndex, priorCandidateStepIndex, candidateStepHitCount, lastConfirmedStepIndex, totalSteps, nearArrival, boundaryPassedMeters } = input
   if (candidateStepIndex <= lastConfirmedStepIndex) {
     return { stepIndex: lastConfirmedStepIndex, candidateStepIndex, candidateStepHitCount: candidateStepIndex === lastConfirmedStepIndex ? 0 : candidateStepHitCount, didConfirm: false }
   }
   const nextHitCount = candidateStepIndex === priorCandidateStepIndex ? candidateStepHitCount + 1 : 1
-  const didConfirm = candidateStepIndex === totalSteps - 1 || nearArrival || nextHitCount >= REQUIRED_FORWARD_STEP_HITS
+  // A projection that has clearly passed the current step endpoint is more
+  // reliable than waiting for another fix behind the turn boundary.
+  const didConfirm = candidateStepIndex === totalSteps - 1
+    || nearArrival
+    || boundaryPassedMeters >= STEP_BOUNDARY_FORCE_ADVANCE_METERS
+    || nextHitCount >= REQUIRED_FORWARD_STEP_HITS
   return { stepIndex: didConfirm ? candidateStepIndex : lastConfirmedStepIndex, candidateStepIndex, candidateStepHitCount: didConfirm ? 0 : nextHitCount, didConfirm }
 }
 

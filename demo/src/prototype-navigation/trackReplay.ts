@@ -153,7 +153,9 @@ function accuracyForNoise(mode: ReplayNoiseMode) {
 }
 
 function applyNoise(point: Gcj02Position, mode: ReplayNoiseMode, seed: number, index: number): Gcj02Position {
-  const [min, max] = mode === 'clean' ? [0, 1] : mode === 'normal' ? [3, 10] : mode === 'poor' ? [15, 40] : [20, 35]
+  // Keep clean replay exactly on the Tencent polyline so progress monotonicity
+  // and step-boundary behaviour are deterministic during local verification.
+  const [min, max] = mode === 'clean' ? [0, 0] : mode === 'normal' ? [3, 10] : mode === 'poor' ? [15, 40] : [20, 35]
   const magnitude = min + deterministicUnit(seed, index * 2) * (max - min)
   const bearingRadians = deterministicUnit(seed, index * 2 + 1) * Math.PI * 2
   return offsetPoint(point, magnitude, bearingRadians * 180 / Math.PI)

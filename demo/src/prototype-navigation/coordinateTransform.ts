@@ -85,7 +85,9 @@ export function toConvertedGcj02Location(input: {
     ...input.position,
     accuracy: input.raw.accuracy,
     timestamp: input.raw.timestamp,
-    source: 'geolocation'
+    source: 'geolocation',
+    speedMps: input.raw.speedMps,
+    headingDegrees: input.raw.headingDegrees
   }
 }
 

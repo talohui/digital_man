@@ -15,7 +15,7 @@ export type Gcj02Position = {
 }
 
 export type PrototypeNavigationTarget = {
-  mode: 'route-segment' | 'joining' | 'free-poi'
+  mode: 'route-segment' | 'joining' | 'free-poi' | 'local-test'
   routeId?: string
   fromStopIndex?: number
   targetStopIndex?: number
@@ -41,6 +41,10 @@ export type PrototypeRouteProgressMetadata = {
 export type BrowserWgs84Location = Wgs84Position & {
   accuracy: number
   timestamp: number
+  /** Browser Geolocation speed in m/s; may be null on some devices. */
+  speedMps?: number
+  /** Browser Geolocation course, normalized to north=0 / east=90. */
+  headingDegrees?: number
 }
 
 export type NavigationPrototypeLocationSource = 'geolocation' | 'replay-gcj02' | 'manual-gcj02'
@@ -49,6 +53,31 @@ export type ConvertedGcj02Location = Gcj02Position & {
   accuracy: number
   timestamp: number
   source: NavigationPrototypeLocationSource
+  speedMps?: number
+  headingDegrees?: number
+}
+
+export type NavigationHeadingSource = 'geolocation' | 'device-orientation' | 'route-bearing' | 'unavailable'
+
+export type NavigationHeadingSnapshot = {
+  geolocationHeading?: number
+  deviceHeading?: number
+  routeBearing?: number
+  selectedHeading?: number
+  source: NavigationHeadingSource
+  speedMps?: number
+  updatedAt?: number
+}
+
+export type LocalNavigationTestTarget = {
+  coordinate: Gcj02Position
+  name: string
+}
+
+export type LocalNavigationTestState = {
+  phase: 'permission-intro' | 'locating' | 'awaiting-target' | 'planning' | 'navigating' | 'arrived' | 'error'
+  origin?: ConvertedGcj02Location
+  target?: LocalNavigationTestTarget
 }
 
 export type CoordinateConversionStatus = 'idle' | 'converting' | 'ready' | 'failed'
@@ -66,6 +95,21 @@ export type NavigationPrototypeTraceRecord = {
   replayScenario?: ReplayScenario
   replayProgress?: number
   seed?: number
+  speedMps?: number
+  geolocationHeading?: number
+  deviceHeading?: number
+  routeBearing?: number
+  selectedHeading?: number
+  headingSource?: NavigationHeadingSource
+  nearestSegmentIndex?: number
+  segmentProgress?: number
+  alongRouteMeters?: number
+  remainingRouteMeters?: number
+  candidateStepIndex?: number
+  currentStepEndAlongMeters?: number
+  distanceToCurrentStepEndMeters?: number
+  currentInstruction?: string
+  nextInstruction?: string
 }
 
 export type ReplaySpeed = 1 | 4 | 10
@@ -127,13 +171,24 @@ export type NavigationPrototypeRoute = {
 }
 
 export type NavigationPrototypeProgress = {
+  /** Legacy alias kept temporarily for existing consumers; this is route remaining, never a straight line. */
   distanceRemainingMeters: number
+  /** Direct distance to the destination, used only by the arrival detector/debug. */
   distanceToDestinationMeters: number
   durationRemainingMinutes: number
   currentStepIndex: number
   currentInstruction: string
   nextInstruction?: string
   nearestPolylineIndex: number
+  nearestSegmentIndex: number
+  projectedPosition: Gcj02Position
+  segmentProgress: number
+  alongRouteMeters: number
+  totalRouteMeters: number
+  remainingRouteMeters: number
+  currentStepEndAlongMeters: number
+  distanceToCurrentStepEndMeters: number
+  routeBearingDegrees?: number
 }
 
 export type NavigationPrototypeMapRuntime = {

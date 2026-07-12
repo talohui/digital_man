@@ -15,6 +15,9 @@ export function NavigationPrototypeReplayControls() {
   const navigationStatus = useNavigationPrototypeStore((state) => state.status)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
+  const confirmedStepIndex = useNavigationPrototypeStore((state) => state.lastConfirmedStepIndex)
+  const stepBoundaryPassedMeters = useNavigationPrototypeStore((state) => state.stepBoundaryPassedMeters)
+  const heading = useNavigationPrototypeStore((state) => state.heading)
   const lastAnnouncedStepIndex = useNavigationPrototypeStore((state) => state.lastAnnouncedStepIndex)
   const acceptReplayFix = useNavigationPrototypeStore((state) => state.acceptSimulatedGcj02Location)
   const setReplayActive = useNavigationPrototypeStore((state) => state.setReplayActive)
@@ -67,7 +70,9 @@ export function NavigationPrototypeReplayControls() {
       </div>
       <small>
         {replay.status} · {replay.scenario} · {replay.frameIndex}/{replay.frameCount} · 最近点 {progress?.nearestPolylineIndex ?? '-'} ·
-        候选步骤 {candidateStepIndex ?? '-'} · 当前步骤 {progress?.currentStepIndex ?? '-'} · 提示 {lastAnnouncedStepIndex ?? '-'}
+        段 {progress?.nearestSegmentIndex ?? '-'} · 沿线 {progress?.alongRouteMeters ?? '-'}m / 剩余 {progress?.remainingRouteMeters ?? '-'}m<br />
+        候选步骤 {candidateStepIndex ?? '-'} · 已确认 {confirmedStepIndex ?? '-'} · 当前步骤 {progress?.currentStepIndex ?? '-'} · 步末 {progress?.currentStepEndAlongMeters ?? '-'}m · 越界 {stepBoundaryPassedMeters ?? '-'}m · 提示 {lastAnnouncedStepIndex ?? '-'}<br />
+        方向 {heading?.source ?? 'unavailable'} {heading?.selectedHeading === undefined ? '' : `${Math.round(heading.selectedHeading)}°`}
       </small>
       <p>当前：{progress?.currentInstruction ?? '-'}<br />下一步：{progress?.nextInstruction ?? '-'}</p>
     </div>

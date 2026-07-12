@@ -24,7 +24,9 @@ export function watchPrototypeLocation(input: {
           lng: position.coords.longitude,
           coordinateSystem: 'WGS84',
           accuracy: position.coords.accuracy,
-          timestamp: position.timestamp
+          timestamp: position.timestamp,
+          speedMps: finiteOrUndefined(position.coords.speed),
+          headingDegrees: normalizeHeading(position.coords.heading)
         })
       },
       (error) => input.onError({ message: normalizeGeolocationError(error) }),
@@ -43,6 +45,15 @@ export function watchPrototypeLocation(input: {
       navigator.geolocation.clearWatch(watchId)
     }
   }
+}
+
+function finiteOrUndefined(value: number | null) {
+  return value !== null && Number.isFinite(value) ? value : undefined
+}
+
+function normalizeHeading(value: number | null) {
+  const heading = finiteOrUndefined(value)
+  return heading === undefined ? undefined : (heading % 360 + 360) % 360
 }
 
 function normalizeGeolocationError(error: GeolocationPositionError) {
