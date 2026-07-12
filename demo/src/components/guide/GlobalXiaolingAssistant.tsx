@@ -215,6 +215,7 @@ export function GlobalXiaolingAssistant() {
             if (isFullscreenPage) navigate('/map-3d-guide-c')
             else setDrawerOpen(false)
           }}
+          onExpandFullscreen={isFullscreenPage ? undefined : () => navigate('/guide')}
           onInputChange={setInput}
           onSend={submit}
           onSuggestedQuestion={askSuggestedQuestion}

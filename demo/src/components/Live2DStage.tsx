@@ -4,7 +4,6 @@ import { CompassOutlined, EnvironmentOutlined, SoundOutlined } from '@ant-design
 import { Card, Col, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import * as PIXI from 'pixi.js'
 import { useChatStore } from '../store/useChatStore'
-import { getSession } from '../store/chatSessions'
 import { fetchPublicAvatarConfig } from '../api/admin'
 import {
   applyCostumeTexture,
@@ -77,9 +76,10 @@ function Live2DStage({
   const [loadError, setLoadError] = useState('')
   const activeSceneId = useChatStore((s) => s.activeSceneId)
   const resolvedSceneId = sceneId ?? activeSceneId
-  const session = useChatStore((s) => getSession(s.sessions, resolvedSceneId))
-  const robotState = robotStateOverride ?? session.robotState
-  const mouthOpen = mouthOpenOverride ?? session.mouthOpen
+  const legacyRobotState = useChatStore((s) => s.sessions[resolvedSceneId]?.robotState ?? 'normal')
+  const legacyMouthOpen = useChatStore((s) => s.sessions[resolvedSceneId]?.mouthOpen ?? 0)
+  const robotState = robotStateOverride ?? legacyRobotState
+  const mouthOpen = mouthOpenOverride ?? legacyMouthOpen
   const visibleHighlights = highlightsOverride ?? highlights
 
   useEffect(() => {
@@ -128,7 +128,7 @@ function Live2DStage({
       .then(async ({ Live2DModel }) => {
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
-        const cfg = await fetchPublicAvatarConfig()
+        const cfg = await fetchPublicAvatarConfig().catch(() => null)
         const configuredUrl =
           typeof cfg?.live2dModelUrl === 'string' ? cfg.live2dModelUrl.trim() : ''
         // 历史配置可能仍指向公网 CDN（jsdelivr / githubusercontent），现场易超时白脸；
@@ -198,7 +198,7 @@ function Live2DStage({
     if (!isInView) return
 
     const syncCostume = async () => {
-      const cfg = await fetchPublicAvatarConfig()
+      const cfg = await fetchPublicAvatarConfig().catch(() => null)
       const nextId = parseCostumeId(cfg?.costumeId)
       if (nextId === costumeIdRef.current) return
       costumeIdRef.current = nextId

@@ -189,6 +189,11 @@
   line-height: 1;
 }
 
+.guide-drawer__header .xiaoling-conversation__expand {
+  color: #8b6b31;
+  font-size: 17px;
+}
+
 .guide-drawer__conversation {
   width: 100%;
   min-height: 0;

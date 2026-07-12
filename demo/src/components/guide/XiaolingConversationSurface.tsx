@@ -23,6 +23,7 @@ export function XiaolingConversationSurface({
   messages,
   input,
   onClose,
+  onExpandFullscreen,
   onInputChange,
   onSend,
   onSuggestedQuestion,
@@ -36,6 +37,7 @@ export function XiaolingConversationSurface({
   messages: GuideMessage[]
   input: string
   onClose: () => void
+  onExpandFullscreen?: () => void
   onInputChange: (value: string) => void
   onSend: () => void
   onSuggestedQuestion: (question: string) => void
@@ -86,6 +88,11 @@ export function XiaolingConversationSurface({
             <span className={`xiaoling-conversation__connection is-${runtime.connectionState}`}>
               {connectionLabels[runtime.connectionState]}
             </span>
+            {layout === 'drawer' && onExpandFullscreen ? (
+              <button type="button" className="xiaoling-conversation__expand" onClick={onExpandFullscreen} aria-label="全屏打开小灵">
+                ↗
+              </button>
+            ) : null}
             <button type="button" onClick={onClose} aria-label={layout === 'fullscreen' ? '返回地图' : '关闭'}>
               {layout === 'fullscreen' ? '‹' : '×'}
             </button>
