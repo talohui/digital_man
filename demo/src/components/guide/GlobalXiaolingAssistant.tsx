@@ -10,7 +10,7 @@ import {
 import { resolveGuideAssistantContent } from '../../guide/guideAssistantContent'
 import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAssistantEvents'
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
-import { XiaolingGuideDrawer } from './XiaolingGuideDrawer'
+import { XiaolingConversationSurface } from './XiaolingConversationSurface'
 import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
@@ -34,6 +34,7 @@ export function GlobalXiaolingAssistant() {
   const sendGuideMessage = useGuideSessionStore((state) => state.sendGuideMessage)
   const addMessage = useGuideSessionStore((state) => state.addMessage)
   const isMapPage = location.pathname.startsWith('/map-3d-guide-c')
+  const isFullscreenPage = location.pathname === '/guide'
   const visualMode = location.pathname.includes('/route/')
     ? 'route'
     : location.pathname.includes('/poi/')
@@ -118,8 +119,17 @@ export function GlobalXiaolingAssistant() {
   }, [mounted, visualMode])
 
   useEffect(() => {
-    if (!isMapPage) setDrawerOpen(false)
-  }, [isMapPage, setDrawerOpen])
+    if (!isMapPage && !isFullscreenPage) setDrawerOpen(false)
+  }, [isFullscreenPage, isMapPage, setDrawerOpen])
+
+  useEffect(() => {
+    if (!isFullscreenPage) return
+    const state = useGuideSessionStore.getState()
+    state.initializeConversation(
+      state.activeConversationKey,
+      resolveGuideAssistantContent(state.context).greeting
+    )
+  }, [isFullscreenPage, activeConversationKey])
 
   useEffect(() => {
     const handleOpen = (event: Event) => {
@@ -169,7 +179,7 @@ export function GlobalXiaolingAssistant() {
     else addMessage({ role: 'assistant', text: '这个操作暂时不可用，请稍后再试。', status: 'complete' })
   }
 
-  if (!mounted || !isMapPage || typeof document === 'undefined') return null
+  if (!mounted || (!isMapPage && !isFullscreenPage) || typeof document === 'undefined') return null
 
   const rootStyle = {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
@@ -182,8 +192,8 @@ export function GlobalXiaolingAssistant() {
       } as CSSProperties)
     : undefined
   return createPortal(
-    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={visualMode}>
-      {!open ? (
+    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={isFullscreenPage ? 'fullscreen' : visualMode}>
+      {!isFullscreenPage && !open ? (
         <XiaolingFloatingCompanion
           mode={visualMode}
           onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: visualMode } }))}
@@ -192,20 +202,25 @@ export function GlobalXiaolingAssistant() {
           routeAnchorReady={visualMode !== 'route' || Boolean(routeAvatarAnchor)}
         />
       ) : null}
-      <XiaolingGuideDrawer
-        open={open}
-        mode={context.page}
-        title={assistantContent.title}
-        summary={assistantContent.subtitle}
-        suggestedQuestions={assistantContent.suggestedQuestions}
-        messages={messages}
-        input={input}
-        onClose={() => setDrawerOpen(false)}
-        onInputChange={setInput}
-        onSend={submit}
-        onSuggestedQuestion={askSuggestedQuestion}
-        onAction={runAction}
-      />
+      {isFullscreenPage || open ? (
+        <XiaolingConversationSurface
+          layout={isFullscreenPage ? 'fullscreen' : 'drawer'}
+          mode={context.page}
+          title={assistantContent.title}
+          subtitle={assistantContent.subtitle}
+          suggestedQuestions={assistantContent.suggestedQuestions}
+          messages={messages}
+          input={input}
+          onClose={() => {
+            if (isFullscreenPage) navigate('/map-3d-guide-c')
+            else setDrawerOpen(false)
+          }}
+          onInputChange={setInput}
+          onSend={submit}
+          onSuggestedQuestion={askSuggestedQuestion}
+          onAction={runAction}
+        />
+      ) : null}
     </div>,
     document.body
   )

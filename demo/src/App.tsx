@@ -165,6 +165,10 @@ function MobileShellRoute() {
   )
 }
 
+function XiaolingFullscreenRoute() {
+  return <div className="xiaoling-fullscreen-route" aria-hidden="true" />
+}
+
 function App() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
@@ -190,6 +194,7 @@ function App() {
             <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
             <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
             <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
+            <Route path="/guide" element={<XiaolingFullscreenRoute />} />
             <Route path="*" element={<MobileShellRoute />} />
           </Routes>
   ) : (
@@ -206,7 +211,7 @@ function App() {
           <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
           <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-          <Route path="/guide" element={<HomeRoute />} />
+          <Route path="/guide" element={<XiaolingFullscreenRoute />} />
           <Route path="/me" element={<HomeRoute />} />
           <Route path="/admin" element={<AdminDashboardRoute />} />
           <Route path="/admin/avatar" element={<AdminAvatarRoute />} />
