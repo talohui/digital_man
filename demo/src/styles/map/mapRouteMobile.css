@@ -844,6 +844,20 @@
     white-space: pre-line;
   }
 
+  .navigation-prototype-local-test {
+    position: fixed;
+    z-index: 76;
+    top: calc(92px + env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    width: min(300px, calc(100vw - 24px));
+    max-height: min(48svh, 420px);
+    overflow: auto;
+    border-style: solid;
+    background: rgba(255, 253, 244, 0.96);
+    box-shadow: 0 12px 28px rgba(24, 51, 95, 0.18);
+    pointer-events: auto;
+  }
+
   .navigation-prototype-card__deviation-actions button:disabled {
     opacity: 0.52;
   }

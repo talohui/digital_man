@@ -880,6 +880,8 @@ type Map3DGuideExperienceProps = {
   onPresentationTransitionChange?: (snapshot: MapPresentationTransitionSnapshot) => void
   /** Optional extension point for prototype-only map overlays. */
   onMapRuntimeChange?: (runtime: Map3DGuideMapRuntime | null) => void
+  /** Temporary map presentation override; never mutates the user's POI preference. */
+  navigationPoiOverrideActive?: boolean
 }
 
 function resolveScenicMapPresentation(
@@ -1018,12 +1020,14 @@ export function Map3DGuideExperience({
   guideState,
   presentation,
   onPresentationTransitionChange,
-  onMapRuntimeChange
+  onMapRuntimeChange,
+  navigationPoiOverrideActive = false
 }: Map3DGuideExperienceProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const effectiveGuideState = guideState ?? ({ viewMode: 'browse', xiaolingMode: 'browse' } satisfies MapGuideState)
   const poiVisibilityMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
+  const effectivePoiMode: LingshanPoiLayerMode = navigationPoiOverrideActive ? 'all' : poiVisibilityMode
   const serviceFacilitiesEnabled = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
   const mapFocusMode = useMapGuideUiStore((state) => state.mapFocusMode)
@@ -1624,6 +1628,7 @@ export function Map3DGuideExperience({
     }
     const createDebugSnapshot = () => {
       const targetMap = mapRef.current
+      const navigationMapDebug = (window as any).__LINGSHAN_NAVIGATION_MAP_DEBUG__ ?? {}
       const requestedCamera = scenicMapPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
       const actualCamera = targetMap && isMapInstanceCurrent(targetMap)
         ? readActualTencentCameraState(targetMap)
@@ -1644,16 +1649,30 @@ export function Map3DGuideExperience({
         cameraTransitionPhase,
         contextLostCount: contextLostCountRef.current,
         hardRecoveryCount: hardRecoveryCountRef.current,
-        currentPoiLayerMode: poiVisibilityMode,
+        currentPoiLayerMode: effectivePoiMode,
         poiLayers: {
-          mode: poiVisibilityMode,
+          mode: effectivePoiMode,
           genericCustomPoiVisibleCount,
           routeStopMarkerCount,
           routeStateMarkerCount,
           tencentNativePoiRequested: tencentPoiMode.requested,
           tencentNativePoiApplied: tencentPoiMode.applied
         },
-        tencentPoiFeatureEnabled: poiVisibilityMode === 'all',
+        tencentPoiFeatureEnabled: effectivePoiMode === 'all',
+        navigationPoiOverride: {
+          active: navigationPoiOverrideActive,
+          userSelectedPoiMode: poiVisibilityMode,
+          effectivePoiMode
+        },
+        navigationMap: {
+          selectedHeading: navigationMapDebug.selectedHeading,
+          headingSource: navigationMapDebug.headingSource ?? 'unavailable',
+          renderedHeading: navigationMapDebug.renderedHeading,
+          navigationOverrideActive: navigationPoiOverrideActive,
+          effectivePoiMode,
+          localTestSelectionActive: navigationMapDebug.localTestSelectionActive ?? false,
+          selectedTargetCoordinate: navigationMapDebug.selectedTargetCoordinate
+        },
         tencentPoiMode,
         nativeMapControls: {
           requestedVisible: false,
@@ -1732,6 +1751,8 @@ export function Map3DGuideExperience({
     mapBoundsSnapshot,
     mapInstanceId,
     nativeMapControlVisibleCount,
+    navigationPoiOverrideActive,
+    effectivePoiMode,
     poiVisibilityMode,
     presentationSwitchError,
     presentationTransition,
@@ -1817,7 +1838,7 @@ export function Map3DGuideExperience({
   const shouldRenderRouteProgress =
     isRouteGuideView && (routeGuideStage === 'active' || routeGuideStage === 'arrived' || joiningStopIndex !== undefined)
   const effectiveMapFocusMode = routeGuideStage === 'preview' ? 'overview' : mapFocusMode
-  const poiLayerMode: LingshanPoiLayerMode = poiVisibilityMode
+  const poiLayerMode: LingshanPoiLayerMode = effectivePoiMode
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
 
   useEffect(() => {
@@ -6426,7 +6447,7 @@ export function Map3DGuideExperience({
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
     const layerVisibility = resolvePoiLayerVisibility({
       presentation: scenicMapPresentation,
-      poiVisibilityMode,
+      poiVisibilityMode: poiLayerMode,
       isRouteGuideView,
       routeStage: routeGuideStage
     })

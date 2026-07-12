@@ -43,6 +43,7 @@ import { NavigationPrototypeCard } from '../prototype-navigation/NavigationProto
 import { NavigationPrototypeMultiStopReplayControls } from '../prototype-navigation/NavigationPrototypeReplayControls'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
+import { NavigationPrototypeLocalTestMapLayer } from '../prototype-navigation/NavigationPrototypeLocalTestMapLayer'
 import { createNavigationBetaViewModel, type NavigationBetaViewModel } from '../prototype-navigation/navigationBetaViewModel'
 import { isNavigationDebugEnabled } from '../prototype-navigation/navigationDebug'
 import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
@@ -684,6 +685,7 @@ function RouteTourMobileOverlay({
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const continueAfterArrivalDetection = useNavigationPrototypeStore((state) => state.continueAfterArrivalDetection)
   const raiseNavigationError = useNavigationPrototypeStore((state) => state.raiseNavigationError)
+  const localNavigationTest = useNavigationPrototypeStore((state) => state.localNavigationTest)
   const multiStopReplaySession = useMultiStopReplayStore((state) => state.session)
   const prototypeResolution = useMemo(() => {
     if (stage === 'active') {
@@ -714,8 +716,9 @@ function RouteTourMobileOverlay({
   }, [route.id])
 
   useEffect(() => {
+    if (localNavigationTest) return
     syncPrototypeTarget(prototypeTarget)
-  }, [prototypeTarget, syncPrototypeTarget])
+  }, [localNavigationTest, prototypeTarget, syncPrototypeTarget])
 
   useEffect(() => () => {
     if (navigateTimerRef.current !== null) {
@@ -1019,15 +1022,18 @@ function RouteTourMobileOverlay({
         )}
       </div>
       {navigationDebugEnabled ? (
-        <NavigationPrototypeMultiStopReplayControls
-          debugEnabled
-          route={route}
-          stage={stage}
-          currentStopIndex={currentStopIndex}
-          joinStopIndex={joinStopIndex}
-          confirmArrival={handleCommitPrototypeArrival}
-          continueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
-        />
+        <>
+          <NavigationPrototypeMultiStopReplayControls
+            debugEnabled
+            route={route}
+            stage={stage}
+            currentStopIndex={currentStopIndex}
+            joinStopIndex={joinStopIndex}
+            confirmArrival={handleCommitPrototypeArrival}
+            continueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
+          />
+          <NavigationPrototypeLocalTestMapLayer runtime={mapRuntime} />
+        </>
       ) : null}
       {feedbackText ? <div className="map-route-tour-toast">{feedbackText}</div> : null}
       <MapLayerPanel open={layerPanelOpen} className="map-route-tour-layer-panel" />
@@ -1095,6 +1101,11 @@ function Map3DRouteGuidePage() {
     isPresentationSwitching: false
   })
   const [mapRuntime, setMapRuntime] = useState<Map3DGuideMapRuntime | null>(null)
+  const navigationStatus = useNavigationPrototypeStore((state) => state.status)
+  const navigationSession = useNavigationPrototypeStore((state) => state.session)
+  const localNavigationTest = useNavigationPrototypeStore((state) => state.localNavigationTest)
+  const navigationPoiOverrideActive = Boolean(navigationSession || localNavigationTest)
+    && ['locating', 'planning', 'navigating', 'paused', 'rerouting', 'arrived'].includes(navigationStatus)
   const handleMapRuntimeChange = useCallback((runtime: Map3DGuideMapRuntime | null) => {
     setMapRuntime(runtime)
   }, [])
@@ -1107,6 +1118,7 @@ function Map3DRouteGuidePage() {
         presentation={routePresentation}
         onPresentationTransitionChange={setPresentationTransition}
         onMapRuntimeChange={handleMapRuntimeChange}
+        navigationPoiOverrideActive={navigationPoiOverrideActive}
       />
       <RouteTourMobileOverlay
         route={route}
