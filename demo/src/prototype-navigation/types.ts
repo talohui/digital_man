@@ -1,6 +1,6 @@
 import type { LatLngPoint } from '../data/guideData'
 
-export type NavigationPrototypeStatus = 'idle' | 'planning' | 'navigating' | 'arrived' | 'error'
+export type NavigationPrototypeStatus = 'idle' | 'locating' | 'navigating' | 'arrived' | 'error'
 
 export type NavigationPrototypeEndpoint = LatLngPoint & {
   name: string
@@ -23,6 +23,19 @@ export type NavigationPrototypeRoute = {
   durationMinutes: number
   polyline: LatLngPoint[]
   steps: NavigationPrototypeStep[]
+}
+
+export type NavigationPrototypeLocation = LatLngPoint & {
+  accuracy: number
+  timestamp: number
+}
+
+export type NavigationPrototypeProgress = {
+  distanceRemainingMeters: number
+  durationRemainingMinutes: number
+  currentStepIndex: number
+  currentInstruction?: string
+  nearestPolylineIndex: number
 }
 
 export type NavigationPrototypeMapRuntime = {

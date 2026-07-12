@@ -40,6 +40,7 @@ import {
 } from './Map3DGuidePage'
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
+import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
@@ -762,6 +763,7 @@ function RouteTourMobileOverlay({
 
   return <>
     <NavigationPrototypeMapLayer runtime={mapRuntime} />
+    <NavigationPrototypeUserMarkerLayer runtime={mapRuntime} />
     {createPortal(
       <div
       className={`map-route-tour-overlay map-route-tour-overlay--portal map-route-tour-overlay--${stage}`}

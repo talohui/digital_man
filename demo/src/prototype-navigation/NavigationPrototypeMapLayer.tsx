@@ -12,7 +12,7 @@ export function NavigationPrototypeMapLayer({ runtime }: { runtime: NavigationPr
     layerRef.current?.setMap?.(null)
     layerRef.current = null
 
-    if (!runtime || !route || (status !== 'navigating' && status !== 'arrived')) {
+    if (!runtime || !route || (status !== 'locating' && status !== 'navigating' && status !== 'arrived')) {
       return undefined
     }
 

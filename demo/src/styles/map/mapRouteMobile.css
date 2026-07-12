@@ -567,6 +567,7 @@
 
   .navigation-prototype-card__status,
   .navigation-prototype-card__instruction,
+  .navigation-prototype-card__location,
   .navigation-prototype-card__arrived,
   .navigation-prototype-card__error p,
   .navigation-prototype-card__details > p {
@@ -614,6 +615,33 @@
     padding: 8px;
     background: rgba(61, 156, 91, 0.14);
     color: #24613b;
+  }
+
+  .navigation-prototype-card__arrival {
+    display: grid;
+    gap: 7px;
+    border-radius: 10px;
+    padding: 9px;
+    background: rgba(61, 156, 91, 0.1);
+  }
+
+  .navigation-prototype-card__arrival p {
+    margin: 0;
+    color: #24613b;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.45;
+  }
+
+  .navigation-prototype-card__arrival a {
+    justify-self: start;
+    border-radius: 9px;
+    padding: 7px 10px;
+    background: #24613b;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 950;
+    text-decoration: none;
   }
 
   .navigation-prototype-card__error {
