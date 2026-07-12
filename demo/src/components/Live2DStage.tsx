@@ -53,13 +53,18 @@ type Live2DStageProps = {
   /** 首屏可见时立即加载，不等待 IntersectionObserver */
   eager?: boolean
   sceneId?: string
+  /** Guide surfaces may control animation without using the legacy chat messages. */
+  robotStateOverride?: RobotState
+  mouthOpenOverride?: number
 }
 
 function Live2DStage({
   highlightsOverride,
   variant = 'default',
   eager = false,
-  sceneId
+  sceneId,
+  robotStateOverride,
+  mouthOpenOverride
 }: Live2DStageProps) {
   const isEmbedded = variant === 'embedded'
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -73,8 +78,8 @@ function Live2DStage({
   const activeSceneId = useChatStore((s) => s.activeSceneId)
   const resolvedSceneId = sceneId ?? activeSceneId
   const session = useChatStore((s) => getSession(s.sessions, resolvedSceneId))
-  const robotState = session.robotState
-  const mouthOpen = session.mouthOpen
+  const robotState = robotStateOverride ?? session.robotState
+  const mouthOpen = mouthOpenOverride ?? session.mouthOpen
   const visibleHighlights = highlightsOverride ?? highlights
 
   useEffect(() => {

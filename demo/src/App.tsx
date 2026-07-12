@@ -4,10 +4,9 @@ import { GlobalXiaolingAssistant } from './components/guide'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
-import { GuideContextBridge } from './guide'
+import { GuideContextBridge, XiaolingRuntimeProvider } from './guide'
 
 const AppProviders = lazy(() => import('./components/AppProviders'))
-const ChatConnectionManager = lazy(() => import('./components/ChatConnectionManager'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminAvatarPage = lazy(() => import('./pages/AdminAvatarPage'))
 const GuideMapPage = lazy(() => import('./pages/GuideMapPage'))
@@ -40,7 +39,6 @@ function AppLazyRoute({ children, label }: LazyRouteProps) {
   return (
     <Suspense fallback={<RouteLoading label={label} />}>
       <AppProviders>
-        <ChatConnectionManager />
         {children}
       </AppProviders>
     </Suspense>
@@ -217,11 +215,11 @@ function App() {
 
   return (
     <RouteErrorBoundary>
-      <>
+      <XiaolingRuntimeProvider enabled={!isAdminRoute}>
         <GuideContextBridge />
         {routeContent}
         <GlobalXiaolingAssistant />
-      </>
+      </XiaolingRuntimeProvider>
     </RouteErrorBoundary>
   )
 }

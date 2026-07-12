@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-import { DigitalHumanStage, type DigitalHumanStatus } from './DigitalHumanStage'
+import Live2DStage from '../Live2DStage'
+import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
 import { GuideInputComposer } from './GuideInputComposer'
 import { GuideMessageTimeline } from './GuideMessageTimeline'
 import type { GuideAction, GuideMessage } from '../../guide'
@@ -14,7 +15,6 @@ export function XiaolingGuideDrawer({
   suggestedQuestions,
   messages,
   input,
-  status,
   onClose,
   onInputChange,
   onSend,
@@ -28,13 +28,13 @@ export function XiaolingGuideDrawer({
   suggestedQuestions: string[]
   messages: GuideMessage[]
   input: string
-  status: DigitalHumanStatus
   onClose: () => void
   onInputChange: (value: string) => void
   onSend: () => void
   onSuggestedQuestion: (question: string) => void
   onAction: (action: GuideAction) => void
 }) {
+  const runtime = useXiaolingRuntime()
   const dragStartYRef = useRef<number | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
 
@@ -68,7 +68,13 @@ export function XiaolingGuideDrawer({
           </div>
           <button type="button" onClick={onClose} aria-label="关闭">×</button>
         </header>
-        <DigitalHumanStage status={status} />
+        <Live2DStage
+          variant="embedded"
+          eager
+          sceneId={runtime.sceneId}
+          robotStateOverride={runtime.robotState}
+          mouthOpenOverride={runtime.mouthOpen}
+        />
         {suggestedQuestions.length ? (
           <div className="guide-drawer__quick-prompts" aria-label="推荐提问">
             {suggestedQuestions.map((question) => (
