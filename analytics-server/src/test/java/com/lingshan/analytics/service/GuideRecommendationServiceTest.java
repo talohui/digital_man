@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,7 +24,7 @@ class GuideRecommendationServiceTest {
         );
 
         GuideRecommendationResponse response = service.recommend(
-                new GuideRecommendationRequest("u1", List.of("亲子游", "拍照打卡"))
+                new GuideRecommendationRequest("u1", List.of("亲子游", "拍照打卡"), Map.of("duration", "quick"))
         );
 
         assertThat(response.engine()).isEqualTo("local-score-v1");

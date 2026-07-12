@@ -96,13 +96,14 @@ export function extractRobotState(
 // Fay /api/send 要求 x-www-form-urlencoded，body 格式: data=<JSON字符串>
 // 参考 Fay 自带前端 gui/static/js/index.js:550:
 //   xhr.send('data=' + encodeURIComponent(JSON.stringify(send_data)))
-export async function sendTextToFay(msg: string, username = 'User') {
+export async function sendTextToFay(msg: string, username = 'User', signal?: AbortSignal) {
   const body = 'data=' + encodeURIComponent(JSON.stringify({ username, msg }))
 
   return fetch(`${FAY_HTTP}/api/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
+    body,
+    signal
   })
 }
 

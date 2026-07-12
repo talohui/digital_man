@@ -2,10 +2,13 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { fetchGuideRecommendations } from '../api/guide'
 import {
+  DEFAULT_GUIDE_PREFERENCES,
   GUIDE_TAGS,
   buildLocalGuideRecommendations,
   getDefaultSpotId,
   getGuideRouteById,
+  type GuidePreferenceContext,
+  type GuidePreferenceKey,
   type GuideRecommendationCard,
   type UserProfileSnapshot
 } from '../data/guideData'
@@ -14,6 +17,7 @@ type GuideState = {
   userId: string
   sessionId: string
   selectedTags: string[]
+  guidePreferences: GuidePreferenceContext
   candidateRoutes: GuideRecommendationCard[]
   userProfile: UserProfileSnapshot | null
   activeRouteId: string
@@ -30,6 +34,7 @@ type GuideState = {
   ensureSessionId: () => string
   bumpConversationEpoch: (sceneId: string) => void
   toggleTag: (tag: string) => void
+  setGuidePreference: (key: GuidePreferenceKey, value: string) => void
   refreshRecommendations: () => Promise<void>
   setActiveRouteId: (routeId: string) => void
   setSelectedSpotId: (spotId: string) => void
@@ -45,7 +50,7 @@ function createSessionId() {
   return `sess-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
 }
 
-const defaultRoutes = buildLocalGuideRecommendations([])
+const defaultRoutes = buildLocalGuideRecommendations([], DEFAULT_GUIDE_PREFERENCES)
 const defaultRouteId = defaultRoutes[0]?.id ?? 'historical_culture'
 
 export const useGuideStore = create<GuideState>()(
@@ -54,6 +59,7 @@ export const useGuideStore = create<GuideState>()(
       userId: '',
       sessionId: '',
       selectedTags: ['祈福静心'],
+      guidePreferences: DEFAULT_GUIDE_PREFERENCES,
       candidateRoutes: defaultRoutes,
       userProfile: null,
       activeRouteId: defaultRouteId,
@@ -101,28 +107,38 @@ export const useGuideStore = create<GuideState>()(
           return { selectedTags }
         })
       },
+      setGuidePreference: (key, value) =>
+        set((state) => ({
+          guidePreferences: {
+            ...state.guidePreferences,
+            [key]: value
+          }
+        })),
       refreshRecommendations: async () => {
         const userId = get().ensureUserId()
-        const { selectedTags, activeRouteId } = get()
+        const { selectedTags, guidePreferences, activeRouteId } = get()
         set({ isLoading: true, lastError: '' })
 
 
         try {
-          const response = await fetchGuideRecommendations({ userId, selectedTags })
+          const response = await fetchGuideRecommendations({ userId, selectedTags, preferences: guidePreferences })
           const nextRouteId =
             response.routes.some((route) => route.id === activeRouteId)
               ? activeRouteId
               : response.recommendedRouteId || response.routes[0]?.id || defaultRouteId
 
           set({
-            candidateRoutes: response.routes.length > 0 ? response.routes : buildLocalGuideRecommendations(selectedTags),
+            candidateRoutes:
+              response.routes.length > 0
+                ? response.routes
+                : buildLocalGuideRecommendations(selectedTags, guidePreferences),
             activeRouteId: nextRouteId,
             selectedSpotId: getDefaultSpotId(nextRouteId),
             isLoading: false,
             lastError: ''
           })
         } catch (error) {
-          const fallbackRoutes = buildLocalGuideRecommendations(selectedTags)
+          const fallbackRoutes = buildLocalGuideRecommendations(selectedTags, guidePreferences)
           const fallbackRouteId = fallbackRoutes[0]?.id ?? defaultRouteId
           const message = error instanceof Error ? error.message : '推荐服务暂时不可用'
           set({
@@ -161,6 +177,7 @@ export const useGuideStore = create<GuideState>()(
         userId: state.userId,
         sessionId: state.sessionId,
         selectedTags: state.selectedTags,
+        guidePreferences: state.guidePreferences,
         candidateRoutes: state.candidateRoutes,
         userProfile: state.userProfile,
         activeRouteId: state.activeRouteId,

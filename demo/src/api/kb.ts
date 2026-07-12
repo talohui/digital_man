@@ -1,4 +1,5 @@
 import { getKbApiBase } from '../lib/runtimeConfig'
+import type { UploadOperation, UploadQuality } from '../lib/kbUploadQuality'
 
 const BASE = getKbApiBase()
 
@@ -29,9 +30,12 @@ export type FaqItem = {
 
 export type UploadResult = {
   result: string
+  operation: UploadOperation
   docId: string
   docName: string
+  category: string
   chunkCount: number
+  quality: UploadQuality
   stats: KbStats
 }
 

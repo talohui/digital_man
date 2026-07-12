@@ -1,14 +1,20 @@
 import { Alert, App, Button, Card, Col, Form, Input, Row, Select, Space, Typography } from 'antd'
-import { SoundOutlined } from '@ant-design/icons'
+import { CheckOutlined, SoundOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
-import AdminLive2DPreview, { HARU_MODEL_URL } from '../components/admin/AdminLive2DPreview'
+import AdminLive2DPreview from '../components/admin/AdminLive2DPreview'
 import { adminGet, adminPut } from '../api/admin'
 import { parseCostumeId, type CostumeId } from '../lib/live2dCostume'
+import {
+  DEFAULT_LIVE2D_PRESET,
+  listLive2DPresets,
+  resolveLive2DPreset,
+  type Live2DPreset
+} from '../lib/live2dPresets'
 import { playVoiceSample } from '../lib/voicePreview'
 
 const { Title, Text } = Typography
 
-const HARU_PRESET_NAME = '默认·小灵'
+const LIVE2D_PRESETS = listLive2DPresets()
 
 interface CostumeOption {
   id: string
@@ -31,6 +37,7 @@ function AdminAvatarPage() {
   const { message } = App.useApp()
   const [config, setConfig] = useState<AvatarAdminConfig | null>(null)
   const [saving, setSaving] = useState(false)
+  const [previewPreset, setPreviewPreset] = useState<Live2DPreset>(DEFAULT_LIVE2D_PRESET)
   const [previewCostumeId, setPreviewCostumeId] = useState<CostumeId>('default')
   const [previewVoiceId, setPreviewVoiceId] = useState<string>('')
   const [form] = Form.useForm()
@@ -39,6 +46,7 @@ function AdminAvatarPage() {
     adminGet<AvatarAdminConfig>('/admin/avatar-config')
       .then((data) => {
         setConfig(data)
+        setPreviewPreset(resolveLive2DPreset(data.live2dModelUrl))
         const costumeId = parseCostumeId(data.costumeId)
         form.setFieldsValue({
           costumeId,
@@ -78,14 +86,16 @@ function AdminAvatarPage() {
       const res = await adminPut<
         AvatarAdminConfig & { fayRestartRequired?: boolean; voiceSyncWarning?: string }
       >('/admin/avatar-config', {
-        live2dModelUrl: HARU_MODEL_URL,
-        live2dPresetName: HARU_PRESET_NAME,
-        costumeId: parseCostumeId(values.costumeId),
+        live2dModelUrl: previewPreset.modelUrl,
+        live2dPresetName: previewPreset.name,
+        costumeId: previewPreset.supportsCostumes
+          ? parseCostumeId(values.costumeId)
+          : 'default',
         voiceId: values.voiceId,
         voiceName: config?.voices?.find((v) => v.id === values.voiceId)?.name,
         displayName: values.displayName
       })
-      message.success('已保存')
+      message.success(`已启用：${previewPreset.name}`)
       if (res.voiceSyncWarning) {
         message.warning(res.voiceSyncWarning)
       }
@@ -94,7 +104,9 @@ function AdminAvatarPage() {
           '音色已写入 Fay 的 config.json 与 cache_data/config.json，请在本机 Fay-main 目录重启 Fay 后生效'
         )
       }
-      setPreviewCostumeId(parseCostumeId(values.costumeId))
+      setPreviewCostumeId(
+        previewPreset.supportsCostumes ? parseCostumeId(values.costumeId) : 'default'
+      )
       load()
     } catch {
       message.error('保存失败')
@@ -123,7 +135,7 @@ function AdminAvatarPage() {
         className="admin-avatar-alert"
         type="info"
         showIcon
-        message="线上音色同时写入 Fay 目录下 config.json 与 cache_data/config.json（Fay 启动可能读后者）。保存后请在 Fay-main 目录重启 Fay。试听为 voice-samples 示意文件；景区服装为成套换装。"
+        message="形象资源均随项目本地发布。默认小灵保留现有换装能力；新增形象使用各自原始服装。音色保存后请重启 Fay 生效。"
       />
 
       <Row gutter={[24, 24]} className="admin-avatar-row">
@@ -142,11 +154,53 @@ function AdminAvatarPage() {
                 }
               }}
             >
+              <Form.Item label="形象预设">
+                <div className="admin-avatar-presets" role="radiogroup" aria-label="数字人形象预设">
+                  {LIVE2D_PRESETS.map((preset, index) => {
+                    const selected = previewPreset.id === preset.id
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        className={`admin-avatar-preset${selected ? ' admin-avatar-preset--selected' : ''}`}
+                        onClick={() => {
+                          setPreviewPreset(preset)
+                          if (!preset.supportsCostumes) {
+                            form.setFieldValue('costumeId', 'default')
+                            setPreviewCostumeId('default')
+                          }
+                        }}
+                      >
+                        <span className="admin-avatar-preset__index">
+                          {String(index + 1).padStart(2, '0')}
+                        </span>
+                        <span className="admin-avatar-preset__copy">
+                          <strong>{preset.name}</strong>
+                          <small>{preset.supportsCostumes ? '支持景区换装' : '原始服装'}</small>
+                        </span>
+                        <span className="admin-avatar-preset__check" aria-hidden="true">
+                          {selected && <CheckOutlined />}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </Form.Item>
               <Form.Item name="displayName" label="导游显示名">
                 <Input placeholder="小灵" />
               </Form.Item>
-              <Form.Item name="costumeId" label="景区服装">
-                <Select options={costumeOptions} />
+              <Form.Item
+                name="costumeId"
+                label="景区服装"
+                extra={
+                  previewPreset.supportsCostumes
+                    ? undefined
+                    : '该形象使用原始服装，暂不支持默认小灵的换装贴图。'
+                }
+              >
+                <Select options={costumeOptions} disabled={!previewPreset.supportsCostumes} />
               </Form.Item>
               <Form.Item label="语音音色">
                 <Space.Compact style={{ width: '100%' }}>
@@ -174,10 +228,15 @@ function AdminAvatarPage() {
           <Card
             className="glass-card admin-avatar-preview-card"
             title={`2D 数字人预览 · ${displayName}`}
+            extra={<Text type="secondary">{previewPreset.name}</Text>}
             bordered={false}
           >
             {config ? (
-              <AdminLive2DPreview costumeId={previewCostumeId} />
+              <AdminLive2DPreview
+                modelUrl={previewPreset.modelUrl}
+                costumeId={previewCostumeId}
+                supportsCostumes={previewPreset.supportsCostumes}
+              />
             ) : (
               <div className="admin-live2d-preview admin-live2d-preview--placeholder" />
             )}

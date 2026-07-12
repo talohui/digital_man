@@ -11,6 +11,7 @@ import { useGuideStore } from '../store/useGuideStore'
 import { getSession } from '../store/chatSessions'
 import { getAnonymousSessionLabel } from '../lib/fayIdentity'
 import { getBrowserVoiceHint, type BrowserAsr } from '../lib/browserAsr'
+import { unlockAudio } from '../lib/audioLipsync'
 import {
   createVoiceAsr,
   getVoiceAsrModeLabel,
@@ -146,7 +147,6 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
     createVoiceAsr({
       onInterim: (text) => {
         setVoiceDraft(text)
-        setInputText(text, resolvedSceneId)
       },
       onFinal: (text) => {
         asrRef.current = null
@@ -243,7 +243,9 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   }, [isRecording, wsStatus])
 
   const handleSend = async () => {
+    if (isRecording || voiceDraft) return
     shouldStickToBottomRef.current = true
+    void unlockAudio()
     await sendMessage(inputText, resolvedSceneId)
   }
 
@@ -379,6 +381,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
             className="chat-card__textarea"
             placeholder={isRecording ? '正在听您说话…' : '在这里输入您的问题'}
             value={inputText}
+            readOnly={isRecording}
             onChange={(event) => setInputText(event.target.value.slice(0, 500), resolvedSceneId)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -391,11 +394,11 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
             type="button"
             className="chat-card__send"
             onClick={() => void handleSend()}
-            disabled={!inputText.trim() || isRecording || isSending}
+            disabled={!inputText.trim() || isRecording || Boolean(voiceDraft) || isSending}
             aria-label="发送"
           >
             {isSending ? <SyncOutlined spin /> : <SendOutlined />}
-            <span>发送</span>
+            <span className="chat-card__send-label">发送</span>
           </button>
         </div>
 

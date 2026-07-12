@@ -2,6 +2,7 @@ import { FAY_HTTP } from '../api/fay'
 import { useChatStore } from '../store/useChatStore'
 import { getFayUsername } from './fayIdentity'
 import type { BrowserAsr } from './browserAsr'
+import { getCloudRecordingError } from './cloudRecordingGuard'
 
 const MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
@@ -34,6 +35,7 @@ export function createCloudAsr(opts: {
   let chunks: Blob[] = []
   let stopped = false
   let mimeType = 'audio/webm'
+  let recordingStartedAt = 0
 
   const cleanup = () => {
     if (recorder && recorder.state !== 'inactive') {
@@ -51,6 +53,7 @@ export function createCloudAsr(opts: {
   const start = async () => {
     stopped = false
     chunks = []
+    recordingStartedAt = 0
     if (typeof MediaRecorder === 'undefined') {
       opts.onError?.('当前浏览器不支持录音，请换 Chrome / Edge 或打字提问。')
       return
@@ -63,6 +66,7 @@ export function createCloudAsr(opts: {
         if (e.data.size > 0) chunks.push(e.data)
       }
       recorder.start(250)
+      recordingStartedAt = Date.now()
       opts.onInterim?.('正在录音…')
     } catch (err) {
       cleanup()
@@ -78,8 +82,12 @@ export function createCloudAsr(opts: {
   const uploadAndRecognize = async () => {
     const blobChunks = [...chunks]
     chunks = []
-    if (!blobChunks.length) {
-      opts.onError?.('没有录到音频，请按住多说 1 秒再松手，或打字提问。')
+    const durationMs = recordingStartedAt ? Date.now() - recordingStartedAt : 0
+    recordingStartedAt = 0
+    const totalBytes = blobChunks.reduce((sum, chunk) => sum + chunk.size, 0)
+    const recordingError = getCloudRecordingError(durationMs, totalBytes)
+    if (recordingError) {
+      opts.onError?.(recordingError)
       return
     }
     opts.onInterim?.('正在云端识别…')
@@ -98,7 +106,7 @@ export function createCloudAsr(opts: {
       try {
         data = (await res.json()) as typeof data
       } catch {
-        throw new Error(`Fay 返回非 JSON（HTTP ${res.status}），请确认 Fay 已启动：${FAY_HTTP}`)
+        throw new Error(`语音识别服务返回异常（HTTP ${res.status}）：${FAY_HTTP}`)
       }
       if (!res.ok || data.result !== 'successful') {
         throw new Error(data.message || `识别失败 HTTP ${res.status}`)
@@ -113,12 +121,12 @@ export function createCloudAsr(opts: {
       const msg = e instanceof Error ? e.message : String(e)
       if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
         opts.onError?.(
-          `无法连接 Fay（${FAY_HTTP}）。请确认 Fay 已启动，并确认当前设备能访问这台电脑的 5000 端口。`
+          `无法连接语音识别服务（${FAY_HTTP}）。请确认服务已启动，并确认当前设备能访问这台电脑的 5000 端口。`
         )
         return
       }
       opts.onError?.(
-        `云端语音识别失败：${msg}。请确认 Fay 已重启、system.conf 已配置 AliNLS、已安装 ffmpeg，且日志有「AliNLS token刷新成功」。`
+        `云端语音识别失败：${msg}。请联系工作人员检查语音识别服务。`
       )
     }
   }
@@ -146,6 +154,7 @@ export function createCloudAsr(opts: {
   const abort = () => {
     stopped = true
     chunks = []
+    recordingStartedAt = 0
     cleanup()
   }
 

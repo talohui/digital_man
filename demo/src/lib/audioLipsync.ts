@@ -39,16 +39,17 @@ async function getCtx(): Promise<AudioContext> {
  * 在用户首次手势(点击 / 触摸)时调用,解锁移动端的音频自动播放限制。
  * 重复调用安全。
  */
-export function unlockAudio(): void {
+export async function unlockAudio(): Promise<boolean> {
   try {
     if (!ctx) {
       ctx = createCtx()
     }
     if (ctx.state === 'suspended') {
-      void ctx.resume()
+      await ctx.resume()
     }
+    return ctx.state === 'running'
   } catch {
-    /* ignore */
+    return false
   }
 }
 

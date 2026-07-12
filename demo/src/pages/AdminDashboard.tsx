@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import {
   AlertOutlined,
   AudioOutlined,
+  BulbOutlined,
   ClockCircleOutlined,
   DatabaseOutlined,
   FileExcelOutlined,
@@ -12,6 +13,7 @@ import {
   FireOutlined,
   LikeOutlined,
   MessageOutlined,
+  SettingOutlined,
   SkinOutlined,
   SmileOutlined,
 } from '@ant-design/icons'
@@ -1229,6 +1231,20 @@ function AdminDashboard() {
                   知识库管理
                 </Button>
               </Link>
+              <Link to="/admin/decision">
+                <Button
+                  size="large"
+                  icon={<BulbOutlined />}
+                  style={{
+                    color: palette.cyan,
+                    fontWeight: 700,
+                    borderColor: palette.cyan,
+                    background: 'rgba(79, 195, 231, 0.1)',
+                  }}
+                >
+                  AI 营销决策
+                </Button>
+              </Link>
               <Link to="/admin/avatar">
                 <Button
                   size="large"
@@ -1241,6 +1257,20 @@ function AdminDashboard() {
                   }}
                 >
                   数字人形象
+                </Button>
+              </Link>
+              <Link to="/admin/config">
+                <Button
+                  size="large"
+                  icon={<SettingOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  服务配置
                 </Button>
               </Link>
               <Link to="/admin/heatmap">

@@ -45,6 +45,7 @@ import fay_booter
 from flask_httpauth import HTTPBasicAuth
 from core import qa_service
 from core import stream_manager
+from gui.service_config_api import register_service_config_api
 
 # 全局变量，用于跟踪当前的genagents服务器
 genagents_server = None
@@ -79,6 +80,14 @@ def verify_password(username, password):
         return True
     if username in users and users[username] == password:
         return username
+
+
+register_service_config_api(
+    __app,
+    config_path=os.path.join(os.getcwd(), 'system.conf'),
+    password_hash=os.getenv('FAY_ADMIN_CONFIG_PASSWORD_HASH', ''),
+    reload_callback=lambda: config_util.load_config(force_reload=True),
+)
 
 
 def __get_template():

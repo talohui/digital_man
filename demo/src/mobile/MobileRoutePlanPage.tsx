@@ -10,6 +10,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sendGuideFeedback } from '../api/guide'
 import {
+  GUIDE_PREFERENCE_GROUPS,
   GUIDE_TAGS,
   getRouteItineraryMeta,
   type GuideRecommendationCard
@@ -33,17 +34,21 @@ function scoreText(route: GuideRecommendationCard) {
 function MobileRoutePlanPage() {
   const navigate = useNavigate()
   const selectedTags = useGuideStore((state) => state.selectedTags)
+  const guidePreferences = useGuideStore((state) => state.guidePreferences)
   const candidateRoutes = useGuideStore((state) => state.candidateRoutes)
   const isLoading = useGuideStore((state) => state.isLoading)
   const lastError = useGuideStore((state) => state.lastError)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
   const toggleTag = useGuideStore((state) => state.toggleTag)
+  const setGuidePreference = useGuideStore((state) => state.setGuidePreference)
   const refreshRecommendations = useGuideStore((state) => state.refreshRecommendations)
   const setActiveRouteId = useGuideStore((state) => state.setActiveRouteId)
   const exposedRecommendationKeyRef = useRef('')
   const sentPreferenceKeyRef = useRef('')
 
   const selectedTagsKey = selectedTags.join('|')
+  const guidePreferenceKey = GUIDE_PREFERENCE_GROUPS.map((group) => guidePreferences[group.key]).join('|')
+  const recommendationInputKey = `${selectedTagsKey}::${guidePreferenceKey}`
   const mainRoute = candidateRoutes[0]
   const secondaryRoutes = candidateRoutes.slice(1)
 
@@ -52,14 +57,14 @@ function MobileRoutePlanPage() {
   }, [ensureUserId])
 
   useEffect(() => {
-    if (selectedTagsKey === sentPreferenceKeyRef.current) return
-    sentPreferenceKeyRef.current = selectedTagsKey
-    capturePreferenceUpdate(selectedTags)
-  }, [selectedTags, selectedTagsKey])
+    if (recommendationInputKey === sentPreferenceKeyRef.current) return
+    sentPreferenceKeyRef.current = recommendationInputKey
+    capturePreferenceUpdate(selectedTags, guidePreferences)
+  }, [guidePreferences, recommendationInputKey, selectedTags])
 
   useEffect(() => {
     void refreshRecommendations()
-  }, [refreshRecommendations, selectedTagsKey])
+  }, [refreshRecommendations, recommendationInputKey])
 
   useEffect(() => {
     if (candidateRoutes.length > 0) {
@@ -127,6 +132,34 @@ function MobileRoutePlanPage() {
           ))}
         </div>
         {lastError ? <p className="mobile-muted">推荐服务暂不可用，已使用本地路线规则。</p> : null}
+      </section>
+
+      <section className="mobile-panel mobile-home__preferences">
+        <div className="mobile-panel__head">
+          <div>
+            <span className="mobile-section-kicker">时间与同行方式</span>
+            <h3>路线会按这些条件重新排序</h3>
+          </div>
+        </div>
+        <div className="mobile-preference-stack">
+          {GUIDE_PREFERENCE_GROUPS.map((group) => (
+            <div className="mobile-preference-group" key={group.key}>
+              <span className="mobile-preference-group__label">{group.label}</span>
+              <div className="mobile-preference-group__chips">
+                {group.options.map((option) => (
+                  <button
+                    className={`mobile-preference-chip ${guidePreferences[group.key] === option.value ? 'is-active' : ''}`}
+                    key={option.value}
+                    type="button"
+                    onClick={() => setGuidePreference(group.key, option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
 
       {mainRoute

@@ -4,6 +4,7 @@ import {
   Card,
   Col,
   ConfigProvider,
+  Divider,
   Form,
   Input,
   Modal,
@@ -18,6 +19,7 @@ import {
 } from 'antd'
 import {
   CloudUploadOutlined,
+  CheckCircleFilled,
   DatabaseOutlined,
   FileTextOutlined,
   PlusOutlined,
@@ -35,8 +37,10 @@ import {
   updateFaq,
   uploadKbDocument,
   type FaqItem,
-  type KbStats
+  type KbStats,
+  type UploadResult
 } from '../api/kb'
+import { describeUploadOperation, summarizeUploadQuality } from '../lib/kbUploadQuality'
 
 const { Title, Text } = Typography
 
@@ -293,6 +297,7 @@ function KnowledgeInner() {
   const [uploadCategory, setUploadCategory] = useState('')
   const [loading, setLoading] = useState(false)
   const [serviceError, setServiceError] = useState<string | null>(null)
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<FaqItem | null>(null)
@@ -306,6 +311,10 @@ function KnowledgeInner() {
     info: qualityReport.issues.filter((issue) => issue.level === 'info').length
   }), [qualityReport.issues])
   const activeIssueFaqs = useMemo(() => getIssueFaqMatches(activeIssue, faqs), [activeIssue, faqs])
+  const uploadSummary = useMemo(
+    () => uploadResult ? summarizeUploadQuality(uploadResult.quality) : null,
+    [uploadResult]
+  )
 
   const refresh = async () => {
     setLoading(true)
@@ -338,7 +347,8 @@ function KnowledgeInner() {
       try {
         const res = await uploadKbDocument(file as File, uploadCategory)
         const catTip = uploadCategory.trim() ? `（分类：${uploadCategory.trim()}）` : ''
-        message.success(`「${res.docName}」已入库${catTip}，新增 ${res.chunkCount} 个切片`)
+        message.success(`「${res.docName}」${describeUploadOperation(res.operation)}${catTip}`)
+        setUploadResult(res)
         setStats(res.stats)
         await refresh()
       } catch (err) {
@@ -641,6 +651,88 @@ function KnowledgeInner() {
           pagination={{ pageSize: 8 }}
         />
       </Card>
+
+      <Modal
+        title="知识库入库验收"
+        open={Boolean(uploadResult)}
+        onCancel={() => setUploadResult(null)}
+        footer={<Button type="primary" onClick={() => setUploadResult(null)}>完成</Button>}
+        width={680}
+        destroyOnClose
+      >
+        {uploadResult && uploadSummary ? (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+              <CheckCircleFilled style={{ color: palette.green, fontSize: 34, marginTop: 2 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Text strong style={{ color: palette.text, fontSize: 18 }}>{uploadResult.docName}</Text>
+                  <Tag color={uploadResult.operation === 'unchanged' ? 'default' : 'green'}>
+                    {describeUploadOperation(uploadResult.operation)}
+                  </Tag>
+                </div>
+                <div style={{ color: palette.green, marginTop: 6, fontWeight: 600 }}>
+                  {uploadSummary.retrievalLabel}
+                </div>
+                <div style={{ color: palette.muted, marginTop: 3, fontSize: 13 }}>
+                  文件已完成解析、切块、向量写入和检索验证，可供数字人下一次问答使用。
+                </div>
+              </div>
+            </div>
+
+            <Divider style={{ margin: 0, borderColor: palette.border }} />
+
+            <Row gutter={[12, 12]}>
+              {[
+                ['有效结构', uploadSummary.structureLabel],
+                ['知识切片', `${uploadResult.quality.chunkCount} 个`],
+                ['检索烟测', uploadSummary.probeLabel],
+                ['资料分类', uploadResult.category || '未分类']
+              ].map(([label, value]) => (
+                <Col xs={24} sm={12} key={label}>
+                  <div style={{ borderLeft: `3px solid ${palette.cyan}`, padding: '4px 0 4px 12' }}>
+                    <div style={{ color: palette.muted, fontSize: 12 }}>{label}</div>
+                    <div style={{ color: palette.text, marginTop: 3, lineHeight: 1.5 }}>{value}</div>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+
+            {uploadResult.quality.topics.length || uploadResult.quality.spots.length ? (
+              <div>
+                <Text style={{ color: palette.muted, fontSize: 12 }}>自动识别</Text>
+                <div style={{ marginTop: 7 }}>
+                  {uploadResult.quality.spots.map((spot) => <Tag color="gold" key={`spot-${spot}`}>{spot}</Tag>)}
+                  {uploadResult.quality.topics.map((topic) => <Tag color="cyan" key={`topic-${topic}`}>{topic}</Tag>)}
+                </div>
+              </div>
+            ) : null}
+
+            {uploadResult.quality.retrieval.probes.length ? (
+              <div>
+                <Text style={{ color: palette.muted, fontSize: 12 }}>检索探针</Text>
+                <div style={{ display: 'grid', gap: 7, marginTop: 8 }}>
+                  {uploadResult.quality.retrieval.probes.map((probe) => (
+                    <div key={probe.query} style={{ display: 'flex', alignItems: 'center', gap: 8, color: palette.text }}>
+                      <CheckCircleFilled style={{ color: probe.matched ? palette.green : palette.muted }} />
+                      <span>{probe.query}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {uploadResult.quality.warnings.length ? (
+              <div style={{ borderLeft: `3px solid ${palette.gold}`, paddingLeft: 12 }}>
+                <Text style={{ color: palette.gold }}>可优化提示</Text>
+                {uploadResult.quality.warnings.map((warning) => (
+                  <div key={warning} style={{ color: palette.muted, marginTop: 4 }}>{warning}</div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         title={editing ? '编辑 FAQ' : '新增 FAQ'}
