@@ -4,7 +4,7 @@
 
 - User location: `NavigationPrototypeUserMarkerLayer`; blue accuracy halo/dot plus a heading arrow derived from `heading.selectedHeading`.
 - Navigation line: `NavigationPrototypeMapLayer`; independent blue Tencent `MultiPolyline`.
-- Generic scenic POI: `PoiLayerController` kind `generic`; hidden whenever navigation temporarily applies `all` semantics.
+- Generic scenic POI: `PoiLayerController` kind `generic`; core/all chooses its dataset while Tencent native labels may coexist.
 - Route stops: `PoiLayerController` kind `routeStops`; unaffected by the generic POI override.
 - Current/next stops: `PoiLayerController` kind `routeState`; unaffected by the generic POI override.
 - Tencent native POI: base-map `point + label`, enabled by the effective POI mode.
@@ -25,7 +25,7 @@ active navigation session/local test + active navigation lifecycle -> all
 otherwise -> user's poiVisibilityMode
 ```
 
-This never calls `setPoiVisibilityMode('all')`, so cancelling or confirming navigation naturally reveals the user's previous core/all preference. Paused and arrival-confirm states retain Tencent point/label. Generic custom POI is hidden, while route stop and current/next layers remain mounted.
+This never calls `setPoiVisibilityMode('all')`, so cancelling or confirming navigation naturally reveals the user's previous core/all preference. Paused and arrival-confirm states retain Tencent point/label. Generic custom POI remains visible; route stop and current/next layers remain independently mounted.
 
 ## Local navigation test
 

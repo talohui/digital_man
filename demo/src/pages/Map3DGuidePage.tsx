@@ -972,16 +972,12 @@ function countVisibleTencentNativeMapControls(container: HTMLElement) {
 }
 
 function resolvePoiLayerVisibility(input: {
-  presentation: ScenicMapPresentation
-  poiVisibilityMode: 'core' | 'all'
   isRouteGuideView: boolean
-  routeStage?: string
 }): PoiLayerVisibility {
-  const showGenericCustomPoi =
-    input.poiVisibilityMode === 'core' && input.presentation === 'ink2d'
-
   return {
-    showGenericCustomPoi,
+    // Core/all selects the custom POI dataset; it must not double as a
+    // visibility switch. Tencent native labels may coexist in all mode.
+    showGenericCustomPoi: true,
     showRouteStopMarkers: input.isRouteGuideView,
     showRouteStateMarkers: input.isRouteGuideView
   }
@@ -6446,10 +6442,7 @@ export function Map3DGuideExperience({
     const nextStopId = nextStop.nextStopId
     const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
     const layerVisibility = resolvePoiLayerVisibility({
-      presentation: scenicMapPresentation,
-      poiVisibilityMode: poiLayerMode,
-      isRouteGuideView,
-      routeStage: routeGuideStage
+      isRouteGuideView
     })
     // Expanded active/arrived cards intentionally narrow the marker field;
     // collapsed cards restore every numbered station without moving the map.
@@ -6457,16 +6450,19 @@ export function Map3DGuideExperience({
     const routeContextPois = routeProgressMode
       ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
       : []
+    const layerPois = Array.from(
+      new Map(
+        [
+          ...getLingshanPoisForLayer(poiLayerMode),
+          ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
+        ].map((poi) => [poi.id, poi])
+      ).values()
+    )
     const genericPois = !isRouteGuideView
-      ? Array.from(
-          new Map(
-            [
-              ...getLingshanPoisForLayer(poiLayerMode),
-              ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
-            ].map((poi) => [poi.id, poi])
-          ).values()
-        )
-      : routeContextPois.filter((poi) => !routeStopIds.has(poi.id))
+      ? layerPois
+      : navigationPoiOverrideActive
+        ? layerPois.filter((poi) => !routeStopIds.has(poi.id))
+        : routeContextPois.filter((poi) => !routeStopIds.has(poi.id))
 
     const genericStyles: Record<string, any> = {}
     const genericGeometries = layerVisibility.showGenericCustomPoi
@@ -6597,6 +6593,7 @@ export function Map3DGuideExperience({
         mode: poiLayerMode,
         presentation: scenicMapPresentation,
         route: isRouteGuideView,
+        navigationOverrideActive: navigationPoiOverrideActive,
         services: serviceFacilitiesEnabled,
         poiIds: genericGeometries.map((item) => item.id)
       },
@@ -6641,6 +6638,7 @@ export function Map3DGuideExperience({
     isRouteGuideView,
     mapVisualReadyForOverlays,
     navigate,
+    navigationPoiOverrideActive,
     nextStop.nextStopId,
     perfRecorder,
     poiLayerController,

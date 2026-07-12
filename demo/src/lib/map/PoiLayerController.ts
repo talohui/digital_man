@@ -29,8 +29,8 @@ const poiLayerKinds: PoiLayerKind[] = ['generic', 'routeStops', 'routeState']
 /**
  * Owns the three semantically distinct custom POI layers.
  *
- * Generic browse labels may be hidden for 3D/all modes without affecting
- * route numbering or current/next-state markers. Each kind retains its own
+ * Generic browse labels update independently from Tencent native labels and
+ * route numbering/current-next markers. Each kind retains its own
  * render key and click listener so an update is idempotent per layer.
  */
 export class PoiLayerController {
