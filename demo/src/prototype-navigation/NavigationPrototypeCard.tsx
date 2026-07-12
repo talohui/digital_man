@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { guideSpots } from '../data/guideData'
 import { getPoiArrivalSummary } from '../data/poiGuideMetadata'
 import { getPrototypeStepInstruction } from './prototypeNavigationPrompt'
+import { NavigationPrototypeReplayControls } from './NavigationPrototypeReplayControls'
 import { useNavigationPrototypeStore } from './useNavigationPrototypeStore'
 import { toGcj02Position } from './coordinateTransform'
 import type { NavigationPrototypeEndpoint } from './types'
@@ -49,6 +50,7 @@ export function NavigationPrototypeCard({
   const conversionProvider = useNavigationPrototypeStore((state) => state.conversionProvider)
   const conversionError = useNavigationPrototypeStore((state) => state.conversionError)
   const coordinateOffsetMeters = useNavigationPrototypeStore((state) => state.coordinateOffsetMeters)
+  const locationSource = useNavigationPrototypeStore((state) => state.locationSource)
   const progress = useNavigationPrototypeStore((state) => state.progress)
   const arrivalLocationHits = useNavigationPrototypeStore((state) => state.arrivalLocationHits)
   const candidateStepIndex = useNavigationPrototypeStore((state) => state.candidateStepIndex)
@@ -133,6 +135,7 @@ export function NavigationPrototypeCard({
           ) : null}
           {latestStepPrompt ? <p className="navigation-prototype-card__prompt">{latestStepPrompt}</p> : null}
           {location ? <p className="navigation-prototype-card__location">定位精度：约{Math.round(location.accuracy)}m</p> : null}
+          {locationSource ? <p className="navigation-prototype-card__location">位置来源：{locationSource}</p> : null}
           {conversionStatus === 'converting' ? <p className="navigation-prototype-card__location">正在转换 GPS 坐标…</p> : null}
           {conversionStatus === 'failed' ? <p className="navigation-prototype-card__reroute-error">坐标转换暂不可用{conversionError ? `：${conversionError}` : ''}</p> : null}
           {isLowAccuracy ? <p className="navigation-prototype-card__low-accuracy">定位精度较低，暂不判断是否偏航</p> : null}
@@ -203,6 +206,7 @@ export function NavigationPrototypeCard({
               <button type="button" className="navigation-prototype-card__debug-export" onClick={exportTrajectory} disabled={!trajectoryRecordCount}>
                 导出 JSON
               </button>
+              <NavigationPrototypeReplayControls />
             </div>
           ) : null}
         </div>

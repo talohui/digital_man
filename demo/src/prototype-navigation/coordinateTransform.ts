@@ -84,7 +84,8 @@ export function toConvertedGcj02Location(input: {
   return {
     ...input.position,
     accuracy: input.raw.accuracy,
-    timestamp: input.raw.timestamp
+    timestamp: input.raw.timestamp,
+    source: 'geolocation'
   }
 }
 

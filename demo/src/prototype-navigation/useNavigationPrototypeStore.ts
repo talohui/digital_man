@@ -21,7 +21,10 @@ import type {
   NavigationPrototypeRoute,
   NavigationPrototypeStatus,
   NavigationPrototypeTraceRecord,
-  PrototypeDeviation
+  NavigationPrototypeLocationSource,
+  PrototypeDeviation,
+  ReplayFix,
+  ReplayScenario
 } from './types'
 
 const ARRIVAL_DISTANCE_METERS = 35
@@ -53,6 +56,10 @@ type NavigationPrototypeStore = {
   route?: NavigationPrototypeRoute
   rawWgs84Position?: BrowserWgs84Location
   convertedGcj02Position?: ConvertedGcj02Location
+  locationSource?: NavigationPrototypeLocationSource
+  replayScenario?: ReplayScenario
+  replayProgress?: number
+  replaySeed?: number
   lastConversionInputWgs84Position?: BrowserWgs84Location
   conversionStatus: CoordinateConversionStatus
   conversionProvider: string
@@ -76,6 +83,7 @@ type NavigationPrototypeStore = {
   start: (origin: NavigationPrototypeEndpoint, destination: NavigationPrototypeEndpoint) => Promise<void>
   acceptRawWgs84Location: (location: BrowserWgs84Location) => void
   acceptSimulatedGcj02Location: (location: ConvertedGcj02Location) => void
+  setReplayActive: (active: boolean) => void
   reroute: () => Promise<void>
   continueCurrentRoute: () => void
   simulateDeviation: () => void
@@ -89,18 +97,37 @@ type NavigationPrototypeStore = {
 }
 
 export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set, get) => {
+  const startGeolocationWatch = () => {
+    if (stopLocationWatch || get().status === 'arrived') return
+    const generation = requestGeneration
+    stopLocationWatch = watchPrototypeLocation({
+      onLocation: (location) => {
+        if (get().locationSource !== 'replay-gcj02') get().acceptRawWgs84Location(location)
+      },
+      onError: ({ message }) => {
+        if (generation === requestGeneration && get().locationSource !== 'replay-gcj02') {
+          set({ status: 'error', error: message })
+        }
+      }
+    })
+  }
+
   const appendTrajectoryRecord = (raw: BrowserWgs84Location | undefined, converted: ConvertedGcj02Location) => {
     const state = get()
-    if (!import.meta.env.DEV || !state.trajectoryRecording || !raw) return
+    if (!import.meta.env.DEV || !state.trajectoryRecording) return
     const record: NavigationPrototypeTraceRecord = {
       timestamp: converted.timestamp,
       rawWgs84: raw,
       convertedGcj02: converted,
       accuracy: converted.accuracy,
-      offsetMeters: state.coordinateOffsetMeters ?? calculateCoordinateOffsetMeters(raw, converted),
+      offsetMeters: raw ? state.coordinateOffsetMeters ?? calculateCoordinateOffsetMeters(raw, converted) : undefined,
       distanceToRouteMeters: state.deviation.distanceToRouteMeters,
       deviationState: state.deviation.state,
-      currentStepIndex: state.progress?.currentStepIndex
+      currentStepIndex: state.progress?.currentStepIndex,
+      locationSource: converted.source,
+      replayScenario: state.replayScenario,
+      replayProgress: state.replayProgress,
+      seed: state.replaySeed
     }
     set({ trajectory: [...state.trajectory, record].slice(-MAX_TRAJECTORY_RECORDS) })
   }
@@ -112,12 +139,12 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     // Converted fixes arriving late are visible for diagnosis but never feed
     // route progress, arrival or deviation decisions.
     if (Date.now() - location.timestamp > LOCATION_STALE_MS) {
-      set({ convertedGcj02Position: location })
+      set({ convertedGcj02Position: location, locationSource: location.source })
       return
     }
 
     if (!state.route) {
-      set({ convertedGcj02Position: location, arrivalLocationHits: 0 })
+      set({ convertedGcj02Position: location, locationSource: location.source, arrivalLocationHits: 0 })
       appendTrajectoryRecord(raw, location)
       return
     }
@@ -140,7 +167,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     const progress = buildNavigationPrototypeProgress(route, location, confirmedStep.stepIndex)
     const deviation = evaluateDeviation({ prior: state.deviation, location, route, timestamp: location.timestamp })
     const isWithinArrivalRadius = progress.distanceToDestinationMeters < ARRIVAL_DISTANCE_METERS
-    const arrivalLocationHits = isWithinArrivalRadius ? state.arrivalLocationHits + 1 : 0
+    // Poor fixes may still move the marker, but cannot advance arrival.
+    const arrivalLocationHits = isWithinArrivalRadius && location.accuracy <= MAX_DEVIATION_ACCURACY_METERS
+      ? state.arrivalLocationHits + 1
+      : 0
     const shouldAnnounce = confirmedStep.didConfirm && state.lastAnnouncedStepIndex !== confirmedStep.stepIndex
 
     if (arrivalLocationHits >= REQUIRED_ARRIVAL_LOCATION_HITS) {
@@ -150,6 +180,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       set({
         status: 'arrived',
         convertedGcj02Position: location,
+        locationSource: location.source,
         progress,
         deviation: createOnRouteDeviation(),
         arrivalLocationHits,
@@ -170,6 +201,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     set({
       status: state.status === 'rerouting' ? 'rerouting' : 'navigating',
       convertedGcj02Position: location,
+      locationSource: location.source,
       progress,
       deviation,
       arrivalLocationHits,
@@ -206,6 +238,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         route: undefined,
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
+        locationSource: undefined,
+        replayScenario: undefined,
+        replayProgress: undefined,
+        replaySeed: undefined,
         lastConversionInputWgs84Position: undefined,
         conversionStatus: 'idle',
         conversionError: undefined,
@@ -225,12 +261,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         error: undefined
       })
 
-      stopLocationWatch = watchPrototypeLocation({
-        onLocation: (location) => get().acceptRawWgs84Location(location),
-        onError: ({ message }) => {
-          if (generation === requestGeneration) set({ status: 'error', error: message })
-        }
-      })
+      startGeolocationWatch()
 
       try {
         const route = await requestPrototypeWalkingRoute(origin, destination)
@@ -257,7 +288,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     acceptRawWgs84Location(location) {
       const state = get()
-      if (state.status === 'arrived') return
+      if (state.status === 'arrived' || state.locationSource === 'replay-gcj02') return
       if (!isAcceptedPrototypeLocation(location)) {
         const generation = nextCoordinateConversionGeneration()
         set({
@@ -311,8 +342,31 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     acceptSimulatedGcj02Location(location) {
       if (!import.meta.env.DEV) return
-      set({ conversionStatus: 'ready', conversionError: undefined, convertedGcj02Position: location })
+      if (!isAcceptedPrototypeLocation(location)) {
+        set({ locationSource: location.source, conversionError: '模拟定位精度超过 100m，已拒绝。' })
+        return
+      }
+      const replayFix = location.source === 'replay-gcj02' ? location as ReplayFix : undefined
+      set({
+        conversionStatus: 'ready',
+        conversionError: undefined,
+        convertedGcj02Position: location,
+        locationSource: location.source,
+        replayScenario: replayFix?.replayScenario,
+        replayProgress: replayFix?.replayProgress,
+        replaySeed: replayFix?.seed
+      })
       acceptConvertedGcj02Location(location)
+    },
+    setReplayActive(active) {
+      if (active) {
+        stopLocationWatch?.()
+        stopLocationWatch = null
+        set({ locationSource: 'replay-gcj02' })
+        return
+      }
+      if (get().locationSource === 'replay-gcj02') set({ locationSource: undefined, replayScenario: undefined, replayProgress: undefined, replaySeed: undefined })
+      startGeolocationWatch()
     },
     async reroute() {
       const state = get()
@@ -369,7 +423,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       const base = route.polyline[Math.floor(route.polyline.length / 2)]
       const now = Date.now()
       for (let index = 0; index < REQUIRED_CONFIRMED_HITS; index += 1) {
-        get().acceptSimulatedGcj02Location({ ...toGcj02Position({ lat: base.lat + 0.00085, lng: base.lng }), accuracy: 12, timestamp: now + index * 4_000 })
+        get().acceptSimulatedGcj02Location({ ...toGcj02Position({ lat: base.lat + 0.00085, lng: base.lng }), accuracy: 12, timestamp: now + index * 4_000, source: 'manual-gcj02' })
       }
     },
     simulateRouteRecovery() {
@@ -378,7 +432,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       const point = route.polyline[Math.floor(route.polyline.length / 2)]
       const now = Date.now()
       for (let index = 0; index < REQUIRED_RECOVERY_HITS; index += 1) {
-        get().acceptSimulatedGcj02Location({ ...toGcj02Position(point), accuracy: 12, timestamp: now + index * 1_000 })
+        get().acceptSimulatedGcj02Location({ ...toGcj02Position(point), accuracy: 12, timestamp: now + index * 1_000, source: 'manual-gcj02' })
       }
     },
     simulateArrival() {
@@ -420,6 +474,10 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         route: undefined,
         rawWgs84Position: undefined,
         convertedGcj02Position: undefined,
+        locationSource: undefined,
+        replayScenario: undefined,
+        replayProgress: undefined,
+        replaySeed: undefined,
         lastConversionInputWgs84Position: undefined,
         conversionStatus: 'idle',
         conversionError: undefined,

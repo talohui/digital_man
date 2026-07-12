@@ -27,6 +27,7 @@ function toTMapRawWgs84DebugLatLng(TMap: any, position: Wgs84Position) {
 export function NavigationPrototypeUserMarkerLayer({ runtime }: { runtime: NavigationPrototypeMapRuntime | null }) {
   const converted = useNavigationPrototypeStore((state) => state.convertedGcj02Position)
   const raw = useNavigationPrototypeStore((state) => state.rawWgs84Position)
+  const locationSource = useNavigationPrototypeStore((state) => state.locationSource)
   const markerLayerRef = useRef<any>(null)
   const debugLineLayerRef = useRef<any>(null)
 
@@ -39,7 +40,7 @@ export function NavigationPrototypeUserMarkerLayer({ runtime }: { runtime: Navig
     if (!runtime || !converted || !runtime.TMap?.MultiMarker || !runtime.TMap?.MarkerStyle) return undefined
 
     const { TMap, map } = runtime
-    const showRawDebug = import.meta.env.DEV && Boolean(raw)
+    const showRawDebug = import.meta.env.DEV && locationSource === 'geolocation' && Boolean(raw)
     const markerLayer = new TMap.MultiMarker({
       map,
       zIndex: 760,
@@ -101,7 +102,7 @@ export function NavigationPrototypeUserMarkerLayer({ runtime }: { runtime: Navig
       if (markerLayerRef.current === markerLayer) markerLayerRef.current = null
       debugLineLayerRef.current = null
     }
-  }, [converted, raw, runtime])
+  }, [converted, locationSource, raw, runtime])
 
   return null
 }
