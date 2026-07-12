@@ -40,10 +40,9 @@ import {
   type ScenicMapPresentation
 } from './Map3DGuidePage'
 import { NavigationPrototypeCard } from '../prototype-navigation/NavigationPrototypeCard'
-import { NavigationPrototypeMultiStopReplayControls } from '../prototype-navigation/NavigationPrototypeReplayControls'
+import { NavigationBetaDebugPanel } from '../prototype-navigation/NavigationBetaDebugPanel'
 import { NavigationPrototypeMapLayer } from '../prototype-navigation/NavigationPrototypeMapLayer'
 import { NavigationPrototypeUserMarkerLayer } from '../prototype-navigation/NavigationPrototypeUserMarkerLayer'
-import { NavigationPrototypeLocalTestMapLayer } from '../prototype-navigation/NavigationPrototypeLocalTestMapLayer'
 import { createNavigationBetaViewModel, type NavigationBetaViewModel } from '../prototype-navigation/navigationBetaViewModel'
 import { isNavigationDebugEnabled } from '../prototype-navigation/navigationDebug'
 import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
@@ -651,6 +650,8 @@ function RouteTourMobileOverlay({
   const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
   const [serviceOpen, setServiceOpen] = useState(false)
+  const [debugMenuOpen, setDebugMenuOpen] = useState(false)
+  const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
   const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
@@ -872,7 +873,24 @@ function RouteTourMobileOverlay({
 
   const openXiaoling = () => {
     setServiceOpen(false)
+    setDebugMenuOpen(false)
+    setDebugPanelOpen(false)
     openGlobalXiaoling({ mode: 'route' })
+  }
+
+  const handleMore = () => {
+    if (!navigationDebugEnabled) {
+      setFeedbackText('更多功能建设中')
+      return
+    }
+    setDebugMenuOpen((open) => !open)
+  }
+
+  const openDebugPanel = () => {
+    setDebugMenuOpen(false)
+    setServiceOpen(false)
+    setLayerPanelOpen(false)
+    setDebugPanelOpen(true)
   }
 
   const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
@@ -887,11 +905,15 @@ function RouteTourMobileOverlay({
 
   const toggleService = () => {
     closeGlobalXiaoling()
+    setDebugMenuOpen(false)
+    setDebugPanelOpen(false)
     setLayerPanelOpen(false)
     setServiceOpen((open) => !open)
   }
 
   const toggleLayer = () => {
+    setDebugMenuOpen(false)
+    setDebugPanelOpen(false)
     setServiceOpen(false)
     setLayerPanelOpen(!layerPanelOpen)
   }
@@ -925,8 +947,13 @@ function RouteTourMobileOverlay({
         routeName={stage === 'preview' ? '路线预览' : route.name}
         progressText={progressText}
         onBack={() => goToMapBrowse(navigate, presentation)}
-        onMore={() => setFeedbackText('更多功能建设中')}
+        onMore={handleMore}
       />
+      {navigationDebugEnabled && debugMenuOpen ? (
+        <div className="navigation-beta-debug-menu" role="menu" aria-label="更多功能">
+          <button type="button" role="menuitem" onClick={openDebugPanel}>导航调试</button>
+        </div>
+      ) : null}
       <RouteToolRail
         side="left"
         stage={stage}
@@ -1022,18 +1049,17 @@ function RouteTourMobileOverlay({
         )}
       </div>
       {navigationDebugEnabled ? (
-        <>
-          <NavigationPrototypeMultiStopReplayControls
-            debugEnabled
-            route={route}
-            stage={stage}
-            currentStopIndex={currentStopIndex}
-            joinStopIndex={joinStopIndex}
-            confirmArrival={handleCommitPrototypeArrival}
-            continueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
-          />
-          <NavigationPrototypeLocalTestMapLayer runtime={mapRuntime} />
-        </>
+        <NavigationBetaDebugPanel
+          open={debugPanelOpen}
+          route={route}
+          stage={stage}
+          currentStopIndex={currentStopIndex}
+          joinStopIndex={joinStopIndex}
+          mapRuntime={mapRuntime}
+          onClose={() => setDebugPanelOpen(false)}
+          onConfirmArrival={handleCommitPrototypeArrival}
+          onContinueToActive={(stopIndex) => goContinueNextStop(navigate, route.id, stopIndex, presentation)}
+        />
       ) : null}
       {feedbackText ? <div className="map-route-tour-toast">{feedbackText}</div> : null}
       <MapLayerPanel open={layerPanelOpen} className="map-route-tour-layer-panel" />

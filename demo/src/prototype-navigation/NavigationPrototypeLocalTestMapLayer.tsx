@@ -148,13 +148,13 @@ export function NavigationPrototypeLocalTestMapLayer({ runtime }: { runtime: Nav
 
   if (!enabled) return null
 
-  return <details className="navigation-prototype-replay navigation-prototype-local-test">
-    <summary>本地真实导航选点</summary>
+  return <section className="navigation-prototype-replay navigation-prototype-local-test">
+    <strong className="navigation-prototype-local-test__title">测试步骤</strong>
     <div className="navigation-prototype-replay__controls">
       {!localTest ? <button type="button" onClick={prepare}>准备本地测试</button> : null}
-      {localTest?.phase === 'permission-intro' ? <button type="button" onClick={start}>获取真实位置并选点</button> : null}
+      {localTest?.phase === 'permission-intro' ? <button type="button" onClick={start}>申请定位与方向权限</button> : null}
       {localTest?.phase === 'locating' ? <p>正在获取 GCJ-02 真实位置…</p> : null}
-      {localTest?.phase === 'awaiting-target' ? <p>请在地图上点击附近终点，建议 200–500 米且包含转弯。</p> : null}
+      {localTest?.phase === 'awaiting-target' ? <p>请在地图上选择终点，建议选择 200–500 米且包含转弯的位置。</p> : null}
       {displayTarget ? <small>
         终点：{displayTarget.name}<br />
         {displayTarget.coordinate.lat.toFixed(6)}, {displayTarget.coordinate.lng.toFixed(6)}<br />
@@ -162,10 +162,13 @@ export function NavigationPrototypeLocalTestMapLayer({ runtime }: { runtime: Nav
       </small> : null}
       <div className="navigation-prototype-replay__buttons">
         {localTest?.phase === 'awaiting-target' && selectedTarget
-          ? <button type="button" onClick={() => confirmTarget(selectedTarget)}>确认终点并规划</button>
+          ? <button type="button" onClick={() => confirmTarget(selectedTarget)}>开始真实步行测试</button>
           : null}
-        {localTest ? <button type="button" onClick={cancel}>取消本地测试</button> : null}
+        {localTest?.phase === 'awaiting-target' && selectedTarget
+          ? <button type="button" onClick={() => setSelectedTarget(undefined)}>重新选择</button>
+          : null}
+        {localTest ? <button type="button" onClick={cancel}>结束本地测试</button> : null}
       </div>
     </div>
-  </details>
+  </section>
 }

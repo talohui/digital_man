@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 
 import type { GuideAssistantMode } from './guideAssistantEvents'
 
-function XiaolingFace() {
+export function XiaolingFace() {
   return (
     <span className="guide-xiaoling-face" aria-hidden="true">
       <i />
