@@ -48,7 +48,6 @@ import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/rout
 import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentTarget'
 import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
 import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
-import { isScenicRouteId, useGuideSessionStore } from '../guide'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
@@ -448,11 +447,7 @@ function RouteActiveCard({
   onNavigate,
   onPoiDetail,
   prototypeTarget,
-  prototypeTargetError,
-  prototypeStatus,
-  onCommitPrototypeArrival,
-  onPrototypeArrivalGuide,
-  onPrototypeArrivalDetail
+  prototypeStatus
 }: {
   route: ScenicRouteConfig
   currentStopIndex: number
@@ -461,11 +456,7 @@ function RouteActiveCard({
   onNavigate: () => void
   onPoiDetail: (stopIndex: number) => void
   prototypeTarget?: PrototypeNavigationTarget
-  prototypeTargetError?: string
   prototypeStatus: string
-  onCommitPrototypeArrival: () => void
-  onPrototypeArrivalGuide: (poiId: string, poiName: string) => void
-  onPrototypeArrivalDetail: (poiId: string) => void
 }) {
   const nextStopIndex = Math.min(currentStopIndex + 1, route.stops.length - 1)
   const nextStop = getNextRouteStop(route.id, currentStopIndex)
@@ -874,45 +865,6 @@ function RouteTourMobileOverlay({
     openGlobalXiaoling({ mode: 'route' })
   }
 
-  const handlePrototypeArrivalGuide = (poiId: string, poiName: string) => {
-    if (!isScenicRouteId(route.id)) {
-      setFeedbackText('当前景点讲解建设中')
-      return
-    }
-
-    const session = useGuideSessionStore.getState()
-    session.setContext({
-      page: 'poi',
-      pathname: window.location.pathname,
-      presentation,
-      routeId: route.id,
-      routeName: route.name,
-      selectedPoiId: poiId,
-      selectedPoiName: poiName,
-      poiSource: 'route',
-      poiReturnStage: 'active',
-      poiReturnStopIndex: currentStopIndex,
-      location: { available: false }
-    })
-    openGlobalXiaoling({ mode: 'poi' })
-  }
-
-  const handlePrototypeArrivalPoiDetail = (poiId: string) => {
-    const destinationStopIndex = route.stops.findIndex((stop) => getStopPoiId(stop) === poiId)
-    if (destinationStopIndex < 0) {
-      setFeedbackText('当前景点详情建设中')
-      return
-    }
-
-    goToPoiFromRoute(navigate, poiId, {
-      routeId: route.id,
-      poiStopIndex: destinationStopIndex,
-      returnStage: 'active',
-      returnStopIndex: currentStopIndex,
-      presentation
-    })
-  }
-
   const handlePreviewGuide = (stop: ScenicRouteStop | undefined) => {
     const stopName = stop?.name ?? '下一站'
     setServiceOpen(false)
@@ -993,25 +945,20 @@ function RouteTourMobileOverlay({
         onLayer={toggleLayer}
         isLayerOpen={layerPanelOpen}
       />
-      <div className={`map-route-tour-bottom${cardCollapsed ? ' is-collapsed' : ''}`}>
-        <button
-          type="button"
-          className="map-route-tour-collapse-toggle"
-          onClick={() => setRouteCardExpanded(!routeCardExpanded)}
-          aria-expanded={!cardCollapsed}
-          aria-label={cardCollapsed ? '展开路线卡片' : '收起路线卡片'}
-        >
-          <span aria-hidden="true" />
-        </button>
+      <div className={`map-route-tour-bottom${!navigationBetaViewModel.shouldReplaceRouteSheet && cardCollapsed ? ' is-collapsed' : ''}`}>
+        {!navigationBetaViewModel.shouldReplaceRouteSheet ? (
+          <button
+            type="button"
+            className="map-route-tour-collapse-toggle"
+            onClick={() => setRouteCardExpanded(!routeCardExpanded)}
+            aria-expanded={!cardCollapsed}
+            aria-label={cardCollapsed ? '展开路线卡片' : '收起路线卡片'}
+          >
+            <span aria-hidden="true" />
+          </button>
+        ) : null}
         {navigationBetaViewModel.shouldReplaceRouteSheet ? (
-          <NavigationPrototypeCard
-            viewModel={navigationBetaViewModel}
-            target={prototypeSession?.target ?? navigationStoreSnapshot.preparedTarget ?? prototypeTarget}
-            targetError={prototypeTargetError}
-            onCommitArrival={handleCommitPrototypeArrival}
-            onListenToArrivalGuide={(destination) => handlePrototypeArrivalGuide(destination.poiId, destination.name)}
-            onViewArrivalPoiDetail={(destination) => handlePrototypeArrivalPoiDetail(destination.poiId)}
-          />
+          <NavigationPrototypeCard viewModel={navigationBetaViewModel} />
         ) : cardCollapsed ? (
           <RouteCollapsedBar
             route={route}
@@ -1060,11 +1007,7 @@ function RouteTourMobileOverlay({
             onNavigate={handleNavigateNext}
             onPoiDetail={handlePoiDetail}
             prototypeTarget={prototypeTarget}
-            prototypeTargetError={prototypeTargetError}
             prototypeStatus={prototypeStatus}
-            onCommitPrototypeArrival={handleCommitPrototypeArrival}
-            onPrototypeArrivalGuide={handlePrototypeArrivalGuide}
-            onPrototypeArrivalDetail={handlePrototypeArrivalPoiDetail}
           />
         )}
       </div>
