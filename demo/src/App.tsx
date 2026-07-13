@@ -1,227 +1,181 @@
-import { lazy, Suspense, useEffect, type ReactNode } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
-import { GlobalXiaolingAssistant } from './components/guide'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { Route, Routes, useLocation } from 'react-router-dom'
+import AdminLogin from './pages/AdminLogin'
+import AdminMobileNotice from './pages/AdminMobileNotice'
+import GuideImmersivePage from './pages/GuideImmersivePage'
+import HomePage from './pages/HomePage'
+import SplashAdPage from './pages/SplashAdPage'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
-import { useIsMobileViewport } from './hooks/useIsMobileViewport'
-import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
+import RouteSkeleton from './components/RouteSkeleton'
+import FloatingGuide from './components/FloatingGuide'
+import { GlobalXiaolingAssistant } from './components/guide'
+import MobileShell from './mobile/MobileShell'
 import { GuideContextBridge } from './guide'
+import { isAdminAuthed } from './lib/adminAuth'
+import { unlockAudio } from './lib/audioLipsync'
+import { markLingshanSplashSeen, shouldShowLingshanSplash } from './lib/introStorage'
+import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
+import { useIsMobileViewport } from './hooks/useIsMobileViewport'
+import { useChatStore } from './store/useChatStore'
 
-const AppProviders = lazy(() => import('./components/AppProviders'))
-const ChatConnectionManager = lazy(() => import('./components/ChatConnectionManager'))
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminAvatarPage = lazy(() => import('./pages/AdminAvatarPage'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
+const AdminKnowledgePage = lazy(() => import('./pages/AdminKnowledgePage'))
+const AdminMarketingDecisionPage = lazy(() => import('./pages/AdminMarketingDecisionPage'))
+const AdminServiceConfigPage = lazy(() => import('./pages/AdminServiceConfigPage'))
 const GuideMapPage = lazy(() => import('./pages/GuideMapPage'))
-const HomePage = lazy(() => import('./pages/HomePage'))
-const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
-const Scenic3DMapPage = lazy(() => import('./pages/Scenic3DMapPage'))
 const Map3DGuidePage = lazy(() => import('./pages/Map3DGuidePage'))
 const Map3DGuidePrototypeAPage = lazy(() => import('./pages/Map3DGuidePrototypeAPage'))
 const Map3DGuidePrototypeBPage = lazy(() => import('./pages/Map3DGuidePrototypeBPage'))
 const Map3DGuidePrototypeCPage = lazy(() => import('./pages/Map3DGuidePrototypeCPage'))
 const Map3DPoiDetailPage = lazy(() => import('./pages/Map3DPoiDetailPage'))
 const Map3DRouteGuidePage = lazy(() => import('./pages/Map3DRouteGuidePage'))
-const MobileShell = lazy(() => import('./mobile/MobileShell'))
+const Scenic3DMapPage = lazy(() => import('./pages/Scenic3DMapPage'))
+const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
+const ScenicMapPage = lazy(() => import('./pages/ScenicMapPage'))
 const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
-
-type LazyRouteProps = {
-  children: ReactNode
-  label: string
-}
-
-function RouteLoading({ label }: { label: string }) {
-  return <div style={{ padding: 24 }}>{label}</div>
-}
-
-function PlainLazyRoute({ children, label }: LazyRouteProps) {
-  return <Suspense fallback={<RouteLoading label={label} />}>{children}</Suspense>
-}
-
-function AppLazyRoute({ children, label }: LazyRouteProps) {
-  return (
-    <Suspense fallback={<RouteLoading label={label} />}>
-      <AppProviders>
-        <ChatConnectionManager />
-        {children}
-      </AppProviders>
-    </Suspense>
-  )
-}
-
-function ThreePreviewRoute() {
-  return (
-    <PlainLazyRoute label="正在加载 3D 预览...">
-      <Scenic3DPreviewPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Scenic3DMapRoute() {
-  return (
-    <PlainLazyRoute label="正在加载真实 3D 地图导览...">
-      <Map3DGuidePage />
-    </PlainLazyRoute>
-  )
-}
-
-function Scenic3DMapPrototypeRoute() {
-  return (
-    <PlainLazyRoute label="正在加载 3D 景区地图原型...">
-      <Scenic3DMapPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DGuideRoute() {
-  return (
-    <PlainLazyRoute label="正在加载真实 3D 地图导览...">
-      <Map3DGuidePage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DGuidePrototypeARoute() {
-  return (
-    <PlainLazyRoute label="正在加载 3D 导览视觉原型 A...">
-      <Map3DGuidePrototypeAPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DGuidePrototypeBRoute() {
-  return (
-    <PlainLazyRoute label="正在加载 3D 导览视觉原型 B...">
-      <Map3DGuidePrototypeBPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DGuidePrototypeCRoute() {
-  return (
-    <PlainLazyRoute label="正在加载 3D 导览视觉原型 C...">
-      <Map3DGuidePrototypeCPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DPoiDetailRoute() {
-  return (
-    <PlainLazyRoute label="正在加载景点详情...">
-      <Map3DPoiDetailPage />
-    </PlainLazyRoute>
-  )
-}
-
-function Map3DRouteGuideRoute() {
-  return (
-    <PlainLazyRoute label="正在加载路线游览...">
-      <Map3DRouteGuidePage />
-    </PlainLazyRoute>
-  )
-}
-
-function HomeRoute() {
-  return (
-    <AppLazyRoute label="正在加载智慧导览...">
-      <HomePage />
-    </AppLazyRoute>
-  )
-}
-
-function GuideMapRoute() {
-  return (
-    <AppLazyRoute label="正在加载地图导览...">
-      <GuideMapPage />
-    </AppLazyRoute>
-  )
-}
-
-function SpotGuideRoute() {
-  return (
-    <AppLazyRoute label="正在加载景点讲解...">
-      <SpotGuidePage />
-    </AppLazyRoute>
-  )
-}
-
-function AdminDashboardRoute() {
-  return (
-    <AppLazyRoute label="正在加载管理后台...">
-      <AdminDashboard />
-    </AppLazyRoute>
-  )
-}
-
-function AdminAvatarRoute() {
-  return (
-    <AppLazyRoute label="正在加载数字人配置...">
-      <AdminAvatarPage />
-    </AppLazyRoute>
-  )
-}
-
-function MobileShellRoute() {
-  return (
-    <AppLazyRoute label="正在加载移动端导览...">
-      <MobileShell />
-    </AppLazyRoute>
-  )
-}
 
 function App() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
+  const initializeConnection = useChatStore((state) => state.initializeConnection)
+  const disconnectConnection = useChatStore((state) => state.disconnectConnection)
+  const isHomeRoute = location.pathname === '/'
   const isAdminRoute = location.pathname.startsWith('/admin')
   const isMapPoiDetailRoute = location.pathname.startsWith('/map-3d-guide-c/poi')
+  const isCanonicalMapRoute = location.pathname.startsWith('/map-3d-guide-c')
+  const isWideAdminScreen =
+    location.pathname === '/admin' || location.pathname.startsWith('/admin/heatmap')
+  const [adminAuthed, setAdminAuthed] = useState(() => isAdminAuthed())
+  const [forceAdminMobile, setForceAdminMobile] = useState(
+    () =>
+      typeof sessionStorage !== 'undefined' &&
+      sessionStorage.getItem('lingshan_admin_force_mobile') === '1'
+  )
+  const [showSplash, setShowSplash] = useState(() => isHomeRoute && shouldShowLingshanSplash())
+
+  useEffect(() => {
+    initializeConnection()
+    return () => disconnectConnection()
+  }, [disconnectConnection, initializeConnection])
 
   useEffect(() => {
     if (!isAdminRoute) {
-      scheduleMap3DGuidePreload({
-        includeLandmarkAssets: !isMapPoiDetailRoute
-      })
+      scheduleMap3DGuidePreload({ includeLandmarkAssets: !isMapPoiDetailRoute })
     }
   }, [isAdminRoute, isMapPoiDetailRoute])
 
-  const routeContent = isMobile && !isAdminRoute ? (
+  useEffect(() => {
+    const unlock = () => {
+      void unlockAudio().then((unlocked) => {
+        if (!unlocked) return
+        window.removeEventListener('pointerdown', unlock)
+        window.removeEventListener('touchend', unlock)
+      })
+    }
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('touchend', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('touchend', unlock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isHomeRoute) {
+      setShowSplash(shouldShowLingshanSplash())
+      return
+    }
+    setShowSplash(false)
+  }, [isHomeRoute])
+
+  const finishSplash = useCallback(() => {
+    markLingshanSplashSeen()
+    setShowSplash(false)
+  }, [])
+
+  const continueAdminMobile = useCallback(() => {
+    try {
+      sessionStorage.setItem('lingshan_admin_force_mobile', '1')
+    } catch {
+      // 隐私模式等场景下忽略。
+    }
+    setForceAdminMobile(true)
+  }, [])
+
+  if (isHomeRoute && showSplash) return <SplashAdPage onFinish={finishSplash} />
+
+  if (isMobile && !isAdminRoute) {
+    return (
+      <RouteErrorBoundary>
+        <Suspense fallback={<RouteSkeleton />}>
           <Routes>
-            <Route path="/three-preview" element={<ThreePreviewRoute />} />
-            <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
-            <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
-            <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
-            <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
-            <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
-            <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
-            <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
-            <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-            <Route path="*" element={<MobileShellRoute />} />
+            <Route path="/guide" element={<GuideImmersivePage />} />
+            <Route path="/guide/classic" element={<HomePage />} />
+            <Route path="/map" element={<Map3DGuidePage />} />
+            <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
+            <Route path="/scenic-3d-map" element={<Map3DGuidePage />} />
+            <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPage />} />
+            <Route path="/map-3d-guide" element={<Map3DGuidePage />} />
+            <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeAPage />} />
+            <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBPage />} />
+            <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailPage />} />
+            <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuidePage />} />
+            <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCPage />} />
+            <Route path="*" element={<MobileShell />} />
           </Routes>
-  ) : (
-        <Routes>
-          <Route path="/" element={<HomeRoute />} />
-          <Route path="/map" element={<GuideMapRoute />} />
-          <Route path="/spot/:spotId" element={<SpotGuideRoute />} />
-          <Route path="/three-preview" element={<ThreePreviewRoute />} />
-          <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
-          <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
-          <Route path="/map-3d-guide" element={<Map3DGuideRoute />} />
-          <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeARoute />} />
-          <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBRoute />} />
-          <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
-          <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
-          <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-          <Route path="/guide" element={<HomeRoute />} />
-          <Route path="/me" element={<HomeRoute />} />
-          <Route path="/admin" element={<AdminDashboardRoute />} />
-          <Route path="/admin/avatar" element={<AdminAvatarRoute />} />
-        </Routes>
-  )
+        </Suspense>
+        <GuideContextBridge />
+        {isCanonicalMapRoute ? <GlobalXiaolingAssistant /> : <FloatingGuide />}
+      </RouteErrorBoundary>
+    )
+  }
+
+  if (isMobile && isWideAdminScreen && !forceAdminMobile) {
+    return (
+      <RouteErrorBoundary>
+        <AdminMobileNotice onContinue={continueAdminMobile} />
+      </RouteErrorBoundary>
+    )
+  }
+
+  if (isAdminRoute && !adminAuthed) {
+    return (
+      <RouteErrorBoundary>
+        <AdminLogin onSuccess={() => setAdminAuthed(true)} />
+      </RouteErrorBoundary>
+    )
+  }
 
   return (
     <RouteErrorBoundary>
-      <>
-        <GuideContextBridge />
-        {routeContent}
-        <GlobalXiaolingAssistant />
-      </>
+      <Suspense fallback={<RouteSkeleton />}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/map" element={<GuideMapPage />} />
+          <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
+          <Route path="/scenic-3d-map" element={<Map3DGuidePage />} />
+          <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPage />} />
+          <Route path="/map-3d-guide" element={<Map3DGuidePage />} />
+          <Route path="/map-3d-guide-a" element={<Map3DGuidePrototypeAPage />} />
+          <Route path="/map-3d-guide-b" element={<Map3DGuidePrototypeBPage />} />
+          <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailPage />} />
+          <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuidePage />} />
+          <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCPage />} />
+          <Route path="/spot/:spotId" element={<SpotGuidePage />} />
+          <Route path="/guide" element={<GuideImmersivePage />} />
+          <Route path="/guide/classic" element={<HomePage />} />
+          <Route path="/me" element={<HomePage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/decision" element={<AdminMarketingDecisionPage />} />
+          <Route path="/admin/heatmap" element={<ScenicMapPage />} />
+          <Route path="/admin/avatar" element={<AdminAvatarPage />} />
+          <Route path="/admin/kb" element={<AdminKnowledgePage />} />
+          <Route path="/admin/config" element={<AdminServiceConfigPage />} />
+        </Routes>
+      </Suspense>
+      <GuideContextBridge />
+      {isCanonicalMapRoute ? <GlobalXiaolingAssistant /> : null}
     </RouteErrorBoundary>
   )
 }

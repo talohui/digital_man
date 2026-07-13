@@ -1,53 +1,186 @@
-import { ClockCircleOutlined, CompassOutlined, CreditCardOutlined, EnvironmentOutlined, LoadingOutlined, MessageOutlined, RightOutlined, ShoppingCartOutlined } from '@ant-design/icons'
-import { useEffect, useRef } from 'react'
+import { CompassOutlined, MessageOutlined, RightOutlined } from '@ant-design/icons'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendGuideFeedback } from '../api/guide'
-import {
-  GUIDE_TAGS,
-  getGuideRouteById,
-  getRouteItineraryMeta,
-  type GuideRecommendationCard
-} from '../data/guideData'
-import {
-  capturePreferenceUpdate,
-  captureRecommendationClick,
-  captureRecommendationExposure,
-  captureRouteClick,
-  captureRouteExpose,
-  captureTagToggle
-} from '../lib/analytics'
+import { getGuideRouteById, guideSpots } from '../data/guideData'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
-import { useTicketStore } from '../store/useTicketStore'
 
-function scoreText(route: GuideRecommendationCard) {
-  if (typeof route.score === 'number') return `${Math.round(route.score)} 分匹配`
-  if (typeof route.matchScore === 'number') return `${Math.round(route.matchScore)}% 匹配`
-  return '智能推荐'
+// 景区服务宫格(精美图标入口,放在 public/icons/)
+const SERVICES = [
+  { icon: 'cat-food', label: '餐饮斋茶', to: '/consume' },
+  { icon: 'cat-culture', label: '文创礼品', to: '/consume' },
+  { icon: 'cat-show', label: '演艺秀场', to: '/consume' },
+  { icon: 'cat-spot', label: '灵山景点', to: '/map' }
+]
+
+type CrowdTone = 'busy' | 'steady' | 'calm'
+
+type CrowdStatus = {
+  level: string
+  hint: string
+  image: string
+  people: 1 | 2 | 3
+  tone: CrowdTone
+}
+
+const CROWD_STATUS_BY_SPOT_ID: Record<string, CrowdStatus> = {
+  south_gate: {
+    level: '适中',
+    hint: '入园排队平稳，适合按计划进园',
+    image: '/scenic/spots/south-gate.jpg',
+    people: 2,
+    tone: 'steady'
+  },
+  lingshan_wall: {
+    level: '舒适',
+    hint: '照壁前停留分散，拍照无需久等',
+    image: '/scenic/spots/lingshan-wall.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  shengjing_square: {
+    level: '适中',
+    hint: '广场通行顺畅，注意结伴同行',
+    image: '/intro/splash/splash-05.webp',
+    people: 2,
+    tone: 'steady'
+  },
+  fozu_tan: {
+    level: '舒适',
+    hint: '礼佛开场点位较安静，可从容停留',
+    image: '/scenic/spots/fozu-tan.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  jiulong_guanyu: {
+    level: '偏拥挤',
+    hint: '演出前后人流集中，建议错峰观看',
+    image: '/intro/splash/splash-04.webp',
+    people: 3,
+    tone: 'busy'
+  },
+  puti_avenue: {
+    level: '舒适',
+    hint: '步行廊道人流分散，适合慢行观景',
+    image: '/scenic/spots/puti-avenue.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  foshou_square: {
+    level: '适中',
+    hint: '互动打卡有短暂停留，排队可控',
+    image: '/scenic/spots/foshou-square.jpg',
+    people: 2,
+    tone: 'steady'
+  },
+  xiangfu_temple: {
+    level: '舒适',
+    hint: '寺院区参观节奏平稳，适合静心游览',
+    image: '/scenic/spots/xiangfu-temple.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  xingtan_square: {
+    level: '舒适',
+    hint: '广场停留较少，可作为短休节点',
+    image: '/scenic/spots/xingtan-square.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  foqian_square: {
+    level: '偏拥挤',
+    hint: '登临大佛前人流较高，注意台阶节奏',
+    image: '/scenic/spots/foqian-square.jpg',
+    people: 3,
+    tone: 'busy'
+  },
+  giant_buddha: {
+    level: '偏拥挤',
+    hint: '礼佛区人流偏高，建议稍后再上行',
+    image: '/intro/splash/splash-03.webp',
+    people: 3,
+    tone: 'busy'
+  },
+  baizi_mile: {
+    level: '适中',
+    hint: '亲子停留较多，互动区整体顺畅',
+    image: '/scenic/spots/baizi-mile.jpg',
+    people: 2,
+    tone: 'steady'
+  },
+  fan_gong: {
+    level: '适中',
+    hint: '室内参观节奏平稳，适合按路线前往',
+    image: '/intro/splash/splash-01.webp',
+    people: 2,
+    tone: 'steady'
+  },
+  fan_gong_square: {
+    level: '舒适',
+    hint: '广场空间开阔，适合休息与集合',
+    image: '/intro/splash/splash-01.webp',
+    people: 1,
+    tone: 'calm'
+  },
+  wuyin_tancheng: {
+    level: '适中',
+    hint: '转经与拍照点位有停留，通行正常',
+    image: '/scenic/spots/wuyin-tancheng.jpg',
+    people: 2,
+    tone: 'steady'
+  },
+  manfeilong_tower: {
+    level: '舒适',
+    hint: '塔区人流较少，适合轻松打卡',
+    image: '/scenic/spots/manfeilong-tower.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  lingshan_jingshe: {
+    level: '舒适',
+    hint: '精舍周边安静，适合放慢节奏',
+    image: '/scenic/spots/lingshan-jingshe.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  sansheng_hall: {
+    level: '舒适',
+    hint: '展陈区客流稳定，适合补充历史讲解',
+    image: '/scenic/spots/sansheng-hall.jpg',
+    people: 1,
+    tone: 'calm'
+  },
+  exit: {
+    level: '适中',
+    hint: '离园通道正常，注意返程接驳时间',
+    image: '/scenic/spots/exit.jpg',
+    people: 2,
+    tone: 'steady'
+  }
+}
+
+const CROWD_SPOTS = guideSpots.map((spot) => ({
+  id: spot.id,
+  name: spot.name,
+  ...CROWD_STATUS_BY_SPOT_ID[spot.id]
+}))
+
+function formatCrowdUpdateTime() {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(new Date())
 }
 
 function MobileHomePage() {
   const navigate = useNavigate()
-  const selectedTags = useGuideStore((state) => state.selectedTags)
-  const candidateRoutes = useGuideStore((state) => state.candidateRoutes)
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
-  const isLoading = useGuideStore((state) => state.isLoading)
-  const lastError = useGuideStore((state) => state.lastError)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
-  const toggleTag = useGuideStore((state) => state.toggleTag)
-  const refreshRecommendations = useGuideStore((state) => state.refreshRecommendations)
-  const setActiveRouteId = useGuideStore((state) => state.setActiveRouteId)
   const setActiveScene = useChatStore((state) => state.setActiveScene)
-  const ticket = useTicketStore((state) => state.ticketProfile)
-  const totalSpend = useTicketStore((state) => state.totalSpend())
-  const exposedRecommendationKeyRef = useRef('')
-  const sentPreferenceKeyRef = useRef('')
-
-  const selectedTagsKey = selectedTags.join('|')
-  const mainRoute = candidateRoutes[0]
-  const secondaryRoutes = candidateRoutes.slice(1)
   const route = getGuideRouteById(activeRouteId)
+  const crowdUpdateTime = formatCrowdUpdateTime()
 
   useEffect(() => {
     ensureUserId()
@@ -56,59 +189,13 @@ function MobileHomePage() {
     void import('../lib/prefetch').then((m) => m.prefetchHeavyTabs())
   }, [ensureUserId, setActiveScene])
 
-  useEffect(() => {
-    if (selectedTagsKey === sentPreferenceKeyRef.current) {
-      return
-    }
-    sentPreferenceKeyRef.current = selectedTagsKey
-    capturePreferenceUpdate(selectedTags)
-  }, [selectedTags, selectedTagsKey])
-
-  useEffect(() => {
-    void refreshRecommendations()
-  }, [refreshRecommendations, selectedTagsKey])
-
-  useEffect(() => {
-    if (candidateRoutes.length > 0) {
-      const exposureKey = candidateRoutes
-        .map((item, index) => `${item.recommendationRequestId ?? 'local'}:${item.id}:${index + 1}`)
-        .join('|')
-      if (exposureKey === exposedRecommendationKeyRef.current) {
-        return
-      }
-      exposedRecommendationKeyRef.current = exposureKey
-      captureRouteExpose(candidateRoutes.map((item) => item.id))
-      captureRecommendationExposure(candidateRoutes)
-    }
-  }, [candidateRoutes])
-
-  const handleTagToggle = (tag: string) => {
-    const isSelected = selectedTags.includes(tag)
-
-    captureTagToggle(tag, !isSelected)
-    toggleTag(tag)
-  }
-
-  const enterRoute = (routeId: string) => {
-    const userId = ensureUserId()
-    const routeIndex = candidateRoutes.findIndex((item) => item.id === routeId)
-    const recommendedRoute = routeIndex >= 0 ? candidateRoutes[routeIndex] : null
-    if (recommendedRoute) {
-      captureRecommendationClick(recommendedRoute, routeIndex + 1)
-    }
-    captureRouteClick(routeId)
-    setActiveRouteId(routeId)
-    void sendGuideFeedback({ userId, routeId, action: 'select_route' })
-    navigate('/map')
-  }
-
   return (
     <div className="mobile-home">
       <section className="mobile-home__hero">
         <div>
           <span className="mobile-section-kicker">当前导览状态</span>
           <h2>您好，我是您的数字向导</h2>
-          <p>先选今天的游览期待，小灵会把路线、地图和景点讲解串成一条连续体验。</p>
+          <p>先规划今天的行程，小灵会把路线、地图和景点讲解串成一条连续体验。</p>
         </div>
         <button
           className="mobile-home__floating-guide"
@@ -121,121 +208,84 @@ function MobileHomePage() {
         </button>
       </section>
 
-      <section className="mobile-ticket-entry">
-        <div className="mobile-ticket-entry__icon">
-          <CreditCardOutlined />
-        </div>
-        <div>
-          <span className="mobile-section-kicker">票务入口</span>
-          {ticket ? (
-            <>
-              <h3>{ticket.visitDate} · {ticket.groupSize} 人入园</h3>
-              <p>已生成本次游客画像，累计模拟消费 ¥{Math.round(totalSpend)}。</p>
-            </>
-          ) : (
-            <>
-              <h3>先购票，后导览</h3>
-              <p>填写年龄段、性别和同行人数，实时大屏会生成票务画像。</p>
-            </>
-          )}
-        </div>
-        <div className="mobile-ticket-entry__actions">
-          <button type="button" onClick={() => navigate('/ticket')}>
-            <CreditCardOutlined />
-            <span>{ticket ? '改票' : '购票'}</span>
-          </button>
-          <button type="button" onClick={() => navigate('/consume')} disabled={!ticket}>
-            <ShoppingCartOutlined />
-            <span>消费</span>
-          </button>
-        </div>
-      </section>
+      <button className="mobile-plan-entry" type="button" onClick={() => navigate('/plan')}>
+        <span className="mobile-plan-entry__icon">
+          <CompassOutlined />
+        </span>
+        <span className="mobile-plan-entry__text">
+          <strong>规划我的行程</strong>
+          <small>选游览期待 · 智能推荐路线</small>
+        </span>
+        <RightOutlined />
+      </button>
 
-      <section className="mobile-panel mobile-home__tags">
+      <section className="mobile-panel">
         <div className="mobile-panel__head">
           <div>
-            <span className="mobile-section-kicker">您的游览期待</span>
-            <h3>选几个今天最想体验的方向</h3>
+            <span className="mobile-section-kicker">景区服务</span>
+            <h3>常用功能一键直达</h3>
           </div>
-          {isLoading ? <LoadingOutlined className="mobile-home__loading" /> : null}
         </div>
-
-        <div className="mobile-tag-list">
-          {GUIDE_TAGS.map((tag) => (
+        <div className="mobile-service-grid">
+          {SERVICES.map((s) => (
             <button
-              key={tag}
+              key={s.label}
               type="button"
-              className={`mobile-tag ${selectedTags.includes(tag) ? 'is-active' : ''}`}
-              onClick={() => handleTagToggle(tag)}
+              className="mobile-service-cell"
+              onClick={() => navigate(s.to)}
             >
-              {tag}
+              <img src={`/icons/${s.icon}.png`} alt="" loading="lazy" />
+              <span>{s.label}</span>
             </button>
           ))}
         </div>
-        {lastError ? <p className="mobile-muted">推荐服务暂不可用，已使用本地路线规则。</p> : null}
       </section>
 
-      {mainRoute ? (() => {
-        const meta = getRouteItineraryMeta(mainRoute.id)
-        return (
-          <section className="mobile-route-feature">
-            <div className="mobile-route-feature__top">
-              <div>
-                <span className="mobile-section-kicker">主推荐路线</span>
-                <h3>{mainRoute.name}</h3>
-              </div>
-              <span>{scoreText(mainRoute)}</span>
-            </div>
-            <div className="mobile-route-feature__facts">
-              <div><ClockCircleOutlined /><span>{meta.durationLabel}</span></div>
-              <div><EnvironmentOutlined /><span>{meta.stopCount} 个站点</span></div>
-              <div><span className="mobile-route-feature__walk">{meta.walkIntensity}</span></div>
-            </div>
-            <p>{mainRoute.reason || mainRoute.whyRecommended || mainRoute.description}</p>
-            {meta.highlights.length ? (
-              <ul className="mobile-route-feature__highlights">
-                {meta.highlights.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            ) : null}
-            <div className="mobile-route-feature__tags">
-              {mainRoute.tags.map((tag) => (
-                <span key={tag}>{tag}</span>
-              ))}
-            </div>
-            <button className="mobile-primary-action" type="button" onClick={() => enterRoute(mainRoute.id)}>
-              开始导览
-              <RightOutlined />
-            </button>
-          </section>
-        )
-      })() : null}
-
-      <section className="mobile-home__routes">
-        <div className="mobile-panel__head">
+      <section className="mobile-crowd-card" aria-label="实时客流">
+        <div className="mobile-crowd-card__top">
           <div>
-            <span className="mobile-section-kicker">候选路线</span>
-            <h3>也可以横向切换其他节奏</h3>
+            <span className="mobile-crowd-card__kicker">实时客流</span>
+            <h3>当前景区人流量适中</h3>
+            <p>更新于 {crowdUpdateTime}</p>
           </div>
-          <CompassOutlined />
+          <button type="button" onClick={() => navigate('/map')}>
+            看地图
+            <RightOutlined />
+          </button>
         </div>
-        <div className="mobile-route-scroll">
-          {secondaryRoutes.map((item) => {
-            const meta = getRouteItineraryMeta(item.id)
-            return (
+
+        <div className="mobile-crowd-card__panel">
+          <div className="mobile-crowd-card__panel-head">
+            <strong>景点实时客流情况</strong>
+            <span>{CROWD_SPOTS.length} 个点位</span>
+          </div>
+          <div className="mobile-crowd-list">
+            {CROWD_SPOTS.map((spot) => (
               <button
-                key={item.id}
+                key={spot.id}
                 type="button"
-                className="mobile-route-card"
-                onClick={() => enterRoute(item.id)}
+                className="mobile-crowd-row"
+                onClick={() => navigate('/map')}
               >
-                <strong>{item.name}</strong>
-                <span>{item.durationLabel} · {meta.stopCount} 站 · {meta.walkIntensity}</span>
-                <p>{item.reason || item.description}</p>
+                <img className="mobile-crowd-row__photo" src={spot.image} alt="" loading="lazy" />
+                <span className="mobile-crowd-row__main">
+                  <strong>{spot.name}</strong>
+                  <small>{spot.hint}</small>
+                </span>
+                <span
+                  className={`mobile-crowd-row__people is-${spot.tone}`}
+                  aria-label={`${spot.name}拥挤度：${spot.level}`}
+                >
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <span key={index} className={index < spot.people ? 'is-active' : ''} />
+                  ))}
+                </span>
+                <span className={`mobile-crowd-row__level is-${spot.tone}`}>
+                  {spot.level}
+                </span>
               </button>
-            )
-          })}
+            ))}
+          </div>
         </div>
       </section>
 

@@ -14,7 +14,10 @@ import {
 import {
   playMotionForState,
   registerModel,
+  setMouthForm,
+  setMouthFormActive,
   setMouthOpen,
+  shouldOverrideMouthForm,
   type Live2DLikeModel,
   type RobotState
 } from '../lib/live2dManager'
@@ -37,7 +40,9 @@ const stateLabel: Record<RobotState, string> = {
   normal: '灵山小灵正在待命',
   speaking: '灵山小灵正在讲解',
   listening: '灵山小灵正在倾听',
-  thinking: '灵山小灵正在查阅讲解资料'
+  thinking: '灵山小灵正在查阅讲解资料',
+  happy: '灵山小灵正在微笑回应',
+  comfort: '灵山小灵正在安抚讲解'
 }
 
 type StageHighlight = {
@@ -49,7 +54,7 @@ type StageHighlight = {
 type Live2DStageProps = {
   highlightsOverride?: StageHighlight[]
   /** 首页左栏嵌入：隐藏指标区、缩小视口 */
-  variant?: 'default' | 'embedded'
+  variant?: 'default' | 'embedded' | 'immersive'
   /** 首屏可见时立即加载，不等待 IntersectionObserver */
   eager?: boolean
   sceneId?: string
@@ -62,6 +67,7 @@ function Live2DStage({
   sceneId
 }: Live2DStageProps) {
   const isEmbedded = variant === 'embedded'
+  const isImmersive = variant === 'immersive'
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
@@ -72,9 +78,9 @@ function Live2DStage({
   const [loadError, setLoadError] = useState('')
   const activeSceneId = useChatStore((s) => s.activeSceneId)
   const resolvedSceneId = sceneId ?? activeSceneId
-  const session = useChatStore((s) => getSession(s.sessions, resolvedSceneId))
-  const robotState = session.robotState
-  const mouthOpen = session.mouthOpen
+  // 只订阅低频的 robotState;mouthOpen(口型)TTS 播放时每帧都变,
+  // 走下面的 transient subscription 直接驱动模型,不触发 React 重渲
+  const robotState = useChatStore((s) => getSession(s.sessions, resolvedSceneId).robotState)
   const visibleHighlights = highlightsOverride ?? highlights
 
   useEffect(() => {
@@ -109,12 +115,18 @@ function Live2DStage({
     setIsLoading(true)
     setLoadError('')
 
+    // 按设备像素比渲染,否则 retina 屏上 1x 渲染被 CSS 拉伸会糊。
+    // 手机限 2x、桌面限 3x,兼顾清晰度与 GPU 开销。
+    const renderResolution = Math.min(window.devicePixelRatio || 1, preferReducedGpu ? 2 : 3)
+
     const app = new PIXI.Application({
       view: canvas,
       autoStart: true,
       resizeTo: canvas.parentElement ?? undefined,
       backgroundAlpha: 0,
-      antialias: !preferReducedGpu
+      antialias: !preferReducedGpu,
+      resolution: renderResolution,
+      autoDensity: true
     })
     appRef.current = app
 
@@ -145,8 +157,10 @@ function Live2DStage({
 
         const fit = () => {
           const parent = canvas.parentElement
-          let w = app.renderer.width
-          let h = app.renderer.height
+          // 用逻辑尺寸(app.screen),不是 renderer.width(autoDensity+resolution 下是物理像素,
+          // 会让模型放大数倍并按物理尺寸算居中而偏到右下)
+          let w = app.screen.width
+          let h = app.screen.height
           if ((!w || !h) && parent) {
             const r = parent.getBoundingClientRect()
             w = r.width
@@ -155,7 +169,7 @@ function Live2DStage({
           }
           const baseW = model.internalModel?.originalWidth ?? model.width
           const baseH = model.internalModel?.originalHeight ?? model.height
-          const scale = Math.min(w / baseW, h / baseH) * 0.9
+          const scale = Math.min(w / baseW, h / baseH) * (isImmersive ? 1.18 : 0.9)
           model.scale.set(scale)
           model.x = (w - baseW * scale) / 2
           model.y = (h - baseH * scale) / 2
@@ -165,6 +179,10 @@ function Live2DStage({
         if (canvas.parentElement) resizeObserver.observe(canvas.parentElement)
 
         registerModel(modelRef.current, resolvedSceneId)
+        playMotionForState(
+          getSession(useChatStore.getState().sessions, resolvedSceneId).robotState,
+          resolvedSceneId
+        )
         setIsLoading(false)
       })
       .catch((err) => {
@@ -187,7 +205,7 @@ function Live2DStage({
       }
       appRef.current = null
     }
-  }, [isInView, resolvedSceneId])
+  }, [isImmersive, isInView, resolvedSceneId])
 
   useEffect(() => {
     if (!isInView) return
@@ -211,23 +229,58 @@ function Live2DStage({
   }, [isInView])
 
   useEffect(() => {
-    setMouthOpen(mouthOpen, resolvedSceneId)
-  }, [mouthOpen, resolvedSceneId])
+    const init = getSession(useChatStore.getState().sessions, resolvedSceneId)
+    let lastOpen = init.mouthOpen
+    let lastForm = init.mouthForm
+    setMouthOpen(lastOpen, resolvedSceneId)
+    setMouthForm(lastForm, resolvedSceneId)
+    // transient subscription:口型(张开度+嘴形)每帧更新直接驱动模型,绕过 React 重渲
+    return useChatStore.subscribe((state) => {
+      const session = getSession(state.sessions, resolvedSceneId)
+      if (session.mouthOpen !== lastOpen) {
+        lastOpen = session.mouthOpen
+        setMouthOpen(lastOpen, resolvedSceneId)
+      }
+      if (session.mouthForm !== lastForm) {
+        lastForm = session.mouthForm
+        setMouthForm(lastForm, resolvedSceneId)
+      }
+    })
+  }, [resolvedSceneId])
 
   useEffect(() => {
     playMotionForState(robotState, resolvedSceneId)
+    // 仅普通讲解时接管嘴形;微笑/担忧状态交还给表情,避免抹平语义嘴形
+    setMouthFormActive(shouldOverrideMouthForm(robotState), resolvedSceneId)
   }, [robotState, resolvedSceneId])
+
+  // 切后台暂停渲染循环(省电省发热),回前台恢复。
+  // PIXI.Ticker.shared 驱动模型参数,app.ticker 驱动渲染,两个都停
+  useEffect(() => {
+    const onVisibility = () => {
+      const app = appRef.current
+      if (document.hidden) {
+        app?.ticker?.stop()
+        PIXI.Ticker.shared.stop()
+      } else {
+        app?.ticker?.start()
+        PIXI.Ticker.shared.start()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   const showPlaceholder = !isInView || (isLoading && !loadError)
   const placeholderText = !isInView
-    ? isEmbedded
+    ? isEmbedded || isImmersive
       ? '正在唤醒小灵...'
       : '下滑至对话区后将加载数字人'
     : '正在唤醒小灵...'
 
   return (
     <Card
-      className={`stage-card ${isEmbedded ? 'stage-card--embedded' : ''}`}
+      className={`stage-card ${isEmbedded ? 'stage-card--embedded' : ''} ${isImmersive ? 'stage-card--immersive' : ''}`}
       bordered={false}
     >
       <div className="stage-card__topline">
@@ -255,7 +308,7 @@ function Live2DStage({
         ) : null}
       </div>
 
-      {!isEmbedded ? (
+      {!isEmbedded && !isImmersive ? (
         <Row gutter={[12, 12]}>
           {visibleHighlights.map((item) => (
             <Col span={8} key={item.title}>

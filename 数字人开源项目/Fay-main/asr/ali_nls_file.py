@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """浏览器上传短音频 → 阿里云 NLS 一句话识别（REST）。"""
 
+import base64
 import io
 import json
 
@@ -13,6 +14,15 @@ from utils import util
 
 _ASR_URL = "https://nls-gateway-cn-shenzhen.aliyuncs.com/stream/v1/asr"
 
+_AUDIO_MIME_TYPES = {
+    "aac": "audio/aac",
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "webm": "audio/webm",
+}
+
 
 def _guess_format(filename: str):
     if not filename or "." not in filename:
@@ -21,6 +31,73 @@ def _guess_format(filename: str):
     if ext in ("webm", "wav", "mp3", "ogg", "m4a", "aac"):
         return ext
     return None
+
+
+def _mime_type(filename: str) -> str:
+    return _AUDIO_MIME_TYPES.get(_guess_format(filename), "application/octet-stream")
+
+
+def _transcribe_with_qwen(
+    audio_bytes: bytes,
+    filename: str,
+    base_url: str,
+    api_key: str,
+) -> str:
+    data_uri = (
+        f"data:{_mime_type(filename)};base64,"
+        f"{base64.b64encode(audio_bytes).decode('ascii')}"
+    )
+    response = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "qwen3-asr-flash",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": data_uri},
+                        }
+                    ],
+                }
+            ],
+            "stream": False,
+            "asr_options": {"language": "zh", "enable_itn": True},
+        },
+        timeout=45,
+    )
+    body_preview = (response.text or "")[:500]
+    if not 200 <= response.status_code < 300:
+        invalid_audio_markers = (
+            "audio is empty",
+            "audio format is illegal",
+            "cannot be opened",
+        )
+        if any(marker in body_preview.lower() for marker in invalid_audio_markers):
+            raise ValueError("没有录到有效语音，请按住至少 1 秒再松手")
+        util.log(2, f"Qwen ASR HTTP {response.status_code}: {body_preview}")
+        raise ValueError(
+            f"百炼语音识别 HTTP {response.status_code}: "
+            f"{body_preview or '无响应体'}"
+        )
+
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        util.log(2, f"Qwen ASR 返回非 JSON: {body_preview}")
+        raise ValueError("百炼语音识别返回非 JSON") from exc
+
+    choices = payload.get("choices") or []
+    message = choices[0].get("message", {}) if choices else {}
+    text = message.get("content", "")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("百炼语音识别未返回有效文本")
+    return text.strip()
 
 
 def _to_pcm16k_mono(audio_bytes: bytes, filename: str = "audio.webm") -> bytes:
@@ -41,8 +118,22 @@ def _to_pcm16k_mono(audio_bytes: bytes, filename: str = "audio.webm") -> bytes:
 def transcribe_uploaded_file(audio_bytes: bytes, filename: str = "audio.webm") -> str:
     if not audio_bytes:
         raise ValueError("音频为空")
-    if not cfg.key_ali_nls_app_key:
-        raise ValueError("未配置 ali_nls_app_key，请在 system.conf 中填写阿里云 NLS 凭据")
+    has_nls = all(
+        (
+            cfg.key_ali_nls_key_id,
+            cfg.key_ali_nls_key_secret,
+            cfg.key_ali_nls_app_key,
+        )
+    )
+    if not has_nls:
+        if cfg.key_gpt_api_key and cfg.gpt_base_url:
+            return _transcribe_with_qwen(
+                audio_bytes,
+                filename,
+                cfg.gpt_base_url,
+                cfg.key_gpt_api_key,
+            )
+        raise ValueError("未配置可用的语音识别服务")
 
     token = ali_nls.get_nls_token()
     if not token:

@@ -8,14 +8,17 @@ import { initPostHogIdle } from './lib/analytics'
 // PostHog 改为空闲帧懒加载,首屏不再背 ~180kB SDK
 initPostHogIdle()
 
-// 生产环境注册 Service Worker:预缓存 vendor-* / CSS / 字体,
-// 第二次访问近 0 网络请求;开发环境跳过避免 HMR 被劫持。
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      /* SW 注册失败不影响应用,静默 */
-    })
-  })
+// 开发/调优期暂时停用 Service Worker:其 cache-first 策略会把旧资源(旧纹理/旧 JS)
+// 缓存死,导致每次重新构建后手机上仍是旧版本(看着"改了没生效/还是慢/口型又不动")。
+// 这里主动注销已注册的 SW 并清空其缓存,保证设备始终拿到最新构建。
+// 最终提交前若要恢复离线/秒开能力,把这段换回 navigator.serviceWorker.register('/sw.js') 即可。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations?.().then((regs) => {
+    regs.forEach((r) => r.unregister())
+  }).catch(() => {})
+  if (typeof caches !== 'undefined') {
+    caches.keys?.().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {})
+  }
 }
 
 // antd 的 ConfigProvider/AntdApp 不在首屏注入(那两个 import 会把整包 antd

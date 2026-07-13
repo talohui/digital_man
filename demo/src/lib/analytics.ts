@@ -10,7 +10,7 @@
 
 import type { PostHog } from 'posthog-js'
 import { useGuideStore } from '../store/useGuideStore'
-import type { GuideRecommendationCard } from '../data/guideData'
+import type { GuidePreferenceContext, GuideRecommendationCard } from '../data/guideData'
 import { getAnalyticsApiBase } from './runtimeConfig'
 import type { PurchaseRecord, TicketProfile } from '../store/useTicketStore'
 
@@ -196,8 +196,8 @@ export function captureTagToggle(tag: string, on: boolean): void {
   capture(EVENT.TAG_TOGGLE, { tag, on })
 }
 
-export function capturePreferenceUpdate(selectedTags: string[]): void {
-  capture(EVENT.PREFERENCE_UPDATE, { selectedTags })
+export function capturePreferenceUpdate(selectedTags: string[], preferences?: GuidePreferenceContext): void {
+  capture(EVENT.PREFERENCE_UPDATE, { selectedTags, preferences })
 }
 
 export function captureTicketPurchase(ticket: TicketProfile): void {

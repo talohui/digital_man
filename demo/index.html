@@ -15,10 +15,17 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="mask-icon" href="/icon.svg" color="#1b5e20" />
-    <!-- Cubism 4 Core 必须在 React bundle 之前加载 -->
-    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
-    <!-- Live2D 模型清单 preload:vendor-live2d chunk 就绪后立即能渲染,省一次往返 -->
+    <!-- 腾讯地图域名提前握手:切到地图 tab 时省 DNS+TLS 往返 -->
+    <link rel="preconnect" href="https://map.qq.com" />
+    <link rel="preconnect" href="https://apis.map.qq.com" />
+    <!-- Cubism 4 Core 本地化 + defer:不再同步阻塞首屏渲染,也不依赖境外 CDN。
+         defer 脚本按文档序先于 module script 执行,仍保证在 React bundle 之前就绪 -->
+    <script defer src="/live2d/core/live2dcubismcore.min.js"></script>
+    <!-- Live2D 模型清单 + 纹理(webp) preload:与 vendor-live2d chunk 并行下载,
+         砍掉「JS就绪→拉清单→拉纹理」的串行瀑布,数字人首屏更快 -->
     <link rel="preload" as="fetch" crossorigin href="/live2d/haru/haru_greeter_t03.model3.json" />
+    <link rel="preload" as="image" href="/live2d/haru/haru_greeter_t03.2048/texture_00.webp" />
+    <link rel="preload" as="image" href="/live2d/haru/haru_greeter_t03.2048/texture_01.webp" />
   </head>
   <body>
     <div id="root"></div>

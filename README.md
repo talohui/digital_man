@@ -6,6 +6,7 @@
 
 先看 [SETUP.md](./SETUP.md)。
 如果你只是接手当前这版的联调和值班，直接看 [地图导览_Gorse_v1_操作说明.md](./地图导览_Gorse_v1_操作说明.md) 会更快。
+如果要部署到服务器，请看 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
 ## 当前这一版包含什么
 
@@ -50,6 +51,7 @@
 ## 推荐阅读顺序
 
 1. [SETUP.md](./SETUP.md)
-2. [地图导览_Gorse_v1_操作说明.md](./地图导览_Gorse_v1_操作说明.md)
-3. [HANDOFF.md](./HANDOFF.md)
-4. [实现文档.md](./实现文档.md)
+2. [DEPLOYMENT.md](./DEPLOYMENT.md)
+3. [地图导览_Gorse_v1_操作说明.md](./地图导览_Gorse_v1_操作说明.md)
+4. [HANDOFF.md](./HANDOFF.md)
+5. [实现文档.md](./实现文档.md)

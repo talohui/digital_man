@@ -9,16 +9,22 @@
  * 第二次访问近 0 网络请求,移动端隧道掉线也能用上次的视图。
  */
 
-const CACHE_VERSION = 'lingshan-v1'
+// 资源优化(webp 纹理/开屏图、原地压缩图标)后必须升版本,否则旧 SW 的 cache-first
+// 会持续喂旧的大体积缓存,优化在已访问过的设备上不生效。activate 时会清掉旧版本缓存。
+const CACHE_VERSION = 'lingshan-v2'
 const ASSETS_CACHE = `${CACHE_VERSION}-assets`
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`
 
 const STATIC_EXT = /\.(?:js|css|woff2?|ttf|otf|png|jpg|jpeg|svg|webp|gif|ico)$/
+const OFFLINE_URL = '/offline.html'
 
 self.addEventListener('install', (event) => {
   // 新版本立即激活,不等待老 SW 关掉所有 tab
   self.skipWaiting()
-  event.waitUntil(caches.open(ASSETS_CACHE))
+  // 预缓存离线兜底页:首次访问即断网也能给出友好提示而非浏览器错误页
+  event.waitUntil(
+    caches.open(ASSETS_CACHE).then((c) => c.add(OFFLINE_URL).catch(() => {}))
+  )
 })
 
 self.addEventListener('activate', (event) => {
@@ -54,7 +60,12 @@ self.addEventListener('fetch', (event) => {
           caches.open(RUNTIME_CACHE).then((c) => c.put(req, copy))
           return res
         })
-        .catch(() => caches.match(req).then((r) => r || caches.match('/')))
+        .catch(() =>
+          caches
+            .match(req)
+            .then((r) => r || caches.match('/'))
+            .then((r) => r || caches.match(OFFLINE_URL))
+        )
     )
     return
   }

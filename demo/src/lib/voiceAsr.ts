@@ -58,7 +58,7 @@ export function isVoiceAsrAvailable(): boolean {
 
 export function getVoiceAsrModeLabel(): string {
   if (shouldUseCloudAsr()) {
-    return '按住说话（阿里云云端识别，松手上传至 Fay）'
+    return '按住说话，松手自动发送（云端语音识别）'
   }
   return '按住下方麦克风说话，松手自动发送（电脑可在按钮外松手）'
 }

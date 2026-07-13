@@ -12,12 +12,12 @@ type CostumeSetUrls = {
 
 const COSTUME_SETS: Record<Exclude<CostumeId, 'default'>, CostumeSetUrls> = {
   costume1: {
-    texture00: '/live2d/costumes/costume1_texture_00.png',
-    texture01: '/live2d/costumes/costume1_texture_01.png'
+    texture00: '/live2d/costumes/costume1_texture_00.webp',
+    texture01: '/live2d/costumes/costume1_texture_01.webp'
   },
   costume2: {
-    texture00: '/live2d/costumes/costume2_texture_00.png',
-    texture01: '/live2d/costumes/costume2_texture_01.png'
+    texture00: '/live2d/costumes/costume2_texture_00.webp',
+    texture01: '/live2d/costumes/costume2_texture_01.webp'
   }
 }
 

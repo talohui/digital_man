@@ -1,0 +1,10 @@
+{
+  "splashAssets": "/intro/splash-assets.json",
+  "images": [
+    "/intro/splash/splash-01.png",
+    "/intro/splash/splash-02.png",
+    "/intro/splash/splash-03.png",
+    "/intro/splash/splash-04.png",
+    "/intro/splash/splash-05.png"
+  ]
+}

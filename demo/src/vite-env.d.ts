@@ -3,6 +3,7 @@
 interface Window {
   TMap?: any
   __tmapLoader?: Promise<any>
+  __tmapScriptLoader?: Promise<any>
   __LINGSHAN_MAP_DEBUG__?: Record<string, unknown>
   LINGSHAN_MAP_DEBUG?: Record<string, unknown>
   __GET_LINGSHAN_MAP_SNAPSHOT__?: () => Record<string, unknown>

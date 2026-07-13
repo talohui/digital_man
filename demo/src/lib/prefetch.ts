@@ -36,6 +36,15 @@ export function prefetchHeavyTabs(): void {
   })
 
   onIdle(() => {
+    // 移动端 5 个懒加载 tab 页:首屏不背它们,空闲时预热,切 tab 秒开
+    void import('../mobile/MobileGuidePage').catch(() => { /* ignore */ })
+    void import('../mobile/MobileMapPage').catch(() => { /* ignore */ })
+    void import('../mobile/MobileProfilePage').catch(() => { /* ignore */ })
+    void import('../mobile/MobileTicketPage').catch(() => { /* ignore */ })
+    void import('../mobile/MobileConsumePage').catch(() => { /* ignore */ })
+  })
+
+  onIdle(() => {
     // TMap SDK 与 MobileMapPage 不可懒;但 loadTMap 内部的脚本拉取可预热
     void import('./loadTMap')
       .then((mod) => {

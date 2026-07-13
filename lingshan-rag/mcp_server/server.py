@@ -13,9 +13,9 @@ from typing import Any
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-# 阿里云百炼 LLM 配置（与 Fay system.conf 保持一致）
-# 注：私密仓库，Key 直接内置作为独立运行兜底；Fay 启动时仍可由 mcp_servers.json 的 env 块覆盖
-os.environ.setdefault("LINGSHAN_LLM_API_KEY", "sk-0fefe3da4be348c399d0d55cd39abdae")
+# 阿里云百炼 LLM 配置（与 Fay system.conf 保持一致）。
+# 服务器部署时从环境变量或 Fay 的 mcp_servers.json env 块注入 Key；
+# 不要把真实 Key 写进仓库。
 os.environ.setdefault("LINGSHAN_LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 os.environ.setdefault("LINGSHAN_LLM_MODEL", "qwen-plus")
 
