@@ -51,6 +51,7 @@ import { isNavigationDebugEnabled } from '../prototype-navigation/navigationDebu
 import { commitPrototypeArrivalToRouteStage } from '../prototype-navigation/routeStageCommit'
 import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentTarget'
 import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
+import { useSimulatedNavigationFallback } from '../prototype-navigation/useSimulatedNavigationFallback'
 import { useMultiStopReplayStore } from '../prototype-navigation/multiStopReplay'
 import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
@@ -703,6 +704,14 @@ function RouteTourMobileOverlay({
   const prototypeTarget = 'target' in prototypeResolution ? prototypeResolution.target : undefined
   const prototypeTargetError = 'error' in prototypeResolution ? prototypeResolution.error || undefined : undefined
   const navigationDebugEnabled = isNavigationDebugEnabled()
+  const simulatedNavigation = useSimulatedNavigationFallback({
+    route,
+    stage,
+    currentStopIndex,
+    joinStopIndex,
+    target: prototypeTarget
+  })
+  const simulatedNavigationMenuVisible = navigationDebugEnabled && (stage === 'active' || stage === 'joining')
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
 
   useEffect(() => {
@@ -821,6 +830,19 @@ function RouteTourMobileOverlay({
     setFeedbackText('请确认定位说明')
   }
 
+  const handleStartSimulatedNavigation = useCallback(() => {
+    const result = simulatedNavigation.start()
+    if (result.status === 'cancelled') return
+    setDebugMenuOpen(false)
+    setDebugPanelDisplay('closed')
+    setServiceOpen(false)
+    setLayerPanelOpen(false)
+    setRouteCardExpanded(true)
+    if (result.status === 'started') setFeedbackText(`正在模拟前往${result.targetName}`)
+    else if (result.status === 'focused') setFeedbackText(`已显示前往${result.targetName}的导航`)
+    else setFeedbackText(result.message)
+  }, [setLayerPanelOpen, setRouteCardExpanded, simulatedNavigation])
+
   const handleCommitPrototypeArrival = () => {
     const expectedTargetStopIndex = stage === 'joining' ? joinStopIndex : currentStopIndex + 1
     const expectedStop = getRouteStopByIndex(route.id, expectedTargetStopIndex)
@@ -840,7 +862,8 @@ function RouteTourMobileOverlay({
 
   const navigationBetaViewModel = useMemo<NavigationBetaViewModel>(() => createNavigationBetaViewModel({
     ...navigationStoreSnapshot,
-    debugEnabled: navigationDebugEnabled
+    debugEnabled: navigationDebugEnabled,
+    simulatedNavigationAvailable: Boolean(prototypeTarget) && (stage === 'active' || stage === 'joining')
   }, {
     enterPermissionIntro: () => prototypeTarget && prepareNavigationTarget(prototypeTarget),
     requestPermissionAndStart: requestPreparedNavigation,
@@ -855,8 +878,9 @@ function RouteTourMobileOverlay({
     confirmArrival: handleCommitPrototypeArrival,
     continueAfterArrivalDetection,
     continueRestoredSession: resumeNavigation,
-    discardRestoredSession: cancelNavigation
-  }), [navigationStoreSnapshot, navigationDebugEnabled, prototypeTarget, prepareNavigationTarget, requestPreparedNavigation, dismissPreparedNavigation, resumeNavigation, pauseNavigation, cancelNavigation, rerouteNavigation, continueCurrentRoute, handleCommitPrototypeArrival, continueAfterArrivalDetection])
+    discardRestoredSession: cancelNavigation,
+    startSimulatedNavigation: handleStartSimulatedNavigation
+  }), [navigationStoreSnapshot, navigationDebugEnabled, prototypeTarget, stage, prepareNavigationTarget, requestPreparedNavigation, dismissPreparedNavigation, resumeNavigation, pauseNavigation, cancelNavigation, rerouteNavigation, continueCurrentRoute, handleCommitPrototypeArrival, continueAfterArrivalDetection, handleStartSimulatedNavigation])
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -954,6 +978,19 @@ function RouteTourMobileOverlay({
       />
       {navigationDebugEnabled && debugMenuOpen ? (
         <div className="navigation-beta-debug-menu" role="menu" aria-label="更多功能">
+          {simulatedNavigationMenuVisible ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!prototypeTarget}
+                onClick={handleStartSimulatedNavigation}
+              >
+                模拟导航到下一站
+              </button>
+              <small>{prototypeTarget ? '模拟导航，仅用于开发测试' : prototypeTargetError || '已是路线最后一站'}</small>
+            </>
+          ) : null}
           <button type="button" role="menuitem" onClick={openDebugPanel}>导航调试</button>
         </div>
       ) : null}
