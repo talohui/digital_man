@@ -422,14 +422,14 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: blur(3px) saturate(0.9) contrast(1.04);
-  transform: scale(1.025);
+  filter: blur(0.5px) saturate(1.06) contrast(1.03);
+  transform: scale(1.015);
   transition: opacity 340ms ease;
 }
 
 .xiaoling-conversation__scenic-backdrop img.is-current,
 .xiaoling-conversation__scenic-backdrop img.is-incoming.is-visible {
-  opacity: 0.82;
+  opacity: 0.96;
 }
 
 .xiaoling-conversation__scenic-backdrop img.is-current.is-fading {
@@ -443,15 +443,15 @@
 }
 
 .xiaoling-conversation__scenic-tint--blue {
-  background: rgba(214, 235, 248, 0.18);
+  background: rgba(224, 235, 226, 0.1);
 }
 
 .xiaoling-conversation__scenic-tint--light {
   background: linear-gradient(
     180deg,
-    rgba(250, 248, 238, 0.02) 0%,
-    rgba(250, 248, 238, 0.18) 48%,
-    rgba(250, 248, 238, 0.62) 100%
+    rgba(245, 241, 232, 0.05) 0%,
+    rgba(233, 240, 231, 0.12) 42%,
+    rgba(245, 241, 232, 0.55) 100%
   );
 }
 
@@ -497,7 +497,29 @@
   flex: 0 0 58px;
   padding-top: 5px;
   box-sizing: border-box;
-  background: linear-gradient(180deg, rgba(245, 252, 255, 0.9), rgba(238, 249, 255, 0.68));
+  border-bottom: 1px solid rgba(201, 168, 106, 0.24);
+  background: linear-gradient(180deg, rgba(245, 241, 232, 0.92), rgba(233, 240, 231, 0.62));
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__topbar > div span {
+  color: rgba(45, 74, 62, 0.72);
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__topbar > div strong,
+.xiaoling-conversation--drawer .xiaoling-conversation__round-action,
+.xiaoling-conversation--drawer .xiaoling-conversation__text-action {
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__round-action,
+.xiaoling-conversation--drawer .xiaoling-conversation__text-action {
+  border: 1px solid rgba(201, 168, 106, 0.34);
+  background: rgba(245, 241, 232, 0.78);
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__round-action:active,
+.xiaoling-conversation--drawer .xiaoling-conversation__text-action:active {
+  background: rgba(201, 168, 106, 0.28);
 }
 
 .xiaoling-conversation--drawer .xiaoling-conversation__status {
@@ -529,11 +551,39 @@
   scroll-padding-inline: 3px;
 }
 
+.xiaoling-conversation--drawer .xiaoling-conversation__quick-asks button {
+  border-color: rgba(92, 122, 107, 0.38);
+  background: rgba(245, 241, 232, 0.9);
+  box-shadow: 0 5px 14px rgba(45, 74, 62, 0.12);
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__quick-asks button:active {
+  border-color: rgba(201, 168, 106, 0.58);
+  background: rgba(226, 235, 218, 0.96);
+}
+
 .xiaoling-conversation--drawer .xiaoling-conversation__messages {
   position: relative;
   z-index: 2;
   min-height: 0;
   overscroll-behavior: contain;
+}
+
+.xiaoling-conversation--drawer .guide-message--assistant > .chat-bubble {
+  border: 1px solid rgba(201, 168, 106, 0.38);
+  background: rgba(245, 241, 232, 0.92);
+  box-shadow: 0 7px 18px rgba(45, 74, 62, 0.12);
+  color: #2d4a3e;
+  backdrop-filter: none;
+}
+
+.xiaoling-conversation--drawer .guide-message--user > .chat-bubble {
+  border: 1px solid rgba(92, 122, 107, 0.34);
+  background: rgba(45, 74, 62, 0.95);
+  box-shadow: 0 7px 18px rgba(45, 74, 62, 0.16);
+  color: #f5f1e8;
+  backdrop-filter: none;
 }
 
 .xiaoling-conversation--drawer .chat-card__composer-stack {
@@ -545,10 +595,108 @@
 .xiaoling-conversation--drawer .chat-card__composer {
   min-width: 0;
   box-sizing: border-box;
+  border-color: rgba(92, 122, 107, 0.42);
+  background: rgba(245, 241, 232, 0.94);
+  box-shadow: 0 8px 22px rgba(45, 74, 62, 0.15);
+  backdrop-filter: none;
 }
 
 .xiaoling-conversation--drawer .chat-card__textarea {
   min-width: 0;
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--drawer .chat-card__textarea::placeholder {
+  color: rgba(45, 74, 62, 0.56);
+}
+
+.xiaoling-conversation--drawer .chat-card__send {
+  background: #2d4a3e;
+  color: #f5f1e8;
+}
+
+.xiaoling-conversation--drawer .chat-card__send:disabled {
+  background: rgba(92, 122, 107, 0.22);
+  color: rgba(45, 74, 62, 0.48);
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__chat .chat-card__mic:disabled {
+  background: rgba(92, 122, 107, 0.14);
+  color: rgba(45, 74, 62, 0.5);
+}
+
+.xiaoling-conversation--drawer .guide-action-card-list--routes {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  align-items: stretch;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 20px 5px 12px;
+  box-sizing: border-box;
+  scroll-padding-inline: 12px 20px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y;
+}
+
+.xiaoling-conversation--drawer .guide-action-card-list--routes::-webkit-scrollbar {
+  display: none;
+}
+
+.xiaoling-conversation--drawer .guide-action-card-list--routes .guide-action-card--route {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  min-height: 188px;
+  flex: 0 0 min(82vw, 320px);
+  flex-direction: column;
+  gap: 7px;
+  scroll-snap-align: start;
+  border-color: rgba(201, 168, 106, 0.46);
+  background: rgba(245, 241, 232, 0.93);
+  box-shadow: 0 8px 20px rgba(45, 74, 62, 0.14);
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route .guide-action-card__eyebrow {
+  color: #9a793d;
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route h3 {
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route p,
+.xiaoling-conversation--drawer .guide-action-card--route small {
+  color: rgba(45, 74, 62, 0.76);
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route .guide-action-card__tags span {
+  border-color: rgba(92, 122, 107, 0.26);
+  background: rgba(222, 234, 218, 0.88);
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route button {
+  min-height: 36px;
+  margin-top: auto;
+  background: #2d4a3e;
+  color: #f5f1e8;
+}
+
+.xiaoling-conversation--drawer .guide-action-card--route button:active {
+  background: #5c7a6b;
 }
 
 @media (max-height: 720px) {

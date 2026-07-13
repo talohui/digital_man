@@ -27,7 +27,7 @@ export function GuideActionCardRenderer({
 }) {
   if (payload.type === 'route_cards') {
     return (
-      <div className="guide-action-card-list">
+      <div className="guide-action-card-list guide-action-card-list--routes" aria-label="推荐路线">
         {payload.items.map((item) => {
           const route = getScenicRouteById(item.routeId)
           if (!route) return null
