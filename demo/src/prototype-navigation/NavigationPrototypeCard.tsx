@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { XiaolingFace } from '../components/guide/XiaolingFloatingCompanion'
+import { XiaolingAvatar } from '../components/guide/XiaolingAvatar'
 import type { NavigationBetaUiState, NavigationBetaViewModel } from './navigationBetaViewModel'
 
 type NavigationPrototypeCardProps = {
@@ -14,7 +14,7 @@ function isCollapsibleState(state: NavigationBetaUiState) {
 function NavigationXiaolingAvatar() {
   return (
     <span className="navigation-beta-card__avatar" aria-hidden="true">
-      <XiaolingFace />
+      <XiaolingAvatar size="small" />
     </span>
   )
 }

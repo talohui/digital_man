@@ -4,7 +4,7 @@
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 2;
+  z-index: auto;
   display: grid;
   width: auto;
   max-width: 100%;
@@ -203,7 +203,7 @@
 .xiaoling-fullscreen-route {
   width: 100%;
   min-height: 100dvh;
-  background: #9ad7fa;
+  background: #f5f1e8;
 }
 
 .xiaoling-conversation {
@@ -217,7 +217,8 @@
   align-self: end;
   justify-self: center;
   width: min(100%, 640px);
-  height: min(88dvh, calc(var(--guide-vvh, 100dvh) - 8px));
+  height: min(var(--guide-drawer-height, 60dvh), 64dvh, 620px);
+  max-height: min(64dvh, calc(var(--guide-vvh, 100dvh) - 8px));
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 28px 28px 0 0;
   box-shadow: 0 -20px 55px rgba(24, 70, 100, 0.28);
@@ -377,7 +378,10 @@
 }
 
 @media (max-height: 720px) {
-  .xiaoling-conversation--drawer { height: min(94dvh, var(--guide-vvh, 100dvh)); }
+  .xiaoling-conversation--drawer {
+    height: min(var(--guide-drawer-height, 60dvh), 64dvh, 520px);
+    max-height: min(64dvh, calc(var(--guide-vvh, 100dvh) - 6px));
+  }
   .xiaoling-conversation__chat { height: 49%; min-height: 230px; }
 }
 
@@ -395,11 +399,10 @@
 .xiaoling-conversation--drawer {
   position: relative;
   width: min(100%, 640px);
-  height: clamp(400px, var(--guide-drawer-height, 66dvh), 620px);
-  max-height: min(72dvh, calc(var(--guide-vvh, 100dvh) - 8px));
+  height: min(var(--guide-drawer-height, 60dvh), 64dvh, 620px);
+  max-height: min(64dvh, calc(var(--guide-vvh, 100dvh) - 8px));
   min-height: 0;
   overflow: hidden;
-  isolation: isolate;
   background: transparent;
 }
 
@@ -422,14 +425,14 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: blur(0.5px) saturate(1.06) contrast(1.03);
-  transform: scale(1.015);
+  filter: saturate(1.04) contrast(1.02);
+  transform: scale(1.005);
   transition: opacity 340ms ease;
 }
 
 .xiaoling-conversation__scenic-backdrop img.is-current,
 .xiaoling-conversation__scenic-backdrop img.is-incoming.is-visible {
-  opacity: 0.96;
+  opacity: 0.98;
 }
 
 .xiaoling-conversation__scenic-backdrop img.is-current.is-fading {
@@ -443,15 +446,15 @@
 }
 
 .xiaoling-conversation__scenic-tint--blue {
-  background: rgba(224, 235, 226, 0.1);
+  background: rgba(226, 235, 224, 0.06);
 }
 
 .xiaoling-conversation__scenic-tint--light {
   background: linear-gradient(
     180deg,
-    rgba(245, 241, 232, 0.05) 0%,
-    rgba(233, 240, 231, 0.12) 42%,
-    rgba(245, 241, 232, 0.55) 100%
+    rgba(245, 241, 232, 0.02) 0%,
+    rgba(233, 240, 231, 0.08) 44%,
+    rgba(245, 241, 232, 0.34) 100%
   );
 }
 
@@ -461,16 +464,6 @@
 
 .xiaoling-conversation--drawer .xiaoling-conversation__avatar {
   z-index: 2;
-}
-
-.xiaoling-conversation--drawer .stage-card--immersive,
-.xiaoling-conversation--drawer .stage-card--immersive .ant-card-body,
-.xiaoling-conversation--drawer .stage-card--immersive .stage-card__viewport {
-  background: transparent;
-}
-
-.xiaoling-conversation--drawer .stage-card--immersive .stage-card__halo {
-  display: none;
 }
 
 .xiaoling-conversation__handle {
@@ -625,38 +618,7 @@
   color: rgba(45, 74, 62, 0.5);
 }
 
-.xiaoling-conversation--drawer .guide-action-card-list--routes {
-  display: flex;
-  width: 100%;
-  max-width: 100%;
-  align-items: stretch;
-  gap: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 2px 20px 5px 12px;
-  box-sizing: border-box;
-  scroll-padding-inline: 12px 20px;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-inline: contain;
-  touch-action: pan-x pan-y;
-}
-
-.xiaoling-conversation--drawer .guide-action-card-list--routes::-webkit-scrollbar {
-  display: none;
-}
-
 .xiaoling-conversation--drawer .guide-action-card-list--routes .guide-action-card--route {
-  display: flex;
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  min-height: 188px;
-  flex: 0 0 min(82vw, 320px);
-  flex-direction: column;
-  gap: 7px;
-  scroll-snap-align: start;
   border-color: rgba(201, 168, 106, 0.46);
   background: rgba(245, 241, 232, 0.93);
   box-shadow: 0 8px 20px rgba(45, 74, 62, 0.14);
@@ -675,13 +637,6 @@
   color: rgba(45, 74, 62, 0.76);
 }
 
-.xiaoling-conversation--drawer .guide-action-card--route small {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
 .xiaoling-conversation--drawer .guide-action-card--route .guide-action-card__tags span {
   border-color: rgba(92, 122, 107, 0.26);
   background: rgba(222, 234, 218, 0.88);
@@ -690,7 +645,6 @@
 
 .xiaoling-conversation--drawer .guide-action-card--route button {
   min-height: 36px;
-  margin-top: auto;
   background: #2d4a3e;
   color: #f5f1e8;
 }
@@ -701,14 +655,89 @@
 
 @media (max-height: 720px) {
   .xiaoling-conversation--drawer {
-    height: clamp(390px, var(--guide-drawer-height, 66dvh), 520px);
-    max-height: min(72dvh, calc(var(--guide-vvh, 100dvh) - 6px));
+    height: min(var(--guide-drawer-height, 60dvh), 64dvh, 520px);
+    max-height: min(64dvh, calc(var(--guide-vvh, 100dvh) - 6px));
   }
 
   .xiaoling-conversation--drawer .xiaoling-conversation__chat {
     height: 54%;
     min-height: 205px;
   }
+}
+
+/* Fullscreen reuses the same timeline and Live2D host with the Lingshan map palette. */
+.xiaoling-conversation--fullscreen {
+  background: transparent;
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--fullscreen::after,
+.xiaoling-conversation--fullscreen .immersive-guide__aura {
+  display: none;
+}
+
+.xiaoling-conversation--fullscreen .xiaoling-conversation__topbar {
+  border-bottom: 1px solid rgba(201, 168, 106, 0.28);
+  background: rgba(245, 241, 232, 0.84);
+  color: #2d4a3e;
+  backdrop-filter: none;
+}
+
+.xiaoling-conversation--fullscreen .xiaoling-conversation__topbar span {
+  color: rgba(45, 74, 62, 0.7);
+}
+
+.xiaoling-conversation--fullscreen .xiaoling-conversation__round-action,
+.xiaoling-conversation--fullscreen .xiaoling-conversation__text-action {
+  border: 1px solid rgba(201, 168, 106, 0.4);
+  background: rgba(245, 241, 232, 0.82);
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--fullscreen .xiaoling-conversation__status {
+  background: rgba(245, 241, 232, 0.86);
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--fullscreen .xiaoling-conversation__quick-asks button {
+  border-color: rgba(92, 122, 107, 0.34);
+  background: rgba(245, 241, 232, 0.9);
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--fullscreen .guide-message--assistant > .chat-bubble {
+  border: 1px solid rgba(201, 168, 106, 0.38);
+  background: rgba(245, 241, 232, 0.92);
+  color: #2d4a3e;
+  backdrop-filter: none;
+}
+
+.xiaoling-conversation--fullscreen .guide-message--user > .chat-bubble {
+  border: 1px solid rgba(92, 122, 107, 0.34);
+  background: rgba(45, 74, 62, 0.95);
+  color: #f5f1e8;
+  backdrop-filter: none;
+}
+
+.xiaoling-conversation--fullscreen .chat-card__composer {
+  border-color: rgba(92, 122, 107, 0.42);
+  background: rgba(245, 241, 232, 0.94);
+  backdrop-filter: none;
+}
+
+.xiaoling-conversation--fullscreen .chat-card__textarea {
+  color: #2d4a3e;
+}
+
+.xiaoling-conversation--fullscreen .chat-card__send {
+  background: #2d4a3e;
+  color: #f5f1e8;
+}
+
+.xiaoling-conversation--fullscreen .guide-action-card--route {
+  border-color: rgba(201, 168, 106, 0.46);
+  background: rgba(245, 241, 232, 0.94);
+  color: #2d4a3e;
 }
 
 @media (prefers-reduced-motion: reduce) {

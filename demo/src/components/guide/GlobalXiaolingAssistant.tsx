@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -12,6 +12,10 @@ import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAss
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
 import { XiaolingConversationSurface } from './XiaolingConversationSurface'
 import { resolveXiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
+import { resolveXiaolingFullscreenBackground } from './resolveXiaolingFullscreenBackground'
+import { captureXiaolingPortrait, useXiaolingPortrait, type XiaolingPresentationMode } from './xiaolingPortrait'
+import Live2DStage from '../Live2DStage'
+import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
 import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
@@ -31,6 +35,10 @@ export function GlobalXiaolingAssistant() {
   const [input, setInput] = useState('')
   const [visualViewport, setVisualViewport] = useState({ height: 0, offsetTop: 0 })
   const [routeAvatarAnchor, setRouteAvatarAnchor] = useState<{ top: number; right: number } | null>(null)
+  const [live2dAnchor, setLive2dAnchor] = useState<DOMRectReadOnly | null>(null)
+  const [live2dInstanceId, setLive2dInstanceId] = useState('')
+  const runtime = useXiaolingRuntime()
+  const portrait = useXiaolingPortrait()
   const context = useGuideSessionStore((state) => state.context)
   const activeConversationKey = useGuideSessionStore((state) => state.activeConversationKey)
   const messages = useGuideSessionStore((state) =>
@@ -59,6 +67,12 @@ export function GlobalXiaolingAssistant() {
       context.selectedPoiId
     ]
   )
+  const fullscreenBackground = useMemo(() => resolveXiaolingFullscreenBackground(), [])
+  const presentationMode: XiaolingPresentationMode = isFullscreenPage
+    ? 'fullscreen'
+    : isMapPage && open
+      ? 'drawer'
+      : 'badge'
 
   useEffect(() => setMounted(true), [])
 
@@ -137,6 +151,69 @@ export function GlobalXiaolingAssistant() {
   }, [mounted, visualMode])
 
   useEffect(() => {
+    if (!mounted) return undefined
+    let frameId = 0
+    let observedAnchor: HTMLElement | null = null
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleUpdate)
+
+    function scheduleUpdate() {
+      window.cancelAnimationFrame(frameId)
+      frameId = window.requestAnimationFrame(updateAnchor)
+    }
+
+    function updateAnchor() {
+      const anchor = document.querySelector<HTMLElement>(`[data-xiaoling-live2d-anchor="${presentationMode}"]`)
+      if (anchor !== observedAnchor) {
+        resizeObserver?.disconnect()
+        observedAnchor = anchor
+        if (anchor) resizeObserver?.observe(anchor)
+      }
+      if (!anchor) {
+        setLive2dAnchor(null)
+        return
+      }
+      const rect = anchor.getBoundingClientRect()
+      setLive2dAnchor((current) => current
+        && Math.round(current.top) === Math.round(rect.top)
+        && Math.round(current.left) === Math.round(rect.left)
+        && Math.round(current.width) === Math.round(rect.width)
+        && Math.round(current.height) === Math.round(rect.height)
+        ? current
+        : rect)
+    }
+
+    const mutationObserver = new MutationObserver(scheduleUpdate)
+    mutationObserver.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', scheduleUpdate)
+    window.visualViewport?.addEventListener('resize', scheduleUpdate)
+    window.visualViewport?.addEventListener('scroll', scheduleUpdate)
+    scheduleUpdate()
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      mutationObserver.disconnect()
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', scheduleUpdate)
+      window.visualViewport?.removeEventListener('resize', scheduleUpdate)
+      window.visualViewport?.removeEventListener('scroll', scheduleUpdate)
+    }
+  }, [mounted, presentationMode])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !mounted) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const live2dCanvasCount = document.querySelectorAll('canvas.live2d-canvas').length
+      const detail = {
+        live2dCanvasCount,
+        mode: presentationMode,
+        portraitReady: portrait.ready
+      }
+      console.debug('[XiaolingLive2D]', detail)
+      if (live2dCanvasCount > 1) console.warn('[XiaolingLive2D] Multiple Live2D canvases detected.', detail)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [mounted, portrait.ready, presentationMode])
+
+  useEffect(() => {
     if (!isMapPage && !isFullscreenPage) setDrawerOpen(false)
   }, [isFullscreenPage, isMapPage, setDrawerOpen])
 
@@ -206,12 +283,21 @@ export function GlobalXiaolingAssistant() {
     else addMessage({ role: 'assistant', text: '这个操作暂时不可用，请稍后再试。', status: 'complete' })
   }
 
-  if (!mounted || (!isMapPage && !isFullscreenPage) || typeof document === 'undefined') return null
+  const handlePresentationReady = useCallback((detail: {
+    canvas: HTMLCanvasElement
+    instanceId: string
+    mode: XiaolingPresentationMode
+  }) => {
+    setLive2dInstanceId(detail.instanceId)
+    if (detail.mode === 'badge') captureXiaolingPortrait(detail.canvas)
+  }, [])
+
+  if (!mounted || typeof document === 'undefined') return null
 
   const rootStyle = {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
     '--guide-vvo-top': `${visualViewport.offsetTop}px`,
-    '--guide-drawer-height': visualViewport.height ? `${Math.round(visualViewport.height * 0.66)}px` : '66dvh'
+    '--guide-drawer-height': visualViewport.height ? `${Math.round(visualViewport.height * 0.6)}px` : '60dvh'
   } as CSSProperties
   const routeAvatarStyle = routeAvatarAnchor
     ? ({
@@ -219,8 +305,39 @@ export function GlobalXiaolingAssistant() {
         '--guide-route-avatar-right': `${routeAvatarAnchor.right}px`
       } as CSSProperties)
     : undefined
+  const live2dHostStyle = live2dAnchor
+    ? ({
+        top: `${Math.round(live2dAnchor.top - visualViewport.offsetTop)}px`,
+        left: `${Math.round(live2dAnchor.left)}px`,
+        width: `${Math.round(live2dAnchor.width)}px`,
+        height: `${Math.round(live2dAnchor.height)}px`
+      } as CSSProperties)
+    : undefined
   return createPortal(
-    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={visualMode}>
+    <div
+      className="guide-assistant-root"
+      style={rootStyle}
+      data-guide-mode={visualMode}
+      data-xiaoling-live2d-mode={presentationMode}
+      data-xiaoling-live2d-instance={live2dInstanceId}
+      data-xiaoling-portrait-ready={portrait.ready ? 'true' : 'false'}
+    >
+      <div
+        className={`xiaoling-live2d-host is-${presentationMode}${live2dAnchor ? '' : ' is-unanchored'}`}
+        style={live2dHostStyle}
+        aria-hidden="true"
+      >
+        <Live2DStage
+          variant="immersive"
+          eager
+          sceneId={runtime.sceneId}
+          robotStateOverride={runtime.robotState}
+          mouthOpenOverride={runtime.mouthOpen}
+          mouthFormOverride={runtime.mouthForm}
+          presentationMode={live2dAnchor ? presentationMode : 'hidden'}
+          onPresentationReady={handlePresentationReady}
+        />
+      </div>
       {isMapPage && !open ? (
         <XiaolingFloatingCompanion
           mode={visualMode}
@@ -232,7 +349,7 @@ export function GlobalXiaolingAssistant() {
       ) : null}
       {open || isFullscreenPage ? <XiaolingConversationSurface
         mode={isFullscreenPage ? 'fullscreen' : 'drawer'}
-        backgroundMedia={isFullscreenPage ? undefined : drawerBackground}
+        backgroundMedia={isFullscreenPage ? fullscreenBackground : drawerBackground}
         title={assistantContent.title}
         subtitle={assistantContent.subtitle}
         suggestedQuestions={assistantContent.suggestedQuestions}

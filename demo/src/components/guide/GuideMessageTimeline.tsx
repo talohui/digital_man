@@ -18,7 +18,11 @@ export function GuideMessageTimeline({
           <div className={`chat-bubble chat-bubble--${message.role}`}>
             <p>{message.text}</p>
           </div>
-          {message.ui ? <GuideActionCardRenderer payload={message.ui} onAction={onAction} /> : null}
+          {message.ui ? (
+            <div className="guide-message__structured">
+              <GuideActionCardRenderer payload={message.ui} onAction={onAction} />
+            </div>
+          ) : null}
         </article>
       ))}
     </div>

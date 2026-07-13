@@ -12,6 +12,7 @@ import RouteSkeleton from '../components/RouteSkeleton'
 import MobileHomePage from './MobileHomePage'
 import { saveCAppReturnContext } from '../lib/cAppReturnContext'
 import { getMapResumeUrl } from '../lib/mapResumeState'
+import { XiaolingAvatar } from '../components/guide/XiaolingAvatar'
 // 首屏只 eager 默认 tab(导览页),其余 5 页懒加载;
 // prefetchHeavyTabs 会在 home 空闲帧预热,切 tab 仍秒开
 const MobileGuidePage = lazy(() => import('./MobileGuidePage'))
@@ -30,7 +31,7 @@ const tabs: Array<{
 }> = [
   { key: 'home', label: '导览', path: '/', icon: tabIcon('tab-home') },
   { key: 'map', label: '地图', path: '/map-3d-guide-c', icon: tabIcon('tab-map') },
-  { key: 'guide', label: '小灵', path: '/guide', icon: tabIcon('tab-guide') },
+  { key: 'guide', label: '小灵', path: '/guide', icon: <XiaolingAvatar size="tab" /> },
   { key: 'consume', label: '消费', path: '/consume', icon: tabIcon('tab-shop') },
   { key: 'profile', label: '我的', path: '/me', icon: tabIcon('tab-me') }
 ]

@@ -1,14 +1,7 @@
 import type { CSSProperties } from 'react'
 
 import type { GuideAssistantMode } from './guideAssistantEvents'
-
-export function XiaolingFace() {
-  return (
-    <span className="guide-xiaoling-face" aria-hidden="true">
-      <i />
-    </span>
-  )
-}
+import { XiaolingAvatar } from './XiaolingAvatar'
 
 export function XiaolingFloatingCompanion({
   mode,
@@ -27,7 +20,9 @@ export function XiaolingFloatingCompanion({
     return (
       <aside className="guide-floating-companion guide-floating-companion--browse" aria-label="小灵陪伴入口">
         <button type="button" className="guide-floating-companion__avatar" onClick={onOpen} aria-label="问小灵">
-          <XiaolingFace />
+          <span className="guide-floating-companion__live-anchor" data-xiaoling-live2d-anchor="badge">
+            <XiaolingAvatar size="floating" />
+          </span>
         </button>
         <div className="guide-floating-companion__content">
           <button type="button" className="guide-floating-companion__tip" onClick={onOpen}>
@@ -49,7 +44,9 @@ export function XiaolingFloatingCompanion({
       style={floatingStyle}
     >
       <button type="button" className="guide-floating-companion__avatar" onClick={onOpen} aria-label="打开小灵导览">
-        <XiaolingFace />
+        <span className="guide-floating-companion__live-anchor" data-xiaoling-live2d-anchor="badge">
+          <XiaolingAvatar size="floating" />
+        </span>
       </button>
     </aside>
   )

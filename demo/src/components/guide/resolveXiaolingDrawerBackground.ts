@@ -10,7 +10,7 @@ const DEFAULT_LINGSHAN_BACKGROUND = getRouteMedia('natural_scenery')
 
 export type XiaolingDrawerBackground = {
   key: string
-  contextType: 'browse' | 'route-preview' | 'route-joining' | 'route-active' | 'route-arrived' | 'poi'
+  contextType: 'browse' | 'route-preview' | 'route-joining' | 'route-active' | 'route-arrived' | 'poi' | 'fullscreen'
   candidates: string[]
   alt: string
 }

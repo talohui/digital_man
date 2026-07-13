@@ -123,7 +123,8 @@ function AppContent() {
         </Suspense>
         <GuideContextBridge />
         <LegacyNavigationNotice />
-        {isCanonicalMapRoute || isXiaolingFullscreenRoute ? <GlobalXiaolingAssistant /> : <FloatingGuide />}
+        <GlobalXiaolingAssistant />
+        {!isCanonicalMapRoute && !isXiaolingFullscreenRoute ? <FloatingGuide /> : null}
       </RouteErrorBoundary>
     )
   }

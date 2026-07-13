@@ -4451,8 +4451,9 @@
     box-shadow: 0 4px 10px rgba(31, 59, 49, 0.14);
   }
 
-  .navigation-beta-card__avatar .guide-xiaoling-face {
-    transform: scale(0.62);
+  .navigation-beta-card__avatar .xiaoling-avatar {
+    width: 100%;
+    height: 100%;
   }
 
   .navigation-beta-card__toggle {

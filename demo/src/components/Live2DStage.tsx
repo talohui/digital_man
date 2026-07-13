@@ -22,6 +22,7 @@ import {
   type RobotState
 } from '../lib/live2dManager'
 import { loadCubismCore } from '../lib/loadCubismCore'
+import type { XiaolingPresentationMode } from './guide/xiaolingPortrait'
 
 // pixi-live2d-display 0.4 通过全局 window.PIXI 访问 Pixi,必须在 import 之前注入
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
@@ -29,6 +30,7 @@ import { loadCubismCore } from '../lib/loadCubismCore'
 // 模型本地化：随包发布到 demo/public/live2d/haru，现场不再依赖公网 CDN，加载稳定。
 // 后台 avatar 配置若显式给了 live2dModelUrl 仍会覆盖此默认值。
 const DEFAULT_MODEL_URL = '/live2d/haru/haru_greeter_t03.model3.json'
+let live2dInstanceSequence = 0
 
 const highlights = [
   { title: '推荐路线', value: '1 日游', icon: <CompassOutlined /> },
@@ -61,6 +63,12 @@ type Live2DStageProps = {
   robotStateOverride?: RobotState
   mouthOpenOverride?: number
   mouthFormOverride?: number
+  presentationMode?: XiaolingPresentationMode
+  onPresentationReady?: (detail: {
+    canvas: HTMLCanvasElement
+    instanceId: string
+    mode: XiaolingPresentationMode
+  }) => void
 }
 
 function Live2DStage({
@@ -70,7 +78,9 @@ function Live2DStage({
   sceneId,
   robotStateOverride,
   mouthOpenOverride,
-  mouthFormOverride
+  mouthFormOverride,
+  presentationMode = 'fullscreen',
+  onPresentationReady
 }: Live2DStageProps) {
   const isEmbedded = variant === 'embedded'
   const isImmersive = variant === 'immersive'
@@ -78,6 +88,11 @@ function Live2DStage({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appRef = useRef<PIXI.Application | null>(null)
   const modelRef = useRef<Live2DLikeModel | null>(null)
+  const fitRef = useRef<(() => void) | null>(null)
+  const presentationModeRef = useRef(presentationMode)
+  const onPresentationReadyRef = useRef(onPresentationReady)
+  const instanceIdRef = useRef('')
+  if (!instanceIdRef.current) instanceIdRef.current = `xiaoling-live2d-${++live2dInstanceSequence}`
   const costumeIdRef = useRef<CostumeId>('default')
   const [isInView, setIsInView] = useState(eager)
   const [isLoading, setIsLoading] = useState(false)
@@ -89,6 +104,11 @@ function Live2DStage({
   const legacyRobotState = useChatStore((s) => s.sessions[resolvedSceneId]?.robotState ?? 'normal')
   const robotState = robotStateOverride ?? legacyRobotState
   const visibleHighlights = highlightsOverride ?? highlights
+
+  useEffect(() => {
+    presentationModeRef.current = presentationMode
+    onPresentationReadyRef.current = onPresentationReady
+  }, [onPresentationReady, presentationMode])
 
   useEffect(() => {
     if (eager) {
@@ -131,6 +151,7 @@ function Live2DStage({
       autoStart: true,
       resizeTo: canvas.parentElement ?? undefined,
       backgroundAlpha: 0,
+      preserveDrawingBuffer: true,
       antialias: !preferReducedGpu,
       resolution: renderResolution,
       autoDensity: true
@@ -176,21 +197,37 @@ function Live2DStage({
           }
           const baseW = model.internalModel?.originalWidth ?? model.width
           const baseH = model.internalModel?.originalHeight ?? model.height
-          const scale = Math.min(w / baseW, h / baseH) * (isImmersive ? 1.18 : 0.9)
+          const mode = presentationModeRef.current
+          const scale = mode === 'badge'
+            ? Math.max(w / baseW, h / baseH) * 1.7
+            : Math.min(w / baseW, h / baseH) * (isImmersive ? 1.18 : 0.9)
           model.scale.set(scale)
           model.x = (w - baseW * scale) / 2
-          model.y = (h - baseH * scale) / 2
+          model.y = mode === 'badge'
+            ? -baseH * scale * 0.08
+            : (h - baseH * scale) / 2
         }
+        fitRef.current = fit
         requestAnimationFrame(fit)
         resizeObserver = new ResizeObserver(fit)
         if (canvas.parentElement) resizeObserver.observe(canvas.parentElement)
 
         registerModel(modelRef.current, resolvedSceneId)
+        app.ticker.maxFPS = presentationModeRef.current === 'badge' ? 20 : 60
         playMotionForState(
           robotState,
           resolvedSceneId
         )
         setIsLoading(false)
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            onPresentationReadyRef.current?.({
+              canvas,
+              instanceId: instanceIdRef.current,
+              mode: presentationModeRef.current
+            })
+          })
+        })
       })
       .catch((err) => {
         console.error('Live2D 加载失败:', err)
@@ -204,6 +241,7 @@ function Live2DStage({
       cancelled = true
       resizeObserver?.disconnect()
       registerModel(null, resolvedSceneId)
+      fitRef.current = null
       modelRef.current = null
       try {
         app.destroy(true, { children: true, texture: true, baseTexture: true })
@@ -212,7 +250,40 @@ function Live2DStage({
       }
       appRef.current = null
     }
-  }, [isImmersive, isInView, resolvedSceneId])
+  }, [isInView, resolvedSceneId])
+
+  useEffect(() => {
+    presentationModeRef.current = presentationMode
+    const app = appRef.current
+    if (!app) return
+
+    if (presentationMode === 'hidden') {
+      app.ticker.stop()
+      return
+    }
+
+    app.ticker.maxFPS = presentationMode === 'badge' ? 20 : 60
+    app.ticker.start()
+    fitRef.current?.()
+    let frame = 0
+    const notify = () => {
+      frame = window.requestAnimationFrame(() => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        onPresentationReadyRef.current?.({
+          canvas,
+          instanceId: instanceIdRef.current,
+          mode: presentationModeRef.current
+        })
+      })
+    }
+    const timer = presentationMode === 'badge' ? window.setTimeout(notify, 240) : 0
+    if (presentationMode !== 'badge') notify()
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      window.cancelAnimationFrame(frame)
+    }
+  }, [presentationMode])
 
   useEffect(() => {
     if (!isInView) return
@@ -274,7 +345,7 @@ function Live2DStage({
       if (document.hidden) {
         app?.ticker?.stop()
         PIXI.Ticker.shared.stop()
-      } else {
+      } else if (presentationModeRef.current !== 'hidden') {
         app?.ticker?.start()
         PIXI.Ticker.shared.start()
       }
@@ -294,6 +365,8 @@ function Live2DStage({
     <Card
       className={`stage-card ${isEmbedded ? 'stage-card--embedded' : ''} ${isImmersive ? 'stage-card--immersive' : ''}`}
       bordered={false}
+      data-xiaoling-live2d-instance={instanceIdRef.current}
+      data-xiaoling-live2d-mode={presentationMode}
     >
       <div className="stage-card__topline">
         {!isEmbedded ? <Tag color="gold">Live2D Stage</Tag> : <span />}

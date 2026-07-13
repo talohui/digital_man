@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import type { GuideAction, GuideMessage } from '../../guide'
 import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
-import Live2DStage from '../Live2DStage'
 import { GuideMessageTimeline } from './GuideMessageTimeline'
 import type { XiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
 
@@ -85,7 +84,7 @@ export function XiaolingConversationSurface({
     >
       <ScenicBackdrop
         media={backgroundMedia}
-        enabled={mode === 'drawer'}
+        enabled={Boolean(backgroundMedia)}
         onResolved={(url) => setResolvedBackgroundUrl(url)}
       />
       <div className="immersive-guide__aura immersive-guide__aura--left" />
@@ -113,16 +112,11 @@ export function XiaolingConversationSurface({
         {connectionLabels[runtime.connectionState]}
       </div>
 
-      <section className="immersive-guide__avatar xiaoling-conversation__avatar" aria-label="小灵数字人">
-        <Live2DStage
-          variant="immersive"
-          eager
-          sceneId={runtime.sceneId}
-          robotStateOverride={runtime.robotState}
-          mouthOpenOverride={runtime.mouthOpen}
-          mouthFormOverride={runtime.mouthForm}
-        />
-      </section>
+      <section
+        className="immersive-guide__avatar xiaoling-conversation__avatar"
+        aria-label="小灵数字人"
+        data-xiaoling-live2d-anchor={mode}
+      />
 
       <section className="immersive-guide__chat xiaoling-conversation__chat" aria-label="与小灵对话">
         {suggestedQuestions.length ? (

@@ -1,4 +1,4 @@
-import { CompassOutlined, MessageOutlined, RightOutlined } from '@ant-design/icons'
+import { CompassOutlined, RightOutlined } from '@ant-design/icons'
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getGuideRouteById, guideSpots } from '../data/guideData'
@@ -11,6 +11,7 @@ import {
   readCAppReturnContext,
   saveCAppReturnContext
 } from '../lib/cAppReturnContext'
+import { XiaolingAvatar } from '../components/guide/XiaolingAvatar'
 
 // 景区服务宫格(精美图标入口,放在 public/icons/)
 const SERVICES = [
@@ -249,7 +250,7 @@ function MobileHomePage() {
           }}
           aria-label="打开灵山小灵"
         >
-          <MessageOutlined />
+          <XiaolingAvatar size="small" />
           <span>小灵</span>
         </button>
       </section>
