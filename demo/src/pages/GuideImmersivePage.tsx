@@ -11,7 +11,7 @@ function GuideImmersivePage() {
   const navigate = useNavigate()
 
   return (
-    <main className="immersive-guide">
+    <main className="immersive-guide c-app-root">
       <div className="immersive-guide__aura immersive-guide__aura--left" />
       <div className="immersive-guide__aura immersive-guide__aura--right" />
 

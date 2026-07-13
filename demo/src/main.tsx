@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import './styles/c-app/cAppTypography.css'
 import './styles/global.css'
 import { initPostHogIdle } from './lib/analytics'
 

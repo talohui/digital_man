@@ -1,0 +1,131 @@
+/*
+ * 灵山本地字体（C 端与地图共享）
+ * display: LingshanSerif -> /fonts/lingshan/noto-serif-sc-{700,800}.woff2
+ * body/ui: LingshanSans -> /fonts/lingshan/noto-sans-sc-{500,700}.woff2
+ * C 端边界: .c-app-root、.mobile-shell、.splash-ad-page、
+ *            .guide-assistant-root[data-guide-surface="c-app"]
+ */
+@font-face {
+  font-family: "LingshanSerif";
+  src: url("/fonts/lingshan/noto-serif-sc-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LingshanSerif";
+  src: url("/fonts/lingshan/noto-serif-sc-800.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LingshanSans";
+  src: url("/fonts/lingshan/noto-sans-sc-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LingshanSans";
+  src: url("/fonts/lingshan/noto-sans-sc-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-lingshan-display: "LingshanSerif", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --font-lingshan-body: "LingshanSans", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-lingshan-ui: "LingshanSans", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+  /* 地图既有变量保持名称和字体映射不变。 */
+  --map-font-serif: var(--font-lingshan-display);
+  --map-font-sans: var(--font-lingshan-body);
+  --route-font-serif: var(--map-font-serif);
+  --route-font-sans: var(--map-font-sans);
+}
+
+:where(
+  .c-app-root,
+  .mobile-shell,
+  .splash-ad-page,
+  .immersive-guide
+) {
+  --font-serif: var(--font-lingshan-display);
+  font-family: var(--font-lingshan-body);
+  font-synthesis: none;
+}
+
+.guide-assistant-root[data-guide-surface="c-app"] {
+  --font-serif: var(--font-lingshan-display);
+  font-family: var(--font-lingshan-body);
+  font-synthesis: none;
+}
+
+:where(
+  .c-app-root,
+  .mobile-shell,
+  .splash-ad-page,
+  .immersive-guide
+) :where(button, input, textarea, select) {
+  font-family: var(--font-lingshan-ui);
+}
+
+.mobile-shell .mobile-primary-action {
+  font-family: var(--font-lingshan-ui);
+}
+
+:where(.c-app-root, .mobile-shell, .splash-ad-page, .immersive-guide)
+  :where(h1, h2, h3),
+.guide-assistant-root[data-guide-surface="c-app"]
+  :where(
+    .guide-drawer__header strong,
+    .xiaoling-conversation__topbar strong,
+    .guide-action-card h3
+  ) {
+  font-family: var(--font-lingshan-display);
+}
+
+:where(
+  .mobile-shell__eyebrow,
+  .mobile-section-kicker,
+  .mobile-shell__tab,
+  .mobile-tag,
+  .mobile-preference-chip,
+  .mobile-primary-action,
+  .mobile-ticket-entry__actions button,
+  .mobile-profile-ticket__actions button,
+  .mobile-segmented button,
+  .mobile-ticket-types button,
+  .mobile-amount-list button,
+  .mobile-consume-grid button,
+  .mobile-shop-add,
+  .mobile-shop-stepper button
+) {
+  font-family: var(--font-lingshan-ui);
+  word-break: keep-all;
+}
+
+:where(.mobile-home, .mobile-guide-page, .mobile-profile-page, .mobile-ticket-page, .mobile-consume-page)
+  :where(p, small) {
+  font-family: var(--font-lingshan-body);
+}
+
+.guide-assistant-root[data-guide-surface="c-app"]
+  :where(
+    .guide-drawer__header p,
+    .guide-drawer__quick-prompts button,
+    .guide-message,
+    .guide-action-card,
+    .guide-input-composer,
+    .xiaoling-conversation__status,
+    input,
+    textarea,
+    button
+  ) {
+  font-family: var(--font-lingshan-ui);
+}

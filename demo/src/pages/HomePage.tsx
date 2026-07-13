@@ -104,7 +104,7 @@ function HomePage() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell c-app-root">
       <SceneHeader />
 
       <main className="app-content">

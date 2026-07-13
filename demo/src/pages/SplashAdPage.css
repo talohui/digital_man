@@ -106,7 +106,7 @@
 }
 
 .splash-ad-brand strong {
-  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-family: var(--font-lingshan-display);
   font-size: clamp(1.15rem, 4.8vw, 1.6rem);
   font-weight: 700;
   letter-spacing: 0.03em;
