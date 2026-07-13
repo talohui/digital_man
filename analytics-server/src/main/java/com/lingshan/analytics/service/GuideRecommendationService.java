@@ -14,6 +14,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -71,9 +73,10 @@ public class GuideRecommendationService {
     public GuideRecommendationResponse recommend(GuideRecommendationRequest request) {
         String userId = sanitizeUserId(request.userId());
         List<String> selectedTags = normalizeTags(request.selectedTags());
+        Map<String, String> preferences = normalizePreferences(request.preferences());
         String requestId = "rec_" + Instant.now().toEpochMilli();
 
-        List<LocalScoreEngine.ScoredRoute> scoredRoutes = localScoreEngine.rank(userId, selectedTags, RECOMMENDATION_SIZE);
+        List<LocalScoreEngine.ScoredRoute> scoredRoutes = localScoreEngine.rank(userId, selectedTags, preferences, RECOMMENDATION_SIZE);
         List<GuideRouteCard> routes = scoredRoutes.stream()
                 .map(route -> toRouteCard(route, requestId))
                 .toList();
@@ -156,6 +159,27 @@ public class GuideRecommendationService {
                 .filter(GuideRouteCatalog.CANONICAL_TAGS::contains)
                 .distinct()
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, String> normalizePreferences(Map<String, String> preferences) {
+        if (preferences == null || preferences.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Set<String>> allowed = Map.of(
+                "duration", Set.of("quick", "half_day", "deep"),
+                "arrival", Set.of("morning", "noon", "afternoon"),
+                "companion", Set.of("solo", "friends", "family", "elder"),
+                "walk", Set.of("light", "normal", "deep"),
+                "show", Set.of("must", "flexible", "skip")
+        );
+
+        return preferences.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getValue() != null)
+                .map(entry -> Map.entry(entry.getKey().trim(), entry.getValue().trim()))
+                .filter(entry -> allowed.containsKey(entry.getKey()))
+                .filter(entry -> allowed.get(entry.getKey()).contains(entry.getValue()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (left, right) -> right));
     }
 
     private String sanitizeUserId(String userId) {

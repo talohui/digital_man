@@ -1,5 +1,6 @@
 import {
   buildLocalGuideRecommendations,
+  type GuidePreferenceContext,
   type GuideRecommendationCard,
   type UserProfileSnapshot
 } from '../data/guideData'
@@ -19,6 +20,7 @@ export type GuideRecommendationsResponse = {
 export async function fetchGuideRecommendations(payload: {
   userId: string
   selectedTags: string[]
+  preferences?: GuidePreferenceContext
 }): Promise<GuideRecommendationsResponse> {
   try {
     const response = await fetch(`${GUIDE_API}/recommendations`, {
@@ -41,7 +43,7 @@ export async function fetchGuideRecommendations(payload: {
       }))
     }
   } catch {
-    const routes = buildLocalGuideRecommendations(payload.selectedTags)
+    const routes = buildLocalGuideRecommendations(payload.selectedTags, payload.preferences)
     return {
       userId: payload.userId,
       recommendedRouteId: routes[0]?.id ?? 'historical_culture',

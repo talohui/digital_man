@@ -45,6 +45,9 @@ import fay_booter
 from flask_httpauth import HTTPBasicAuth
 from core import qa_service
 from core import stream_manager
+from gui.marketing_decision_api import register_marketing_decision_api
+from gui.service_config_api import register_service_config_api
+from utils.marketing_decision_llm import generate_marketing_decision
 
 # 全局变量，用于跟踪当前的genagents服务器
 genagents_server = None
@@ -79,6 +82,21 @@ def verify_password(username, password):
         return True
     if username in users and users[username] == password:
         return username
+
+
+register_service_config_api(
+    __app,
+    config_path=os.path.join(os.getcwd(), 'system.conf'),
+    password_hash=os.getenv('FAY_ADMIN_CONFIG_PASSWORD_HASH', ''),
+    reload_callback=lambda: config_util.load_config(force_reload=True),
+)
+register_marketing_decision_api(
+    __app,
+    generator=lambda decision_input: generate_marketing_decision(
+        decision_input,
+        config_util,
+    ),
+)
 
 
 def __get_template():

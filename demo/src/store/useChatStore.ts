@@ -1,12 +1,22 @@
 import { create } from 'zustand'
 import { connectFayWS, extractAudioUrl, extractRobotState, registerFayUsername, sendTextToFay, type FayMessage } from '../api/fay'
 import { playWithLipsync } from '../lib/audioLipsync'
-import type { RobotState } from '../lib/live2dManager'
+import { buildGuidePrompt } from '../lib/guidePrompt'
+import {
+  addEmotionInstructionToPrompt,
+  createFayEmotionCue,
+  getReplyEmotionStateForUserText,
+  resolveReplyRobotState
+} from '../lib/fayEmotion'
+import { FAY_SEND_TIMEOUT_MS, isFayReplyComplete } from '../lib/fayReplyLifecycle'
+import { getAudioPlaybackState, type RobotState } from '../lib/live2dManager'
 import { getFayUsername, getSceneIdFromFayUsername } from '../lib/fayIdentity'
 import {
   appendAssistantChunkToScene,
   appendMessageToScene,
   createInitialSessions,
+  createMessage,
+  DEFAULT_ASSISTANT_GREETING,
   getSession,
   normalizeSceneId,
   setGuideContextForScene,
@@ -15,6 +25,7 @@ import {
   type ChatSessions,
   type GuideContext
 } from './chatSessions'
+import { useGuideStore } from './useGuideStore'
 import {
   capture, EVENT,
   captureSessionStart, captureSessionEnd,
@@ -40,13 +51,14 @@ interface ChatState {
   handleFayMessage: (message: FayMessage) => void
   sendMessage: (value?: string, sceneId?: string) => Promise<void>
   sendQuickAsk: (question: string, sceneId?: string) => Promise<void>
+  clearSession: (sceneId?: string) => void
   startRecord: (sceneId?: string) => void
   stopRecord: (sceneId?: string) => void
   setGuideContext: (context: GuideContext, sceneId?: string) => void
   clearGuideContext: (sceneId?: string) => void
   setRobotState: (state: RobotState, sceneId?: string) => void
   setMouthOpen: (value: number, sceneId?: string) => void
-  enqueueAudio: (url: string, sceneId?: string) => void
+  enqueueAudio: (url: string, sceneId?: string, state?: RobotState) => void
 }
 
 type AudioQueue = {
@@ -109,24 +121,6 @@ const getRawFayText = (message: FayMessage): string => {
   return text ?? ''
 }
 
-const buildGuidePrompt = (content: string, guideContext: GuideContext | null) => {
-  if (!guideContext?.spotName && !guideContext?.routeName) {
-    return content
-  }
-
-  return [
-    '你是灵山胜境的数字人讲解员，请优先围绕当前场景回答游客问题。',
-    guideContext.routeName ? `当前路线：${guideContext.routeName}` : '',
-    guideContext.spotName ? `当前景点：${guideContext.spotName}` : '',
-    guideContext.spotIntro ? `景点简介：${guideContext.spotIntro}` : '',
-    guideContext.spotNarrative ? `当前讲解重点：${guideContext.spotNarrative}` : '',
-    '如果游客问题偏离当前场景，也请先简短回答，再自然地把话题拉回当前导览场景。',
-    `游客问题：${content}`
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
 function getMessageSceneId(message: FayMessage): string | null {
   const username =
     typeof message.Username === 'string'
@@ -137,6 +131,15 @@ function getMessageSceneId(message: FayMessage): string | null {
           ? message.panelReply.username
           : null
   return getSceneIdFromFayUsername(username)
+}
+
+function getPendingRobotState(content: string): RobotState {
+  return getReplyEmotionStateForUserText(content) ?? 'thinking'
+}
+
+function buildPromptForFay(content: string, guideContext: GuideContext | null): string {
+  const guidePrompt = buildGuidePrompt(content, guideContext)
+  return addEmotionInstructionToPrompt(guidePrompt, content)
 }
 
 // ===== WebSocket 重连 & 发送离线队列(模块级,跨 store 实例稳定) =====
@@ -304,9 +307,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       //    Fay 流式协议:每句话首块带 _<isfirst>,末块带 _<isend>
       //    见到 isFirst 时开新气泡;否则把内容追加到最后一个 assistant 气泡
       const rawText = getRawFayText(message)
+      const isReplyComplete = isFayReplyComplete(message, rawText)
       if (rawText) {
         const isFirst = /_<isfirst>/.test(rawText)
-        const isEnd = /_<isend>/.test(rawText)
+        const isEnd = isReplyComplete
         const clean = stripBackendMarkup(rawText)
         if (clean) {
           const session = getSession(get().sessions, sceneId)
@@ -321,20 +325,39 @@ export const useChatStore = create<ChatState>((set, get) => {
           const messages = getSession(get().sessions, sceneId).messages
           const assistant = messages[messages.length - 1]
           captureAiReply(assistant?.role === 'assistant' ? assistant.content : clean, getSession(get().sessions, sceneId)._lastSendTime)
-          patchSession(sceneId, (session) => ({ ...session, _lastSendTime: 0 }))
+          patchSession(sceneId, (session) => ({
+            ...session,
+            isSending: false,
+            _lastSendTime: 0
+          }))
         }
+      } else if (isReplyComplete) {
+        patchSession(sceneId, (session) => ({ ...session, isSending: false, _lastSendTime: 0 }))
       }
 
       // 2. 数字人状态
+      const emotionCue = createFayEmotionCue(message, rawText)
       const robot = extractRobotState(message)
-      if (robot) {
-        get().setRobotState(robot, sceneId)
+      const currentReplyEmotionState = getSession(get().sessions, sceneId).replyEmotionState
+      const replyRobotState = resolveReplyRobotState(
+        currentReplyEmotionState,
+        robot,
+        emotionCue
+      )
+      if (robot || rawText || emotionCue.tone !== 'neutral') {
+        patchSession(sceneId, (session) => ({
+          ...session,
+          robotState: replyRobotState,
+          replyEmotionState:
+            currentReplyEmotionState ??
+            (emotionCue.tone === 'neutral' ? null : emotionCue.robotState)
+        }))
       }
 
       // 3. 音频(可能多段,串行入队)
       const audioUrl = extractAudioUrl(message)
       if (audioUrl) {
-        get().enqueueAudio(audioUrl, sceneId)
+        get().enqueueAudio(audioUrl, sceneId, replyRobotState)
       }
     },
     sendMessage: async (value, sceneId) => {
@@ -354,14 +377,22 @@ export const useChatStore = create<ChatState>((set, get) => {
         inputText: '',
         isSending: true,
         lastError: '',
-        robotState: 'thinking',
+        robotState: getPendingRobotState(content),
+        replyEmotionState: getReplyEmotionStateForUserText(content),
         _lastSendTime
       }))
 
       try {
         registerScene(id)
-        const prompt = buildGuidePrompt(content, getSession(get().sessions, id).guideContext)
-        const response = await sendTextToFay(prompt, getFayUsername(id))
+        const prompt = buildPromptForFay(content, getSession(get().sessions, id).guideContext)
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), FAY_SEND_TIMEOUT_MS)
+        let response: Response
+        try {
+          response = await sendTextToFay(prompt, getFayUsername(id), controller.signal)
+        } finally {
+          window.clearTimeout(timeout)
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
@@ -370,13 +401,21 @@ export const useChatStore = create<ChatState>((set, get) => {
         const message =
           error instanceof Error ? error.message : '消息发送失败，请稍后重试。'
 
+        // Fay 已通过 WS 返回完整回复时，HTTP 连接即使随后超时也不能再次排队，
+        // 否则同一问题会在重连后被重复发送。
+        const settledSession = getSession(get().sessions, id)
+        if (!settledSession.isSending && settledSession._lastSendTime === 0) {
+          return
+        }
+
         // 网络断/服务暂时不可达 → 入离线队列,等 WS 重连成功后自动重发
         const isNetworkLike =
           (typeof navigator !== 'undefined' && !navigator.onLine) ||
           (error instanceof TypeError) || // fetch 网络错误典型是 TypeError
+          (error instanceof DOMException && error.name === 'AbortError') ||
           /Failed to fetch|NetworkError|HTTP 5\d\d/.test(message)
         if (isNetworkLike) {
-          const prompt = buildGuidePrompt(content, getSession(get().sessions, id).guideContext)
+          const prompt = buildPromptForFay(content, getSession(get().sessions, id).guideContext)
           _pendingSends.push({ sceneId: id, prompt, username: getFayUsername(id) })
           patchSession(id, (session) => ({
             ...session,
@@ -397,6 +436,23 @@ export const useChatStore = create<ChatState>((set, get) => {
     sendQuickAsk: async (question, sceneId) => {
       captureQuickAsk(question)
       await get().sendMessage(question, sceneId)
+    },
+    clearSession: (sceneId) => {
+      const id = targetScene(sceneId)
+      // 轮换匿名会话段：下一次发送将用新的 Fay username，后端查不到旧历史 ⇒ 上下文清空
+      useGuideStore.getState().bumpConversationEpoch(id)
+      set((state) => ({
+        sessions: updateSession(state.sessions, id, (session) => ({
+          ...session,
+          messages: [createMessage('assistant', DEFAULT_ASSISTANT_GREETING)],
+          inputText: '',
+          isRecording: false,
+          isSending: false,
+          robotState: 'happy',
+          replyEmotionState: null,
+          lastError: ''
+        }))
+      }))
     },
     startRecord: (sceneId) => {
       const id = targetScene(sceneId)
@@ -432,16 +488,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       patchSession(sceneId, (session) => ({ ...session, robotState })),
     setMouthOpen: (mouthOpen, sceneId) =>
       patchSession(sceneId, (session) => ({ ...session, mouthOpen })),
-    enqueueAudio: (url, sceneId) => {
+    enqueueAudio: (url, sceneId, state = 'speaking') => {
       const id = targetScene(sceneId)
       const queue = getAudioQueue(id)
+      const speakingState = getAudioPlaybackState(state)
       queue.pending += 1
-      get().setRobotState('speaking', id)
+      get().setRobotState(speakingState, id)
       capture(EVENT.AUDIO_PLAY_START, {})
       queue.chain = queue.chain
         .then(() =>
-          playWithLipsync(url, (v) => {
-            get().setMouthOpen(v, id)
+          playWithLipsync(url, (open, form) => {
+            // 每帧同时更新张开度与嘴形(粗略元音);合并为一次 patch,少一次 store 写入
+            patchSession(id, (session) => ({ ...session, mouthOpen: open, mouthForm: form }))
           })
         )
         .catch((err) => {
@@ -451,7 +509,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           queue.pending -= 1
           if (queue.pending <= 0) {
             queue.pending = 0
-            patchSession(id, (session) => ({ ...session, mouthOpen: 0, robotState: 'normal' }))
+            patchSession(id, (session) => ({
+              ...session,
+              mouthOpen: 0,
+              mouthForm: 0,
+              robotState: 'happy',
+              replyEmotionState: null
+            }))
             capture(EVENT.AUDIO_PLAY_END, {})
           }
         })

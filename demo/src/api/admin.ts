@@ -30,9 +30,13 @@ export type PublicAvatarConfig = {
 }
 
 export async function fetchPublicAvatarConfig(): Promise<PublicAvatarConfig | null> {
-  const res = await fetch(`${BASE}/public/avatar-config`)
-  if (!res.ok) return null
-  return res.json()
+  try {
+    const res = await fetch(`${BASE}/public/avatar-config`)
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
 }
 
 export function adminGet<T>(path: string) {

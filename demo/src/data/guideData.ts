@@ -2,6 +2,70 @@ export const GUIDE_TAGS = ['亲子游', '文化探秘', '祈福静心', '轻松�
 
 export type GuideTag = (typeof GUIDE_TAGS)[number]
 
+export type GuidePreferenceKey = 'duration' | 'arrival' | 'companion' | 'walk' | 'show'
+
+export type GuidePreferenceContext = Record<GuidePreferenceKey, string>
+
+export const DEFAULT_GUIDE_PREFERENCES: GuidePreferenceContext = {
+  duration: 'half_day',
+  arrival: 'morning',
+  companion: 'friends',
+  walk: 'normal',
+  show: 'flexible'
+}
+
+export const GUIDE_PREFERENCE_GROUPS: Array<{
+  key: GuidePreferenceKey
+  label: string
+  options: Array<{ value: string; label: string }>
+}> = [
+  {
+    key: 'duration',
+    label: '游览时长',
+    options: [
+      { value: 'quick', label: '1-2 小时' },
+      { value: 'half_day', label: '半日游' },
+      { value: 'deep', label: '深度游' }
+    ]
+  },
+  {
+    key: 'arrival',
+    label: '到达时间',
+    options: [
+      { value: 'morning', label: '上午' },
+      { value: 'noon', label: '中午' },
+      { value: 'afternoon', label: '下午' }
+    ]
+  },
+  {
+    key: 'companion',
+    label: '同行人群',
+    options: [
+      { value: 'friends', label: '朋友' },
+      { value: 'family', label: '亲子' },
+      { value: 'elder', label: '老人' }
+    ]
+  },
+  {
+    key: 'walk',
+    label: '步行强度',
+    options: [
+      { value: 'light', label: '少走路' },
+      { value: 'normal', label: '正常' },
+      { value: 'deep', label: '可多走' }
+    ]
+  },
+  {
+    key: 'show',
+    label: '演出安排',
+    options: [
+      { value: 'must', label: '想看' },
+      { value: 'flexible', label: '随缘' },
+      { value: 'skip', label: '不看' }
+    ]
+  }
+]
+
 export type LatLngPoint = {
   lat: number
   lng: number
@@ -30,6 +94,8 @@ export type GuideRoute = {
   durationLabel: string
   tags: GuideTag[]
   description: string
+  // 路线封面图（灵山实拍），用于图卡式路线展示
+  cover: string
   stops: GuideRouteStop[]
   experiences: string[]
   walkIntensity: WalkIntensity
@@ -232,6 +298,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '6 小时深度游',
     tags: ['文化探秘', '祈福静心'],
     description: '适合喜欢佛教历史、建筑艺术与沉浸式讲解的游客，覆盖灵山最有代表性的人文主线。',
+    cover: '/intro/splash/splash-01.webp',
     stops: [
       { spotId: 'south_gate', narrative: '从南门开始建立整体认知，这条路线会以佛教历史、建筑艺术和文化轴线为主线展开。' },
       { spotId: 'lingshan_wall', narrative: '灵山大照壁最适合先铺开景区的文化门面，帮助游客快速进入整座景区的历史语境。' },
@@ -313,6 +380,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '5 小时全景游',
     tags: ['轻松漫步', '拍照打卡'],
     description: '适合偏好慢节奏漫游、园林禅意和太湖视野的游客，整体更轻松也更适合拍照。',
+    cover: '/intro/splash/splash-05.webp',
     stops: [
       { spotId: 'south_gate', narrative: '自然风光线从南门开始，重点不是赶景点，而是沿着更开阔的观景动线感受太湖与园林空间。' },
       { spotId: 'fozu_tan', narrative: '佛足坛适合做礼佛开场，也能把游览节奏从入园的喧闹自然过渡到更平静的观景状态。' },
@@ -338,6 +406,7 @@ export const guideRoutes: GuideRoute[] = [
     durationLabel: '4 小时轻松游',
     tags: ['亲子游', '拍照打卡'],
     description: '适合带孩子边玩边逛，侧重互动体验、故事表达和视觉冲击，节奏更友好。',
+    cover: '/intro/splash/splash-04.webp',
     stops: [
       { spotId: 'south_gate', narrative: '从南门开始把整条路线讲成一场轻松探索，让孩子先知道今天会有表演、互动和很多好看的艺术空间。' },
       { spotId: 'jiulong_guanyu', narrative: '九龙灌浴适合用生动语言讲释迦牟尼诞生的故事，让孩子先从有画面感的内容进入佛教文化。' },
@@ -407,6 +476,7 @@ export function getRouteItineraryMeta(routeId?: string | null) {
     stopCount: route.stops.length,
     walkIntensity: route.walkIntensity,
     tags: route.tags,
+    cover: route.cover,
     highlights: route.experiences.slice(0, 2)
   }
 }
@@ -422,18 +492,24 @@ export function buildSpotQuestions(routeId: string, spotId: string) {
   ]
 }
 
-export function buildLocalGuideRecommendations(selectedTags: string[]): GuideRecommendationCard[] {
+export function buildLocalGuideRecommendations(
+  selectedTags: string[] = [],
+  preferences: GuidePreferenceContext = DEFAULT_GUIDE_PREFERENCES
+): GuideRecommendationCard[] {
   const ranked = [...guideRoutes].sort((left, right) => {
-    const leftScore = countOverlap(left.tags, selectedTags)
-    const rightScore = countOverlap(right.tags, selectedTags)
+    const leftScore = countOverlap(left.tags, selectedTags) * 120 + getRoutePreferenceScore(left, preferences)
+    const rightScore = countOverlap(right.tags, selectedTags) * 120 + getRoutePreferenceScore(right, preferences)
     return rightScore - leftScore
   })
 
   return ranked.map((route, index) => {
     const matchedTags = route.tags.filter((tag) => selectedTags.includes(tag))
+    const preferenceReason = getPreferenceReason(route, preferences)
     const reason =
       matchedTags.length > 0
         ? `你选择了“${matchedTags.join('、')}”，这条路线主题最贴近。`
+        : preferenceReason
+          ? preferenceReason
         : index === 0
           ? '按景区经典游览动线为你推荐，适合首次体验。'
           : '这条路线能补充不同游览节奏，适合作为备选。'
@@ -444,11 +520,57 @@ export function buildLocalGuideRecommendations(selectedTags: string[]): GuideRec
       description: route.description,
       durationLabel: route.durationLabel,
       tags: route.tags,
-      reason
+      reason,
+      score: countOverlap(route.tags, selectedTags) * 120 + getRoutePreferenceScore(route, preferences),
+      debug: {
+        source: 'local',
+        preferenceScore: getRoutePreferenceScore(route, preferences)
+      }
     }
   })
 }
 
 function countOverlap(routeTags: string[], selectedTags: string[]) {
   return routeTags.reduce((count, tag) => (selectedTags.includes(tag) ? count + 1 : count), 0)
+}
+
+function getRoutePreferenceScore(route: GuideRoute, preferences: GuidePreferenceContext) {
+  const routeId = route.id
+  const values: number[] = []
+
+  if (preferences.duration === 'quick') values.push(routeId === 'family' ? 100 : routeId === 'natural_scenery' ? 70 : 30)
+  if (preferences.duration === 'half_day') values.push(routeId === 'natural_scenery' ? 85 : routeId === 'family' ? 80 : 55)
+  if (preferences.duration === 'deep') values.push(routeId === 'historical_culture' ? 100 : routeId === 'natural_scenery' ? 70 : 45)
+
+  if (preferences.arrival === 'morning') values.push(routeId === 'historical_culture' ? 90 : routeId === 'natural_scenery' ? 75 : 70)
+  if (preferences.arrival === 'noon') values.push(routeId === 'natural_scenery' ? 80 : routeId === 'family' ? 78 : 62)
+  if (preferences.arrival === 'afternoon') values.push(routeId === 'family' ? 85 : routeId === 'natural_scenery' ? 82 : 45)
+
+  if (preferences.companion === 'family') values.push(routeId === 'family' ? 100 : routeId === 'natural_scenery' ? 65 : 45)
+  if (preferences.companion === 'elder') values.push(routeId === 'natural_scenery' ? 85 : routeId === 'family' ? 82 : 35)
+  if (preferences.companion === 'friends') values.push(routeId === 'natural_scenery' ? 88 : routeId === 'historical_culture' ? 72 : 68)
+
+  if (preferences.walk === 'light') values.push(route.walkIntensity === '轻松' ? 100 : route.walkIntensity === '适中' ? 72 : 25)
+  if (preferences.walk === 'normal') values.push(route.walkIntensity === '适中' ? 95 : route.walkIntensity === '轻松' ? 80 : 70)
+  if (preferences.walk === 'deep') values.push(route.walkIntensity === '较多步行' ? 100 : route.walkIntensity === '适中' ? 78 : 48)
+
+  if (preferences.show === 'must') values.push(routeId === 'historical_culture' ? 92 : routeId === 'family' ? 72 : 65)
+  if (preferences.show === 'flexible') values.push(70)
+  if (preferences.show === 'skip') values.push(routeId === 'natural_scenery' ? 85 : routeId === 'family' ? 82 : 45)
+
+  if (!values.length) {
+    return 0
+  }
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function getPreferenceReason(route: GuideRoute, preferences: GuidePreferenceContext) {
+  if (preferences.duration === 'quick' && route.id === 'family') return '你选择短时游览，这条路线站点更集中、节奏更轻。'
+  if (preferences.duration === 'deep' && route.id === 'historical_culture') return '你选择深度游览，这条路线更适合慢慢理解灵山文化。'
+  if (preferences.companion === 'family' && route.id === 'family') return '你选择亲子同行，这条路线步行压力低、互动点更友好。'
+  if (preferences.companion === 'elder' && route.walkIntensity !== '较多步行') return '你选择带老人同行，优先推荐步行负担更低的路线。'
+  if (preferences.walk === 'light' && route.walkIntensity === '轻松') return '你选择少走路，这条路线更轻松，适合慢游。'
+  if (preferences.walk === 'deep' && route.walkIntensity === '较多步行') return '你接受较多步行，这条路线覆盖更完整。'
+  if (preferences.show === 'must' && route.id === 'historical_culture') return '你希望观看演出，路线会更靠近文化演艺体验。'
+  return ''
 }

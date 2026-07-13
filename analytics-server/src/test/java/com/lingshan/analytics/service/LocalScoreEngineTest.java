@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,6 +36,24 @@ class LocalScoreEngineTest {
 
         assertThat(routes.get(0).route().routeId()).isEqualTo("historical_culture");
         assertThat(routes.get(0).matchedTags()).containsExactly("文化探秘", "祈福静心");
+    }
+
+    @Test
+    void shortFamilyLowWalkPreferencesCanRankFamilyRouteWithoutTags() {
+        LocalScoreEngine engine = new LocalScoreEngine(repository(List.of()));
+
+        List<LocalScoreEngine.ScoredRoute> routes = engine.rank(
+                "u1",
+                List.of(),
+                Map.of("duration", "quick", "companion", "family", "walk", "light"),
+                3
+        );
+
+        LocalScoreEngine.ScoredRoute top = routes.get(0);
+        assertThat(top.route().routeId()).isEqualTo("family");
+        assertThat(top.reasonCodes()).contains("PREFERENCE_CONTEXT");
+        assertThat(top.reason()).contains("短时游览");
+        assertThat((Double) top.debug().get("preferenceScore")).isGreaterThan(0.0);
     }
 
     @Test

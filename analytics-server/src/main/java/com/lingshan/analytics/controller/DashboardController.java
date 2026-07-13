@@ -1,6 +1,7 @@
 package com.lingshan.analytics.controller;
 
 import com.lingshan.analytics.service.DashboardService;
+import com.lingshan.analytics.service.MarketingDecisionService;
 import com.lingshan.analytics.service.VisitorBehaviorService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -14,15 +15,19 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardService service;
+    private final MarketingDecisionService marketingDecisionService;
     private final VisitorBehaviorService visitorBehaviorService;
 
-    public DashboardController(DashboardService service, VisitorBehaviorService visitorBehaviorService) {
+    public DashboardController(DashboardService service, MarketingDecisionService marketingDecisionService, VisitorBehaviorService visitorBehaviorService) {
         this.service = service;
+        this.marketingDecisionService = marketingDecisionService;
         this.visitorBehaviorService = visitorBehaviorService;
     }
 
     @GetMapping("/overview")
-    public Map<String, Object> overview() { return service.overview(); }
+    public Map<String, Object> overview(@RequestParam(defaultValue = "5") int activeWindowMinutes) {
+        return service.overview(activeWindowMinutes);
+    }
 
     @GetMapping("/chat-insights")
     public Map<String, Object> chatInsights() { return service.chatInsights(); }
@@ -50,6 +55,13 @@ public class DashboardController {
     @GetMapping("/recommendation")
     public Map<String, Object> recommendation() { return service.recommendation(); }
 
+    @GetMapping("/marketing-decision")
+    public Object marketingDecision(@RequestParam(defaultValue = "false") boolean forceRefresh) {
+        return marketingDecisionService.getDecisionCards(forceRefresh);
+    }
+
     @GetMapping("/realtime")
-    public Map<String, Object> realtime() { return service.realtime(); }
+    public Map<String, Object> realtime(@RequestParam(defaultValue = "5") int activeWindowMinutes) {
+        return service.realtime(activeWindowMinutes);
+    }
 }

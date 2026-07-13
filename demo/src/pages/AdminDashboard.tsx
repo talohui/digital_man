@@ -1,18 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Card, Col, ConfigProvider, Progress, Row, Segmented, Statistic, Tag, Typography, theme } from 'antd'
+import { Button, Card, Col, ConfigProvider, Progress, Row, Segmented, Statistic, Tag, Typography, theme } from 'antd'
 import { Bar, Line, Pie } from '@ant-design/charts'
+import { Link } from 'react-router-dom'
 import {
   AlertOutlined,
   AudioOutlined,
+  BulbOutlined,
   ClockCircleOutlined,
+  DatabaseOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
   FireOutlined,
   LikeOutlined,
   MessageOutlined,
-  RadarChartOutlined,
+  SettingOutlined,
+  SkinOutlined,
   SmileOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { exportDashboardExcel, exportDashboardPdf } from '../lib/reportExport'
 import { getAnalyticsApiBase } from '../lib/runtimeConfig'
 
 const { Title, Text } = Typography
@@ -22,6 +28,7 @@ type Overview = {
   totalMessages: number
   totalAiReplies: number
   activeSessions5min: number
+  activeWindowMinutes?: number
   positiveRatio: number
   avgLatencyMs: number
   p90LatencyMs: number
@@ -29,6 +36,9 @@ type Overview = {
   voiceUseCount: number
   routeClickCount: number
   feedbackCount: number
+  feedbackPositiveCount: number
+  feedbackNegativeCount: number
+  feedbackNeutralCount: number
 }
 
 type ServiceQuality = {
@@ -67,6 +77,7 @@ type Persona = {
 
 type Realtime = {
   activeSessions5min: number
+  activeWindowMinutes?: number
   recentEvents: Array<{ event: string; label: string; timestamp: string; target?: string }>
   alerts: Array<{ level: string; message: string }>
 }
@@ -281,6 +292,9 @@ const emptyData: DashboardData = {
     voiceUseCount: 0,
     routeClickCount: 0,
     feedbackCount: 0,
+    feedbackPositiveCount: 0,
+    feedbackNegativeCount: 0,
+    feedbackNeutralCount: 0,
   },
   service: {
     p50LatencyMs: 0,
@@ -364,6 +378,395 @@ const emptyData: DashboardData = {
   },
 }
 
+// B 端临时演示数据开关:用于比赛前快速检查大屏满数据状态。
+// 接回真实运营数据时改为 false 即可恢复接口结果。
+const ADMIN_DASHBOARD_DEMO_DATA_ENABLED = true
+const ACTIVE_WINDOW_STORAGE_KEY = 'lingshan_admin_active_window_minutes'
+const ACTIVE_WINDOW_OPTIONS = [1, 3, 4, 5, 10, 15, 30] as const
+type ActiveWindowMinutes = typeof ACTIVE_WINDOW_OPTIONS[number]
+
+function normalizeActiveWindowMinutes(value: unknown): ActiveWindowMinutes {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  return ACTIVE_WINDOW_OPTIONS.includes(numeric as ActiveWindowMinutes)
+    ? numeric as ActiveWindowMinutes
+    : 5
+}
+
+function readActiveWindowMinutes(): ActiveWindowMinutes {
+  if (typeof window === 'undefined') return 5
+  try {
+    return normalizeActiveWindowMinutes(window.localStorage.getItem(ACTIVE_WINDOW_STORAGE_KEY))
+  } catch {
+    return 5
+  }
+}
+
+function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: ActiveWindowMinutes): DashboardData {
+  const now = dayjs()
+  const at = (minutesAgo: number) => now.subtract(minutesAgo, 'minute').toISOString()
+  const isHistory = visitorMode === 'history'
+  const demoActiveSessions = Math.max(1, Math.round(43 * Math.sqrt(activeWindowMinutes / 5)))
+
+  const visitorBehavior: VisitorBehaviorDashboard = {
+    mode: visitorMode,
+    sourceLabel: isHistory ? '灵山历史样本' : '实时游客数据',
+    sampleCount: isHistory ? 48620 : 522,
+    timeRangeLabel: isHistory ? '2026 春夏历史样本' : '近24小时 / 小程序采集',
+    summary: {
+      visitorCount: isHistory ? 48620 : 522,
+      expectedVisitors: isHistory ? 51240 : 686,
+      avgGroupSize: isHistory ? 2.8 : 3.1,
+      avgStayHours: isHistory ? 5.6 : 4.7,
+      avgSpend: isHistory ? 318 : 896,
+      avgSatisfaction: isHistory ? 91.8 : 88.6,
+      ticketRevenue: isHistory ? 6284600 : 106197,
+    },
+    demographics: {
+      ageBands: [
+        { ageBand: '25-34', label: '25-34', count: isHistory ? 15860 : 192 },
+        { ageBand: '35-44', label: '35-44', count: isHistory ? 12240 : 116 },
+        { ageBand: '45-59', label: '45-59', count: isHistory ? 10810 : 109 },
+        { ageBand: '18-24', label: '18-24', count: isHistory ? 6420 : 66 },
+        { ageBand: '60+', label: '60+', count: isHistory ? 3290 : 39 },
+      ],
+      genderDistribution: [
+        { gender: 'male', label: '男', count: isHistory ? 25380 : 278 },
+        { gender: 'female', label: '女', count: isHistory ? 23240 : 244 },
+      ],
+      groupSizeDistribution: [
+        { groupSize: '1', label: '单人', count: isHistory ? 3820 : 43 },
+        { groupSize: '2', label: '双人', count: isHistory ? 13760 : 146 },
+        { groupSize: '3-4', label: '3-4人', count: isHistory ? 21680 : 238 },
+        { groupSize: '5-8', label: '5-8人', count: isHistory ? 7430 : 82 },
+        { groupSize: '9+', label: '9人以上', count: isHistory ? 1930 : 13 },
+      ],
+    },
+    consumption: {
+      totalAmount: isHistory ? 15458760 : 467648,
+      avgPerVisitor: isHistory ? 318 : 896,
+      costMix: [
+        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : 106197, share: 0.23 },
+        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : 119108, share: 0.25 },
+        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : 123094, share: 0.26 },
+        { category: 'transport', label: '交通', amount: isHistory ? 2576460 : 66207, share: 0.14 },
+        { category: 'show', label: '演艺', amount: isHistory ? 1883306 : 53043, share: 0.12 },
+      ],
+      topCategories: [
+        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : 123094, share: 0.26 },
+        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : 119108, share: 0.25 },
+        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : 106197, share: 0.23 },
+      ],
+      trend: [
+        { bucket: '09:00', amount: isHistory ? 920000 : 26800, count: 48 },
+        { bucket: '10:00', amount: isHistory ? 1280000 : 42100, count: 71 },
+        { bucket: '11:00', amount: isHistory ? 1680000 : 66800, count: 92 },
+        { bucket: '12:00', amount: isHistory ? 2130000 : 81600, count: 118 },
+        { bucket: '13:00', amount: isHistory ? 1960000 : 70400, count: 96 },
+        { bucket: '14:00', amount: isHistory ? 2410000 : 95700, count: 124 },
+        { bucket: '15:00', amount: isHistory ? 2740000 : 109300, count: 138 },
+        { bucket: '16:00', amount: isHistory ? 2110000 : 75200, count: 91 },
+      ],
+    },
+    attractions: {
+      visits: [
+        { name: '灵山大佛', spotId: 'giant_buddha', count: isHistory ? 39480 : 486, avgStayHours: 1.1 },
+        { name: '梵宫', spotId: 'fan_gong', count: isHistory ? 32860 : 392, avgStayHours: 0.9 },
+        { name: '九龙灌浴', spotId: 'jiulong_guanyu', count: isHistory ? 28630 : 348, avgStayHours: 0.7 },
+        { name: '五印坛城', spotId: 'wuyin_tancheng', count: isHistory ? 23980 : 286, avgStayHours: 0.6 },
+        { name: '祥符禅寺', spotId: 'xiangfu_temple', count: isHistory ? 21160 : 241, avgStayHours: 0.8 },
+        { name: '佛手广场', spotId: 'foshou_square', count: isHistory ? 18620 : 219, avgStayHours: 0.4 },
+        { name: '菩提大道', spotId: 'puti_avenue', count: isHistory ? 16930 : 205, avgStayHours: 0.5 },
+        { name: '百子戏弥勒', spotId: 'baizi_mile', count: isHistory ? 14200 : 176, avgStayHours: 0.35 },
+      ],
+      dwellRanking: [
+        { name: '灵山大佛', spotId: 'giant_buddha', avgStayHours: 1.1, avgSeconds: 3960 },
+        { name: '梵宫', spotId: 'fan_gong', avgStayHours: 0.9, avgSeconds: 3240 },
+        { name: '祥符禅寺', spotId: 'xiangfu_temple', avgStayHours: 0.8, avgSeconds: 2880 },
+        { name: '九龙灌浴', spotId: 'jiulong_guanyu', avgStayHours: 0.7, avgSeconds: 2520 },
+        { name: '五印坛城', spotId: 'wuyin_tancheng', avgStayHours: 0.6, avgSeconds: 2160 },
+      ],
+    },
+    satisfaction: {
+      distribution: [
+        { score: '95-100', count: isHistory ? 15640 : 168 },
+        { score: '90-94', count: isHistory ? 18120 : 194 },
+        { score: '80-89', count: isHistory ? 10860 : 116 },
+        { score: '70-79', count: isHistory ? 3120 : 34 },
+        { score: '<70', count: isHistory ? 880 : 10 },
+      ],
+      lowSatisfactionItems: [
+        { name: '亲子轻游路线', reason: '路线评分偏低', score: 3.2 },
+        { name: '佛手广场', reason: '点踩反馈偏高', score: 24 },
+        { name: '菩提大道', reason: '点踩反馈偏高', score: 19 },
+      ],
+      spotFeedback: [
+        { spotId: 'giant_buddha', name: '灵山大佛', likes: 462, dislikes: 18 },
+        { spotId: 'fan_gong', name: '梵宫', likes: 398, dislikes: 16 },
+        { spotId: 'jiulong_guanyu', name: '九龙灌浴', likes: 322, dislikes: 21 },
+        { spotId: 'wuyin_tancheng', name: '五印坛城', likes: 286, dislikes: 19 },
+        { spotId: 'xiangfu_temple', name: '祥符禅寺', likes: 248, dislikes: 13 },
+        { spotId: 'foshou_square', name: '佛手广场', likes: 18, dislikes: 24 },
+        { spotId: 'puti_avenue', name: '菩提大道', likes: 14, dislikes: 19 },
+      ],
+    },
+  }
+  const demoFeedbackPositiveCount = visitorBehavior.satisfaction.spotFeedback.reduce((sum, item) => sum + item.likes, 0)
+  const demoFeedbackNegativeCount = visitorBehavior.satisfaction.spotFeedback.reduce((sum, item) => sum + item.dislikes, 0)
+  const demoFeedbackNeutralCount = 0
+  const demoFeedbackCount = demoFeedbackPositiveCount + demoFeedbackNegativeCount + demoFeedbackNeutralCount
+
+  return {
+    overview: {
+      totalMessages: 1846,
+      totalAiReplies: 1762,
+      activeSessions5min: demoActiveSessions,
+      activeWindowMinutes,
+      positiveRatio: 0.87,
+      avgLatencyMs: 1260,
+      p90LatencyMs: 2860,
+      quickAskCount: 624,
+      voiceUseCount: 318,
+      routeClickCount: 276,
+      feedbackCount: demoFeedbackCount,
+      feedbackPositiveCount: demoFeedbackPositiveCount,
+      feedbackNegativeCount: demoFeedbackNegativeCount,
+      feedbackNeutralCount: demoFeedbackNeutralCount,
+    },
+    service: {
+      p50LatencyMs: 820,
+      p90LatencyMs: 2860,
+      maxLatencyMs: 6420,
+      avgLatencyMs: 1260,
+      voiceStartCount: 358,
+      voiceEndCount: 331,
+      voiceCompletionRate: 0.925,
+      estimatedAnswerRate: 0.956,
+      recentSlowReplies: [
+        { timestamp: at(4), latencyMs: 4210, sessionId: 'wx-ls-2039' },
+        { timestamp: at(11), latencyMs: 5380, sessionId: 'wx-ls-1982' },
+        { timestamp: at(18), latencyMs: 3940, sessionId: 'wx-ls-1916' },
+        { timestamp: at(27), latencyMs: 6420, sessionId: 'wx-ls-1841' },
+      ],
+    },
+    chat: {
+      topQuestions: [
+        { question: '灵山大佛高度咨询', count: 186 },
+        { question: '梵宫时间/演出咨询', count: 142 },
+        { question: '亲子路线咨询', count: 119 },
+        { question: '餐饮茶歇咨询', count: 106 },
+        { question: '停车交通咨询', count: 94 },
+        { question: '五印坛城介绍咨询', count: 81 },
+        { question: '文创购物咨询', count: 73 },
+        { question: '祈福礼佛咨询', count: 66 },
+      ],
+      keywordStats: [
+        { keyword: '灵山大佛', count: 268 },
+        { keyword: '梵宫', count: 224 },
+        { keyword: '路线', count: 198 },
+        { keyword: '演出', count: 166 },
+        { keyword: '停车', count: 132 },
+        { keyword: '餐饮', count: 121 },
+        { keyword: '祈福', count: 108 },
+        { keyword: '文创', count: 96 },
+      ],
+      intentDistribution: [
+        { type: '景点讲解', value: 432 },
+        { type: '路线规划', value: 286 },
+        { type: '消费咨询', value: 218 },
+        { type: '服务问询', value: 176 },
+        { type: '祈福体验', value: 128 },
+      ],
+      spotMentionStats: [
+        { spot: '灵山大佛', count: 286 },
+        { spot: '梵宫', count: 242 },
+        { spot: '九龙灌浴', count: 168 },
+        { spot: '五印坛城', count: 139 },
+        { spot: '祥符禅寺', count: 116 },
+        { spot: '佛手广场', count: 92 },
+      ],
+      negativeQuestionCount: 17,
+    },
+    behavior: {
+      routeClicks: [
+        { routeId: 'historical_culture', name: '历史文化路线', count: 214 },
+        { routeId: 'pray-calm', name: '祈福静心路线', count: 188 },
+        { routeId: 'family', name: '亲子轻游路线', count: 146 },
+        { routeId: 'photo', name: '拍照打卡路线', count: 132 },
+        { routeId: 'natural_scenery', name: '自然风光路线', count: 86 },
+      ],
+      spotVisits: visitorBehavior.attractions.visits.map((item) => ({
+        spotId: item.spotId ?? item.name,
+        name: item.name,
+        count: item.count,
+      })),
+      spotDwellAvg: visitorBehavior.attractions.dwellRanking.map((item) => ({
+        spotId: item.spotId ?? item.name,
+        name: item.name,
+        avgSeconds: item.avgSeconds ?? Math.round((item.avgStayHours ?? 0) * 3600),
+      })),
+      routeRatings: [
+        { routeId: 'historical_culture', name: '历史文化路线', avgRating: 4.7, count: 86 },
+        { routeId: 'pray-calm', name: '祈福静心路线', avgRating: 4.8, count: 74 },
+        { routeId: 'family', name: '亲子轻游路线', avgRating: 3.2, count: 58 },
+      ],
+      spotFeedback: visitorBehavior.satisfaction.spotFeedback,
+      lowSatisfactionItems: visitorBehavior.satisfaction.lowSatisfactionItems,
+    },
+    persona: {
+      selectedTagDistribution: [
+        { tag: '祈福静心', count: 196 },
+        { tag: '文化探秘', count: 154 },
+        { tag: '亲子游', count: 132 },
+        { tag: '拍照打卡', count: 108 },
+        { tag: '轻松漫步', count: 86 },
+        { tag: '自然风光', count: 74 },
+      ],
+      tagTrend: [
+        { hour: '09:00', tag: '祈福静心', count: 18 },
+        { hour: '10:00', tag: '文化探秘', count: 26 },
+        { hour: '11:00', tag: '亲子游', count: 31 },
+        { hour: '14:00', tag: '拍照打卡', count: 34 },
+      ],
+    },
+    realtime: {
+      activeSessions5min: demoActiveSessions,
+      activeWindowMinutes,
+      recentEvents: [
+        { event: 'ask', label: '问答', timestamp: at(1), target: '灵山大佛讲解' },
+        { event: 'route', label: '路线', timestamp: at(3), target: '祈福静心路线' },
+        { event: 'purchase', label: '消费', timestamp: at(5), target: '梵宫文创' },
+        { event: 'voice', label: '语音', timestamp: at(7), target: '小灵讲解' },
+        { event: 'feedback', label: '反馈', timestamp: at(9), target: '九龙灌浴' },
+        { event: 'ticket', label: '票务', timestamp: at(12), target: '3人入园' },
+      ],
+      alerts: [
+        { level: 'warning', message: '亲子轻游路线评分低于 3.5' },
+        { level: 'info', message: '梵宫相关问询进入高峰' },
+      ],
+    },
+    recommendation: {
+      exposureCount: 2386,
+      clickCount: 286,
+      ctr: 0.12,
+      engineDistribution: [
+        { engine: '规则推荐', count: 1024 },
+        { engine: 'Gorse 协同过滤', count: 856 },
+        { engine: 'RAG 场景召回', count: 506 },
+      ],
+      topRoutes: [
+        { routeId: 'history-culture', name: '历史文化路线', exposureCount: 632, clickCount: 86, ctr: 0.136 },
+        { routeId: 'pray-calm', name: '祈福静心路线', exposureCount: 598, clickCount: 81, ctr: 0.135 },
+        { routeId: 'family', name: '亲子轻松路线', exposureCount: 482, clickCount: 56, ctr: 0.116 },
+      ],
+    },
+    visitorBehavior,
+    sentimentTrend: [
+      { hour: '09:00', positive: 64, negative: 4, neutral: 18 },
+      { hour: '10:00', positive: 86, negative: 6, neutral: 24 },
+      { hour: '11:00', positive: 112, negative: 9, neutral: 31 },
+      { hour: '12:00', positive: 128, negative: 13, neutral: 36 },
+      { hour: '13:00', positive: 118, negative: 12, neutral: 29 },
+      { hour: '14:00', positive: 146, negative: 15, neutral: 38 },
+      { hour: '15:00', positive: 158, negative: 17, neutral: 42 },
+      { hour: '16:00', positive: 126, negative: 11, neutral: 33 },
+    ],
+    official: {
+      summary: {
+        sourceLabel: '官方历史样本',
+        disclaimer: officialDisclaimer,
+        recordCount: 48620,
+        dateRange: { start: '2026-03-01', end: '2026-06-30', dayCount: 122 },
+        sampleCount: 48620,
+        attractionTypeCount: 7,
+        avgSatisfaction: 91.8,
+        avgStayHours: 5.6,
+        avgSpend: 318,
+        stayDurationUnit: 'hour',
+        dataQuality: {
+          totalRows: 48620,
+          negativeCostRows: 0,
+          costMismatchRows: 126,
+          costMismatchRatio: 0.0026,
+          totalCostClip: { p1: 48, p99: 1260 },
+        },
+      },
+      demographics: {
+        sourceLabel: '官方历史样本',
+        disclaimer: officialDisclaimer,
+        ageBands: visitorBehavior.demographics.ageBands.map((item) => ({
+          label: item.label,
+          count: item.count,
+          ratio: item.count / visitorBehavior.summary.visitorCount,
+        })),
+        genderDistribution: visitorBehavior.demographics.genderDistribution.map((item) => ({
+          label: item.label,
+          count: item.count,
+          ratio: item.count / visitorBehavior.summary.visitorCount,
+        })),
+        groupSizeBands: visitorBehavior.demographics.groupSizeDistribution.map((item) => ({
+          label: item.label,
+          count: item.count,
+          ratio: item.count / visitorBehavior.summary.visitorCount,
+        })),
+      },
+      attractionTypes: {
+        sourceLabel: '官方历史样本',
+        disclaimer: officialDisclaimer,
+        items: [
+          { type: '佛教文化', visitCount: 39480, visitRatio: 0.81, heatIndex: 96, avgSatisfaction: 94.2, avgStayHours: 1.1, avgSpend: 286, sampleSize: 39480 },
+          { type: '室内展陈', visitCount: 32860, visitRatio: 0.68, heatIndex: 89, avgSatisfaction: 92.8, avgStayHours: 0.9, avgSpend: 352, sampleSize: 32860 },
+          { type: '互动演艺', visitCount: 28630, visitRatio: 0.59, heatIndex: 84, avgSatisfaction: 89.6, avgStayHours: 0.7, avgSpend: 316, sampleSize: 28630 },
+          { type: '祈福体验', visitCount: 23980, visitRatio: 0.49, heatIndex: 78, avgSatisfaction: 93.1, avgStayHours: 0.6, avgSpend: 298, sampleSize: 23980 },
+        ],
+      },
+      satisfaction: {
+        sourceLabel: '官方历史样本',
+        disclaimer: officialDisclaimer,
+        overallSat: 91.8,
+        distribution: visitorBehavior.satisfaction.distribution.map((item, index) => ({
+          score: 100 - index * 10,
+          normalizedScore: 100 - index * 10,
+          count: item.count,
+          ratio: item.count / visitorBehavior.summary.visitorCount,
+        })),
+        satByType: [
+          { type: '佛教文化', avgSatisfaction: 94.2, sampleSize: 39480 },
+          { type: '祈福体验', avgSatisfaction: 93.1, sampleSize: 23980 },
+          { type: '室内展陈', avgSatisfaction: 92.8, sampleSize: 32860 },
+          { type: '交通服务', avgSatisfaction: 82.4, sampleSize: 18620 },
+        ],
+        lowSatWarnings: [
+          { type: '交通服务', avgSatisfaction: 82.4, sampleSize: 18620, reason: '停车与接驳体验波动' },
+          { type: '餐饮服务', avgSatisfaction: 84.6, sampleSize: 21140, reason: '午间排队压力较高' },
+        ],
+      },
+      spending: {
+        sourceLabel: '官方历史样本',
+        disclaimer: officialDisclaimer,
+        avgTotalCost: 318,
+        costMix: visitorBehavior.consumption.costMix.map((item) => ({
+          category: item.category,
+          label: item.label,
+          total: item.amount,
+          avg: Math.round(item.amount / visitorBehavior.summary.visitorCount),
+          share: item.share,
+        })),
+        avgCostByType: [
+          { type: '家庭亲子', avgSpend: 386, sampleSize: 13200 },
+          { type: '文化深度', avgSpend: 352, sampleSize: 10860 },
+          { type: '祈福静心', avgSpend: 296, sampleSize: 14280 },
+          { type: '轻松游览', avgSpend: 244, sampleSize: 10280 },
+        ],
+        dataQuality: {
+          costMismatchRows: 126,
+          costMismatchRatio: 0.0026,
+          note: '演示样本已做金额裁剪与异常值过滤。',
+        },
+      },
+    },
+  }
+}
+
 const palette = {
   bg: '#08111f',
   panel: '#101b2e',
@@ -374,7 +777,8 @@ const palette = {
   cyan: '#5ad7ff',
   red: '#ff7b7b',
   text: '#edf5ff',
-  muted: '#8fa6c1',
+  muted: '#b5c6dc',
+  dim: '#8ca0ba',
 }
 
 const panelStyle: React.CSSProperties = {
@@ -391,6 +795,81 @@ const chartTheme = {
     brandColor: palette.gold,
     paletteQualitative10: [palette.gold, palette.cyan, palette.green, '#9d8cff', '#ff9f7a', '#7aa7ff'],
   },
+}
+
+const chartSeriesColors = [palette.gold, palette.cyan, palette.green, '#9d8cff', '#ff9f7a', '#7aa7ff']
+
+const chartTextStyle = {
+  fill: palette.text,
+  fontSize: 12,
+  fontWeight: 600,
+}
+
+const chartMutedTextStyle = {
+  fill: palette.muted,
+  fontSize: 12,
+  fontWeight: 500,
+}
+
+const darkLegend = {
+  position: 'bottom' as const,
+  itemName: {
+    style: {
+      fill: palette.muted,
+      fontSize: 12,
+      fontWeight: 600,
+    },
+  },
+  marker: {
+    style: {
+      r: 5,
+    },
+  },
+}
+
+const hiddenDonutStatistic = {
+  title: false as const,
+  content: false as const,
+}
+
+function asDarkDonut(data: Array<Record<string, unknown>>, angleField = 'value', colorField = 'type', innerRadius = 0.58) {
+  return {
+    data,
+    angleField,
+    colorField,
+    innerRadius,
+    label: {
+      type: 'spider' as const,
+      style: {
+        fill: palette.muted,
+        fontSize: 12,
+        fontWeight: 600,
+      },
+      labelLine: {
+        style: {
+          stroke: palette.muted,
+          lineWidth: 1,
+        },
+      },
+    },
+    legend: darkLegend,
+    statistic: hiddenDonutStatistic,
+    theme: chartTheme,
+  }
+}
+
+function asCompactDonut(data: Array<Record<string, unknown>>, angleField = 'value', colorField = 'type', innerRadius = 0.62) {
+  return {
+    data,
+    angleField,
+    colorField,
+    innerRadius,
+    radius: 0.86,
+    label: false as const,
+    legend: false as const,
+    statistic: hiddenDonutStatistic,
+    theme: chartTheme,
+  }
 }
 
 async function fetchJson<T>(path: string, fallback: T): Promise<T> {
@@ -435,10 +914,18 @@ function asLongBar<T extends Record<string, unknown>>(data: T[], xField: keyof T
     yField: String(yField),
     height: 220,
     colorField: String(yField),
-    label: { position: 'right' as const, style: { fill: palette.text } },
+    label: { position: 'right' as const, style: chartTextStyle },
     axis: {
-      x: { labelFill: palette.muted, gridStroke: '#21324c' },
-      y: { labelFill: palette.muted },
+      x: {
+        labelFill: palette.muted,
+        label: { style: chartMutedTextStyle },
+        gridStroke: '#2a3d5c',
+        grid: { line: { style: { stroke: '#2a3d5c', lineWidth: 1 } } },
+      },
+      y: {
+        labelFill: palette.muted,
+        label: { style: { ...chartMutedTextStyle, fontSize: 13 } },
+      },
     },
     theme: chartTheme,
   }
@@ -450,7 +937,7 @@ const EmptyState = ({ text = '暂无数据，等待游客互动接入' }: { text
 
 const Panel = ({ title, extra, children, minHeight }: { title: string; extra?: React.ReactNode; children: React.ReactNode; minHeight?: number }) => (
   <Card
-    title={<span style={{ color: palette.text, fontWeight: 700 }}>{title}</span>}
+    title={<span style={{ color: palette.text, fontWeight: 700, fontSize: 18, lineHeight: '24px' }}>{title}</span>}
     extra={extra}
     style={{ ...panelStyle, minHeight }}
     bordered={false}
@@ -471,7 +958,21 @@ const SectionHeading = ({ eyebrow, title, note }: { eyebrow: string; title: stri
   </div>
 )
 
-const MetricCard = ({ title, value, suffix, icon, tone = palette.text }: { title: string; value: number | string; suffix?: string; icon: React.ReactNode; tone?: string }) => (
+const MetricCard = ({
+  title,
+  value,
+  suffix,
+  icon,
+  tone = palette.text,
+  footer,
+}: {
+  title: string
+  value: number | string
+  suffix?: string
+  icon: React.ReactNode
+  tone?: string
+  footer?: React.ReactNode
+}) => (
   <Card style={{ ...panelStyle, background: '#0d1a2f' }} bordered={false} bodyStyle={{ padding: '14px 16px' }}>
     <Statistic
       title={<span style={{ color: palette.muted }}>{title}</span>}
@@ -480,6 +981,7 @@ const MetricCard = ({ title, value, suffix, icon, tone = palette.text }: { title
       prefix={<span style={{ color: tone, marginRight: 4 }}>{icon}</span>}
       valueStyle={{ color: tone, fontSize: 26, fontWeight: 800 }}
     />
+    {footer ? <div style={{ marginTop: 8 }}>{footer}</div> : null}
   </Card>
 )
 
@@ -510,6 +1012,7 @@ function AdminDashboard() {
   const [currentTime, setCurrentTime] = useState(dayjs().format('YYYY-MM-DD HH:mm:ss'))
   const [data, setData] = useState<DashboardData>(emptyData)
   const [visitorMode, setVisitorMode] = useState<VisitorMode>('realtime')
+  const [activeWindowMinutes, setActiveWindowMinutes] = useState<ActiveWindowMinutes>(readActiveWindowMinutes)
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(dayjs().format('YYYY-MM-DD HH:mm:ss')), 1000)
@@ -519,6 +1022,7 @@ function AdminDashboard() {
   useEffect(() => {
     let stopped = false
     const load = async () => {
+      const activeWindowQuery = `activeWindowMinutes=${activeWindowMinutes}`
       const [
         overview,
         service,
@@ -535,12 +1039,12 @@ function AdminDashboard() {
         officialSatisfaction,
         officialSpending,
       ] = await Promise.all([
-        fetchJson<Overview>('/dashboard/overview', emptyData.overview),
+        fetchJson<Overview>(`/dashboard/overview?${activeWindowQuery}`, emptyData.overview),
         fetchJson<ServiceQuality>('/dashboard/service-quality', emptyData.service),
         fetchJson<ChatInsights>('/dashboard/chat-insights', emptyData.chat),
         fetchJson<Behavior>('/dashboard/behavior', emptyData.behavior),
         fetchJson<Persona>('/dashboard/persona', emptyData.persona),
-        fetchJson<Realtime>('/dashboard/realtime', emptyData.realtime),
+        fetchJson<Realtime>(`/dashboard/realtime?${activeWindowQuery}`, emptyData.realtime),
         fetchJson<Recommendation>('/dashboard/recommendation', emptyData.recommendation),
         fetchJson<VisitorBehaviorDashboard>(`/dashboard/visitor-behavior?mode=${visitorMode}`, emptyVisitorBehavior),
         fetchJson<SentimentTrend>('/sentiment-trend?hours=12', []),
@@ -551,7 +1055,7 @@ function AdminDashboard() {
         fetchJson<OfficialSpending>('/official-behavior/spending', emptyData.official.spending),
       ])
       if (!stopped) {
-        setData({
+        const liveData = {
           overview,
           service,
           chat,
@@ -568,13 +1072,29 @@ function AdminDashboard() {
             satisfaction: officialSatisfaction,
             spending: officialSpending,
           },
-        })
+        }
+        setData(ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? buildDemoDashboardData(visitorMode, activeWindowMinutes) : liveData)
       }
     }
     load()
     const timer = setInterval(load, 15000)
     return () => { stopped = true; clearInterval(timer) }
-  }, [visitorMode])
+  }, [visitorMode, activeWindowMinutes])
+
+  const activeWindowOptions = useMemo(() => ACTIVE_WINDOW_OPTIONS.map((minutes) => ({
+    label: `${minutes}分钟`,
+    value: minutes,
+  })), [])
+
+  const handleActiveWindowChange = (value: string | number) => {
+    const next = normalizeActiveWindowMinutes(value)
+    setActiveWindowMinutes(next)
+    try {
+      window.localStorage.setItem(ACTIVE_WINDOW_STORAGE_KEY, String(next))
+    } catch {
+      // localStorage 在隐私模式下可能不可用，设置失败不影响页面切换。
+    }
+  }
 
   const sentimentLines = useMemo(() => data.sentimentTrend.flatMap((row) => [
     { hour: row.hour?.slice(-5) || row.hour, value: row.positive, type: '正面' },
@@ -601,7 +1121,7 @@ function AdminDashboard() {
       items.push({
         level: 'warning',
         title: `回复延迟偏高（P90 ${formatLatency(data.service.p90LatencyMs)}）`,
-        action: '关注「慢回复监控」，排查高延迟会话与知识库召回耗时。',
+        action: '关注「AI 服务质量」，排查知识库召回、模型响应与语音合成耗时。',
       })
     }
 
@@ -629,7 +1149,7 @@ function AdminDashboard() {
     if (topQuestion?.question) {
       items.push({
         level: 'info',
-        title: `高频问题：${topQuestion.question}`,
+        title: `高频主题：${topQuestion.question}`,
         action: '可补充对应知识库内容或设置首页快捷入口。',
       })
     }
@@ -637,12 +1157,39 @@ function AdminDashboard() {
     return items
   }, [data.recommendation, data.service, data.behavior.lowSatisfactionItems, data.visitorBehavior.attractions.dwellRanking, data.chat.topQuestions])
 
-  const spotFeedbackBars = data.behavior.spotFeedback.map((item) => ({ name: item.name, value: item.likes - item.dislikes }))
+  const spotFeedbackRank = data.behavior.spotFeedback
+    .map((item) => {
+      const total = item.likes + item.dislikes
+      return {
+        ...item,
+        total,
+        positiveRate: total > 0 ? Math.round((item.likes / total) * 100) : 0,
+      }
+    })
+    .sort((a, b) => {
+      if (b.dislikes !== a.dislikes) return b.dislikes - a.dislikes
+      return b.total - a.total
+    })
   const visitorAgeBars = data.visitorBehavior.demographics.ageBands.map((item) => ({ name: item.label, value: item.count }))
   const visitorGroupBars = data.visitorBehavior.demographics.groupSizeDistribution.map((item) => ({ name: item.label, value: item.count }))
   const visitorGenderPie = data.visitorBehavior.demographics.genderDistribution.map((item) => ({ type: item.label, value: item.count }))
+  const visitorGenderTotal = visitorGenderPie.reduce((sum, item) => sum + item.value, 0)
   const visitorCostMixPie = data.visitorBehavior.consumption.costMix.map((item) => ({ type: item.label, value: item.amount }))
   const visitorTrendLines = data.visitorBehavior.consumption.trend.map((item) => ({ bucket: item.bucket?.slice(-5) || item.bucket, amount: item.amount }))
+  const spotFeedbackPositiveFallback = spotFeedbackRank.reduce((sum, item) => sum + item.likes, 0)
+  const spotFeedbackNegativeFallback = spotFeedbackRank.reduce((sum, item) => sum + item.dislikes, 0)
+  const feedbackPositiveCount = data.overview.feedbackPositiveCount ?? spotFeedbackPositiveFallback
+  const feedbackNegativeCount = data.overview.feedbackNegativeCount ?? spotFeedbackNegativeFallback
+  const feedbackNeutralCount = data.overview.feedbackNeutralCount ?? Math.max(0, data.overview.feedbackCount - feedbackPositiveCount - feedbackNegativeCount)
+  const feedbackTotal = Math.max(data.overview.feedbackCount, feedbackPositiveCount + feedbackNegativeCount + feedbackNeutralCount)
+  const feedbackPositiveRate = feedbackTotal > 0 ? Math.round((feedbackPositiveCount / feedbackTotal) * 100) : 0
+
+  // FR-B3.4 导出运营报告:基于驾驶舱当前数据生成 Excel(多 Sheet)/ PDF
+  const buildReportMeta = () => ({
+    title: '灵山胜境 AI 导览 · 运营报告',
+    generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+    visitorModeLabel: visitorMode === 'realtime' ? '实时' : '历史',
+  })
 
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
@@ -652,20 +1199,148 @@ function AdminDashboard() {
             <Text style={{ color: palette.gold, letterSpacing: 0, fontWeight: 700 }}>AI GUIDE OPERATIONS</Text>
             <Title level={2} style={{ color: palette.text, margin: '4px 0 0', fontSize: 30 }}>灵山胜境 · AI 导览运营驾驶舱</Title>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <Text style={{ color: palette.muted }}>实时刷新 · 15s</Text>
+          <div style={{ display: 'grid', justifyItems: 'end', gap: 8, textAlign: 'right' }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button
+                size="large"
+                icon={<FileExcelOutlined />}
+                onClick={() => exportDashboardExcel(data, buildReportMeta())}
+                style={{ color: palette.green, fontWeight: 700, borderColor: palette.green, background: 'rgba(94, 230, 168, 0.1)' }}
+              >
+                导出 Excel
+              </Button>
+              <Button
+                size="large"
+                icon={<FilePdfOutlined />}
+                onClick={() => exportDashboardPdf(data, buildReportMeta())}
+                style={{ color: palette.red, fontWeight: 700, borderColor: palette.red, background: 'rgba(255, 123, 123, 0.1)' }}
+              >
+                导出 PDF
+              </Button>
+              <Link to="/admin/kb">
+                <Button
+                  size="large"
+                  icon={<DatabaseOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  知识库管理
+                </Button>
+              </Link>
+              <Link to="/admin/decision">
+                <Button
+                  size="large"
+                  icon={<BulbOutlined />}
+                  style={{
+                    color: palette.cyan,
+                    fontWeight: 700,
+                    borderColor: palette.cyan,
+                    background: 'rgba(79, 195, 231, 0.1)',
+                  }}
+                >
+                  AI 营销决策
+                </Button>
+              </Link>
+              <Link to="/admin/avatar">
+                <Button
+                  size="large"
+                  icon={<SkinOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  数字人形象
+                </Button>
+              </Link>
+              <Link to="/admin/config">
+                <Button
+                  size="large"
+                  icon={<SettingOutlined />}
+                  style={{
+                    color: palette.gold,
+                    fontWeight: 700,
+                    borderColor: palette.gold,
+                    background: 'rgba(212, 175, 55, 0.1)',
+                  }}
+                >
+                  服务配置
+                </Button>
+              </Link>
+              <Link to="/admin/heatmap">
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<FireOutlined />}
+                  style={{
+                    color: '#1a1208',
+                    fontWeight: 800,
+                    borderColor: palette.gold,
+                    background: 'linear-gradient(135deg, #f3da80, #d4af37)',
+                    boxShadow: '0 6px 22px rgba(212, 175, 55, 0.5)',
+                  }}
+                >
+                  客流热力图
+                </Button>
+              </Link>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? <Tag color="purple">演示数据</Tag> : null}
+              <Text style={{ color: palette.muted }}>实时刷新 · 15s</Text>
+            </div>
             <div style={{ color: palette.cyan, fontFamily: 'monospace', fontSize: 20 }}>{currentTime}</div>
           </div>
         </header>
 
         <SectionHeading eyebrow="REAL-TIME OVERVIEW" title="实时态势" note="近 24 小时小程序与数字人实时采集" />
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+          margin: '-4px 0 10px',
+        }}>
+          <Text style={{ color: palette.muted, fontSize: 12 }}>活跃统计窗口</Text>
+          <Segmented
+            size="small"
+            value={activeWindowMinutes}
+            options={activeWindowOptions}
+            onChange={handleActiveWindowChange}
+            style={{
+              background: '#0d1a2f',
+              border: `1px solid ${palette.border}`,
+              color: palette.text,
+            }}
+          />
+        </div>
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
           <Col span={4}><MetricCard title="近24h对话" value={data.overview.totalMessages} icon={<MessageOutlined />} tone={palette.cyan} /></Col>
-          <Col span={4}><MetricCard title="实时活跃" value={data.overview.activeSessions5min} icon={<FireOutlined />} tone="#ffb86b" /></Col>
+          <Col span={4}><MetricCard title={`近${activeWindowMinutes}分钟活跃`} value={data.overview.activeSessions5min} icon={<FireOutlined />} tone="#ffb86b" /></Col>
           <Col span={4}><MetricCard title="正面情绪率" value={formatPct(data.overview.positiveRatio)} suffix="%" icon={<SmileOutlined />} tone={palette.green} /></Col>
           <Col span={4}><MetricCard title="P90 响应" value={formatLatency(data.overview.p90LatencyMs)} icon={<ClockCircleOutlined />} tone={data.overview.p90LatencyMs > LATENCY_ATTENTION_MS ? palette.red : palette.gold} /></Col>
           <Col span={4}><MetricCard title="语音使用" value={data.overview.voiceUseCount} icon={<AudioOutlined />} tone="#b69cff" /></Col>
-          <Col span={4}><MetricCard title="评分反馈" value={data.overview.feedbackCount} icon={<LikeOutlined />} tone={palette.green} /></Col>
+          <Col span={4}>
+            <MetricCard
+              title="游客反馈"
+              value={feedbackTotal}
+              icon={<LikeOutlined />}
+              tone={feedbackNegativeCount > 0 ? palette.gold : palette.green}
+              footer={(
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', color: palette.muted, fontSize: 12, lineHeight: 1.4 }}>
+                  <span style={{ color: palette.green }}>好评 {feedbackPositiveCount}</span>
+                  <span style={{ color: feedbackNegativeCount > 0 ? palette.red : palette.muted }}>差评 {feedbackNegativeCount}</span>
+                  <span>好评率 {feedbackPositiveRate}%</span>
+                </div>
+              )}
+            />
+          </Col>
         </Row>
 
         <SectionHeading eyebrow="OPERATION OPPORTUNITIES" title="今天该处理什么？" note="基于实时指标自动梳理的运营机会与待办，按真实数据触发" />
@@ -704,92 +1379,124 @@ function AdminDashboard() {
         <SectionHeading eyebrow="CHAT & SERVICE INSIGHTS" title="聊天洞察与服务质量" note="基于实时问答日志，反映小灵的回答质量与游客情绪" />
         <Row gutter={[12, 12]}>
           <Col span={6}>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <Panel title="AI 服务质量" minHeight={288} extra={<Tag color={data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? 'error' : 'success'}>{data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? '需关注' : '稳定'}</Tag>}>
-                <Row gutter={[8, 14]}>
-                  <Col span={8}><Statistic title="P50" value={formatLatency(data.service.p50LatencyMs)} valueStyle={{ color: palette.text, fontSize: 22 }} /></Col>
-                  <Col span={8}><Statistic title="P90" value={formatLatency(data.service.p90LatencyMs)} valueStyle={{ color: palette.gold, fontSize: 22 }} /></Col>
-                  <Col span={8}><Statistic title="MAX" value={formatLatency(data.service.maxLatencyMs)} valueStyle={{ color: palette.red, fontSize: 22 }} /></Col>
-                </Row>
-                <div style={{ marginTop: 18 }}>
-                  <Text style={{ color: palette.muted }}>语音完成率</Text>
-                  <Progress percent={formatPct(data.service.voiceCompletionRate)} strokeColor={palette.cyan} trailColor="#1c2a3f" />
-                  <Text style={{ color: palette.muted }}>AI 回复率</Text>
-                  <Progress percent={formatPct(data.service.estimatedAnswerRate)} strokeColor={palette.green} trailColor="#1c2a3f" />
-                </div>
-              </Panel>
-
-              <Panel title="情绪趋势" minHeight={286}>
-                {sentimentLines.length ? (
-                  <Line
-                    data={sentimentLines}
-                    xField="hour"
-                    yField="value"
-                    seriesField="type"
-                    height={210}
-                    smooth
-                    color={[palette.green, palette.red, palette.muted]}
-                    legend={{ position: 'top' }}
-                    theme={chartTheme}
-                  />
-                ) : <EmptyState />}
-              </Panel>
-            </div>
+            <Panel title="AI 服务质量" minHeight={300} extra={<Tag color={data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? 'error' : 'success'}>{data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? '需关注' : '稳定'}</Tag>}>
+              <Row gutter={[8, 14]}>
+                <Col span={8}><Statistic title="P50" value={formatLatency(data.service.p50LatencyMs)} valueStyle={{ color: palette.text, fontSize: 22 }} /></Col>
+                <Col span={8}><Statistic title="P90" value={formatLatency(data.service.p90LatencyMs)} valueStyle={{ color: palette.gold, fontSize: 22 }} /></Col>
+                <Col span={8}><Statistic title="MAX" value={formatLatency(data.service.maxLatencyMs)} valueStyle={{ color: palette.red, fontSize: 22 }} /></Col>
+              </Row>
+              <div style={{ marginTop: 18 }}>
+                <Text style={{ color: palette.muted }}>语音完成率</Text>
+                <Progress percent={formatPct(data.service.voiceCompletionRate)} strokeColor={palette.cyan} trailColor="#1c2a3f" />
+                <Text style={{ color: palette.muted }}>AI 回复率</Text>
+                <Progress percent={formatPct(data.service.estimatedAnswerRate)} strokeColor={palette.green} trailColor="#1c2a3f" />
+              </div>
+            </Panel>
           </Col>
 
           <Col span={12}>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <Panel title="聊天内容洞察" minHeight={300} extra={<Tag color="blue">负面问题 {data.chat.negativeQuestionCount}</Tag>}>
-                <Row gutter={12}>
-                  <Col span={12}>
-                    <Text style={{ color: palette.muted }}>热门问题</Text>
-                    <RankedList data={data.chat.topQuestions} nameKey="question" valueKey="count" />
-                  </Col>
-                  <Col span={12}>
-                    {data.chat.intentDistribution.some((item) => item.value > 0) ? (
-                      <Pie data={data.chat.intentDistribution} angleField="value" colorField="type" innerRadius={0.58} height={230} legend={{ position: 'bottom' }} theme={chartTheme} />
-                    ) : <EmptyState text="暂无意图分类数据" />}
-                  </Col>
-                </Row>
-              </Panel>
-
+            <Panel title="聊天内容洞察" minHeight={300} extra={<Tag color="blue">负面问题 {data.chat.negativeQuestionCount}</Tag>}>
               <Row gutter={12}>
                 <Col span={12}>
-                  <Panel title="高频关键词" minHeight={270}>
-                    {data.chat.keywordStats.length ? <Bar {...asLongBar(data.chat.keywordStats.slice(0, 8), 'count', 'keyword')} /> : <EmptyState />}
-                  </Panel>
+                  <Text style={{ color: palette.muted }}>热门咨询主题</Text>
+                  <RankedList data={data.chat.topQuestions} nameKey="question" valueKey="count" />
                 </Col>
                 <Col span={12}>
-                  <Panel title="景点关注度" minHeight={270}>
-                    {data.chat.spotMentionStats.length ? <Bar {...asLongBar(data.chat.spotMentionStats, 'count', 'spot')} /> : <EmptyState />}
-                  </Panel>
+                  {data.chat.intentDistribution.some((item) => item.value > 0) ? (
+                    <Pie data={data.chat.intentDistribution} angleField="value" colorField="type" innerRadius={0.58} height={230} legend={{ position: 'bottom' }} theme={chartTheme} />
+                  ) : <EmptyState text="暂无意图分类数据" />}
                 </Col>
               </Row>
-            </div>
+            </Panel>
           </Col>
 
           <Col span={6}>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <Panel title="游览期待偏好" minHeight={288}>
-                {data.persona.selectedTagDistribution.some((item) => item.count > 0) ? (
-                  <Pie data={data.persona.selectedTagDistribution} angleField="count" colorField="tag" innerRadius={0.62} height={220} legend={{ position: 'bottom' }} theme={chartTheme} />
-                ) : <EmptyState />}
-              </Panel>
-
-              <Panel title="路线与景点行为" minHeight={286}>
-                <Text style={{ color: palette.muted }}>路线点击排行</Text>
-                <RankedList data={data.behavior.routeClicks} nameKey="name" valueKey="count" />
-                <div style={{ height: 14 }} />
-                <Text style={{ color: palette.muted }}>景点净好评</Text>
-                {spotFeedbackBars.length ? <Bar {...asLongBar(spotFeedbackBars.slice(0, 6), 'value', 'name')} /> : <EmptyState text="暂无点赞/点踩数据" />}
-              </Panel>
-            </div>
+            <Panel title="游览期待偏好" minHeight={300}>
+              {data.persona.selectedTagDistribution.some((item) => item.count > 0) ? (
+                <Pie data={data.persona.selectedTagDistribution} angleField="count" colorField="tag" innerRadius={0.62} height={230} legend={{ position: 'bottom' }} theme={chartTheme} />
+              ) : <EmptyState />}
+            </Panel>
           </Col>
         </Row>
 
-        <SectionHeading eyebrow="RECOMMENDATION & OPS MONITOR" title="推荐与运营监控" note="推荐曝光点击、低满意风险与慢回复实时告警" />
-        <Row gutter={[12, 12]} style={{ marginTop: 0 }}>
+        <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
           <Col span={6}>
+            <Panel title="情绪趋势" minHeight={290}>
+              {sentimentLines.length ? (
+                <Line
+                  data={sentimentLines}
+                  xField="hour"
+                  yField="value"
+                  seriesField="type"
+                  height={214}
+                  smooth
+                  color={[palette.green, palette.red, palette.muted]}
+                  legend={{ position: 'top' }}
+                  theme={chartTheme}
+                />
+              ) : <EmptyState />}
+            </Panel>
+          </Col>
+
+          <Col span={6}>
+            <Panel title="高频关键词" minHeight={290}>
+              {data.chat.keywordStats.length ? <Bar {...asLongBar(data.chat.keywordStats.slice(0, 8), 'count', 'keyword')} /> : <EmptyState />}
+            </Panel>
+          </Col>
+
+          <Col span={6}>
+            <Panel title="景点关注度" minHeight={290}>
+              {data.chat.spotMentionStats.length ? <Bar {...asLongBar(data.chat.spotMentionStats, 'count', 'spot')} /> : <EmptyState />}
+            </Panel>
+          </Col>
+
+          <Col span={6}>
+            <Panel title="路线点击排行" minHeight={290}>
+              <RankedList data={data.behavior.routeClicks} nameKey="name" valueKey="count" />
+            </Panel>
+          </Col>
+        </Row>
+
+        <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
+          <Col span={24}>
+            <Panel title="反馈来源排行" minHeight={168}>
+              {spotFeedbackRank.length ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(176px, 1fr))', gap: 10 }}>
+                  {spotFeedbackRank.slice(0, 5).map((item) => (
+                    <div
+                      key={item.spotId}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        background: item.dislikes > 0 ? 'rgba(255, 123, 123, 0.08)' : '#0d1a2f',
+                        border: `1px solid ${item.dislikes > 0 ? 'rgba(255, 123, 123, 0.28)' : palette.border}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: palette.text, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                        <span style={{ color: item.positiveRate < 80 ? palette.red : palette.green, fontSize: 12, flex: '0 0 auto' }}>
+                          {item.positiveRate}%
+                        </span>
+                      </div>
+                      <div style={{ height: 5, borderRadius: 999, background: '#1c2a3f', overflow: 'hidden', marginTop: 9 }}>
+                        <div style={{ width: `${item.positiveRate}%`, height: '100%', borderRadius: 999, background: item.positiveRate < 80 ? palette.red : palette.green }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8, color: palette.muted, fontSize: 12 }}>
+                        <span style={{ color: palette.green }}>好评 {item.likes}</span>
+                        <span style={{ color: item.dislikes > 0 ? palette.red : palette.muted }}>差评 {item.dislikes}</span>
+                        <span>总计 {item.total}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState text="暂无点赞/点踩数据" />}
+            </Panel>
+          </Col>
+        </Row>
+
+        <SectionHeading eyebrow="RECOMMENDATION & OPS MONITOR" title="推荐与运营监控" note="推荐曝光点击与低满意风险提示" />
+        <Row gutter={[12, 12]} style={{ marginTop: 0 }}>
+          <Col span={12}>
             <Panel title="推荐效果" minHeight={190} extra={<Tag color={data.recommendation.ctr > 0 ? (data.recommendation.ctr < 0.1 ? 'orange' : 'cyan') : 'default'}>{Math.round(data.recommendation.ctr * 100)}% CTR</Tag>}>
               <div style={{ display: 'flex', gap: 18, marginBottom: 8 }}>
                 <Statistic title="曝光" value={data.recommendation.exposureCount} valueStyle={{ color: palette.cyan, fontSize: 20 }} />
@@ -823,41 +1530,13 @@ function AdminDashboard() {
               ) : <EmptyState text="暂无推荐曝光" />}
             </Panel>
           </Col>
-          <Col span={6}>
+          <Col span={12}>
             <Panel title="低满意风险提示" minHeight={190} extra={<AlertOutlined style={{ color: palette.gold }} />}>
               {data.behavior.lowSatisfactionItems.length ? (
                 <div style={{ display: 'grid', gap: 8 }}>
                   {data.behavior.lowSatisfactionItems.map((item, index) => <Tag key={index} color="warning" style={{ width: 'fit-content' }}>{item.name} · {item.reason}</Tag>)}
                 </div>
               ) : <EmptyState text="暂无低满意风险" />}
-            </Panel>
-          </Col>
-          <Col span={6}>
-            <Panel title="慢回复监控" minHeight={190} extra={<RadarChartOutlined style={{ color: palette.cyan }} />}>
-              {data.service.recentSlowReplies.length ? (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {data.service.recentSlowReplies.map((item, index) => (
-                    <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: palette.text }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dayjs(item.timestamp).format('HH:mm:ss')} · {item.sessionId}</span>
-                      <span style={{ flex: '0 0 auto', color: palette.red }}>{formatLatency(item.latencyMs)}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : <EmptyState text="暂无慢回复" />}
-            </Panel>
-          </Col>
-          <Col span={6}>
-            <Panel title="最近事件流" minHeight={190} extra={<ThunderboltOutlined style={{ color: palette.gold }} />}>
-              {data.realtime.recentEvents.length ? (
-                <div style={{ display: 'grid', gap: 7, maxHeight: 124, overflow: 'hidden' }}>
-                  {data.realtime.recentEvents.slice(0, 5).map((item, index) => (
-                    <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: palette.text }}>
-                      <span><Tag color="geekblue">{item.label}</Tag>{item.target}</span>
-                      <span style={{ color: palette.muted }}>{dayjs(item.timestamp).format('HH:mm:ss')}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : <EmptyState text="暂无实时事件" />}
             </Panel>
           </Col>
         </Row>
@@ -875,6 +1554,8 @@ function AdminDashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Tag color={visitorMode === 'history' ? 'gold' : 'green'}>{data.visitorBehavior.timeRangeLabel}</Tag>
               <Segmented
+                size="large"
+                className="dash-source-toggle"
                 value={visitorMode}
                 options={[
                   { label: '实时游客数据', value: 'realtime' },
@@ -910,15 +1591,27 @@ function AdminDashboard() {
                   </Col>
                   <Col span={12}>
                     {visitorGenderPie.length ? (
-                      <Pie
-                        data={visitorGenderPie}
-                        angleField="value"
-                        colorField="type"
-                        innerRadius={0.62}
-                        height={190}
-                        legend={{ position: 'bottom' }}
-                        theme={chartTheme}
-                      />
+                      <div style={{ display: 'grid', gridTemplateRows: '24px 1fr', gap: 4, height: 190 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'baseline',
+                            justifyContent: 'center',
+                            gap: 6,
+                            color: palette.muted
+                          }}
+                        >
+                          <span style={{ fontSize: 12 }}>性别样本</span>
+                          <span style={{ color: palette.cyan, fontSize: 18, fontWeight: 800, lineHeight: 1 }}>
+                            {formatCount(visitorGenderTotal)}
+                          </span>
+                          <span style={{ fontSize: 12 }}>人</span>
+                        </div>
+                        <Pie
+                          {...asDarkDonut(visitorGenderPie, 'value', 'type', 0.62)}
+                          height={160}
+                        />
+                      </div>
                     ) : <EmptyState text="暂无性别分布" />}
                   </Col>
                 </Row>
@@ -936,19 +1629,43 @@ function AdminDashboard() {
             <Col span={6}>
               <Panel title="消费结构" minHeight={260} extra={<Tag color="gold">客单 {formatMoney(data.visitorBehavior.consumption.avgPerVisitor)}</Tag>}>
                 {visitorCostMixPie.some((item) => item.value > 0) ? (
-                  <Pie
-                    data={visitorCostMixPie}
-                    angleField="value"
-                    colorField="type"
-                    innerRadius={0.58}
-                    height={165}
-                    legend={{ position: 'bottom' }}
-                    theme={chartTheme}
-                  />
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>总消费</Text>
+                      <span style={{ color: palette.gold, fontSize: 22, fontWeight: 800 }}>
+                        {formatMoney(data.visitorBehavior.consumption.totalAmount)}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '126px 1fr', alignItems: 'center', gap: 14 }}>
+                      <Pie
+                        {...asCompactDonut(visitorCostMixPie, 'value', 'type', 0.66)}
+                        height={124}
+                      />
+                      <div style={{ display: 'grid', gap: 7 }}>
+                        {data.visitorBehavior.consumption.costMix.slice(0, 5).map((item, index) => {
+                          const share = item.share || (data.visitorBehavior.consumption.totalAmount ? item.amount / data.visitorBehavior.consumption.totalAmount : 0)
+                          const percent = Math.round(share * 100)
+                          const color = chartSeriesColors[index % chartSeriesColors.length]
+
+                          return (
+                            <div key={item.category}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, lineHeight: 1.35 }}>
+                                <span style={{ color: palette.text, display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                  <i style={{ width: 8, height: 8, borderRadius: 999, background: color, flex: '0 0 auto' }} />
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                                </span>
+                                <span style={{ color: palette.muted, flex: '0 0 auto' }}>{percent}%</span>
+                              </div>
+                              <div style={{ height: 4, borderRadius: 999, background: '#1c2a3f', marginTop: 4, overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.max(4, percent)}%`, height: '100%', borderRadius: 999, background: color }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 ) : <EmptyState text="暂无消费结构" />}
-                <div style={{ color: palette.muted, fontSize: 12, lineHeight: 1.7 }}>
-                  总消费：<span style={{ color: palette.gold }}>{formatMoney(data.visitorBehavior.consumption.totalAmount)}</span>
-                </div>
               </Panel>
             </Col>
           </Row>
@@ -981,7 +1698,7 @@ function AdminDashboard() {
                     {data.visitorBehavior.satisfaction.lowSatisfactionItems.slice(0, 5).map((item) => (
                       <div key={`${item.name}-${item.reason}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: palette.text }}>
                         <span>{item.name} · {item.reason}</span>
-                        <span style={{ color: palette.gold }}>{item.score}</span>
+                        <span style={{ color: palette.gold }}>{item.reason.includes('评分') ? `${item.score} 分` : `${item.score} 次`}</span>
                       </div>
                     ))}
                   </div>

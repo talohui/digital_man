@@ -9,6 +9,7 @@ import {
   type TicketGender,
   type TicketType,
 } from '../store/useTicketStore'
+import PaymentSheet from './PaymentSheet'
 
 const ageBands: TicketAgeBand[] = ['18-24', '25-34', '35-44', '45-59', '60+']
 const genderOptions: TicketGender[] = ['女', '男', '不便透露']
@@ -33,8 +34,15 @@ function MobileTicketPage() {
     () => ticketTypeOptions.find((item) => item.id === ticketType) ?? ticketTypeOptions[0],
     [ticketType]
   )
+  const totalPrice = useMemo(() => selectedTicket.price * groupSize, [selectedTicket, groupSize])
+  const [showPay, setShowPay] = useState(false)
 
   const handleSubmit = () => {
+    setShowPay(true)
+  }
+
+  // 支付成功后才出票
+  const handlePaid = () => {
     const ticket = submitTicket({
       ageBand,
       gender,
@@ -43,7 +51,52 @@ function MobileTicketPage() {
       ticketType,
     })
     captureTicketPurchase(ticket)
+    setShowPay(false)
     navigate('/consume')
+  }
+
+  // 票务一次性:已购票则锁定,只读展示,不可再改(本次行程票务固定)
+  if (currentTicket) {
+    const lockedTypeLabel =
+      ticketTypeOptions.find((item) => item.id === currentTicket.ticketType)?.label ??
+      currentTicket.ticketType
+    return (
+      <div className="mobile-ticket-page">
+        <section className="mobile-ticket-hero">
+          <div>
+            <span className="mobile-section-kicker">TICKET LOCKED</span>
+            <h2>本次票务已锁定</h2>
+            <p>每次行程只购票一次，票务一经购买不可更改。</p>
+          </div>
+          <CheckCircleOutlined />
+        </section>
+
+        <section className="mobile-panel">
+          <div className="mobile-panel__head">
+            <div>
+              <span className="mobile-section-kicker">本次票务</span>
+              <h3>{currentTicket.visitDate} 入园</h3>
+            </div>
+            <CheckCircleOutlined />
+          </div>
+          <div className="mobile-ticket-summary">
+            <div>
+              <span>同行人数</span>
+              <strong>{currentTicket.groupSize} 人</strong>
+            </div>
+            <div>
+              <span>票型</span>
+              <strong>{lockedTypeLabel}</strong>
+            </div>
+          </div>
+        </section>
+
+        <button className="mobile-primary-action" type="button" onClick={() => navigate('/consume')}>
+          去景区消费
+        </button>
+        <p className="mobile-muted">票务已固定，本次行程不可更改。</p>
+      </div>
+    )
   }
 
   return (
@@ -151,14 +204,18 @@ function MobileTicketPage() {
         </div>
         <div>
           <span>模拟票价</span>
-          <strong>¥{selectedTicket.price}</strong>
+          <strong>¥{totalPrice}</strong>
         </div>
       </section>
 
       <button className="mobile-primary-action" type="button" onClick={handleSubmit}>
-        确认购票并去消费页
+        确认购票 · 支付 ¥{totalPrice}
       </button>
-      <p className="mobile-muted">比赛演示版不接真实支付，不采集身份证、姓名、手机号或支付账号。</p>
+      <p className="mobile-muted">比赛演示版为模拟支付，不采集身份证、姓名、手机号或真实支付账号。</p>
+
+      {showPay && (
+        <PaymentSheet amount={totalPrice} onClose={() => setShowPay(false)} onPaid={handlePaid} />
+      )}
     </div>
   )
 }

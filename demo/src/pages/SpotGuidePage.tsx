@@ -25,6 +25,7 @@ import {
 import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 import { captureRateSpot, captureSpotEnter, captureSpotLeave } from '../lib/analytics'
+import { TOUR_GUIDE_SCENE_ID } from '../lib/guideScene'
 
 function SpotGuidePage() {
   const navigate = useNavigate()
@@ -43,17 +44,22 @@ function SpotGuidePage() {
       ? spotId
       : getDefaultSpotId(route.id)
   const spot = getGuideSpotById(currentSpotId)
-  const sceneId = `spot:${route.id}:${spot.id}`
+  const sceneId = TOUR_GUIDE_SCENE_ID
   const { stop, stopIndex, nextStop } = getRouteStop(route.id, currentSpotId)
   const nextSpot = nextStop ? getGuideSpotById(nextStop.spotId) : null
 
   useEffect(() => {
     setSelectedSpotId(currentSpotId)
     setActiveScene(sceneId, {
+      routeId: route.id,
       routeName: route.name,
+      spotId: spot.id,
       spotName: spot.name,
       spotIntro: spot.intro,
-      spotNarrative: stop?.narrative ?? spot.intro
+      spotNarrative: stop?.narrative ?? spot.intro,
+      locationSource: 'spot-page',
+      locationConfidence: 1,
+      visitedSpotIds: [...new Set([...useGuideStore.getState().visitedStops, currentSpotId])]
     })
 
     captureSpotEnter(currentSpotId, route.id)

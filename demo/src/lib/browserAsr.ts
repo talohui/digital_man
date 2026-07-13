@@ -43,16 +43,16 @@ export function getBrowserVoiceHint(): string | null {
   if (!isSecureContextForMic) {
     const host = window.location.hostname
     if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-      parts.push('当前为局域网 IP 访问，浏览器原生语音可能不可用，将自动改用 Fay 云端识别')
+      parts.push('当前为局域网 IP 访问，将自动使用云端语音识别')
     } else {
       parts.push('请使用 https 或 localhost 访问以启用语音')
     }
   }
 
   if (kind === '360') {
-    parts.push('360 等浏览器将自动使用 Fay 阿里云识别（需 AliNLS 已配置），亦可换 Edge')
+    parts.push('当前浏览器将自动使用云端语音识别，也可以换用 Edge')
   } else if (!isSecureContextForMic) {
-    parts.push('本页将使用 Fay 云端语音识别（按住说话上传至 Fay）')
+    parts.push('本页将使用云端语音识别（按住说话，松手自动发送）')
   } else if (kind === 'chrome' && isSecureContextForMic) {
     parts.push('Chrome 依赖在线语音服务，若识别失败可换 Edge 或检查网络')
   } else if (kind === 'edge') {
@@ -72,12 +72,12 @@ export function formatAsrError(code: string): string {
   }
   if (code === 'not-allowed') {
     if (!isSecureContextForMic) {
-      return '无法使用麦克风：请在地址栏允许麦克风；局域网访问会使用 Fay 云端识别。'
+      return '无法使用麦克风：请在地址栏允许麦克风；局域网访问会使用云端语音识别。'
     }
     return '麦克风权限被拒绝，请在浏览器地址栏允许麦克风。'
   }
   if (code === 'network' || code === 'service-not-available') {
-    return '浏览器在线语音识别不可用（360/Chrome 常见）。将自动改用 Fay 阿里云识别，请再按一次麦克风。'
+    return '浏览器在线语音识别不可用，将自动改用云端识别，请再按一次麦克风。'
   }
   if (code === 'aborted') {
     return ''
@@ -186,7 +186,7 @@ export function createAsr(opts: {
     } catch (e) {
       if (!isSecureContextForMic) {
         opts.onError?.(
-          '无法启动浏览器语音识别：局域网访问将自动改用 Fay 云端识别，请再按一次麦克风。'
+          '无法启动浏览器语音识别：局域网访问将自动改用云端识别，请再按一次麦克风。'
         )
       } else {
         opts.onError?.(`启动语音识别失败: ${(e as Error).message}`)
