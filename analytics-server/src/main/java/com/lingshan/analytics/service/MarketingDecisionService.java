@@ -7,6 +7,7 @@ import com.lingshan.analytics.entity.AnalyticsEvent;
 import com.lingshan.analytics.repository.EventRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,6 +18,8 @@ import java.util.Map;
 
 @Service
 public class MarketingDecisionService {
+    private static final long CACHE_TTL_MILLIS = 5 * 60 * 1000L;
+    private static final List<String> ALLOWED_PRIORITIES = List.of("高", "中", "低");
     private static final Map<String, String> SPOT_NAMES = Map.ofEntries(
             Map.entry("giant_buddha", "灵山大佛"), Map.entry("fan_gong", "梵宫"),
             Map.entry("jiulong_guanyu", "九龙灌浴"), Map.entry("foshou_square", "佛手广场"),
@@ -28,14 +31,56 @@ public class MarketingDecisionService {
     private final EventRepository repository;
     private final MarketingDecisionEngine engine;
     private final ObjectMapper objectMapper;
+    private final MarketingDecisionGenerator fayClient;
+    private CachedDecision cachedDecision;
 
-    public MarketingDecisionService(EventRepository repository, MarketingDecisionEngine engine, ObjectMapper objectMapper) {
+    public MarketingDecisionService(
+            EventRepository repository,
+            MarketingDecisionEngine engine,
+            ObjectMapper objectMapper,
+            MarketingDecisionGenerator fayClient
+    ) {
         this.repository = repository;
         this.engine = engine;
         this.objectMapper = objectMapper;
+        this.fayClient = fayClient;
     }
 
     public DecisionResponse getDecisionCards() {
+        return getDecisionCards(false);
+    }
+
+    public synchronized DecisionResponse getDecisionCards(boolean forceRefresh) {
+        long now = System.currentTimeMillis();
+        if (!forceRefresh && cachedDecision != null && cachedDecision.expiresAtMillis() > now) {
+            return withMetadata(
+                    cachedDecision.response(),
+                    cachedDecision.response().generationSource(),
+                    cachedDecision.response().generatedAt(),
+                    true,
+                    cachedDecision.response().fallbackReason()
+            );
+        }
+
+        DecisionInput input = buildDecisionInput();
+        DecisionResponse result;
+        try {
+            DecisionResponse modelResponse = fayClient.generate(input);
+            if (!isValidModelResponse(modelResponse)) {
+                result = ruleFallback(input, "模型结果格式不合格，已使用规则分析");
+            } else {
+                result = withMetadata(
+                        modelResponse, "llm", Instant.now().toString(), false, null
+                );
+            }
+        } catch (RuntimeException ignored) {
+            result = ruleFallback(input, "模型服务暂不可用，已使用规则分析");
+        }
+        cachedDecision = new CachedDecision(result, now + CACHE_TTL_MILLIS);
+        return result;
+    }
+
+    private DecisionInput buildDecisionInput() {
         List<AnalyticsEvent> events = repository.findByTsAfter(LocalDateTime.now().minusHours(24));
         List<AnalyticsEvent> recent = repository.findByTsAfter(LocalDateTime.now().minusMinutes(5));
         Map<String, MutableTopicMetric> topicMap = new LinkedHashMap<>();
@@ -73,8 +118,48 @@ public class MarketingDecisionService {
         Map.Entry<String, Double> consumption = consumptionAmounts.entrySet().stream().max(Map.Entry.comparingByValue()).orElse(null);
         String topConsumptionCategory = consumption == null ? null : CONSUMPTION_LABELS.getOrDefault(consumption.getKey(), consumption.getKey());
         double totalConsumption = consumptionAmounts.values().stream().mapToDouble(Double::doubleValue).sum();
-        return engine.generate(new DecisionInput(messageBase, totalMessages > 0 ? (double) positive / totalMessages : 0, percentile(latencies), activeSessions, topics,
-                hottestSpotVisits >= 3, hottestSpot, hottestSpotVisits, personaTags, topConsumptionCategory, totalConsumption));
+        return new DecisionInput(messageBase, totalMessages > 0 ? (double) positive / totalMessages : 0, percentile(latencies), activeSessions, topics,
+                hottestSpotVisits >= 3, hottestSpot, hottestSpotVisits, personaTags, topConsumptionCategory, totalConsumption);
+    }
+
+    private DecisionResponse ruleFallback(DecisionInput input, String reason) {
+        DecisionResponse rules = engine.generate(input);
+        String source = rules.demoFallback() ? "demo" : "rules";
+        return withMetadata(rules, source, Instant.now().toString(), false, reason);
+    }
+
+    private boolean isValidModelResponse(DecisionResponse response) {
+        if (response == null || response.summary() == null || response.summary().isBlank()) return false;
+        if (response.cards() == null || response.cards().size() < 3 || response.cards().size() > 5) return false;
+        return response.cards().stream().allMatch(card ->
+                card != null
+                        && card.title() != null && !card.title().isBlank()
+                        && card.type() != null && !card.type().isBlank()
+                        && ALLOWED_PRIORITIES.contains(card.priority())
+                        && card.evidence() != null && !card.evidence().isEmpty()
+                        && card.reason() != null && !card.reason().isBlank()
+                        && card.actions() != null && !card.actions().isEmpty()
+        );
+    }
+
+    private DecisionResponse withMetadata(
+            DecisionResponse response,
+            String source,
+            String generatedAt,
+            boolean cacheHit,
+            String fallbackReason
+    ) {
+        return new DecisionResponse(
+                response.summary(),
+                response.cards(),
+                response.actionTodos() == null ? List.of() : response.actionTodos(),
+                response.dataSources() == null ? List.of() : response.dataSources(),
+                response.demoFallback(),
+                source,
+                generatedAt,
+                cacheHit,
+                fallbackReason
+        );
     }
 
     private void addTopic(Map<String, MutableTopicMetric> topics, String text, boolean negative) {
@@ -114,4 +199,6 @@ public class MarketingDecisionService {
         private MutableTopicMetric(String topic) { this.topic = topic; }
         private TopicMetric toMetric() { return new TopicMetric(topic, count, negativeCount, samples); }
     }
+
+    private record CachedDecision(DecisionResponse response, long expiresAtMillis) {}
 }

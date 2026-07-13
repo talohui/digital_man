@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { AlertOutlined, ArrowLeftOutlined, CheckCircleOutlined, FireOutlined, RiseOutlined } from '@ant-design/icons'
+import { useCallback, useEffect, useState } from 'react'
+import { AlertOutlined, ArrowLeftOutlined, CheckCircleOutlined, FireOutlined, ReloadOutlined, RiseOutlined } from '@ant-design/icons'
 import { Button, Card, Col, ConfigProvider, Row, Space, Spin, Tag, Typography, theme } from 'antd'
 import { Link } from 'react-router-dom'
 import { getAnalyticsApiBase } from '../lib/runtimeConfig'
@@ -25,6 +25,10 @@ type DecisionResponse = {
   actionTodos: string[]
   dataSources: string[]
   demoFallback: boolean
+  generationSource?: 'llm' | 'rules' | 'demo' | string
+  generatedAt?: string
+  cacheHit?: boolean
+  fallbackReason?: string
 }
 
 const palette = {
@@ -57,13 +61,27 @@ async function readDecision(path: string): Promise<{ response: Response; data: D
   return { response, data: await response.json() as DecisionResponse }
 }
 
-async function fetchDecision(): Promise<DecisionResponse> {
+async function fetchDecision(forceRefresh = false): Promise<DecisionResponse> {
+  const suffix = forceRefresh ? '?forceRefresh=true' : ''
   try {
-    return (await readDecision('/dashboard/marketing-decision')).data
+    return (await readDecision(`/dashboard/marketing-decision${suffix}`)).data
   } catch (error) {
     if (!(error instanceof Error) || (error as Error & { status?: number }).status !== 404) throw error
-    return (await readDecision('/decision/cards')).data
+    return (await readDecision(`/decision/cards${suffix}`)).data
   }
+}
+
+function sourceMeta(decision: DecisionResponse | null) {
+  if (!decision) return null
+  if (decision.demoFallback || decision.generationSource === 'demo') return { label: '演示样例', color: 'warning' }
+  if (decision.generationSource === 'rules') return { label: '规则兜底', color: 'orange' }
+  return { label: '大模型生成', color: 'green' }
+}
+
+function formatGeneratedAt(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 function PriorityBadge({ value }: { value: string }) {
@@ -77,64 +95,78 @@ function PriorityBadge({ value }: { value: string }) {
 function AdminMarketingDecisionPage() {
   const [decision, setDecision] = useState<DecisionResponse | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let stopped = false
-    const load = async () => {
-      try {
-        const next = await fetchDecision()
-        if (!stopped) {
-          setDecision(next)
-          setError('')
-        }
-      } catch {
-        if (!stopped) setError('暂时无法读取营销决策数据，请确认 analytics-server 已启动。')
+  const load = useCallback(async (forceRefresh = false, isActive: () => boolean = () => true) => {
+    if (isActive()) setLoading(true)
+    try {
+      const next = await fetchDecision(forceRefresh)
+      if (isActive()) {
+        setDecision(next)
+        setError('')
       }
-    }
-    void load()
-    const timer = window.setInterval(() => void load(), 60000)
-    return () => {
-      stopped = true
-      window.clearInterval(timer)
+    } catch {
+      if (isActive()) setError('暂时无法读取营销决策数据，请确认 analytics-server 已启动。')
+    } finally {
+      if (isActive()) setLoading(false)
     }
   }, [])
 
+  useEffect(() => {
+    let active = true
+    const isActive = () => active
+    void load(false, isActive)
+    const timer = window.setInterval(() => void load(false, isActive), 60000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [load])
+
+  const source = sourceMeta(decision)
+  const generatedTime = formatGeneratedAt(decision?.generatedAt)
+
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
-      <main style={{ minHeight: '100vh', padding: 22, color: palette.text, background: `radial-gradient(circle at top left, #183457 0, ${palette.bg} 43%, #050b14 100%)` }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 18 }}>
-          <div>
+      <main style={{ minHeight: '100vh', padding: 22, overflowX: 'hidden', color: palette.text, background: `radial-gradient(circle at top left, #183457 0, ${palette.bg} 43%, #050b14 100%)` }}>
+        <header style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 18 }}>
+          <div style={{ minWidth: 0 }}>
             <Text style={{ color: palette.gold, fontWeight: 700, letterSpacing: '.04em' }}>NEXT BEST ACTION</Text>
             <Title level={2} style={{ margin: '4px 0 0', color: palette.text }}>AI 营销决策分析</Title>
           </div>
           <Space wrap>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load(true)}>重新生成</Button>
             <Link to="/admin"><Button icon={<ArrowLeftOutlined />}>返回运营驾驶舱</Button></Link>
             <Link to="/admin/heatmap"><Button icon={<FireOutlined />} type="primary">查看客流热力图</Button></Link>
           </Space>
         </header>
 
         <Card bordered={false} style={{ marginBottom: 16, border: `1px solid rgba(213, 167, 58, .32)`, background: 'linear-gradient(135deg, rgba(213,167,58,.16), rgba(17,28,48,.92))' }}>
-          <Space align="start" size={12}>
+          <Space align="start" size={12} wrap style={{ width: '100%' }}>
             <RiseOutlined style={{ marginTop: 2, color: palette.gold, fontSize: 23 }} />
-            <div>
-              <Text style={{ color: '#f5dc9a', fontWeight: 800 }}>今日 AI 运营摘要</Text>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <Space size={8} wrap>
+                <Text style={{ color: '#f5dc9a', fontWeight: 800 }}>今日 AI 运营摘要</Text>
+                {source ? <Tag color={source.color}>{source.label}</Tag> : null}
+                {generatedTime ? <Text style={{ color: palette.muted, fontSize: 12 }}>生成于 {generatedTime}{decision?.cacheHit ? ' · 缓存' : ''}</Text> : null}
+              </Space>
               <Paragraph style={{ maxWidth: 940, margin: '7px 0 0', color: palette.muted, lineHeight: 1.7 }}>
                 {decision?.summary ?? (error || '正在读取游客行为数据，生成今日营销决策建议…')}
               </Paragraph>
+              {decision?.fallbackReason ? <Text style={{ color: '#efc66c', fontSize: 12 }}>{decision.fallbackReason}</Text> : null}
             </div>
-            {decision?.demoFallback ? <Tag color="warning">demo fallback</Tag> : null}
           </Space>
         </Card>
 
         <Row gutter={[16, 16]}>
-          <Col xs={24} xl={16}>
+          <Col xs={24} xl={16} style={{ minWidth: 0 }}>
             {decision ? (
               <Row gutter={[14, 14]}>
                 {decision.cards.map((card) => (
                   <Col xs={24} lg={12} key={`${card.type}-${card.title}`}>
                     <Card bordered={false} style={{ height: '100%', border: `1px solid ${palette.border}`, background: palette.panel }} bodyStyle={{ padding: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <Space size={6} wrap>
                             <Tag color={typeColor[card.type] ?? 'default'}>{card.type}</Tag>
                             {card.demoFallback ? <Tag>演示样例</Tag> : null}
@@ -166,7 +198,14 @@ function AdminMarketingDecisionPage() {
                   </Col>
                 ))}
               </Row>
-            ) : <Card bordered={false} style={{ border: `1px solid ${palette.border}`, background: palette.panel }}><Spin /> <Text style={{ marginLeft: 10, color: palette.muted }}>正在加载智能决策…</Text></Card>}
+            ) : loading ? (
+              <Card bordered={false} style={{ border: `1px solid ${palette.border}`, background: palette.panel }}><Spin /> <Text style={{ marginLeft: 10, color: palette.muted }}>正在加载智能决策…</Text></Card>
+            ) : (
+              <Card bordered={false} style={{ border: `1px solid ${palette.border}`, background: palette.panel }}>
+                <AlertOutlined style={{ marginRight: 8, color: palette.red }} />
+                <Text style={{ color: palette.muted }}>{error || '暂无可用的营销决策数据。'}</Text>
+              </Card>
+            )}
           </Col>
 
           <Col xs={24} xl={8}>

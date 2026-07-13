@@ -16,3 +16,23 @@ test('registers the decision workspace in the new B-end routes', () => {
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
   assert.match(app, /path="\/admin\/decision"\s+element=\{<AdminMarketingDecisionPage\s*\/>\}/)
 })
+
+test('shows LLM, rule fallback and demo source labels', () => {
+  assert.match(page, /大模型生成/)
+  assert.match(page, /规则兜底/)
+  assert.match(page, /演示样例/)
+  assert.match(page, /generatedAt/)
+})
+
+test('force refresh calls analytics and every terminal state clears loading', () => {
+  assert.match(page, /forceRefresh=true/)
+  assert.match(page, /重新生成/)
+  assert.match(page, /setLoading\(false\)/)
+  assert.match(page, /finally/)
+})
+
+test('prevents narrow viewport overflow', () => {
+  assert.match(page, /overflowX:\s*'hidden'/)
+  assert.match(page, /flexWrap:\s*'wrap'/)
+  assert.match(page, /minWidth:\s*0/)
+})

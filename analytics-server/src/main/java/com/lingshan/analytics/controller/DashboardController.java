@@ -56,7 +56,9 @@ public class DashboardController {
     public Map<String, Object> recommendation() { return service.recommendation(); }
 
     @GetMapping("/marketing-decision")
-    public Object marketingDecision() { return marketingDecisionService.getDecisionCards(); }
+    public Object marketingDecision(@RequestParam(defaultValue = "false") boolean forceRefresh) {
+        return marketingDecisionService.getDecisionCards(forceRefresh);
+    }
 
     @GetMapping("/realtime")
     public Map<String, Object> realtime(@RequestParam(defaultValue = "5") int activeWindowMinutes) {
