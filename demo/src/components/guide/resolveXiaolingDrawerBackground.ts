@@ -1,20 +1,61 @@
-import { getPoiMedia, getRouteMedia, type ScenicMediaEntry } from '../../data/scenicMediaCatalog'
+import {
+  getPoiMedia,
+  getRouteMedia,
+  SCENIC_MEDIA_FALLBACK,
+  type ScenicMediaEntry
+} from '../../data/scenicMediaCatalog'
 import type { GuideContext } from '../../guide'
 
 const DEFAULT_LINGSHAN_BACKGROUND = getRouteMedia('natural_scenery')
 
-export function resolveXiaolingDrawerBackground(context: GuideContext): ScenicMediaEntry {
+export type XiaolingDrawerBackground = {
+  key: string
+  contextType: 'browse' | 'route-preview' | 'route-joining' | 'route-active' | 'route-arrived' | 'poi'
+  candidates: string[]
+  alt: string
+}
+
+function mediaCandidates(media: ScenicMediaEntry) {
+  const contextualCandidates = [media.drawerBackground, media.cover, media.gallery?.[0]]
+    .filter((value): value is string => Boolean(value) && value !== SCENIC_MEDIA_FALLBACK)
+  return [
+    ...contextualCandidates,
+    DEFAULT_LINGSHAN_BACKGROUND.drawerBackground,
+    DEFAULT_LINGSHAN_BACKGROUND.cover,
+    DEFAULT_LINGSHAN_BACKGROUND.gallery?.[0],
+    SCENIC_MEDIA_FALLBACK
+  ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
+}
+
+function createBackground(
+  key: string,
+  contextType: XiaolingDrawerBackground['contextType'],
+  media: ScenicMediaEntry
+): XiaolingDrawerBackground {
+  return { key, contextType, candidates: mediaCandidates(media), alt: media.alt }
+}
+
+export function resolveXiaolingDrawerBackground(context: GuideContext): XiaolingDrawerBackground {
   if (context.page === 'poi') {
-    return getPoiMedia(context.selectedPoiId)
+    return createBackground(`poi:${context.selectedPoiId ?? 'unknown'}`, 'poi', getPoiMedia(context.selectedPoiId))
   }
 
   if (context.page === 'route') {
-    if (context.stage === 'preview') return getRouteMedia(context.routeId)
-    if (context.stage === 'joining') return getPoiMedia(context.currentStopPoiId)
-    if (context.stage === 'active') return getPoiMedia(context.nextStopPoiId ?? context.currentStopPoiId)
-    if (context.stage === 'arrived') return getPoiMedia(context.currentStopPoiId)
-    return getRouteMedia(context.routeId)
+    const routeId = context.routeId ?? 'unknown'
+    if (context.stage === 'joining') {
+      const poiId = context.currentStopPoiId ?? 'unknown'
+      return createBackground(`route:${routeId}:joining:${poiId}`, 'route-joining', getPoiMedia(context.currentStopPoiId))
+    }
+    if (context.stage === 'active') {
+      const poiId = context.nextStopPoiId ?? context.currentStopPoiId ?? 'unknown'
+      return createBackground(`route:${routeId}:active:${poiId}`, 'route-active', getPoiMedia(poiId))
+    }
+    if (context.stage === 'arrived') {
+      const poiId = context.currentStopPoiId ?? 'unknown'
+      return createBackground(`route:${routeId}:arrived:${poiId}`, 'route-arrived', getPoiMedia(context.currentStopPoiId))
+    }
+    return createBackground(`route:${routeId}:preview`, 'route-preview', getRouteMedia(context.routeId))
   }
 
-  return DEFAULT_LINGSHAN_BACKGROUND
+  return createBackground('browse:lingshan', 'browse', DEFAULT_LINGSHAN_BACKGROUND)
 }

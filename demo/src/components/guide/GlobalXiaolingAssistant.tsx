@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -48,7 +48,17 @@ export function GlobalXiaolingAssistant() {
       ? 'poi'
       : 'browse'
   const assistantContent = resolveGuideAssistantContent(context)
-  const drawerBackground = resolveXiaolingDrawerBackground(context)
+  const drawerBackground = useMemo(
+    () => resolveXiaolingDrawerBackground(context),
+    [
+      context.page,
+      context.routeId,
+      context.stage,
+      context.currentStopPoiId,
+      context.nextStopPoiId,
+      context.selectedPoiId
+    ]
+  )
 
   useEffect(() => setMounted(true), [])
 
@@ -222,10 +232,7 @@ export function GlobalXiaolingAssistant() {
       ) : null}
       {open || isFullscreenPage ? <XiaolingConversationSurface
         mode={isFullscreenPage ? 'fullscreen' : 'drawer'}
-        backgroundMedia={isFullscreenPage ? undefined : {
-          src: drawerBackground.drawerBackground ?? drawerBackground.cover,
-          alt: drawerBackground.alt
-        }}
+        backgroundMedia={isFullscreenPage ? undefined : drawerBackground}
         title={assistantContent.title}
         subtitle={assistantContent.subtitle}
         suggestedQuestions={assistantContent.suggestedQuestions}

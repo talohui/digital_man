@@ -400,12 +400,11 @@
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
+  background: rgba(82, 159, 209, 0.22);
 }
 
 .xiaoling-conversation--drawer::after {
-  z-index: -1;
-  height: 48%;
-  background: linear-gradient(160deg, rgba(215, 239, 255, 0.7), rgba(61, 126, 174, 0.72));
+  display: none;
 }
 
 .xiaoling-conversation__scenic-backdrop {
@@ -423,22 +422,39 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: saturate(0.82) contrast(1.02);
-  transform: scale(1.015);
+  filter: blur(10px) saturate(0.88) contrast(1.03);
+  transform: scale(1.06);
   transition: opacity 340ms ease;
 }
 
-.xiaoling-conversation__scenic-backdrop img.is-visible,
-.xiaoling-conversation__scenic-backdrop img.is-previous {
-  opacity: 1;
+.xiaoling-conversation__scenic-backdrop img.is-current,
+.xiaoling-conversation__scenic-backdrop img.is-incoming.is-visible {
+  opacity: 0.64;
 }
 
-.xiaoling-conversation__scenic-backdrop span {
+.xiaoling-conversation__scenic-backdrop img.is-current.is-fading {
+  opacity: 0;
+}
+
+.xiaoling-conversation__scenic-tint {
   position: absolute;
   inset: 0;
+  z-index: 1;
+}
+
+.xiaoling-conversation__scenic-tint--blue {
+  background: linear-gradient(180deg, rgba(69, 151, 205, 0.38) 0%, rgba(78, 157, 208, 0.25) 48%, rgba(27, 72, 103, 0.42) 100%);
+}
+
+.xiaoling-conversation__scenic-tint--light {
   background:
-    linear-gradient(180deg, rgba(105, 180, 229, 0.78) 0%, rgba(113, 183, 228, 0.54) 42%, rgba(28, 76, 108, 0.66) 100%),
-    radial-gradient(circle at 72% 20%, rgba(255, 250, 224, 0.42), transparent 34%);
+    radial-gradient(circle at 74% 18%, rgba(255, 249, 220, 0.38), transparent 34%),
+    linear-gradient(180deg, rgba(241, 250, 255, 0.12) 0%, transparent 45%, rgba(247, 244, 222, 0.32) 100%);
+}
+
+.xiaoling-conversation--drawer .immersive-guide__aura {
+  z-index: 1;
+  opacity: 0.28;
 }
 
 .xiaoling-conversation__handle {

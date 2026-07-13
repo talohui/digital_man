@@ -4,7 +4,7 @@ import type { GuideAction, GuideMessage } from '../../guide'
 import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
 import Live2DStage from '../Live2DStage'
 import { GuideMessageTimeline } from './GuideMessageTimeline'
-import { SCENIC_MEDIA_FALLBACK } from '../../data/scenicMediaCatalog'
+import type { XiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
 
 type SurfaceMode = 'drawer' | 'fullscreen'
 
@@ -45,12 +45,13 @@ export function XiaolingConversationSurface({
   onClose: () => void
   onFullscreen?: () => void
   onOpenMap?: () => void
-  backgroundMedia?: { src: string; alt: string }
+  backgroundMedia?: XiaolingDrawerBackground
 }) {
   const runtime = useXiaolingRuntime()
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const shouldFollowRef = useRef(true)
   const didInitialScrollRef = useRef(false)
+  const [resolvedBackgroundUrl, setResolvedBackgroundUrl] = useState('')
 
   useEffect(() => {
     const timeline = timelineRef.current
@@ -69,9 +70,24 @@ export function XiaolingConversationSurface({
     onSend()
   }
 
+  const debugBackgroundAttributes = import.meta.env.DEV && mode === 'drawer' && backgroundMedia
+    ? {
+        'data-xiaoling-background-key': backgroundMedia.key,
+        'data-xiaoling-background-url': resolvedBackgroundUrl,
+        'data-xiaoling-background-context-type': backgroundMedia.contextType
+      }
+    : {}
+
   const content = (
-    <main className={`immersive-guide xiaoling-conversation xiaoling-conversation--${mode}`}>
-      <ScenicBackdrop media={backgroundMedia} enabled={mode === 'drawer'} />
+    <main
+      className={`immersive-guide xiaoling-conversation xiaoling-conversation--${mode}`}
+      {...debugBackgroundAttributes}
+    >
+      <ScenicBackdrop
+        media={backgroundMedia}
+        enabled={mode === 'drawer'}
+        onResolved={(url) => setResolvedBackgroundUrl(url)}
+      />
       <div className="immersive-guide__aura immersive-guide__aura--left" />
       <div className="immersive-guide__aura immersive-guide__aura--right" />
 
@@ -170,50 +186,110 @@ export function XiaolingConversationSurface({
 
 function ScenicBackdrop({
   media,
-  enabled
+  enabled,
+  onResolved
 }: {
-  media?: { src: string; alt: string }
+  media?: XiaolingDrawerBackground
   enabled: boolean
+  onResolved: (url: string) => void
 }) {
-  const [current, setCurrent] = useState(media ?? null)
-  const [previous, setPrevious] = useState<typeof media | null>(null)
-  const [visible, setVisible] = useState(true)
-  const currentRef = useRef(media ?? null)
+  type LoadedBackground = { key: string; src: string; alt: string }
+  const [current, setCurrent] = useState<LoadedBackground | null>(null)
+  const [incoming, setIncoming] = useState<LoadedBackground | null>(null)
+  const [incomingVisible, setIncomingVisible] = useState(false)
+  const currentRef = useRef<LoadedBackground | null>(null)
+  const onResolvedRef = useRef(onResolved)
 
   useEffect(() => {
-    if (!media || media.src === currentRef.current?.src) return undefined
-    setPrevious(currentRef.current)
-    currentRef.current = media
-    setCurrent(media)
-    setVisible(false)
-    let revealFrame = 0
-    const frame = window.requestAnimationFrame(() => {
-      revealFrame = window.requestAnimationFrame(() => setVisible(true))
-    })
-    const timer = window.setTimeout(() => setPrevious(null), 380)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.cancelAnimationFrame(revealFrame)
-      window.clearTimeout(timer)
-    }
-  }, [media?.alt, media?.src])
+    onResolvedRef.current = onResolved
+  }, [onResolved])
 
-  if (!enabled || !current) return null
+  useEffect(() => {
+    if (!enabled || !media) return undefined
+    let cancelled = false
+    let preloadImage: HTMLImageElement | null = null
+    let revealFrame = 0
+    let secondRevealFrame = 0
+    let swapTimer = 0
+
+    setIncoming(null)
+    setIncomingVisible(false)
+
+    const loadCandidate = (index: number) => {
+      const src = media.candidates[index]
+      if (!src) return
+      if (currentRef.current?.src === src) {
+        currentRef.current = { ...currentRef.current, key: media.key, alt: media.alt }
+        setCurrent(currentRef.current)
+        onResolvedRef.current(src)
+        return
+      }
+
+      preloadImage = new Image()
+      preloadImage.onload = () => {
+        if (cancelled) return
+        const loaded = { key: media.key, src, alt: media.alt }
+        if (!currentRef.current) {
+          currentRef.current = loaded
+          setCurrent(loaded)
+          onResolvedRef.current(src)
+          return
+        }
+
+        setIncoming(loaded)
+        revealFrame = window.requestAnimationFrame(() => {
+          secondRevealFrame = window.requestAnimationFrame(() => setIncomingVisible(true))
+        })
+        swapTimer = window.setTimeout(() => {
+          if (cancelled) return
+          currentRef.current = loaded
+          setCurrent(loaded)
+          setIncoming(null)
+          setIncomingVisible(false)
+          onResolvedRef.current(src)
+        }, 360)
+      }
+      preloadImage.onerror = () => {
+        if (!cancelled) loadCandidate(index + 1)
+      }
+      preloadImage.src = src
+    }
+
+    loadCandidate(0)
+    return () => {
+      window.cancelAnimationFrame(revealFrame)
+      window.cancelAnimationFrame(secondRevealFrame)
+      window.clearTimeout(swapTimer)
+      cancelled = true
+      if (preloadImage) {
+        preloadImage.onload = null
+        preloadImage.onerror = null
+      }
+    }
+  }, [enabled, media])
+
+  if (!enabled) return null
 
   return (
     <div className="xiaoling-conversation__scenic-backdrop" aria-hidden="true">
-      {previous ? <img className="is-previous" src={previous.src} alt="" /> : null}
-      <img
-        className={visible ? 'is-visible' : ''}
-        src={current.src}
-        alt=""
-        title={current.alt}
-        onError={(event) => {
-          if (event.currentTarget.src.endsWith(SCENIC_MEDIA_FALLBACK)) return
-          event.currentTarget.src = SCENIC_MEDIA_FALLBACK
-        }}
-      />
-      <span />
+      {current ? (
+        <img
+          className={`is-current${incomingVisible ? ' is-fading' : ''}`}
+          src={current.src}
+          alt=""
+          title={current.alt}
+        />
+      ) : null}
+      {incoming ? (
+        <img
+          className={`is-incoming${incomingVisible ? ' is-visible' : ''}`}
+          src={incoming.src}
+          alt=""
+          title={incoming.alt}
+        />
+      ) : null}
+      <span className="xiaoling-conversation__scenic-tint xiaoling-conversation__scenic-tint--blue" />
+      <span className="xiaoling-conversation__scenic-tint xiaoling-conversation__scenic-tint--light" />
     </div>
   )
 }
