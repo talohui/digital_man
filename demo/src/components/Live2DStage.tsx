@@ -58,13 +58,19 @@ type Live2DStageProps = {
   /** 首屏可见时立即加载，不等待 IntersectionObserver */
   eager?: boolean
   sceneId?: string
+  robotStateOverride?: RobotState
+  mouthOpenOverride?: number
+  mouthFormOverride?: number
 }
 
 function Live2DStage({
   highlightsOverride,
   variant = 'default',
   eager = false,
-  sceneId
+  sceneId,
+  robotStateOverride,
+  mouthOpenOverride,
+  mouthFormOverride
 }: Live2DStageProps) {
   const isEmbedded = variant === 'embedded'
   const isImmersive = variant === 'immersive'
@@ -80,7 +86,8 @@ function Live2DStage({
   const resolvedSceneId = sceneId ?? activeSceneId
   // 只订阅低频的 robotState;mouthOpen(口型)TTS 播放时每帧都变,
   // 走下面的 transient subscription 直接驱动模型,不触发 React 重渲
-  const robotState = useChatStore((s) => getSession(s.sessions, resolvedSceneId).robotState)
+  const legacyRobotState = useChatStore((s) => s.sessions[resolvedSceneId]?.robotState ?? 'normal')
+  const robotState = robotStateOverride ?? legacyRobotState
   const visibleHighlights = highlightsOverride ?? highlights
 
   useEffect(() => {
@@ -135,7 +142,7 @@ function Live2DStage({
       .then(async ({ Live2DModel }) => {
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
-        const cfg = await fetchPublicAvatarConfig()
+        const cfg = await fetchPublicAvatarConfig().catch(() => null)
         const configuredUrl =
           typeof cfg?.live2dModelUrl === 'string' ? cfg.live2dModelUrl.trim() : ''
         // 历史配置可能仍指向公网 CDN（jsdelivr / githubusercontent），现场易超时白脸；
@@ -180,7 +187,7 @@ function Live2DStage({
 
         registerModel(modelRef.current, resolvedSceneId)
         playMotionForState(
-          getSession(useChatStore.getState().sessions, resolvedSceneId).robotState,
+          robotState,
           resolvedSceneId
         )
         setIsLoading(false)
@@ -211,7 +218,7 @@ function Live2DStage({
     if (!isInView) return
 
     const syncCostume = async () => {
-      const cfg = await fetchPublicAvatarConfig()
+      const cfg = await fetchPublicAvatarConfig().catch(() => null)
       const nextId = parseCostumeId(cfg?.costumeId)
       if (nextId === costumeIdRef.current) return
       costumeIdRef.current = nextId
@@ -229,6 +236,11 @@ function Live2DStage({
   }, [isInView])
 
   useEffect(() => {
+    if (mouthOpenOverride !== undefined || mouthFormOverride !== undefined) {
+      setMouthOpen(mouthOpenOverride ?? 0, resolvedSceneId)
+      setMouthForm(mouthFormOverride ?? 0, resolvedSceneId)
+      return undefined
+    }
     const init = getSession(useChatStore.getState().sessions, resolvedSceneId)
     let lastOpen = init.mouthOpen
     let lastForm = init.mouthForm
@@ -246,7 +258,7 @@ function Live2DStage({
         setMouthForm(lastForm, resolvedSceneId)
       }
     })
-  }, [resolvedSceneId])
+  }, [mouthFormOverride, mouthOpenOverride, resolvedSceneId])
 
   useEffect(() => {
     playMotionForState(robotState, resolvedSceneId)

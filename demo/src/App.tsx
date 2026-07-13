@@ -10,13 +10,12 @@ import RouteSkeleton from './components/RouteSkeleton'
 import FloatingGuide from './components/FloatingGuide'
 import { GlobalXiaolingAssistant } from './components/guide'
 import MobileShell from './mobile/MobileShell'
-import { GuideContextBridge } from './guide'
+import { GuideContextBridge, XiaolingRuntimeProvider } from './guide'
 import { isAdminAuthed } from './lib/adminAuth'
 import { unlockAudio } from './lib/audioLipsync'
 import { markLingshanSplashSeen, shouldShowLingshanSplash } from './lib/introStorage'
 import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
-import { useChatStore } from './store/useChatStore'
 
 const AdminAvatarPage = lazy(() => import('./pages/AdminAvatarPage'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
@@ -35,11 +34,9 @@ const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
 const ScenicMapPage = lazy(() => import('./pages/ScenicMapPage'))
 const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
-function App() {
+function AppContent() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
-  const initializeConnection = useChatStore((state) => state.initializeConnection)
-  const disconnectConnection = useChatStore((state) => state.disconnectConnection)
   const isHomeRoute = location.pathname === '/'
   const isAdminRoute = location.pathname.startsWith('/admin')
   const isMapPoiDetailRoute = location.pathname.startsWith('/map-3d-guide-c/poi')
@@ -53,11 +50,6 @@ function App() {
       sessionStorage.getItem('lingshan_admin_force_mobile') === '1'
   )
   const [showSplash, setShowSplash] = useState(() => isHomeRoute && shouldShowLingshanSplash())
-
-  useEffect(() => {
-    initializeConnection()
-    return () => disconnectConnection()
-  }, [disconnectConnection, initializeConnection])
 
   useEffect(() => {
     if (!isAdminRoute) {
@@ -177,6 +169,14 @@ function App() {
       <GuideContextBridge />
       {isCanonicalMapRoute ? <GlobalXiaolingAssistant /> : null}
     </RouteErrorBoundary>
+  )
+}
+
+function App() {
+  return (
+    <XiaolingRuntimeProvider>
+      <AppContent />
+    </XiaolingRuntimeProvider>
   )
 }
 

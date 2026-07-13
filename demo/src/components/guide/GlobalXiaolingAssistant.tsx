@@ -29,7 +29,6 @@ export function GlobalXiaolingAssistant() {
   const messages = useGuideSessionStore((state) =>
     state.getMessagesForConversation(state.activeConversationKey)
   )
-  const status = useGuideSessionStore((state) => state.status)
   const open = useGuideSessionStore((state) => state.isDrawerOpen)
   const setDrawerOpen = useGuideSessionStore((state) => state.setDrawerOpen)
   const sendGuideMessage = useGuideSessionStore((state) => state.sendGuideMessage)
@@ -182,8 +181,6 @@ export function GlobalXiaolingAssistant() {
         '--guide-route-avatar-right': `${routeAvatarAnchor.right}px`
       } as CSSProperties)
     : undefined
-  const digitalStatus = status === 'error' ? 'offline' : status
-
   return createPortal(
     <div className="guide-assistant-root" style={rootStyle} data-guide-mode={visualMode}>
       {!open ? (
@@ -203,7 +200,6 @@ export function GlobalXiaolingAssistant() {
         suggestedQuestions={assistantContent.suggestedQuestions}
         messages={messages}
         input={input}
-        status={digitalStatus}
         onClose={() => setDrawerOpen(false)}
         onInputChange={setInput}
         onSend={submit}
