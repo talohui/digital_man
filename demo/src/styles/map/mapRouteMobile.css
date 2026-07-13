@@ -4887,3 +4887,34 @@
     animation: none;
   }
 }
+
+@media (max-width: 880px) {
+  .map-route-tour-cover {
+    overflow: hidden;
+    background: #456f60;
+  }
+
+  .map-route-tour-cover img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    filter: saturate(0.88) contrast(1.03);
+  }
+
+  .map-route-tour-cover::before {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(20, 55, 43, 0.02), rgba(20, 55, 43, 0.22));
+    content: '';
+    pointer-events: none;
+  }
+
+  .map-route-tour-cover span,
+  .map-route-tour-cover::after {
+    display: none;
+  }
+}

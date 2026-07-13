@@ -11,6 +11,7 @@ import { resolveGuideAssistantContent } from '../../guide/guideAssistantContent'
 import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAssistantEvents'
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
 import { XiaolingConversationSurface } from './XiaolingConversationSurface'
+import { resolveXiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
 import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
@@ -47,6 +48,7 @@ export function GlobalXiaolingAssistant() {
       ? 'poi'
       : 'browse'
   const assistantContent = resolveGuideAssistantContent(context)
+  const drawerBackground = resolveXiaolingDrawerBackground(context)
 
   useEffect(() => setMounted(true), [])
 
@@ -198,7 +200,8 @@ export function GlobalXiaolingAssistant() {
 
   const rootStyle = {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
-    '--guide-vvo-top': `${visualViewport.offsetTop}px`
+    '--guide-vvo-top': `${visualViewport.offsetTop}px`,
+    '--guide-drawer-height': visualViewport.height ? `${Math.round(visualViewport.height * 0.66)}px` : '66dvh'
   } as CSSProperties
   const routeAvatarStyle = routeAvatarAnchor
     ? ({
@@ -219,6 +222,10 @@ export function GlobalXiaolingAssistant() {
       ) : null}
       {open || isFullscreenPage ? <XiaolingConversationSurface
         mode={isFullscreenPage ? 'fullscreen' : 'drawer'}
+        backgroundMedia={isFullscreenPage ? undefined : {
+          src: drawerBackground.drawerBackground ?? drawerBackground.cover,
+          alt: drawerBackground.alt
+        }}
         title={assistantContent.title}
         subtitle={assistantContent.subtitle}
         suggestedQuestions={assistantContent.suggestedQuestions}

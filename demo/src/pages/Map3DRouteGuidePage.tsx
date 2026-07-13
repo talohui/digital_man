@@ -6,6 +6,7 @@ import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
 import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail, type MapMobileToolRailItem } from '../components/map/MapMobileToolRail'
 import { getLingshanPoiDetailById } from '../data/lingshanPoiDetails'
+import { getRouteMedia } from '../data/scenicMediaCatalog'
 import {
   getPoiArrivalSummary,
   getRecommendedStayLabel,
@@ -302,6 +303,7 @@ function RoutePreviewSlide({
   onStart: (routeId: string) => void
 }) {
   const tags = route.tags.slice(0, 2)
+  const media = getRouteMedia(route.id)
 
   return (
     <section
@@ -311,7 +313,8 @@ function RoutePreviewSlide({
     >
       <div className="map-route-tour-card__inner">
         <div className="map-route-tour-card__main">
-          <div className="map-route-tour-cover" aria-hidden="true">
+          <div className="map-route-tour-cover">
+            <img src={media.cover} alt={media.alt} loading={selected ? 'eager' : 'lazy'} />
             <span />
           </div>
           <div className="map-route-tour-card__content">
