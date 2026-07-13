@@ -222,7 +222,17 @@ function NavigationErrorCard({ viewModel }: { viewModel: NavigationBetaViewModel
         <strong>{error.title}</strong>
         <p>{error.message}</p>
       </div>
-      {error.retryable ? (
+      {viewModel.simulation.insecureContextFallback ? (
+        <>
+          <p className="navigation-beta-card__copy">{viewModel.simulation.disclaimer}</p>
+          <NavigationActionPair
+            primaryLabel="使用模拟导航"
+            onPrimary={viewModel.actions.startSimulatedNavigation}
+            secondaryLabel="继续查看路线"
+            onSecondary={viewModel.actions.cancel}
+          />
+        </>
+      ) : error.retryable ? (
         <NavigationActionPair
           primaryLabel="重新尝试"
           onPrimary={viewModel.actions.retryLocation}

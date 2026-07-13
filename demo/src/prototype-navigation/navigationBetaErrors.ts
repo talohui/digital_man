@@ -15,7 +15,7 @@ export type NavigationBetaErrorKind =
 
 export function resolveNavigationBetaError(kind: NavigationBetaErrorKind, debugMessage?: string) {
   const messages: Record<NavigationBetaErrorKind, { title: string; message: string; retryable: boolean }> = {
-    'insecure-context': { title: '无法使用实时定位', message: '浏览器需要在安全连接下才能使用实时定位。', retryable: false },
+    'insecure-context': { title: '无法使用实时定位', message: '当前页面不是安全连接，暂时无法使用真实定位。', retryable: false },
     'permission-denied': { title: '定位权限未开启', message: '请在浏览器或系统设置中允许位置权限后重试。', retryable: true },
     'location-timeout': { title: '暂时无法获取当前位置', message: '请到室外开阔区域后重新尝试。', retryable: true },
     'location-unavailable': { title: '暂时无法获取当前位置', message: '请到室外开阔区域后重新尝试。', retryable: true },

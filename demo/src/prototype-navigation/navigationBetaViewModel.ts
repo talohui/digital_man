@@ -26,6 +26,7 @@ export type NavigationBetaSnapshot = {
   restoredFromSessionStorage: boolean
   backgroundPaused: boolean
   debugEnabled: boolean
+  simulatedNavigationAvailable: boolean
 }
 
 export type NavigationBetaViewModel = {
@@ -53,6 +54,7 @@ export type NavigationBetaViewModel = {
   error?: ReturnType<typeof resolveNavigationBetaError>
   restoredSession?: { targetName: string }
   arrival?: { kind: 'route-arrival' | 'joining-arrival'; targetName: string }
+  simulation: { available: boolean; insecureContextFallback: boolean; disclaimer: string }
   debugEnabled: boolean
   actions: NavigationBetaActions
 }
@@ -72,6 +74,7 @@ export type NavigationBetaActions = {
   continueAfterArrivalDetection(): void
   continueRestoredSession(): void
   discardRestoredSession(): void
+  startSimulatedNavigation(): void
 }
 
 export function resolveNavigationBetaUiState(snapshot: NavigationBetaSnapshot): NavigationBetaUiState {
@@ -125,6 +128,11 @@ export function createNavigationBetaViewModel(snapshot: NavigationBetaSnapshot, 
     error: errorKind ? resolveNavigationBetaError(errorKind, snapshot.debugEnabled ? snapshot.error : undefined) : undefined,
     restoredSession: snapshot.restoredFromSessionStorage && target ? { targetName: target.name } : undefined,
     arrival: state === 'arrival-confirm' && target ? { kind: target.mode === 'joining' ? 'joining-arrival' : 'route-arrival', targetName: target.name } : undefined,
+    simulation: {
+      available: snapshot.debugEnabled && snapshot.simulatedNavigationAvailable,
+      insecureContextFallback: snapshot.debugEnabled && snapshot.simulatedNavigationAvailable && errorKind === 'insecure-context',
+      disclaimer: '模拟导航，仅用于开发测试'
+    },
     debugEnabled: snapshot.debugEnabled,
     actions
   }
