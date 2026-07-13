@@ -44,9 +44,9 @@ function MobileProfilePage() {
   )
   const hasJourney = visitedSpotList.length > 0
   const activeRoute = getGuideRouteById(activeRouteId)
-  const lastVisitedStopIndex = Math.max(
-    0,
-    activeRoute.stops.findIndex((stop) => stop.spotId === visitedStops[visitedStops.length - 1])
+  const lastVisitedStopNumber = Math.max(
+    1,
+    activeRoute.stops.findIndex((stop) => stop.spotId === visitedStops[visitedStops.length - 1]) + 1
   )
 
   const personaLabel = userProfile?.primaryPersonaLabel || '偏好逐步形成中'
@@ -110,7 +110,7 @@ function MobileProfilePage() {
               type="button"
               className="mobile-profile-continue-route"
               onClick={() => navigate(
-                `/map-3d-guide-c/route/${encodeURIComponent(activeRoute.id)}?stage=active&stop=${lastVisitedStopIndex}`
+                `/map-3d-guide-c/route/${encodeURIComponent(activeRoute.id)}?stage=active&stop=${lastVisitedStopNumber}`
               )}
             >
               继续上一次行程
