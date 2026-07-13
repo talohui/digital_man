@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGuideSpotById } from '../data/guideData'
+import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
 import { useGuideStore } from '../store/useGuideStore'
 import {
   ticketTypeOptions,
@@ -23,6 +23,7 @@ function MobileProfilePage() {
   const userProfile = useGuideStore((state) => state.userProfile)
   const visitedStops = useGuideStore((state) => state.visitedStops)
   const listenedStops = useGuideStore((state) => state.listenedStops)
+  const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const ticket = useTicketStore((state) => state.ticketProfile)
   const purchases = useTicketStore((state) => state.purchases)
   // 注意：selector 必须返回稳定引用。直接 state.spendByCategory() 每次返回新对象，
@@ -42,6 +43,11 @@ function MobileProfilePage() {
     [visitedSpotList]
   )
   const hasJourney = visitedSpotList.length > 0
+  const activeRoute = getGuideRouteById(activeRouteId)
+  const lastVisitedStopIndex = Math.max(
+    0,
+    activeRoute.stops.findIndex((stop) => stop.spotId === visitedStops[visitedStops.length - 1])
+  )
 
   const personaLabel = userProfile?.primaryPersonaLabel || '偏好逐步形成中'
   const ticketTypeLabel = ticketTypeOptions.find((item) => item.id === ticket?.ticketType)?.label ?? ticket?.ticketType
@@ -100,6 +106,15 @@ function MobileProfilePage() {
                 </span>
               ))}
             </div>
+            <button
+              type="button"
+              className="mobile-profile-continue-route"
+              onClick={() => navigate(
+                `/map-3d-guide-c/route/${encodeURIComponent(activeRoute.id)}?stage=active&stop=${lastVisitedStopIndex}`
+              )}
+            >
+              继续上一次行程
+            </button>
           </>
         ) : (
           <p className="mobile-muted">还没有到访记录。进入地图选一条路线、点开景点听小灵讲解，这里会自动记录你的当日足迹。</p>

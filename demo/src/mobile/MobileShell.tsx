@@ -13,7 +13,6 @@ import MobileHomePage from './MobileHomePage'
 // 首屏只 eager 默认 tab(导览页),其余 5 页懒加载;
 // prefetchHeavyTabs 会在 home 空闲帧预热,切 tab 仍秒开
 const MobileGuidePage = lazy(() => import('./MobileGuidePage'))
-const MobileMapPage = lazy(() => import('./MobileMapPage'))
 const MobileConsumePage = lazy(() => import('./MobileConsumePage'))
 const MobileProfilePage = lazy(() => import('./MobileProfilePage'))
 const MobileTicketPage = lazy(() => import('./MobileTicketPage'))
@@ -28,7 +27,7 @@ const tabs: Array<{
   icon: ReactNode
 }> = [
   { key: 'home', label: '导览', path: '/', icon: tabIcon('tab-home') },
-  { key: 'map', label: '地图', path: '/map', icon: tabIcon('tab-map') },
+  { key: 'map', label: '地图', path: '/map-3d-guide-c', icon: tabIcon('tab-map') },
   { key: 'guide', label: '小灵', path: '/guide', icon: tabIcon('tab-guide') },
   { key: 'consume', label: '消费', path: '/consume', icon: tabIcon('tab-shop') },
   { key: 'profile', label: '我的', path: '/me', icon: tabIcon('tab-me') }
@@ -40,7 +39,7 @@ function getSpotIdFromPath(pathname: string) {
 }
 
 function getActiveTab(pathname: string): MobileTabKey {
-  if (pathname === '/map') return 'map'
+  if (pathname.startsWith('/map-3d-guide-c')) return 'map'
   if (pathname === '/consume') return 'consume'
   if (pathname === '/me') return 'profile'
   if (pathname === '/guide' || pathname.startsWith('/spot/')) return 'guide'
@@ -92,7 +91,6 @@ function MobileShell() {
   }
 
   let page = <MobileHomePage />
-  if (activeTab === 'map') page = <MobileMapPage />
   if (activeTab === 'guide') page = <MobileGuidePage spotId={spotId} />
   if (activeTab === 'profile') page = <MobileProfilePage />
   if (location.pathname === '/ticket') page = <MobileTicketPage />
@@ -115,7 +113,7 @@ function MobileShell() {
           <button
             className="mobile-shell__route-chip"
             type="button"
-            onClick={() => navigate('/map')}
+            onClick={() => navigate(`/map-3d-guide-c/route/${encodeURIComponent(route.id)}`)}
             aria-label="查看当前路线"
           >
             <CompassOutlined />

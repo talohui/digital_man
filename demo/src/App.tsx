@@ -7,6 +7,7 @@ import SplashAdPage from './pages/SplashAdPage'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import RouteSkeleton from './components/RouteSkeleton'
 import FloatingGuide from './components/FloatingGuide'
+import { LegacyMapRedirect, LegacyNavigationNotice, LegacySpotRedirect } from './components/LegacyCAppRedirects'
 import { GlobalXiaolingAssistant } from './components/guide'
 import MobileShell from './mobile/MobileShell'
 import { GuideContextBridge, XiaolingRuntimeProvider } from './guide'
@@ -21,7 +22,6 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminKnowledgePage = lazy(() => import('./pages/AdminKnowledgePage'))
 const AdminMarketingDecisionPage = lazy(() => import('./pages/AdminMarketingDecisionPage'))
 const AdminServiceConfigPage = lazy(() => import('./pages/AdminServiceConfigPage'))
-const GuideMapPage = lazy(() => import('./pages/GuideMapPage'))
 const Map3DGuidePage = lazy(() => import('./pages/Map3DGuidePage'))
 const Map3DGuidePrototypeAPage = lazy(() => import('./pages/Map3DGuidePrototypeAPage'))
 const Map3DGuidePrototypeBPage = lazy(() => import('./pages/Map3DGuidePrototypeBPage'))
@@ -31,7 +31,6 @@ const Map3DRouteGuidePage = lazy(() => import('./pages/Map3DRouteGuidePage'))
 const Scenic3DMapPage = lazy(() => import('./pages/Scenic3DMapPage'))
 const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
 const ScenicMapPage = lazy(() => import('./pages/ScenicMapPage'))
-const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
 function XiaolingFullscreenRoute() {
   return <div className="xiaoling-fullscreen-route" aria-hidden="true" />
@@ -108,7 +107,8 @@ function AppContent() {
           <Routes>
             <Route path="/guide" element={<XiaolingFullscreenRoute />} />
             <Route path="/guide/classic" element={<HomePage />} />
-            <Route path="/map" element={<Map3DGuidePage />} />
+            <Route path="/map" element={<LegacyMapRedirect />} />
+            <Route path="/spot/:spotId" element={<LegacySpotRedirect />} />
             <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
             <Route path="/scenic-3d-map" element={<Map3DGuidePage />} />
             <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPage />} />
@@ -122,6 +122,7 @@ function AppContent() {
           </Routes>
         </Suspense>
         <GuideContextBridge />
+        <LegacyNavigationNotice />
         {isCanonicalMapRoute || isXiaolingFullscreenRoute ? <GlobalXiaolingAssistant /> : <FloatingGuide />}
       </RouteErrorBoundary>
     )
@@ -148,7 +149,7 @@ function AppContent() {
       <Suspense fallback={<RouteSkeleton />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/map" element={<GuideMapPage />} />
+          <Route path="/map" element={<LegacyMapRedirect />} />
           <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
           <Route path="/scenic-3d-map" element={<Map3DGuidePage />} />
           <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPage />} />
@@ -158,7 +159,7 @@ function AppContent() {
           <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailPage />} />
           <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuidePage />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCPage />} />
-          <Route path="/spot/:spotId" element={<SpotGuidePage />} />
+          <Route path="/spot/:spotId" element={<LegacySpotRedirect />} />
           <Route path="/guide" element={<XiaolingFullscreenRoute />} />
           <Route path="/guide/classic" element={<HomePage />} />
           <Route path="/me" element={<HomePage />} />
@@ -171,6 +172,7 @@ function AppContent() {
         </Routes>
       </Suspense>
       <GuideContextBridge />
+      <LegacyNavigationNotice />
       {isCanonicalMapRoute || isXiaolingFullscreenRoute ? <GlobalXiaolingAssistant /> : null}
     </RouteErrorBoundary>
   )

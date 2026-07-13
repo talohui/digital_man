@@ -94,7 +94,7 @@ function MobileRoutePlanPage() {
     captureRouteClick(routeId)
     setActiveRouteId(routeId)
     void sendGuideFeedback({ userId, routeId, action: 'select_route' })
-    navigate('/map')
+    navigate(`/map-3d-guide-c/route/${encodeURIComponent(routeId)}`)
   }
 
   return (

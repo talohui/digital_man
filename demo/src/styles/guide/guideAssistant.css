@@ -14,6 +14,26 @@
   pointer-events: none;
 }
 
+.legacy-navigation-notice {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: max(18px, calc(env(safe-area-inset-bottom, 0px) + 12px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  z-index: 27000;
+  width: fit-content;
+  max-width: min(520px, calc(100% - 32px));
+  margin-inline: auto;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 999px;
+  padding: 10px 15px;
+  background: rgba(25, 58, 77, 0.9);
+  box-shadow: 0 10px 28px rgba(24, 70, 100, 0.22);
+  color: #f7fbff;
+  font: 700 13px/1.35 system-ui, sans-serif;
+  text-align: center;
+  backdrop-filter: blur(12px);
+}
+
 .guide-floating-companion {
   position: absolute;
   pointer-events: auto;

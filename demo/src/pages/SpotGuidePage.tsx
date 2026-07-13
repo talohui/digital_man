@@ -1,3 +1,4 @@
+/** @deprecated Legacy spot page retained for rollback; /spot/:spotId redirects to the canonical POI route. */
 import {
   ArrowLeftOutlined,
   CheckCircleFilled,

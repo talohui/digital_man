@@ -3,6 +3,7 @@ import { Modal, Rate } from 'antd'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { captureRateRoute } from '../lib/analytics'
+/** @deprecated Legacy C-app map retained for rollback; formal routes use /map-3d-guide-c. */
 import {
   getDefaultSpotId,
   getGuideRouteById,

@@ -11,7 +11,7 @@ const SERVICES = [
   { icon: 'cat-food', label: '餐饮斋茶', to: '/consume' },
   { icon: 'cat-culture', label: '文创礼品', to: '/consume' },
   { icon: 'cat-show', label: '演艺秀场', to: '/consume' },
-  { icon: 'cat-spot', label: '灵山景点', to: '/map' }
+  { icon: 'cat-spot', label: '灵山景点', to: '/map-3d-guide-c' }
 ]
 
 type CrowdTone = 'busy' | 'steady' | 'calm'
@@ -248,7 +248,7 @@ function MobileHomePage() {
             <h3>当前景区人流量适中</h3>
             <p>更新于 {crowdUpdateTime}</p>
           </div>
-          <button type="button" onClick={() => navigate('/map')}>
+          <button type="button" onClick={() => navigate('/map-3d-guide-c')}>
             看地图
             <RightOutlined />
           </button>
@@ -265,7 +265,7 @@ function MobileHomePage() {
                 key={spot.id}
                 type="button"
                 className="mobile-crowd-row"
-                onClick={() => navigate('/map')}
+                onClick={() => navigate(`/map-3d-guide-c/poi/${encodeURIComponent(spot.id)}?from=browse`)}
               >
                 <img className="mobile-crowd-row__photo" src={spot.image} alt="" loading="lazy" />
                 <span className="mobile-crowd-row__main">

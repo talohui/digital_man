@@ -6485,6 +6485,18 @@ body::before {
   -webkit-line-clamp: 2;
 }
 
+.mobile-profile-continue-route {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #315f83;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 /* Immersive digital-human guide: the avatar remains visible behind a compact real chat. */
 .immersive-guide {
   position: relative;
