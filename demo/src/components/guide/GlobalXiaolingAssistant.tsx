@@ -18,8 +18,8 @@ import '../../styles/guide/digitalHumanStage.css'
 import '../../styles/guide/guideCards.css'
 import {
   consumeCAppReturnContext,
-  normalizeInternalReturnTo,
   readCAppReturnContext,
+  resolveCAppReturnTarget,
   saveCAppReturnContext
 } from '../../lib/cAppReturnContext'
 
@@ -234,10 +234,11 @@ export function GlobalXiaolingAssistant() {
         onClose={() => {
           if (isFullscreenPage) {
             const saved = readCAppReturnContext()
-            const queryTarget = normalizeInternalReturnTo(new URLSearchParams(location.search).get('returnTo'))
-            const target = saved?.returnTo ?? queryTarget ?? (
-              context.pathname.startsWith('/map-3d-guide-c') ? context.pathname : '/'
-            )
+            const target = resolveCAppReturnTarget({
+              context: saved,
+              queryReturnTo: new URLSearchParams(location.search).get('returnTo'),
+              fallback: context.pathname.startsWith('/map-3d-guide-c') ? context.pathname : '/'
+            })
             navigate(target)
           } else {
             setDrawerOpen(false)

@@ -9,7 +9,7 @@ import { guideSpots } from '../data/guideData'
 import { lingshanPois } from '../data/lingshanMapData'
 import { getPoiMedia, type ScenicMediaEntry } from '../data/scenicMediaCatalog'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
-import { readCAppReturnContext } from '../lib/cAppReturnContext'
+import { readCAppReturnContext, resolveHomeCrowdPoiReturn } from '../lib/cAppReturnContext'
 import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
 
@@ -43,11 +43,9 @@ function Map3DPoiDetailPage() {
   const articleRef = useRef<HTMLElement | null>(null)
   const handleBack = () => {
     const returnContext = readCAppReturnContext()
-    if (
-      returnContext?.source === 'home-crowd' &&
-      (!returnContext.poiId || returnContext.poiId === resolvedPoiId)
-    ) {
-      navigate(returnContext.returnTo, { replace: true })
+    const homeReturnTo = resolveHomeCrowdPoiReturn(returnContext, resolvedPoiId)
+    if (homeReturnTo) {
+      navigate(homeReturnTo, { replace: true })
       return
     }
     goBackFromPoi(navigate, {

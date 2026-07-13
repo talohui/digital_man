@@ -36,6 +36,19 @@ export function normalizeInternalReturnTo(value: string | null | undefined): str
   }
 }
 
+export function resolveCAppReturnTarget(input: {
+  context?: CAppReturnContext
+  queryReturnTo?: string | null
+  fallback: string
+}) {
+  return input.context?.returnTo ?? normalizeInternalReturnTo(input.queryReturnTo) ?? input.fallback
+}
+
+export function resolveHomeCrowdPoiReturn(context: CAppReturnContext | undefined, poiId?: string) {
+  if (context?.source !== 'home-crowd') return undefined
+  return !context.poiId || context.poiId === poiId ? context.returnTo : undefined
+}
+
 export function saveCAppReturnContext(
   context: Omit<CAppReturnContext, 'version' | 'createdAt'> & Partial<Pick<CAppReturnContext, 'createdAt'>>
 ): CAppReturnContext | undefined {

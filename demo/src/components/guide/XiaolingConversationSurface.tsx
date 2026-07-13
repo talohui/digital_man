@@ -4,6 +4,7 @@ import type { GuideAction, GuideMessage } from '../../guide'
 import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
 import Live2DStage from '../Live2DStage'
 import { GuideMessageTimeline } from './GuideMessageTimeline'
+import { SCENIC_MEDIA_FALLBACK } from '../../data/scenicMediaCatalog'
 
 type SurfaceMode = 'drawer' | 'fullscreen'
 
@@ -202,7 +203,16 @@ function ScenicBackdrop({
   return (
     <div className="xiaoling-conversation__scenic-backdrop" aria-hidden="true">
       {previous ? <img className="is-previous" src={previous.src} alt="" /> : null}
-      <img className={visible ? 'is-visible' : ''} src={current.src} alt="" title={current.alt} />
+      <img
+        className={visible ? 'is-visible' : ''}
+        src={current.src}
+        alt=""
+        title={current.alt}
+        onError={(event) => {
+          if (event.currentTarget.src.endsWith(SCENIC_MEDIA_FALLBACK)) return
+          event.currentTarget.src = SCENIC_MEDIA_FALLBACK
+        }}
+      />
       <span />
     </div>
   )

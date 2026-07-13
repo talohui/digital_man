@@ -1,5 +1,4 @@
 import type { ScenicMapPresentation } from '../types/mapGuide'
-import { isScenicRouteId } from '../guide/GuideMessageSchema'
 
 export interface MapResumeSnapshot {
   version: 1
@@ -17,6 +16,13 @@ export interface MapResumeSnapshot {
 const STORAGE_KEY = 'lingshan:c-app:map-resume:v1'
 const MAX_AGE_MS = 2 * 60 * 60 * 1000
 const MAP_PATH = '/map-3d-guide-c'
+const VALID_ROUTE_IDS = new Set([
+  'historical_culture',
+  'prayer_meditation',
+  'highlights_checkin',
+  'natural_scenery',
+  'family'
+])
 
 function normalizeMapUrl(value: string | null | undefined): string | undefined {
   if (!value || typeof window === 'undefined') return undefined
@@ -25,7 +31,7 @@ function normalizeMapUrl(value: string | null | undefined): string | undefined {
     if (url.origin !== window.location.origin || !url.pathname.startsWith(MAP_PATH)) return undefined
     if (url.pathname !== MAP_PATH) {
       const routeMatch = url.pathname.match(/^\/map-3d-guide-c\/route\/([^/]+)$/)
-      if (!routeMatch || !isScenicRouteId(decodeURIComponent(routeMatch[1]))) return undefined
+      if (!routeMatch || !VALID_ROUTE_IDS.has(decodeURIComponent(routeMatch[1]))) return undefined
     }
     return `${url.pathname}${url.search}${url.hash}`
   } catch {

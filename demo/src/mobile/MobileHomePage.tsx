@@ -5,6 +5,7 @@ import { getGuideRouteById, guideSpots } from '../data/guideData'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
+import { getPoiMedia } from '../data/scenicMediaCatalog'
 import {
   consumeCAppReturnContext,
   readCAppReturnContext,
@@ -168,7 +169,8 @@ const CROWD_STATUS_BY_SPOT_ID: Record<string, CrowdStatus> = {
 const CROWD_SPOTS = guideSpots.map((spot) => ({
   id: spot.id,
   name: spot.name,
-  ...CROWD_STATUS_BY_SPOT_ID[spot.id]
+  ...CROWD_STATUS_BY_SPOT_ID[spot.id],
+  image: getPoiMedia(spot.id).thumbnail ?? getPoiMedia(spot.id).cover
 }))
 
 function formatCrowdUpdateTime() {
