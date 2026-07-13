@@ -422,8 +422,8 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: blur(7px) saturate(0.9) contrast(1.04);
-  transform: scale(1.045);
+  filter: blur(3px) saturate(0.9) contrast(1.04);
+  transform: scale(1.025);
   transition: opacity 340ms ease;
 }
 
