@@ -84,7 +84,7 @@ function HomePage() {
       routeId,
       action: 'select_route'
     })
-    navigate(`/map-3d-guide-c/route/${encodeURIComponent(routeId)}`)
+    navigate('/map')
   }
 
   const handleTagToggle = (tag: string) => {

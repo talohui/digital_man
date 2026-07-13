@@ -209,7 +209,7 @@ function MobileProfilePage() {
           <CompassOutlined />
         </div>
         <p className="mobile-profile-page__route">{primaryRoute.description}</p>
-        <button className="mobile-primary-action" type="button" onClick={() => navigate(`/map-3d-guide-c/route/${encodeURIComponent(primaryRoute.id)}`)}>
+        <button className="mobile-primary-action" type="button" onClick={() => navigate('/map')}>
           继续这条路线
         </button>
       </section>

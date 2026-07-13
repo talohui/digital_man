@@ -4170,28 +4170,6 @@ body::before {
 
 /* Map module mobile styles live in src/styles/map/*.css. */
 
-.legacy-spot-redirect {
-  display: grid;
-  min-height: 100dvh;
-  place-content: center;
-  gap: 12px;
-  padding: 24px;
-  background: #f4f6e9;
-  color: #214a3b;
-  text-align: center;
-}
-
-.legacy-spot-redirect strong { font-size: 22px; }
-.legacy-spot-redirect span { color: #627268; }
-.legacy-spot-redirect button {
-  min-height: 44px;
-  border: 0;
-  border-radius: 999px;
-  background: #214a3b;
-  color: #fff;
-  font-weight: 800;
-}
-
 /* 通用按压反馈兜底:所有 shell 内的 button 都有微缩感
  * (优先级低于上面具体的按钮规则,所以不会覆盖主按钮的下沉效果) */
 .mobile-shell button {

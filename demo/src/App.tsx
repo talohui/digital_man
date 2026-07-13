@@ -1,15 +1,16 @@
 import { lazy, Suspense, useEffect, type ReactNode } from 'react'
-import { Navigate, Routes, Route, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { GlobalXiaolingAssistant } from './components/guide'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useIsMobileViewport } from './hooks/useIsMobileViewport'
 import { scheduleMap3DGuidePreload } from './lib/map3dPreload'
-import { GuideContextBridge, XiaolingRuntimeProvider } from './guide'
-import { resolveLegacySpotId } from './data/legacyPoiRoutes'
+import { GuideContextBridge } from './guide'
 
 const AppProviders = lazy(() => import('./components/AppProviders'))
+const ChatConnectionManager = lazy(() => import('./components/ChatConnectionManager'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminAvatarPage = lazy(() => import('./pages/AdminAvatarPage'))
+const GuideMapPage = lazy(() => import('./pages/GuideMapPage'))
 const HomePage = lazy(() => import('./pages/HomePage'))
 const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
 const Scenic3DMapPage = lazy(() => import('./pages/Scenic3DMapPage'))
@@ -20,6 +21,7 @@ const Map3DGuidePrototypeCPage = lazy(() => import('./pages/Map3DGuidePrototypeC
 const Map3DPoiDetailPage = lazy(() => import('./pages/Map3DPoiDetailPage'))
 const Map3DRouteGuidePage = lazy(() => import('./pages/Map3DRouteGuidePage'))
 const MobileShell = lazy(() => import('./mobile/MobileShell'))
+const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
 type LazyRouteProps = {
   children: ReactNode
@@ -38,6 +40,7 @@ function AppLazyRoute({ children, label }: LazyRouteProps) {
   return (
     <Suspense fallback={<RouteLoading label={label} />}>
       <AppProviders>
+        <ChatConnectionManager />
         {children}
       </AppProviders>
     </Suspense>
@@ -124,6 +127,22 @@ function HomeRoute() {
   )
 }
 
+function GuideMapRoute() {
+  return (
+    <AppLazyRoute label="正在加载地图导览...">
+      <GuideMapPage />
+    </AppLazyRoute>
+  )
+}
+
+function SpotGuideRoute() {
+  return (
+    <AppLazyRoute label="正在加载景点讲解...">
+      <SpotGuidePage />
+    </AppLazyRoute>
+  )
+}
+
 function AdminDashboardRoute() {
   return (
     <AppLazyRoute label="正在加载管理后台...">
@@ -145,39 +164,6 @@ function MobileShellRoute() {
     <AppLazyRoute label="正在加载移动端导览...">
       <MobileShell />
     </AppLazyRoute>
-  )
-}
-
-function XiaolingFullscreenRoute() {
-  return <div className="xiaoling-fullscreen-route" aria-hidden="true" />
-}
-
-function LegacyMapRedirect() {
-  return <Navigate replace to="/map-3d-guide-c" />
-}
-
-/** Legacy C-app route retained as a redirect; the old pages remain available for rollback. */
-function LegacySpotRedirect() {
-  const { spotId } = useParams()
-  const navigate = useNavigate()
-  const resolvedPoiId = resolveLegacySpotId(spotId)
-
-  useEffect(() => {
-    if (resolvedPoiId) return
-    const timer = window.setTimeout(() => navigate('/map-3d-guide-c', { replace: true }), 1600)
-    return () => window.clearTimeout(timer)
-  }, [navigate, resolvedPoiId])
-
-  if (resolvedPoiId) {
-    return <Navigate replace to={`/map-3d-guide-c/poi/${encodeURIComponent(resolvedPoiId)}?from=browse`} />
-  }
-
-  return (
-    <main className="legacy-spot-redirect" role="status">
-      <strong>未找到这个旧景点</strong>
-      <span>正在返回新版灵山地图，你可以从地图中重新选择景点。</span>
-      <button type="button" onClick={() => navigate('/map-3d-guide-c', { replace: true })}>立即返回地图</button>
-    </main>
   )
 }
 
@@ -206,16 +192,13 @@ function App() {
             <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
             <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
             <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-            <Route path="/guide" element={<XiaolingFullscreenRoute />} />
-            <Route path="/map" element={<LegacyMapRedirect />} />
-            <Route path="/spot/:spotId" element={<LegacySpotRedirect />} />
             <Route path="*" element={<MobileShellRoute />} />
           </Routes>
   ) : (
         <Routes>
           <Route path="/" element={<HomeRoute />} />
-          <Route path="/map" element={<LegacyMapRedirect />} />
-          <Route path="/spot/:spotId" element={<LegacySpotRedirect />} />
+          <Route path="/map" element={<GuideMapRoute />} />
+          <Route path="/spot/:spotId" element={<SpotGuideRoute />} />
           <Route path="/three-preview" element={<ThreePreviewRoute />} />
           <Route path="/scenic-3d-map" element={<Scenic3DMapRoute />} />
           <Route path="/scenic-3d-map-prototype" element={<Scenic3DMapPrototypeRoute />} />
@@ -225,7 +208,7 @@ function App() {
           <Route path="/map-3d-guide-c/poi/:poiId" element={<Map3DPoiDetailRoute />} />
           <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuideRoute />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCRoute />} />
-          <Route path="/guide" element={<XiaolingFullscreenRoute />} />
+          <Route path="/guide" element={<HomeRoute />} />
           <Route path="/me" element={<HomeRoute />} />
           <Route path="/admin" element={<AdminDashboardRoute />} />
           <Route path="/admin/avatar" element={<AdminAvatarRoute />} />
@@ -234,11 +217,11 @@ function App() {
 
   return (
     <RouteErrorBoundary>
-      <XiaolingRuntimeProvider enabled={!isAdminRoute}>
+      <>
         <GuideContextBridge />
         {routeContent}
         <GlobalXiaolingAssistant />
-      </XiaolingRuntimeProvider>
+      </>
     </RouteErrorBoundary>
   )
 }

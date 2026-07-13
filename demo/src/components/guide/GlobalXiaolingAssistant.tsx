@@ -10,7 +10,7 @@ import {
 import { resolveGuideAssistantContent } from '../../guide/guideAssistantContent'
 import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAssistantEvents'
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
-import { XiaolingConversationSurface } from './XiaolingConversationSurface'
+import { XiaolingGuideDrawer } from './XiaolingGuideDrawer'
 import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
@@ -29,12 +29,12 @@ export function GlobalXiaolingAssistant() {
   const messages = useGuideSessionStore((state) =>
     state.getMessagesForConversation(state.activeConversationKey)
   )
+  const status = useGuideSessionStore((state) => state.status)
   const open = useGuideSessionStore((state) => state.isDrawerOpen)
   const setDrawerOpen = useGuideSessionStore((state) => state.setDrawerOpen)
   const sendGuideMessage = useGuideSessionStore((state) => state.sendGuideMessage)
   const addMessage = useGuideSessionStore((state) => state.addMessage)
   const isMapPage = location.pathname.startsWith('/map-3d-guide-c')
-  const isFullscreenPage = location.pathname === '/guide'
   const visualMode = location.pathname.includes('/route/')
     ? 'route'
     : location.pathname.includes('/poi/')
@@ -119,17 +119,8 @@ export function GlobalXiaolingAssistant() {
   }, [mounted, visualMode])
 
   useEffect(() => {
-    if (!isMapPage && !isFullscreenPage) setDrawerOpen(false)
-  }, [isFullscreenPage, isMapPage, setDrawerOpen])
-
-  useEffect(() => {
-    if (!isFullscreenPage) return
-    const state = useGuideSessionStore.getState()
-    state.initializeConversation(
-      state.activeConversationKey,
-      resolveGuideAssistantContent(state.context).greeting
-    )
-  }, [isFullscreenPage, activeConversationKey])
+    if (!isMapPage) setDrawerOpen(false)
+  }, [isMapPage, setDrawerOpen])
 
   useEffect(() => {
     const handleOpen = (event: Event) => {
@@ -179,7 +170,7 @@ export function GlobalXiaolingAssistant() {
     else addMessage({ role: 'assistant', text: '这个操作暂时不可用，请稍后再试。', status: 'complete' })
   }
 
-  if (!mounted || (!isMapPage && !isFullscreenPage) || typeof document === 'undefined') return null
+  if (!mounted || !isMapPage || typeof document === 'undefined') return null
 
   const rootStyle = {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
@@ -191,9 +182,11 @@ export function GlobalXiaolingAssistant() {
         '--guide-route-avatar-right': `${routeAvatarAnchor.right}px`
       } as CSSProperties)
     : undefined
+  const digitalStatus = status === 'error' ? 'offline' : status
+
   return createPortal(
-    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={isFullscreenPage ? 'fullscreen' : visualMode}>
-      {!isFullscreenPage && !open ? (
+    <div className="guide-assistant-root" style={rootStyle} data-guide-mode={visualMode}>
+      {!open ? (
         <XiaolingFloatingCompanion
           mode={visualMode}
           onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: visualMode } }))}
@@ -202,26 +195,21 @@ export function GlobalXiaolingAssistant() {
           routeAnchorReady={visualMode !== 'route' || Boolean(routeAvatarAnchor)}
         />
       ) : null}
-      {isFullscreenPage || open ? (
-        <XiaolingConversationSurface
-          layout={isFullscreenPage ? 'fullscreen' : 'drawer'}
-          mode={context.page}
-          title={assistantContent.title}
-          subtitle={assistantContent.subtitle}
-          suggestedQuestions={assistantContent.suggestedQuestions}
-          messages={messages}
-          input={input}
-          onClose={() => {
-            if (isFullscreenPage) navigate('/map-3d-guide-c')
-            else setDrawerOpen(false)
-          }}
-          onExpandFullscreen={isFullscreenPage ? undefined : () => navigate('/guide')}
-          onInputChange={setInput}
-          onSend={submit}
-          onSuggestedQuestion={askSuggestedQuestion}
-          onAction={runAction}
-        />
-      ) : null}
+      <XiaolingGuideDrawer
+        open={open}
+        mode={context.page}
+        title={assistantContent.title}
+        summary={assistantContent.subtitle}
+        suggestedQuestions={assistantContent.suggestedQuestions}
+        messages={messages}
+        input={input}
+        status={digitalStatus}
+        onClose={() => setDrawerOpen(false)}
+        onInputChange={setInput}
+        onSend={submit}
+        onSuggestedQuestion={askSuggestedQuestion}
+        onAction={runAction}
+      />
     </div>,
     document.body
   )

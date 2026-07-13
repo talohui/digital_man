@@ -1,5 +1,4 @@
-.guide-drawer-layer,
-.xiaoling-conversation-layer {
+.guide-drawer-layer {
   position: absolute;
   top: 0;
   right: 0;
@@ -12,13 +11,6 @@
   align-items: end;
   box-sizing: border-box;
   pointer-events: auto;
-}
-
-.xiaoling-conversation-layer.is-fullscreen {
-  inset: 0;
-  z-index: 3;
-  align-items: stretch;
-  background: #f4f6e9;
 }
 
 .guide-drawer-layer__scrim {
@@ -55,83 +47,6 @@
   box-shadow: 0 -18px 52px rgba(16, 52, 39, 0.24);
   overscroll-behavior: contain;
   touch-action: pan-y;
-}
-
-.xiaoling-conversation.is-fullscreen {
-  width: min(760px, 100%);
-  max-width: 100%;
-  height: var(--guide-vvh, 100dvh);
-  max-height: var(--guide-vvh, 100dvh);
-  border: 0;
-  border-radius: 0;
-  padding-top: max(14px, env(safe-area-inset-top, 0px));
-  box-shadow: 0 0 44px rgba(16, 52, 39, 0.13);
-}
-
-.xiaoling-conversation__eyebrow {
-  display: block;
-  margin-bottom: 3px;
-  color: #8b6b31;
-  font: 800 10px/1.2 var(--map-font-sans, sans-serif);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.xiaoling-conversation__header-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-
-.xiaoling-conversation__connection {
-  max-width: 112px;
-  overflow: hidden;
-  border-radius: 999px;
-  padding: 6px 9px;
-  background: rgba(99, 116, 105, 0.12);
-  color: #5d7165;
-  font: 700 10px/1 var(--map-font-sans, sans-serif);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.xiaoling-conversation__connection.is-connected {
-  background: rgba(31, 142, 53, 0.13);
-  color: #287a39;
-}
-
-.xiaoling-conversation__connection.is-connecting {
-  background: rgba(217, 134, 60, 0.14);
-  color: #a45c1b;
-}
-
-.xiaoling-conversation__stage {
-  min-height: var(--guide-hero-height);
-  flex: 0 0 var(--guide-hero-height);
-  overflow: hidden;
-  border-radius: 20px;
-}
-
-.xiaoling-conversation__stage .stage-card,
-.xiaoling-conversation__stage .ant-card-body,
-.xiaoling-conversation__stage .stage-card__viewport {
-  height: 100%;
-  min-height: 0;
-  box-sizing: border-box;
-}
-
-.xiaoling-conversation__stage .stage-card {
-  overflow: hidden;
-  border: 1px solid rgba(201, 168, 106, 0.24);
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at 50% 30%, rgba(255, 249, 221, 0.9), transparent 34%),
-    linear-gradient(145deg, rgba(225, 240, 216, 0.96), rgba(247, 236, 202, 0.88));
-}
-
-.xiaoling-conversation.is-fullscreen .xiaoling-conversation__stage {
-  --guide-hero-height: clamp(220px, 34dvh, 320px);
 }
 
 .guide-drawer__handle {
@@ -187,11 +102,6 @@
   color: #214a3b;
   font-size: 24px;
   line-height: 1;
-}
-
-.guide-drawer__header .xiaoling-conversation__expand {
-  color: #8b6b31;
-  font-size: 17px;
 }
 
 .guide-drawer__conversation {
@@ -288,11 +198,4 @@
 
 @media (max-height: 680px) {
   .guide-drawer { height: min(88dvh, calc(var(--guide-vvh, 100dvh) - 6px)); }
-  .xiaoling-conversation.is-fullscreen { height: var(--guide-vvh, 100dvh); }
-  .xiaoling-conversation.is-fullscreen .xiaoling-conversation__stage { --guide-hero-height: 174px; }
-}
-
-@media (max-width: 390px) {
-  .xiaoling-conversation__connection { max-width: 92px; padding-inline: 7px; }
-  .xiaoling-conversation__header-actions { gap: 5px; }
 }
