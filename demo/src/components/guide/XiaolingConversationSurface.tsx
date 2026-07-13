@@ -1,4 +1,4 @@
-import { useEffect, useRef, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import type { GuideAction, GuideMessage } from '../../guide'
 import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
@@ -28,7 +28,8 @@ export function XiaolingConversationSurface({
   onAction,
   onClose,
   onFullscreen,
-  onOpenMap
+  onOpenMap,
+  backgroundMedia
 }: {
   mode: SurfaceMode
   title: string
@@ -43,6 +44,7 @@ export function XiaolingConversationSurface({
   onClose: () => void
   onFullscreen?: () => void
   onOpenMap?: () => void
+  backgroundMedia?: { src: string; alt: string }
 }) {
   const runtime = useXiaolingRuntime()
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -68,8 +70,11 @@ export function XiaolingConversationSurface({
 
   const content = (
     <main className={`immersive-guide xiaoling-conversation xiaoling-conversation--${mode}`}>
+      <ScenicBackdrop media={backgroundMedia} enabled={mode === 'drawer'} />
       <div className="immersive-guide__aura immersive-guide__aura--left" />
       <div className="immersive-guide__aura immersive-guide__aura--right" />
+
+      <div className="xiaoling-conversation__handle" aria-hidden="true" />
 
       <header className="immersive-guide__topbar xiaoling-conversation__topbar">
         <button type="button" className="xiaoling-conversation__round-action" onClick={onClose} aria-label={mode === 'drawer' ? '关闭小灵' : '返回'}>
@@ -159,5 +164,46 @@ export function XiaolingConversationSurface({
       <button type="button" className="guide-drawer-layer__scrim" aria-label="关闭小灵导览" onClick={onClose} />
       {content}
     </section>
+  )
+}
+
+function ScenicBackdrop({
+  media,
+  enabled
+}: {
+  media?: { src: string; alt: string }
+  enabled: boolean
+}) {
+  const [current, setCurrent] = useState(media ?? null)
+  const [previous, setPrevious] = useState<typeof media | null>(null)
+  const [visible, setVisible] = useState(true)
+  const currentRef = useRef(media ?? null)
+
+  useEffect(() => {
+    if (!media || media.src === currentRef.current?.src) return undefined
+    setPrevious(currentRef.current)
+    currentRef.current = media
+    setCurrent(media)
+    setVisible(false)
+    let revealFrame = 0
+    const frame = window.requestAnimationFrame(() => {
+      revealFrame = window.requestAnimationFrame(() => setVisible(true))
+    })
+    const timer = window.setTimeout(() => setPrevious(null), 380)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.cancelAnimationFrame(revealFrame)
+      window.clearTimeout(timer)
+    }
+  }, [media?.alt, media?.src])
+
+  if (!enabled || !current) return null
+
+  return (
+    <div className="xiaoling-conversation__scenic-backdrop" aria-hidden="true">
+      {previous ? <img className="is-previous" src={previous.src} alt="" /> : null}
+      <img className={visible ? 'is-visible' : ''} src={current.src} alt="" title={current.alt} />
+      <span />
+    </div>
   )
 }

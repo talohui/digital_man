@@ -7,6 +7,7 @@ import { getPoiDetailContent, type PoiDetailContent } from '../data/poiDetailCon
 import { getRecommendedStayLabel } from '../data/poiGuideMetadata'
 import { guideSpots } from '../data/guideData'
 import { lingshanPois } from '../data/lingshanMapData'
+import { getPoiMedia, type ScenicMediaEntry } from '../data/scenicMediaCatalog'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
 import { readCAppReturnContext } from '../lib/cAppReturnContext'
 import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
@@ -30,6 +31,7 @@ function Map3DPoiDetailPage() {
   const resolvedPoiId = resolvePoiDetailId(poiId)
   const detail = getPoiDetailView(resolvedPoiId)
   const content = getPoiDetailContent(detail?.id)
+  const media = getPoiMedia(detail?.id)
   const route = routeId ? getScenicRouteConfig(routeId) : undefined
   const routeReturnContext = route ? parsePoiRouteReturnContext(searchParams, route.stops.length) : undefined
   const relatedDetails = useMemo(
@@ -137,7 +139,7 @@ function Map3DPoiDetailPage() {
       </header>
 
       <section className={`map-poi-detail__stage map-poi-detail__stage--${detail.id}`}>
-        <PoiStageMedia detail={detail} />
+        <PoiStageMedia detail={detail} media={media} />
         {modelPreviewOpen ? <MapPoiModelPreview model={detail.model} name={detail.name} /> : null}
 
         {detail.model ? (
@@ -341,26 +343,21 @@ function getPrimaryTag(detail: LingshanPoiDetail) {
   return detail.highlights[0] ?? '景点导览'
 }
 
-function PoiStageMedia({ detail }: { detail: LingshanPoiDetail }) {
+function PoiStageMedia({ detail, media }: { detail: LingshanPoiDetail; media: ScenicMediaEntry }) {
   const [failedUrls, setFailedUrls] = useState<Set<string>>(() => new Set())
-  const photo = detail.photo
-  const photoUrl =
-    photo && !failedUrls.has(photo.url)
-      ? photo.url
-      : photo?.fallbackUrl && !failedUrls.has(photo.fallbackUrl)
-        ? photo.fallbackUrl
-        : undefined
+  const mediaUrls = Array.from(new Set([media.cover, ...(media.gallery ?? [])]))
+  const photoUrl = mediaUrls.find((url) => !failedUrls.has(url))
 
   useEffect(() => {
     setFailedUrls(new Set())
-  }, [photo?.url])
+  }, [detail.id, media.cover])
 
   return (
     <div className="map-poi-detail__stage-media">
-      {photoUrl && photo ? (
+      {photoUrl ? (
         <img
           src={photoUrl}
-          alt={photo.alt}
+          alt={media.alt}
           loading="eager"
           decoding="async"
           referrerPolicy="no-referrer"
