@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import AdminLogin from './pages/AdminLogin'
 import AdminMobileNotice from './pages/AdminMobileNotice'
-import GuideImmersivePage from './pages/GuideImmersivePage'
 import HomePage from './pages/HomePage'
 import SplashAdPage from './pages/SplashAdPage'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
@@ -34,6 +33,10 @@ const Scenic3DPreviewPage = lazy(() => import('./pages/Scenic3DPreviewPage'))
 const ScenicMapPage = lazy(() => import('./pages/ScenicMapPage'))
 const SpotGuidePage = lazy(() => import('./pages/SpotGuidePage'))
 
+function XiaolingFullscreenRoute() {
+  return <div className="xiaoling-fullscreen-route" aria-hidden="true" />
+}
+
 function AppContent() {
   const location = useLocation()
   const isMobile = useIsMobileViewport()
@@ -41,6 +44,7 @@ function AppContent() {
   const isAdminRoute = location.pathname.startsWith('/admin')
   const isMapPoiDetailRoute = location.pathname.startsWith('/map-3d-guide-c/poi')
   const isCanonicalMapRoute = location.pathname.startsWith('/map-3d-guide-c')
+  const isXiaolingFullscreenRoute = location.pathname === '/guide'
   const isWideAdminScreen =
     location.pathname === '/admin' || location.pathname.startsWith('/admin/heatmap')
   const [adminAuthed, setAdminAuthed] = useState(() => isAdminAuthed())
@@ -102,7 +106,7 @@ function AppContent() {
       <RouteErrorBoundary>
         <Suspense fallback={<RouteSkeleton />}>
           <Routes>
-            <Route path="/guide" element={<GuideImmersivePage />} />
+            <Route path="/guide" element={<XiaolingFullscreenRoute />} />
             <Route path="/guide/classic" element={<HomePage />} />
             <Route path="/map" element={<Map3DGuidePage />} />
             <Route path="/three-preview" element={<Scenic3DPreviewPage />} />
@@ -118,7 +122,7 @@ function AppContent() {
           </Routes>
         </Suspense>
         <GuideContextBridge />
-        {isCanonicalMapRoute ? <GlobalXiaolingAssistant /> : <FloatingGuide />}
+        {isCanonicalMapRoute || isXiaolingFullscreenRoute ? <GlobalXiaolingAssistant /> : <FloatingGuide />}
       </RouteErrorBoundary>
     )
   }
@@ -155,7 +159,7 @@ function AppContent() {
           <Route path="/map-3d-guide-c/route/:routeId" element={<Map3DRouteGuidePage />} />
           <Route path="/map-3d-guide-c" element={<Map3DGuidePrototypeCPage />} />
           <Route path="/spot/:spotId" element={<SpotGuidePage />} />
-          <Route path="/guide" element={<GuideImmersivePage />} />
+          <Route path="/guide" element={<XiaolingFullscreenRoute />} />
           <Route path="/guide/classic" element={<HomePage />} />
           <Route path="/me" element={<HomePage />} />
           <Route path="/admin" element={<AdminDashboard />} />
@@ -167,7 +171,7 @@ function AppContent() {
         </Routes>
       </Suspense>
       <GuideContextBridge />
-      {isCanonicalMapRoute ? <GlobalXiaolingAssistant /> : null}
+      {isCanonicalMapRoute || isXiaolingFullscreenRoute ? <GlobalXiaolingAssistant /> : null}
     </RouteErrorBoundary>
   )
 }

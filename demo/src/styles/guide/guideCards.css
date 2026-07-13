@@ -15,7 +15,8 @@
   max-width: min(82%, 360px);
 }
 
-.guide-message > p {
+.guide-message > p,
+.guide-message > .chat-bubble > p {
   min-width: 0;
   max-width: 100%;
   margin: 0;
@@ -30,14 +31,16 @@
 }
 
 .guide-message--user { justify-self: end; }
-.guide-message--user > p { border-color: transparent; border-radius: 16px 16px 4px 16px; background: #214a3b; color: #fff8df; }
+.guide-message--user > p,
+.guide-message--user > .chat-bubble > p { border-color: transparent; border-radius: 16px 16px 4px 16px; background: #214a3b; color: #fff8df; }
 
 .guide-message--with-card {
   width: min(100%, 360px);
   max-width: 100%;
 }
 
-.guide-message--with-card > p {
+.guide-message--with-card > p,
+.guide-message--with-card > .chat-bubble {
   max-width: min(82%, 360px);
 }
 

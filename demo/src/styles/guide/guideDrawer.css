@@ -199,3 +199,194 @@
 @media (max-height: 680px) {
   .guide-drawer { height: min(88dvh, calc(var(--guide-vvh, 100dvh) - 6px)); }
 }
+
+.xiaoling-fullscreen-route {
+  width: 100%;
+  min-height: 100dvh;
+  background: #9ad7fa;
+}
+
+.xiaoling-conversation {
+  width: 100%;
+  height: var(--guide-vvh, 100dvh);
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.xiaoling-conversation--drawer {
+  align-self: end;
+  justify-self: center;
+  width: min(100%, 640px);
+  height: min(88dvh, calc(var(--guide-vvh, 100dvh) - 8px));
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 28px 28px 0 0;
+  box-shadow: 0 -20px 55px rgba(24, 70, 100, 0.28);
+}
+
+.xiaoling-conversation--drawer .xiaoling-conversation__topbar {
+  border-radius: 27px 27px 0 0;
+}
+
+.xiaoling-conversation__topbar {
+  padding-inline-start: max(14px, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(14px, env(safe-area-inset-right, 0px));
+}
+
+.xiaoling-conversation__topbar > div {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.xiaoling-conversation__topbar > div span,
+.xiaoling-conversation__topbar > div strong {
+  display: block;
+  max-width: min(62vw, 390px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xiaoling-conversation__round-action,
+.xiaoling-conversation__text-action {
+  display: grid;
+  min-width: 42px;
+  height: 40px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.36);
+  color: #22546b;
+  font: 700 13px/1 system-ui, sans-serif;
+}
+
+.xiaoling-conversation__round-action {
+  width: 42px;
+  font-size: 30px;
+  font-weight: 400;
+}
+
+.xiaoling-conversation__status {
+  display: flex;
+  max-width: calc(100% - 32px);
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.xiaoling-conversation__status > span {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #d99d45;
+  box-shadow: 0 0 0 3px rgba(217, 157, 69, 0.16);
+}
+
+.xiaoling-conversation__status--connected > span {
+  background: #45a874;
+  box-shadow: 0 0 0 3px rgba(69, 168, 116, 0.16);
+}
+
+.xiaoling-conversation__status--error > span,
+.xiaoling-conversation__status--disconnected > span {
+  background: #8da1ad;
+  box-shadow: 0 0 0 3px rgba(141, 161, 173, 0.16);
+}
+
+.xiaoling-conversation__avatar {
+  min-height: 230px;
+}
+
+.xiaoling-conversation__chat {
+  display: grid;
+  height: min(46%, 410px);
+  min-height: 250px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  box-sizing: border-box;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.xiaoling-conversation__quick-asks {
+  display: flex;
+  min-width: 0;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 1px 5px 2px;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+
+.xiaoling-conversation__quick-asks::-webkit-scrollbar { display: none; }
+
+.xiaoling-conversation__quick-asks button {
+  min-width: max-content;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 6px 18px rgba(31, 74, 104, 0.12);
+  color: #22546b;
+  font: 700 12px/1.2 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.xiaoling-conversation__messages {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.xiaoling-conversation__messages .guide-message-timeline {
+  align-content: end;
+  min-height: 100%;
+}
+
+.xiaoling-conversation__messages .guide-message {
+  width: fit-content;
+  max-width: 92%;
+}
+
+.xiaoling-conversation__messages .guide-message--with-card {
+  width: min(100%, 390px);
+  max-width: 100%;
+}
+
+.xiaoling-conversation__messages .guide-message > .chat-bubble {
+  width: fit-content;
+}
+
+.xiaoling-conversation__messages .guide-message > .chat-bubble > p {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.xiaoling-conversation__messages .guide-action-card-list {
+  width: 100%;
+}
+
+.xiaoling-conversation__chat .chat-card__mic:disabled {
+  color: #9fb1bc;
+  background: #e4edf1;
+}
+
+@media (max-height: 720px) {
+  .xiaoling-conversation--drawer { height: min(94dvh, var(--guide-vvh, 100dvh)); }
+  .xiaoling-conversation__chat { height: 49%; min-height: 230px; }
+}
+
+@media (min-width: 769px) {
+  .xiaoling-conversation--fullscreen .xiaoling-conversation__chat {
+    right: max(16%, 180px);
+    left: max(16%, 180px);
+  }
+
+  .xiaoling-conversation--drawer .xiaoling-conversation__avatar { inset-inline: 0; }
+  .xiaoling-conversation--drawer .xiaoling-conversation__chat { right: 12px; left: 12px; }
+}

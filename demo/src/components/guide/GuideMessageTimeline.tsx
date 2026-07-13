@@ -13,9 +13,11 @@ export function GuideMessageTimeline({
       {messages.map((message) => (
         <article
           key={message.id}
-          className={`guide-message guide-message--${message.role}${message.ui ? ' guide-message--with-card' : ''}`}
+          className={`chat-bubble-row chat-bubble-row--${message.role} guide-message guide-message--${message.role}${message.ui ? ' guide-message--with-card' : ''}`}
         >
-          <p>{message.text}</p>
+          <div className={`chat-bubble chat-bubble--${message.role}`}>
+            <p>{message.text}</p>
+          </div>
           {message.ui ? <GuideActionCardRenderer payload={message.ui} onAction={onAction} /> : null}
         </article>
       ))}
