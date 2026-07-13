@@ -20,7 +20,8 @@ function rulesFor(selector: string): string {
 }
 
 test('floating guide opens the complete guide route instead of a second chat overlay', () => {
-  assert.match(floatingGuideSource, /navigate\('\/guide'\)/)
+  assert.match(floatingGuideSource, /navigate\(`\/guide\?returnTo=/)
+  assert.match(floatingGuideSource, /saveCAppReturnContext/)
   assert.doesNotMatch(floatingGuideSource, /floating-guide__overlay/)
 })
 

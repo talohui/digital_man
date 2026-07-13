@@ -10,6 +10,8 @@ import { getDefaultSpotId, getGuideRouteById, getGuideSpotById } from '../data/g
 import { useGuideStore } from '../store/useGuideStore'
 import RouteSkeleton from '../components/RouteSkeleton'
 import MobileHomePage from './MobileHomePage'
+import { saveCAppReturnContext } from '../lib/cAppReturnContext'
+import { getMapResumeUrl } from '../lib/mapResumeState'
 // 首屏只 eager 默认 tab(导览页),其余 5 页懒加载;
 // prefetchHeavyTabs 会在 home 空闲帧预热,切 tab 仍秒开
 const MobileGuidePage = lazy(() => import('./MobileGuidePage'))
@@ -84,7 +86,18 @@ function MobileShell() {
 
   const handleTabClick = (tab: (typeof tabs)[number]) => {
     if (tab.key === 'guide') {
-      navigate(location.pathname.startsWith('/spot/') ? location.pathname : '/guide')
+      const returnTo = `${location.pathname}${location.search}${location.hash}`
+      saveCAppReturnContext({
+        source: 'home-xiaoling',
+        returnTo,
+        returnScrollY: window.scrollY,
+        contextType: 'browse'
+      })
+      navigate(`/guide?returnTo=${encodeURIComponent(returnTo)}`)
+      return
+    }
+    if (tab.key === 'map') {
+      navigate(getMapResumeUrl())
       return
     }
     navigate(tab.path)

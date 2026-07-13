@@ -8,6 +8,7 @@ import { getRecommendedStayLabel } from '../data/poiGuideMetadata'
 import { guideSpots } from '../data/guideData'
 import { lingshanPois } from '../data/lingshanMapData'
 import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
+import { readCAppReturnContext } from '../lib/cAppReturnContext'
 import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
 
@@ -38,14 +39,24 @@ function Map3DPoiDetailPage() {
   const [modelPreviewOpen, setModelPreviewOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
-  const handleBack = () => goBackFromPoi(navigate, {
-    from: source,
-    routeId,
-    poiStopIndex: stopIndex,
-    returnStage: routeReturnContext?.returnStage,
-    returnStopIndex: routeReturnContext?.returnStopIndex,
-    presentation: routeReturnContext?.presentation
-  })
+  const handleBack = () => {
+    const returnContext = readCAppReturnContext()
+    if (
+      returnContext?.source === 'home-crowd' &&
+      (!returnContext.poiId || returnContext.poiId === resolvedPoiId)
+    ) {
+      navigate(returnContext.returnTo, { replace: true })
+      return
+    }
+    goBackFromPoi(navigate, {
+      from: source,
+      routeId,
+      poiStopIndex: stopIndex,
+      returnStage: routeReturnContext?.returnStage,
+      returnStopIndex: routeReturnContext?.returnStopIndex,
+      presentation: routeReturnContext?.presentation
+    })
+  }
   const isRouteEntry = source === 'route'
   const stopNumber = stopIndex !== undefined ? stopIndex + 1 : undefined
 

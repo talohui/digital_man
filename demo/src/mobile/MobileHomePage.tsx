@@ -1,10 +1,15 @@
 import { CompassOutlined, MessageOutlined, RightOutlined } from '@ant-design/icons'
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { getGuideRouteById, guideSpots } from '../data/guideData'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
+import {
+  consumeCAppReturnContext,
+  readCAppReturnContext,
+  saveCAppReturnContext
+} from '../lib/cAppReturnContext'
 
 // 景区服务宫格(精美图标入口,放在 public/icons/)
 const SERVICES = [
@@ -175,6 +180,7 @@ function formatCrowdUpdateTime() {
 }
 
 function MobileHomePage() {
+  const location = useLocation()
   const navigate = useNavigate()
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
@@ -189,9 +195,44 @@ function MobileHomePage() {
     void import('../lib/prefetch').then((m) => m.prefetchHeavyTabs())
   }, [ensureUserId, setActiveScene])
 
+  useEffect(() => {
+    const context = readCAppReturnContext()
+    const currentUrl = `${location.pathname}${location.search}${location.hash}`
+    if (!context || !context.source.startsWith('home-') || context.returnTo !== currentUrl) return undefined
+
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (Number.isFinite(context.returnScrollY)) {
+          window.scrollTo({ top: context.returnScrollY, behavior: 'auto' })
+        } else if (context.returnAnchor) {
+          document.getElementById(context.returnAnchor)?.scrollIntoView({ block: 'start' })
+        }
+        consumeCAppReturnContext()
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      window.cancelAnimationFrame(secondFrame)
+    }
+  }, [location.hash, location.pathname, location.search])
+
+  const saveHomeReturn = (source: 'home-crowd' | 'home-xiaoling', returnAnchor: string, poiId?: string) => {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`
+    saveCAppReturnContext({
+      source,
+      returnTo,
+      returnScrollY: window.scrollY,
+      returnAnchor,
+      contextType: source === 'home-xiaoling' ? 'browse' : undefined,
+      poiId
+    })
+    return returnTo
+  }
+
   return (
     <div className="mobile-home">
-      <section className="mobile-home__hero">
+      <section className="mobile-home__hero" id="c-app-home-xiaoling">
         <div>
           <span className="mobile-section-kicker">当前导览状态</span>
           <h2>您好，我是您的数字向导</h2>
@@ -200,7 +241,10 @@ function MobileHomePage() {
         <button
           className="mobile-home__floating-guide"
           type="button"
-          onClick={() => navigate('/guide')}
+          onClick={() => {
+            const returnTo = saveHomeReturn('home-xiaoling', 'c-app-home-xiaoling')
+            navigate(`/guide?returnTo=${encodeURIComponent(returnTo)}`)
+          }}
           aria-label="打开灵山小灵"
         >
           <MessageOutlined />
@@ -241,7 +285,7 @@ function MobileHomePage() {
         </div>
       </section>
 
-      <section className="mobile-crowd-card" aria-label="实时客流">
+      <section className="mobile-crowd-card" id="c-app-home-crowd" aria-label="实时客流">
         <div className="mobile-crowd-card__top">
           <div>
             <span className="mobile-crowd-card__kicker">实时客流</span>
@@ -265,7 +309,10 @@ function MobileHomePage() {
                 key={spot.id}
                 type="button"
                 className="mobile-crowd-row"
-                onClick={() => navigate(`/map-3d-guide-c/poi/${encodeURIComponent(spot.id)}?from=browse`)}
+                onClick={() => {
+                  saveHomeReturn('home-crowd', 'c-app-home-crowd', spot.id)
+                  navigate(`/map-3d-guide-c/poi/${encodeURIComponent(spot.id)}?from=browse`)
+                }}
               >
                 <img className="mobile-crowd-row__photo" src={spot.image} alt="" loading="lazy" />
                 <span className="mobile-crowd-row__main">

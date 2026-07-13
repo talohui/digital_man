@@ -10,11 +10,13 @@ import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { type MapGuideState } from '../types/mapGuide'
 import {
   Map3DGuideExperience,
+  type Map3DGuideMapRuntime,
   type MapPresentationTransitionSnapshot,
   type ScenicMapPresentation
 } from './Map3DGuidePage'
 import { closeGlobalXiaoling, guideAssistantEvents } from '../components/guide'
 import '../styles/map/mapBrowseMobile.css'
+import { useMapResumeMemory } from '../hooks/useMapResumeMemory'
 
 const browseGuideState = {
   viewMode: 'browse',
@@ -279,6 +281,8 @@ function Map3DGuidePrototypeCPage() {
     transition: 'idle',
     isPresentationSwitching: false
   })
+  const [mapRuntime, setMapRuntime] = useState<Map3DGuideMapRuntime | null>(null)
+  useMapResumeMemory(mapRuntime, browsePresentation)
 
   return (
     <>
@@ -287,6 +291,7 @@ function Map3DGuidePrototypeCPage() {
         guideState={browseGuideState}
         presentation={browsePresentation}
         onPresentationTransitionChange={setPresentationTransition}
+        onMapRuntimeChange={setMapRuntime}
       />
       <BrowseMobileOverlay
         presentation={browsePresentation}

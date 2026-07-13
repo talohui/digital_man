@@ -56,6 +56,7 @@ import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
+import { useMapResumeMemory } from '../hooks/useMapResumeMemory'
 
 const DEFAULT_STOP_INDEX = 0
 
@@ -1138,6 +1139,7 @@ function Map3DRouteGuidePage() {
   const handleMapRuntimeChange = useCallback((runtime: Map3DGuideMapRuntime | null) => {
     setMapRuntime(runtime)
   }, [])
+  useMapResumeMemory(mapRuntime, routePresentation)
 
   return (
     <>

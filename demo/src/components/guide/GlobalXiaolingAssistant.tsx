@@ -15,6 +15,12 @@ import '../../styles/guide/guideAssistant.css'
 import '../../styles/guide/guideDrawer.css'
 import '../../styles/guide/digitalHumanStage.css'
 import '../../styles/guide/guideCards.css'
+import {
+  consumeCAppReturnContext,
+  normalizeInternalReturnTo,
+  readCAppReturnContext,
+  saveCAppReturnContext
+} from '../../lib/cAppReturnContext'
 
 /** Persistent C-app assistant. Pages only publish UI intents. */
 export function GlobalXiaolingAssistant() {
@@ -123,6 +129,15 @@ export function GlobalXiaolingAssistant() {
   }, [isFullscreenPage, isMapPage, setDrawerOpen])
 
   useEffect(() => {
+    if (!isMapPage) return
+    const saved = readCAppReturnContext()
+    const currentUrl = `${location.pathname}${location.search}${location.hash}`
+    if (!saved?.source.startsWith('map-') || saved.returnTo !== currentUrl) return
+    if (saved.reopenDrawer) setDrawerOpen(true)
+    consumeCAppReturnContext()
+  }, [isMapPage, location.hash, location.pathname, location.search, setDrawerOpen])
+
+  useEffect(() => {
     if (!isFullscreenPage) return
     const state = useGuideSessionStore.getState()
     state.initializeConversation(
@@ -211,16 +226,33 @@ export function GlobalXiaolingAssistant() {
         input={input}
         onClose={() => {
           if (isFullscreenPage) {
-            const target = context.pathname.startsWith('/map-3d-guide-c') ? context.pathname : '/'
+            const saved = readCAppReturnContext()
+            const queryTarget = normalizeInternalReturnTo(new URLSearchParams(location.search).get('returnTo'))
+            const target = saved?.returnTo ?? queryTarget ?? (
+              context.pathname.startsWith('/map-3d-guide-c') ? context.pathname : '/'
+            )
             navigate(target)
           } else {
             setDrawerOpen(false)
           }
         }}
-        onFullscreen={isMapPage ? () => navigate('/guide') : undefined}
-        onOpenMap={isFullscreenPage ? () => navigate(
-          context.pathname.startsWith('/map-3d-guide-c') ? context.pathname : '/map-3d-guide-c'
-        ) : undefined}
+        onFullscreen={isMapPage ? () => {
+          const returnTo = `${location.pathname}${location.search}${location.hash}`
+          saveCAppReturnContext({
+            source: context.page === 'route' ? 'map-route' : context.page === 'poi' ? 'map-poi' : 'map-browse',
+            returnTo,
+            conversationKey: activeConversationKey,
+            contextType: context.page,
+            routeId: context.routeId,
+            poiId: context.selectedPoiId,
+            reopenDrawer: true
+          })
+          navigate(`/guide?returnTo=${encodeURIComponent(returnTo)}`)
+        } : undefined}
+        onOpenMap={isFullscreenPage ? () => {
+          const saved = readCAppReturnContext()
+          navigate(saved?.returnTo.startsWith('/map-3d-guide-c') ? saved.returnTo : '/map-3d-guide-c')
+        } : undefined}
         onInputChange={setInput}
         onSend={submit}
         onSuggestedQuestion={askSuggestedQuestion}

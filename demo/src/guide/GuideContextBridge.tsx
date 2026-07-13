@@ -14,10 +14,11 @@ import type { GuideContext, ScenicRouteId } from './GuideMessageSchema'
 import { isScenicRouteId } from './GuideMessageSchema'
 import { useGuideSessionStore } from './useGuideSessionStore'
 import { resolveGuideAssistantContent } from './guideAssistantContent'
+import { normalizeInternalReturnTo, readCAppReturnContext } from '../lib/cAppReturnContext'
 
 const basePath = '/map-3d-guide-c'
 
-function buildContext(pathname: string, search: string): GuideContext | undefined {
+export function buildGuideContext(pathname: string, search: string): GuideContext | undefined {
   if (!pathname.startsWith(basePath)) return undefined
   const params = new URLSearchParams(search)
   const requestedPresentation = params.get('presentation')
@@ -76,7 +77,17 @@ function buildContext(pathname: string, search: string): GuideContext | undefine
 
 export default function GuideContextBridge() {
   const location = useLocation()
-  const context = useMemo(() => buildContext(location.pathname, location.search), [location.pathname, location.search])
+  const context = useMemo(() => {
+    if (location.pathname !== '/guide') return buildGuideContext(location.pathname, location.search)
+    const saved = readCAppReturnContext()
+    const queryReturnTo = normalizeInternalReturnTo(new URLSearchParams(location.search).get('returnTo'))
+    const returnTo = saved?.returnTo ?? queryReturnTo
+    if (saved?.source === 'home-xiaoling' || !returnTo) {
+      return buildGuideContext(basePath, '')
+    }
+    const target = new URL(returnTo, window.location.origin)
+    return buildGuideContext(target.pathname, target.search) ?? buildGuideContext(basePath, '')
+  }, [location.pathname, location.search])
   const setContext = useGuideSessionStore((state) => state.setContext)
   const ensureSessionId = useGuideSessionStore((state) => state.ensureSessionId)
 

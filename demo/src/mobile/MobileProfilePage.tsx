@@ -11,6 +11,7 @@ import {
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
+import { getMapResumeUrl } from '../lib/mapResumeState'
 import { useGuideStore } from '../store/useGuideStore'
 import {
   ticketTypeOptions,
@@ -109,9 +110,9 @@ function MobileProfilePage() {
             <button
               type="button"
               className="mobile-profile-continue-route"
-              onClick={() => navigate(
+              onClick={() => navigate(getMapResumeUrl(
                 `/map-3d-guide-c/route/${encodeURIComponent(activeRoute.id)}?stage=active&stop=${lastVisitedStopNumber}`
-              )}
+              ))}
             >
               继续上一次行程
             </button>

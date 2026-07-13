@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
+import { saveCAppReturnContext } from '../lib/cAppReturnContext'
 
 function shouldHideOnRoute(pathname: string) {
   return pathname === '/guide' || pathname.startsWith('/spot/')
@@ -18,7 +19,16 @@ function FloatingGuide() {
     <button
       type="button"
       className={`floating-guide__fab ${isFullbleedRoute(location.pathname) ? 'is-fullbleed' : ''}`}
-      onClick={() => navigate('/guide')}
+      onClick={() => {
+        const returnTo = `${location.pathname}${location.search}${location.hash}`
+        saveCAppReturnContext({
+          source: 'home-xiaoling',
+          returnTo,
+          returnScrollY: window.scrollY,
+          contextType: 'browse'
+        })
+        navigate(`/guide?returnTo=${encodeURIComponent(returnTo)}`)
+      }}
       aria-label="进入灵山小灵数字人导览"
     >
       <span className="floating-guide__fab-pulse" aria-hidden />
