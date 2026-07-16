@@ -45,6 +45,8 @@ import fay_booter
 from flask_httpauth import HTTPBasicAuth
 from core import qa_service
 from core import stream_manager
+from gui.operations_copilot_api import register_operations_copilot_api
+from utils.operations_copilot_llm import generate_operations_copilot
 
 # 全局变量，用于跟踪当前的genagents服务器
 genagents_server = None
@@ -80,6 +82,14 @@ def verify_password(username, password):
     if username in users and users[username] == password:
         return username
 
+
+register_operations_copilot_api(
+    __app,
+    generator=lambda copilot_input: generate_operations_copilot(
+        copilot_input,
+        config_util,
+    ),
+)
 
 def __get_template():
     try:
