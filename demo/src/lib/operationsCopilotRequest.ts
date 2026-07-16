@@ -1,39 +1,12 @@
+// Native Node TypeScript tests require explicit extensions; Vite supports these source imports.
+// @ts-expect-error TS5097: allow direct reuse in the Node strip-types test runner.
+import { trimOperationsCopilotHistory } from './operationsCopilotSession.ts'
 import type {
   OperationsCopilotPageContext,
   OperationsCopilotQueryInput,
-  OperationsCopilotTurn,
 } from './operationsCopilotSession'
 
 export type { OperationsCopilotPageContext, OperationsCopilotQueryInput, OperationsCopilotTurn } from './operationsCopilotSession'
-
-function trimQueryHistory(history: readonly unknown[] | null | undefined): OperationsCopilotTurn[] {
-  if (!Array.isArray(history)) return []
-
-  const safeTurns = history.flatMap((candidate): OperationsCopilotTurn[] => {
-    if (!candidate || typeof candidate !== 'object') return []
-
-    const role = Reflect.get(candidate, 'role')
-    const rawContent = Reflect.get(candidate, 'content')
-    if ((role !== 'user' && role !== 'assistant') || typeof rawContent !== 'string') return []
-
-    const content = Array.from(rawContent.trim()).slice(0, 800).join('')
-    return content ? [{ role, content }] : []
-  }).slice(-8)
-
-  const retained: OperationsCopilotTurn[] = []
-  let characterCount = 0
-  for (let index = safeTurns.length - 1; index >= 0; index -= 1) {
-    const turn = safeTurns[index]
-    if (!turn) continue
-
-    const turnCharacters = Array.from(turn.content).length
-    if (characterCount + turnCharacters > 4000) break
-
-    retained.unshift(turn)
-    characterCount += turnCharacters
-  }
-  return retained
-}
 
 function pickPageContext(pageContext: OperationsCopilotPageContext): OperationsCopilotPageContext {
   return {
@@ -52,7 +25,7 @@ export function buildOperationsCopilotQueryRequest(input: string | OperationsCop
     : {
         question: input.question,
         sessionId: input.sessionId,
-        history: trimQueryHistory(input.history),
+        history: trimOperationsCopilotHistory(input.history),
         ...(input.pageContext ? { pageContext: pickPageContext(input.pageContext) } : {}),
       }
 

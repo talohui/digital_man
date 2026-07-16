@@ -1,5 +1,8 @@
-import { getAnalyticsApiBase } from '../lib/runtimeConfig'
-import { buildOperationsCopilotConfirmRequest, buildOperationsCopilotQueryRequest } from '../lib/operationsCopilotRequest'
+// Native Node TypeScript tests require explicit extensions; Vite supports these source imports.
+// @ts-expect-error TS5097: allow the same module graph in the Node strip-types test runner.
+import { getAnalyticsApiBase } from '../lib/runtimeConfig.ts'
+// @ts-expect-error TS5097: allow the same module graph in the Node strip-types test runner.
+import { buildOperationsCopilotConfirmRequest, buildOperationsCopilotQueryRequest } from '../lib/operationsCopilotRequest.ts'
 import type { OperationsCopilotQueryInput } from '../lib/operationsCopilotSession'
 
 export type {
@@ -8,7 +11,7 @@ export type {
   OperationsCopilotTurn,
 } from '../lib/operationsCopilotSession'
 
-const BASE = getAnalyticsApiBase()
+const BASE = typeof window === 'undefined' ? 'http://127.0.0.1:5002/api' : getAnalyticsApiBase()
 
 export type OperationsCopilotProposalType = 'EMERGENCY_DRAFT' | 'KB_CREATE' | 'KB_UPDATE' | 'KB_DEACTIVATE'
 
