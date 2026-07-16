@@ -9,5 +9,6 @@ test('owns one persistent Live2D stage for all presentation modes', () => {
   assert.match(source, /data-xiaoling-live2d-mode=\{presentationMode\}/)
   assert.match(source, /data-xiaoling-live2d-instance=\{live2dInstanceId\}/)
   assert.match(source, /data-xiaoling-portrait-ready=/)
+  assert.match(source, /presentationFraming=\{presentationMode === 'badge' \? 'full-body' : 'upper-body'\}/)
+  assert.match(source, /visualViewport\.height \* 0\.85/)
 })
-

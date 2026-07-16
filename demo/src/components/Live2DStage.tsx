@@ -64,6 +64,7 @@ type Live2DStageProps = {
   mouthOpenOverride?: number
   mouthFormOverride?: number
   presentationMode?: XiaolingPresentationMode
+  presentationFraming?: 'full-body' | 'upper-body'
   onPresentationReady?: (detail: {
     canvas: HTMLCanvasElement
     instanceId: string
@@ -80,6 +81,7 @@ function Live2DStage({
   mouthOpenOverride,
   mouthFormOverride,
   presentationMode = 'fullscreen',
+  presentationFraming = 'full-body',
   onPresentationReady
 }: Live2DStageProps) {
   const isEmbedded = variant === 'embedded'
@@ -90,6 +92,7 @@ function Live2DStage({
   const modelRef = useRef<Live2DLikeModel | null>(null)
   const fitRef = useRef<(() => void) | null>(null)
   const presentationModeRef = useRef(presentationMode)
+  const presentationFramingRef = useRef(presentationFraming)
   const onPresentationReadyRef = useRef(onPresentationReady)
   const instanceIdRef = useRef('')
   if (!instanceIdRef.current) instanceIdRef.current = `xiaoling-live2d-${++live2dInstanceSequence}`
@@ -107,8 +110,9 @@ function Live2DStage({
 
   useEffect(() => {
     presentationModeRef.current = presentationMode
+    presentationFramingRef.current = presentationFraming
     onPresentationReadyRef.current = onPresentationReady
-  }, [onPresentationReady, presentationMode])
+  }, [onPresentationReady, presentationFraming, presentationMode])
 
   useEffect(() => {
     if (eager) {
@@ -189,23 +193,31 @@ function Live2DStage({
           // 会让模型放大数倍并按物理尺寸算居中而偏到右下)
           let w = app.screen.width
           let h = app.screen.height
-          if ((!w || !h) && parent) {
+          if (parent) {
             const r = parent.getBoundingClientRect()
-            w = r.width
-            h = r.height
-            app.renderer.resize(w, h)
+            if (r.width > 0 && r.height > 0) {
+              w = r.width
+              h = r.height
+              if (Math.abs(app.screen.width - w) > 0.5 || Math.abs(app.screen.height - h) > 0.5) {
+                app.renderer.resize(w, h)
+              }
+            }
           }
           const baseW = model.internalModel?.originalWidth ?? model.width
           const baseH = model.internalModel?.originalHeight ?? model.height
           const mode = presentationModeRef.current
+          const framing = presentationFramingRef.current
+          const containedScale = Math.min(w / baseW, h / baseH)
           const scale = mode === 'badge'
             ? Math.max(w / baseW, h / baseH) * 1.7
-            : Math.min(w / baseW, h / baseH) * (isImmersive ? 1.18 : 0.9)
+            : containedScale * (isImmersive && framing === 'upper-body' ? 2.08 : isImmersive ? 1.18 : 0.9)
           model.scale.set(scale)
           model.x = (w - baseW * scale) / 2
           model.y = mode === 'badge'
             ? -baseH * scale * 0.08
-            : (h - baseH * scale) / 2
+            : isImmersive && framing === 'upper-body'
+              ? -baseH * scale * 0.035
+              : (h - baseH * scale) / 2
         }
         fitRef.current = fit
         requestAnimationFrame(fit)
@@ -254,6 +266,7 @@ function Live2DStage({
 
   useEffect(() => {
     presentationModeRef.current = presentationMode
+    presentationFramingRef.current = presentationFraming
     const app = appRef.current
     if (!app) return
 
@@ -283,7 +296,7 @@ function Live2DStage({
       if (timer) window.clearTimeout(timer)
       window.cancelAnimationFrame(frame)
     }
-  }, [presentationMode])
+  }, [presentationFraming, presentationMode])
 
   useEffect(() => {
     if (!isInView) return

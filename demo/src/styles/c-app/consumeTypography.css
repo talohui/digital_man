@@ -1,0 +1,117 @@
+/* C APP CONSUME TYPOGRAPHY - shared by /consume and /consume-components */
+
+.consume-v2-preview,
+.scroll-title-preview {
+  --consume-type-eyebrow: 10px;
+  --consume-type-caption: 11px;
+  --consume-type-body: 12px;
+}
+
+/* 眉题、状态、单位与轻量标签。 */
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-topbar small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-context-slip small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-title__copy > span,
+:is(.consume-v2-preview, .scroll-title-preview) .market-title__aside,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note header > span,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note__meta > small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-reason-detail small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__index small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__copy > small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__add small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__trade > em,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-dock__copy small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-dock__total small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-dock__title-row > em,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__header small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__number,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__number::before,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__footer small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-overlay__header small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__intro small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__options legend,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__notice span,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__summary small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__ledger dt,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__coupon small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__coupon em,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__footer small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__ticket small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__stats small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__list article small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__list article em,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__breakdown > header small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__breakdown > div small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-success-dialog > small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-state-lab,
+:is(.consume-v2-preview, .scroll-title-preview) .scroll-title-topbar small {
+  font-size: var(--consume-type-eyebrow);
+}
+
+/* 说明、规格、推荐理由与辅助信息。 */
+:is(.consume-v2-preview, .scroll-title-preview) .market-title__copy p,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note__reason,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note__copy p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-reason-detail p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-catalog-state p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-demo-note,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__copy p,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__header p,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__copy small,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__empty p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__intro p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__notice p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__summary p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__lines p small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__demo,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__status p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__ticket p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__lines p small,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__empty p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-success-dialog > p,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-merchant,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-tip,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-pwd__merchant,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-pwd__hint {
+  font-size: var(--consume-type-caption);
+}
+
+/* 正文、输入、选择项与文字按钮。标题、价格、数量和纯图形符号保留原层级。 */
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-topbar button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-context-slip strong,
+:is(.consume-v2-preview, .scroll-title-preview) .market-title--welcome .market-title__action button,
+:is(.consume-v2-preview, .scroll-title-preview) .market-category-tabs strong,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note .xiaoling-recommendation-note__action > button,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note__stepper button,
+:is(.consume-v2-preview, .scroll-title-preview) .xiaoling-recommendation-note__stepper strong,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-reason-detail button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-catalog-state button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-state-lab button,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__stepper button,
+:is(.consume-v2-preview, .scroll-title-preview) .market-product-ledger__stepper strong,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-dock__action,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__header > button,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__stepper b,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__empty strong,
+:is(.consume-v2-preview, .scroll-title-preview) .market-cart-sheet__footer > button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-overlay__header > button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__options button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__stepper strong,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-detail-sheet__footer > button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__lines p strong,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__ledger dd,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__coupon strong,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__methods button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-checkout-sheet__footer > button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__list article header strong,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__lines p,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-orders-sheet__breakdown > header button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-success-dialog button,
+:is(.consume-v2-preview, .scroll-title-preview) .consume-v2-toast,
+:is(.consume-v2-preview, .scroll-title-preview) .scroll-title-topbar button,
+:is(.consume-v2-preview, .scroll-title-preview) .scroll-title-category-state,
+:is(.consume-v2-preview, .scroll-title-preview) .scroll-title-category-state strong,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-method__name,
+:is(.consume-v2-preview, .scroll-title-preview) .pay-confirm {
+  font-size: var(--consume-type-body);
+}
+

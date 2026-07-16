@@ -6,6 +6,7 @@ import {
   readCAppReturnContext,
   resolveCAppReturnTarget,
   resolveHomeCrowdPoiReturn,
+  resolveSpotsListPoiReturn,
   saveCAppReturnContext
 } from './cAppReturnContext.ts'
 
@@ -48,6 +49,14 @@ test('home crowd POI returns only to its matching saved homepage context', () =>
   assert.equal(resolveHomeCrowdPoiReturn(saved, 'jiulong_guanyu'), undefined)
 })
 
+test('spots list POI returns only to its matching list context', () => {
+  const saved = saveCAppReturnContext({
+    source: 'spots-list', returnTo: '/spots', returnScrollY: 420, poiId: 'giant_buddha'
+  })
+  assert.equal(resolveSpotsListPoiReturn(saved, 'giant_buddha'), '/spots')
+  assert.equal(resolveSpotsListPoiReturn(saved, 'fan_gong'), undefined)
+})
+
 test('/guide return prefers stored context and preserves full route URL', () => {
   const saved = saveCAppReturnContext({
     source: 'map-route',
@@ -59,4 +68,3 @@ test('/guide return prefers stored context and preserves full route URL', () => 
     saved?.returnTo
   )
 })
-

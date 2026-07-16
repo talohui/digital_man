@@ -1,0 +1,854 @@
+@import './mapTokens.css';
+
+body.real-nav-validation-active .guide-floating-companion {
+  display: none;
+}
+
+.real-nav-validation-page {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #dfe8dc;
+  color: #173d30;
+  font-family: var(--map-font-serif, "Songti SC", "STSong", "Noto Serif SC", serif);
+}
+
+.real-nav-validation-page > .map-3d-guide-shell {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.real-nav-validation-page .map-3d-guide-hero,
+.real-nav-validation-page .map-3d-guide-routes,
+.real-nav-validation-page .map-3d-guide-camera,
+.real-nav-validation-page .map-3d-guide-status,
+.real-nav-validation-page .map-3d-guide-pois,
+.real-nav-validation-page .map-3d-guide-controlbar,
+.real-nav-validation-page .map-3d-guide-mobile-topbar,
+.real-nav-validation-page .map-3d-guide-mobile-guide {
+  display: none !important;
+}
+
+.real-nav-validation-page *,
+.real-nav-validation-page *::before,
+.real-nav-validation-page *::after {
+  box-sizing: border-box;
+}
+
+.real-nav-validation-overlay {
+  position: absolute;
+  inset: 0;
+  /* Tencent GLJS mounts interactive attribution/control nodes at z-index 1000.
+   * Keep the standalone validation controls above that map-only surface so
+   * taps reach the real-navigation actions instead of falling through to TMap. */
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.real-nav-validation-topbar {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top, 0px));
+  right: max(18px, env(safe-area-inset-right, 0px));
+  left: max(18px, env(safe-area-inset-left, 0px));
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+.real-nav-validation-topbar__back {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(207, 176, 112, .56);
+  border-radius: 18px;
+  background: rgba(255, 253, 242, .94);
+  color: #24513f;
+  box-shadow: 0 10px 26px rgba(22, 55, 43, .18);
+  backdrop-filter: blur(16px);
+  cursor: pointer;
+}
+
+.real-nav-validation-topbar__back span {
+  display: block;
+  margin: -5px 0 0 -1px;
+  font-family: sans-serif;
+  font-size: 44px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.real-nav-validation-topbar__title {
+  justify-self: start;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid rgba(207, 176, 112, .48);
+  border-radius: 18px;
+  padding: 8px 15px;
+  background: rgba(255, 253, 242, .92);
+  box-shadow: 0 10px 26px rgba(22, 55, 43, .14);
+  backdrop-filter: blur(16px);
+}
+
+.real-nav-validation-topbar__title strong {
+  overflow: hidden;
+  color: #173d30;
+  font-size: 18px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.real-nav-validation-topbar__title span {
+  overflow: hidden;
+  color: rgba(35, 78, 62, .65);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.real-nav-validation-security {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(207, 176, 112, .46);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: rgba(255, 253, 242, .94);
+  color: #7c5022;
+  box-shadow: 0 8px 20px rgba(22, 55, 43, .13);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  backdrop-filter: blur(14px);
+}
+
+.real-nav-validation-security i,
+.real-nav-validation-live-source i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #d17b36;
+  box-shadow: 0 0 0 4px rgba(209, 123, 54, .15);
+}
+
+.real-nav-validation-security.is-secure {
+  color: #236847;
+}
+
+.real-nav-validation-security.is-secure i,
+.real-nav-validation-live-source i {
+  background: #28a566;
+  box-shadow: 0 0 0 4px rgba(40, 165, 102, .15);
+}
+
+.real-nav-validation-xiaoling {
+  position: absolute;
+  top: max(82px, calc(env(safe-area-inset-top, 0px) + 72px));
+  left: max(18px, env(safe-area-inset-left, 0px));
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  width: min(530px, calc(100vw - 36px));
+  align-items: center;
+  gap: 11px;
+  border: 1px solid rgba(207, 176, 112, .5);
+  border-radius: 22px;
+  padding: 10px 10px 10px 11px;
+  background: linear-gradient(135deg, rgba(255, 253, 241, .96), rgba(240, 246, 231, .94));
+  box-shadow: 0 14px 34px rgba(21, 57, 43, .18);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.real-nav-validation-xiaoling__avatar {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid #3d8055;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, #fde7d8 0 29%, #f8f5d9 30% 65%, #d8edd5 66% 100%);
+  box-shadow: 0 5px 13px rgba(31, 59, 49, .16);
+}
+
+.real-nav-validation-xiaoling__avatar .xiaoling-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.real-nav-validation-xiaoling > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.real-nav-validation-xiaoling strong {
+  color: #805f2d;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.real-nav-validation-xiaoling p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #254d3e;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.real-nav-validation-xiaoling button {
+  min-height: 34px;
+  border: 1px solid rgba(58, 112, 82, .28);
+  border-radius: 999px;
+  padding: 0 11px;
+  background: rgba(235, 245, 232, .9);
+  color: #286045;
+  font: 800 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.real-nav-validation-panel,
+.real-nav-validation-card {
+  position: absolute;
+  right: max(22px, env(safe-area-inset-right, 0px));
+  bottom: max(22px, env(safe-area-inset-bottom, 0px));
+  width: min(400px, calc(100vw - 44px));
+  pointer-events: auto;
+}
+
+.real-nav-validation-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(207, 176, 112, .58);
+  border-radius: 28px;
+  padding: 21px;
+  background:
+    linear-gradient(145deg, rgba(255, 253, 241, .98), rgba(242, 246, 226, .97)),
+    #f8f3df;
+  box-shadow: 0 20px 52px rgba(19, 52, 39, .23);
+  backdrop-filter: blur(19px);
+}
+
+.real-nav-validation-panel__eyebrow {
+  width: max-content;
+  max-width: 100%;
+  border: 1px solid rgba(192, 155, 78, .32);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgba(249, 236, 192, .54);
+  color: #8a692e;
+  font: 800 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: .03em;
+}
+
+.real-nav-validation-panel h1,
+.real-nav-validation-panel h2 {
+  margin: 0;
+  color: #173d30;
+  font-weight: 850;
+  line-height: 1.16;
+}
+
+.real-nav-validation-panel h1 {
+  font-size: clamp(23px, 2.4vw, 29px);
+}
+
+.real-nav-validation-panel h2 {
+  font-size: 24px;
+}
+
+.real-nav-validation-panel > p,
+.real-nav-validation-locating p {
+  margin: 0;
+  color: rgba(32, 75, 58, .76);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+.real-nav-validation-panel > small {
+  color: rgba(42, 83, 66, .58);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.real-nav-validation-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 15px;
+  padding: 10px;
+  background: rgba(46, 102, 75, .08);
+  color: #2c644b;
+  font: 800 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.real-nav-validation-flow i {
+  color: rgba(135, 98, 39, .62);
+  font-style: normal;
+}
+
+.real-nav-validation-primary,
+.real-nav-validation-secondary {
+  min-height: 46px;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 850;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.real-nav-validation-primary {
+  border: 1px solid #194d39;
+  background: linear-gradient(135deg, #285f47, #163f31);
+  color: #fffbed;
+  box-shadow: 0 9px 20px rgba(23, 67, 49, .2);
+}
+
+.real-nav-validation-secondary {
+  border: 1px solid rgba(194, 157, 82, .48);
+  background: rgba(255, 253, 244, .84);
+  color: #346148;
+}
+
+.real-nav-validation-primary:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+  box-shadow: none;
+}
+
+.real-nav-validation-panel__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr);
+  gap: 9px;
+}
+
+.real-nav-validation-locating {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.real-nav-validation-locating > button {
+  grid-column: 1 / -1;
+  min-height: 42px;
+  border: 1px solid rgba(194, 157, 82, .44);
+  border-radius: 999px;
+  background: rgba(255, 253, 244, .78);
+  color: #346148;
+  font-family: inherit;
+  font-weight: 800;
+}
+
+.real-nav-validation-locating strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 19px;
+}
+
+.real-nav-validation-spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(48, 103, 78, .18);
+  border-top-color: #286047;
+  border-radius: 50%;
+  animation: real-nav-validation-spin .85s linear infinite;
+}
+
+.real-nav-validation-target {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(196, 148, 53, .26);
+  border-radius: 15px;
+  padding: 10px 11px;
+  background: rgba(248, 231, 176, .28);
+}
+
+.real-nav-validation-target > span {
+  color: #d1891e;
+  font-size: 20px;
+  text-shadow: 0 2px 7px rgba(193, 126, 27, .28);
+}
+
+.real-nav-validation-target div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.real-nav-validation-target strong {
+  overflow: hidden;
+  color: #244b3c;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.real-nav-validation-target small {
+  color: rgba(44, 79, 64, .64);
+  font: 650 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.real-nav-validation-live-source {
+  position: absolute;
+  right: max(22px, env(safe-area-inset-right, 0px));
+  bottom: max(440px, calc(env(safe-area-inset-bottom, 0px) + 128px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 10px;
+  max-width: 400px;
+  border: 1px solid rgba(207, 176, 112, .42);
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: rgba(255, 253, 242, .92);
+  color: rgba(32, 75, 58, .72);
+  box-shadow: 0 8px 22px rgba(22, 55, 43, .13);
+  font: 750 11px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.real-nav-validation-live-source span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.real-nav-validation-live-source i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+}
+
+.real-nav-validation-panel--success {
+  gap: 11px;
+}
+
+.real-nav-validation-success-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #4c9367, #286047);
+  color: #fffbea;
+  box-shadow: 0 10px 22px rgba(40, 96, 71, .24);
+  font: 900 25px/1 sans-serif;
+}
+
+.real-nav-validation-success-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.real-nav-validation-success-metrics span {
+  display: grid;
+  gap: 3px;
+  border-radius: 14px;
+  padding: 10px 11px;
+  background: rgba(45, 101, 75, .08);
+  color: rgba(44, 79, 64, .62);
+  font: 700 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.real-nav-validation-success-metrics b {
+  color: #244b3c;
+  font-family: var(--map-font-serif, "Songti SC", serif);
+  font-size: 17px;
+}
+
+@keyframes real-nav-validation-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (min-width: 881px) {
+  .real-nav-validation-card .navigation-beta-card {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+    border: 1px solid rgba(207, 176, 112, .58);
+    border-radius: 28px;
+    padding: 18px;
+    background: linear-gradient(145deg, rgba(255, 253, 241, .98), rgba(242, 246, 226, .97));
+    color: #1f4b3c;
+    box-shadow: 0 20px 52px rgba(19, 52, 39, .23);
+    pointer-events: auto;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__header,
+  .real-nav-validation-card .navigation-beta-card__header-copy,
+  .real-nav-validation-card .navigation-beta-card__guide {
+    display: grid;
+    gap: 4px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__header--companion {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__header-copy h2,
+  .real-nav-validation-card .navigation-beta-card p {
+    margin: 0;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__eyebrow,
+  .real-nav-validation-card .navigation-beta-card__step {
+    color: #8b6d35;
+    font: 750 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__header-copy h2 {
+    overflow: hidden;
+    color: #183d30;
+    font-size: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__avatar {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    overflow: hidden;
+    border: 2px solid #3a8051;
+    border-radius: 50%;
+    background: #eef3dc;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__avatar .xiaoling-avatar {
+    width: 100%;
+    height: 100%;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__guide,
+  .real-nav-validation-card .navigation-beta-card__notice,
+  .real-nav-validation-card .navigation-beta-card__error {
+    border-radius: 14px;
+    padding: 10px 11px;
+    background: rgba(63, 111, 90, .09);
+  }
+
+  .real-nav-validation-card .navigation-beta-card__guide strong {
+    color: #183d30;
+    font-size: 18px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__guide em {
+    color: rgba(31, 75, 60, .7);
+    font-style: normal;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__copy,
+  .real-nav-validation-card .navigation-beta-card__next-step,
+  .real-nav-validation-card .navigation-beta-card__quality,
+  .real-nav-validation-card .navigation-beta-card__notice,
+  .real-nav-validation-card .navigation-beta-card__error {
+    color: rgba(31, 75, 60, .76);
+    font: 650 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__metrics,
+  .real-nav-validation-card .navigation-beta-card__actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 9px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__actions button,
+  .real-nav-validation-card .navigation-beta-card__secondary--wide {
+    flex: 1 1 0;
+    min-height: 43px;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-weight: 800;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__primary {
+    border: 1px solid #194d39;
+    background: #1f4b3c;
+    color: #fff9e8;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__secondary {
+    border: 1px solid rgba(201, 168, 106, .52);
+    background: rgba(255, 253, 244, .86);
+    color: #315d4c;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__toggle {
+    border: 0;
+    border-radius: 50%;
+    background: rgba(63, 111, 90, .1);
+    color: #315d4c;
+  }
+
+  .real-nav-validation-card .navigation-beta-card--compact {
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    min-height: 82px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-main {
+    display: grid;
+    min-width: 0;
+    align-content: center;
+    gap: 6px;
+    border: 0;
+    padding: 10px 0 10px 14px;
+    background: transparent;
+    color: #1f4b3c;
+    text-align: left;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-head {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-head strong {
+    overflow: hidden;
+    color: #183d30;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-head > span:last-child {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: rgba(31, 75, 60, .64);
+    font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-guide {
+    overflow: hidden;
+    color: rgba(31, 75, 60, .76);
+    font: 650 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-guide b,
+  .real-nav-validation-card .navigation-beta-card__compact-guide i {
+    font-style: normal;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__compact-guide b {
+    color: #183d30;
+  }
+
+  .real-nav-validation-card .navigation-beta-card__toggle--expand {
+    width: 42px;
+    height: 100%;
+    border-radius: 0;
+    background: rgba(63, 111, 90, .06);
+  }
+}
+
+@media (max-width: 880px) {
+  .real-nav-validation-topbar {
+    top: max(9px, env(safe-area-inset-top, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    grid-template-columns: 43px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .real-nav-validation-topbar__back {
+    width: 43px;
+    height: 43px;
+    border-radius: 16px;
+  }
+
+  .real-nav-validation-topbar__back span {
+    font-size: 39px;
+  }
+
+  .real-nav-validation-topbar__title {
+    justify-self: stretch;
+    border-radius: 16px;
+    padding: 7px 10px;
+  }
+
+  .real-nav-validation-topbar__title strong {
+    font-size: clamp(14px, 4.2vw, 17px);
+  }
+
+  .real-nav-validation-topbar__title span {
+    font-size: 10px;
+  }
+
+  .real-nav-validation-security {
+    min-height: 34px;
+    padding: 0 9px;
+    font-size: 10px;
+  }
+
+  .real-nav-validation-xiaoling {
+    top: max(65px, calc(env(safe-area-inset-top, 0px) + 57px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    width: auto;
+    gap: 8px;
+    border-radius: 18px;
+    padding: 8px;
+  }
+
+  .real-nav-validation-xiaoling__avatar {
+    width: 38px;
+    height: 38px;
+  }
+
+  .real-nav-validation-xiaoling strong {
+    font-size: 11px;
+  }
+
+  .real-nav-validation-xiaoling p {
+    font-size: clamp(11px, 3.05vw, 13px);
+    -webkit-line-clamp: 2;
+  }
+
+  .real-nav-validation-xiaoling button {
+    min-height: 30px;
+    padding-inline: 9px;
+    font-size: 10px;
+  }
+
+  .real-nav-validation-panel,
+  .real-nav-validation-card {
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    width: auto;
+  }
+
+  .real-nav-validation-panel {
+    max-height: min(48vh, 390px);
+    gap: clamp(8px, 2.2vw, 11px);
+    overflow-y: auto;
+    border-radius: clamp(22px, 6vw, 27px);
+    padding: clamp(14px, 4vw, 18px);
+    overscroll-behavior: contain;
+  }
+
+  .real-nav-validation-panel h1 {
+    font-size: clamp(20px, 5.8vw, 25px);
+  }
+
+  .real-nav-validation-panel h2 {
+    font-size: clamp(19px, 5.4vw, 23px);
+  }
+
+  .real-nav-validation-panel > p,
+  .real-nav-validation-locating p {
+    font-size: clamp(12px, 3.35vw, 14px);
+    line-height: 1.52;
+  }
+
+  .real-nav-validation-flow {
+    gap: 4px;
+    padding: 8px;
+    font-size: clamp(9px, 2.7vw, 11px);
+  }
+
+  .real-nav-validation-primary,
+  .real-nav-validation-secondary {
+    min-height: clamp(42px, 11.5vw, 47px);
+    padding-inline: 10px;
+    font-size: clamp(13px, 3.7vw, 15px);
+    white-space: nowrap;
+  }
+
+  .real-nav-validation-live-source {
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + min(46vh, 350px));
+    max-width: calc(100vw - 24px);
+    padding: 6px 9px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 390px) {
+  .real-nav-validation-security {
+    width: 46px;
+    justify-content: center;
+    padding: 0;
+    font-size: 8px;
+  }
+
+  .real-nav-validation-security i {
+    flex: 0 0 auto;
+  }
+
+  .real-nav-validation-xiaoling button {
+    display: none;
+  }
+
+  .real-nav-validation-xiaoling {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 690px) and (max-width: 880px) {
+  .real-nav-validation-xiaoling {
+    top: max(61px, calc(env(safe-area-inset-top, 0px) + 54px));
+  }
+
+  .real-nav-validation-panel {
+    max-height: 43vh;
+  }
+
+  .real-nav-validation-panel > p,
+  .real-nav-validation-flow {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .real-nav-validation-spinner {
+    animation-duration: 1.8s;
+  }
+}

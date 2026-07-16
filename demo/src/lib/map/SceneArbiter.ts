@@ -1,6 +1,6 @@
 export type SceneArbiterActionType = 'load' | 'show' | 'hide' | 'dispose' | 'rehydrate'
 export type SceneArbiterSource = 'orchestrator' | 'spatial' | 'memory' | 'window' | 'state' | 'runtime'
-export type SceneArbiterModelKind = 'tree' | 'landmark' | 'companion' | 'model' | 'poi'
+export type SceneArbiterModelKind = 'landmark' | 'companion' | 'model' | 'poi'
 
 export type SceneArbiterModelMeta = {
   modelId: string
@@ -81,7 +81,6 @@ const SOURCE_PRIORITY: Record<SceneArbiterSource, number> = {
 }
 
 const DEFAULT_MEMORY_ESTIMATE_MB: Record<SceneArbiterModelKind, number> = {
-  tree: 1.2,
   landmark: 36,
   companion: 2,
   model: 8,

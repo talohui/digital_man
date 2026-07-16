@@ -4622,7 +4622,7 @@
     top: calc(var(--map-top-control-offset) + clamp(46px, 12vw, 54px));
     right: max(14px, env(safe-area-inset-right, 0px));
     z-index: 118;
-    width: 136px;
+    width: min(204px, calc(100vw - 28px));
     border: 1px solid rgba(201, 168, 106, 0.48);
     border-radius: 12px;
     padding: 5px;
@@ -4640,6 +4640,36 @@
     color: #315d4c;
     font-family: inherit;
     font-weight: 700;
+  }
+
+  .navigation-beta-debug-menu .navigation-beta-showcase-menu-action {
+    min-height: 40px;
+    border: 1px solid rgba(201, 168, 106, 0.36);
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(255, 252, 241, 0.78);
+    color: #24483c;
+    font-size: 12px;
+    font-weight: 950;
+  }
+
+  .navigation-beta-debug-menu .navigation-beta-showcase-menu-action + .navigation-beta-showcase-menu-action {
+    margin-top: 5px;
+  }
+
+  .navigation-beta-debug-menu .navigation-beta-showcase-menu-action--deviation {
+    border-color: rgba(177, 112, 57, 0.42);
+    background: rgba(246, 231, 204, 0.72);
+    color: #744a28;
+  }
+
+  .navigation-beta-debug-menu small {
+    display: block;
+    padding: 5px 5px 7px;
+    color: rgba(49, 93, 76, 0.66);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.35;
   }
 
   .navigation-beta-debug-capsule {
@@ -4918,4 +4948,262 @@
   .map-route-tour-cover::after {
     display: none;
   }
+}
+
+/* Confirmed C-side route folio for the formal route-preview stage. */
+.map-route-tour-overlay--preview .map-route-tour-card--preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(45, 74, 62, 0.78);
+  border-radius: 2px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 28px, rgba(45, 74, 62, 0.026) 29px),
+    linear-gradient(180deg, rgba(251, 248, 239, 0.985), rgba(245, 239, 226, 0.985));
+  box-shadow:
+    inset 0 0 0 3px rgba(251, 248, 239, 0.96),
+    inset 0 0 0 4px rgba(201, 168, 106, 0.5),
+    5px 6px 0 rgba(45, 74, 62, 0.13),
+    0 18px 34px rgba(24, 48, 39, 0.2);
+  backdrop-filter: none;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview::before {
+  position: absolute;
+  top: 0;
+  right: 18px;
+  left: 18px;
+  z-index: 2;
+  height: 4px;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(90deg, #2d4a3e 0 78px, #c9a86a 78px 92px, #2d4a3e 92px 100%);
+  content: '';
+  pointer-events: none;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview::after {
+  position: absolute;
+  inset: 7px;
+  z-index: 0;
+  border: 1px solid rgba(201, 168, 106, 0.42);
+  border-radius: 0;
+  background: transparent;
+  content: '';
+  pointer-events: none;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-card__main {
+  grid-template-columns: 88px minmax(0, 1fr) !important;
+  gap: 12px !important;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-cover {
+  position: relative;
+  min-height: 94px !important;
+  overflow: hidden;
+  border: 1px solid rgba(45, 74, 62, 0.72);
+  border-radius: 1px;
+  background:
+    repeating-linear-gradient(135deg, rgba(45, 74, 62, 0.035) 0 1px, transparent 1px 7px),
+    #dde9e7;
+  box-shadow:
+    inset 0 0 0 3px #f5f1e8,
+    inset 0 0 0 4px rgba(201, 168, 106, 0.7),
+    2px 3px 0 rgba(201, 168, 106, 0.2);
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-cover img {
+  inset: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  filter: saturate(0.8) contrast(1.02) sepia(0.06);
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-cover::before {
+  inset: 4px;
+  border: 1px solid rgba(251, 248, 239, 0.36);
+  background: linear-gradient(180deg, rgba(245, 241, 232, 0.03), rgba(32, 59, 51, 0.2));
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-card__content {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-kicker {
+  min-height: 0;
+  border: 0;
+  border-right: 1px solid #c9a86a;
+  border-left: 1px solid #c9a86a;
+  border-radius: 0;
+  padding: 2px 7px 3px;
+  color: #896932;
+  background: transparent;
+  font-family: var(--route-font-serif, serif);
+  font-size: var(--map-type-eyebrow, 10px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview h2 {
+  margin-top: 0;
+  color: #203b33;
+  font-family: var(--route-font-serif, serif);
+  font-size: 22px !important;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: 0.035em;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-meta {
+  width: fit-content;
+  margin-top: 0;
+  padding: 0 0 4px;
+  border-bottom: 1px solid rgba(201, 168, 106, 0.48);
+  color: rgba(32, 59, 51, 0.68);
+  font-size: var(--map-type-caption, 11px) !important;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-tags {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin-top: 0;
+  overflow: hidden;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-tags span {
+  flex: 0 0 auto;
+  border: 0;
+  border-right: 1px solid rgba(201, 168, 106, 0.68);
+  border-radius: 0;
+  padding: 1px 8px;
+  color: #2d4a3e;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--map-type-eyebrow, 10px) !important;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-tags span:first-child { padding-left: 0; }
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-tags span:last-child { border-right: 0; }
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-stops {
+  position: relative;
+  display: flex;
+  min-height: 38px !important;
+  gap: 0;
+  align-items: center;
+  padding: 4px 6px !important;
+  border-top: 1px solid rgba(201, 168, 106, 0.38);
+  border-bottom: 1px solid rgba(201, 168, 106, 0.38);
+  background: rgba(221, 233, 231, 0.2);
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-stops span {
+  position: relative;
+  min-height: 28px !important;
+  gap: 6px;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 20px 2px 0 !important;
+  color: #2d4a3e;
+  background: transparent;
+  font-size: var(--map-type-body, 12px) !important;
+  font-weight: 700;
+  line-height: 1 !important;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-stops span:not(:last-child)::after {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 10px;
+  height: 1px;
+  background: #c9a86a;
+  content: '';
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-stops span:last-child { padding-right: 0 !important; }
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-stops span i {
+  width: 22px !important;
+  height: 22px !important;
+  flex: 0 0 22px !important;
+  border: 1px solid rgba(116, 50, 42, 0.72);
+  border-radius: 1px;
+  color: #f8ead9;
+  background: #914f43;
+  box-shadow: inset 0 0 0 2px rgba(248, 234, 217, 0.18);
+  font-family: var(--route-font-serif, serif);
+  font-size: var(--map-type-eyebrow, 10px) !important;
+  font-weight: 800;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-card__footer {
+  min-height: 42px !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 12px !important;
+  align-items: center;
+  padding-top: 2px;
+  border-top: 1px solid rgba(201, 168, 106, 0.34);
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-primary {
+  min-height: 38px !important;
+  border: 1px solid #c9a86a;
+  border-radius: 0;
+  color: #f5f1e8;
+  background: #2d4a3e;
+  box-shadow: inset 0 0 0 2px rgba(245, 241, 232, 0.12), 2px 3px 0 rgba(201, 168, 106, 0.24);
+  font-family: var(--route-font-serif, serif);
+  font-size: var(--map-type-body, 12px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-primary::after {
+  margin-left: 9px;
+  color: #e3c98e;
+  content: '›';
+  font-size: 16px;
+  line-height: 1;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-footer-hint {
+  width: 76px;
+  padding: 4px 0 4px 9px;
+  border-left: 2px solid #c9a86a;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-card--preview .map-route-tour-footer-hint small {
+  display: block;
+  color: rgba(32, 59, 51, 0.58);
+  font-size: var(--map-type-caption, 11px);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-preview-deck > .map-route-tour-dots {
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.map-route-tour-overlay--preview .map-route-tour-preview-deck > .map-route-tour-dots span {
+  width: 12px;
+  height: 2px;
+  border-radius: 0;
+  background: rgba(45, 74, 62, 0.24);
+}
+
+.map-route-tour-overlay--preview .map-route-tour-preview-deck > .map-route-tour-dots span.is-active {
+  width: 36px;
+  background: #2d4a3e;
 }

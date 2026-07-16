@@ -14,6 +14,8 @@ export type Gcj02Position = {
   coordinateSystem: 'GCJ-02'
 }
 
+export type NavigationReplayPurpose = 'debug' | 'showcase'
+
 export type PrototypeNavigationTarget = {
   mode: 'route-segment' | 'joining' | 'free-poi' | 'local-test'
   routeId?: string
@@ -28,6 +30,8 @@ export type PrototypeNavigationSession = {
   id: string
   target: PrototypeNavigationTarget
   originStage?: 'joining' | 'active'
+  replayPurpose?: NavigationReplayPurpose
+  replayOriginLabel?: string
   committed: boolean
   targetChangedAt: number
 }
@@ -116,6 +120,7 @@ export type ReplaySpeed = 1 | 4 | 10
 export type ReplayNoiseMode = 'clean' | 'normal' | 'poor' | 'rejected'
 export type ReplayScenario =
   | 'route'
+  | 'showcase_off_route'
   | 'brief_drift'
   | 'sustained_off_route'
   | 'recovery'

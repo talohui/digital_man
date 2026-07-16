@@ -1,6 +1,7 @@
 export type CAppReturnSource =
   | 'home-crowd'
   | 'home-xiaoling'
+  | 'spots-list'
   | 'map-browse'
   | 'map-route'
   | 'map-poi'
@@ -21,7 +22,7 @@ export interface CAppReturnContext {
 
 const STORAGE_KEY = 'lingshan:c-app:return-context:v1'
 const MAX_AGE_MS = 2 * 60 * 60 * 1000
-const VALID_SOURCES: CAppReturnSource[] = ['home-crowd', 'home-xiaoling', 'map-browse', 'map-route', 'map-poi']
+const VALID_SOURCES: CAppReturnSource[] = ['home-crowd', 'home-xiaoling', 'spots-list', 'map-browse', 'map-route', 'map-poi']
 
 export function normalizeInternalReturnTo(value: string | null | undefined): string | undefined {
   if (!value || typeof window === 'undefined') return undefined
@@ -46,6 +47,11 @@ export function resolveCAppReturnTarget(input: {
 
 export function resolveHomeCrowdPoiReturn(context: CAppReturnContext | undefined, poiId?: string) {
   if (context?.source !== 'home-crowd') return undefined
+  return !context.poiId || context.poiId === poiId ? context.returnTo : undefined
+}
+
+export function resolveSpotsListPoiReturn(context: CAppReturnContext | undefined, poiId?: string) {
+  if (context?.source !== 'spots-list') return undefined
   return !context.poiId || context.poiId === poiId ? context.returnTo : undefined
 }
 

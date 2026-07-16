@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { createReplayScenario, createRouteReplay } from './trackReplay'
+import { createReplayScenario, createRouteReplay, createShowcaseDeviationReplay } from './trackReplay'
 import type {
+  Gcj02Position,
   NavigationPrototypeRoute,
   ReplayFix,
   ReplayNoiseMode,
@@ -73,8 +74,9 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     }
   }, [clearTimer, emitNext, setReplayActive])
 
-  const playRoute = useCallback((options?: { speed?: ReplaySpeed; noiseMode?: ReplayNoiseMode; seed?: number }) => {
-    if (!route) return
+  const playRoute = useCallback((options?: { speed?: ReplaySpeed; noiseMode?: ReplayNoiseMode; seed?: number; route?: NavigationPrototypeRoute }) => {
+    const routePlan = options?.route ?? route
+    if (!routePlan) return
     const nextSpeed = options?.speed ?? speed
     const nextNoiseMode = options?.noiseMode ?? noiseMode
     const nextSeed = options?.seed ?? seed
@@ -82,7 +84,7 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     setSpeed(nextSpeed)
     setNoiseMode(nextNoiseMode)
     setSeed(nextSeed)
-    loadFrames(createRouteReplay(route, { noiseMode: nextNoiseMode, seed: nextSeed, startTimestamp: Date.now() }), 'route', true)
+    loadFrames(createRouteReplay(routePlan, { noiseMode: nextNoiseMode, seed: nextSeed, startTimestamp: Date.now() }), 'route', true)
   }, [loadFrames, noiseMode, route, seed])
 
   const playFromStart = useCallback(() => playRoute(), [playRoute])
@@ -162,6 +164,21 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     loadFrames(createReplayScenario(route, nextScenario, seed, Date.now()), nextScenario, true)
   }, [loadFrames, route, seed])
 
+  const runShowcaseDeviation = useCallback((startPosition?: Gcj02Position) => {
+    if (!route) return
+    const showcaseSpeed: ReplaySpeed = 4
+    const showcaseSeed = 20260716
+    speedRef.current = showcaseSpeed
+    setSpeed(showcaseSpeed)
+    setNoiseMode('clean')
+    setSeed(showcaseSeed)
+    loadFrames(createShowcaseDeviationReplay(route, {
+      seed: showcaseSeed,
+      startTimestamp: Date.now(),
+      startPosition
+    }), 'showcase_off_route', true)
+  }, [loadFrames, route])
+
   useEffect(() => () => {
     clearTimer()
     setReplayActive(false)
@@ -192,6 +209,7 @@ export function useTrackReplay({ route, suspended = false, acceptReplayFix, setR
     reset,
     jumpToStep,
     jumpNearDestination,
-    runScenario
+    runScenario,
+    runShowcaseDeviation
   }
 }

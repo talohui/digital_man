@@ -12,7 +12,6 @@ import { guideAssistantEvents, type GuideAssistantOpenRequest } from './guideAss
 import { XiaolingFloatingCompanion } from './XiaolingFloatingCompanion'
 import { XiaolingConversationSurface } from './XiaolingConversationSurface'
 import { resolveXiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
-import { resolveXiaolingFullscreenBackground } from './resolveXiaolingFullscreenBackground'
 import { captureXiaolingPortrait, useXiaolingPortrait, type XiaolingPresentationMode } from './xiaolingPortrait'
 import Live2DStage from '../Live2DStage'
 import { useXiaolingRuntime } from '../../guide/runtime/useXiaolingRuntime'
@@ -37,6 +36,7 @@ export function GlobalXiaolingAssistant() {
   const [routeAvatarAnchor, setRouteAvatarAnchor] = useState<{ top: number; right: number } | null>(null)
   const [live2dAnchor, setLive2dAnchor] = useState<DOMRectReadOnly | null>(null)
   const [live2dInstanceId, setLive2dInstanceId] = useState('')
+  const [companionSuppressed, setCompanionSuppressed] = useState(false)
   const runtime = useXiaolingRuntime()
   const portrait = useXiaolingPortrait()
   const context = useGuideSessionStore((state) => state.context)
@@ -67,7 +67,6 @@ export function GlobalXiaolingAssistant() {
       context.selectedPoiId
     ]
   )
-  const fullscreenBackground = useMemo(() => resolveXiaolingFullscreenBackground(), [])
   const presentationMode: XiaolingPresentationMode = isFullscreenPage
     ? 'fullscreen'
     : isMapPage && open
@@ -256,6 +255,15 @@ export function GlobalXiaolingAssistant() {
     }
   }, [location.pathname, activeConversationKey])
 
+  useEffect(() => {
+    const handleCompanionSuppression = (event: Event) => {
+      const detail = (event as CustomEvent<{ suppressed?: boolean }>).detail
+      setCompanionSuppressed(Boolean(detail?.suppressed))
+    }
+    window.addEventListener(guideAssistantEvents.companionSuppression, handleCompanionSuppression)
+    return () => window.removeEventListener(guideAssistantEvents.companionSuppression, handleCompanionSuppression)
+  }, [])
+
   const submit = () => {
     const text = input.trim()
     if (!text) return
@@ -297,7 +305,7 @@ export function GlobalXiaolingAssistant() {
   const rootStyle = {
     '--guide-vvh': visualViewport.height ? `${visualViewport.height}px` : '100dvh',
     '--guide-vvo-top': `${visualViewport.offsetTop}px`,
-    '--guide-drawer-height': visualViewport.height ? `${Math.round(visualViewport.height * 0.6)}px` : '60dvh'
+    '--guide-drawer-height': visualViewport.height ? `${Math.round(visualViewport.height * 0.85)}px` : '85dvh'
   } as CSSProperties
   const routeAvatarStyle = routeAvatarAnchor
     ? ({
@@ -335,10 +343,11 @@ export function GlobalXiaolingAssistant() {
           mouthOpenOverride={runtime.mouthOpen}
           mouthFormOverride={runtime.mouthForm}
           presentationMode={live2dAnchor ? presentationMode : 'hidden'}
+          presentationFraming={presentationMode === 'badge' ? 'full-body' : 'upper-body'}
           onPresentationReady={handlePresentationReady}
         />
       </div>
-      {isMapPage && !open ? (
+      {isMapPage && !open && !companionSuppressed ? (
         <XiaolingFloatingCompanion
           mode={visualMode}
           onOpen={() => window.dispatchEvent(new CustomEvent(guideAssistantEvents.open, { detail: { mode: visualMode } }))}
@@ -349,7 +358,7 @@ export function GlobalXiaolingAssistant() {
       ) : null}
       {open || isFullscreenPage ? <XiaolingConversationSurface
         mode={isFullscreenPage ? 'fullscreen' : 'drawer'}
-        backgroundMedia={isFullscreenPage ? fullscreenBackground : drawerBackground}
+        backgroundMedia={drawerBackground}
         title={assistantContent.title}
         subtitle={assistantContent.subtitle}
         suggestedQuestions={assistantContent.suggestedQuestions}

@@ -10,3 +10,12 @@ test('renders every route card supplied by the guide payload', () => {
   assert.doesNotMatch(source, /payload\.items\[0\]/)
 })
 
+test('routes every supported payload through the generic recommendation card', () => {
+  assert.match(source, /import \{ GuideRecommendationCard \}/)
+  assert.equal(source.match(/<GuideRecommendationCard/g)?.length, 5)
+  assert.match(source, /kind: 'route'/)
+  assert.match(source, /kind: 'poi'/)
+  assert.match(source, /kind: 'navigation'/)
+  assert.match(source, /kind: 'next-stop'/)
+  assert.match(source, /kind: 'progress'/)
+})

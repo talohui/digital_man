@@ -1,4 +1,7 @@
 :root {
+  --map-type-eyebrow: 10px;
+  --map-type-caption: 11px;
+  --map-type-body: 12px;
   --map-green-deep: #214a3b;
   --map-green-mid: #3f6f5a;
   --map-cream: rgba(250, 246, 226, 0.94);

@@ -4,19 +4,16 @@ export type GLBRuntimeOrchestratorPhase =
   | 'waiting-visual'
   | 'route-poi'
   | 'landmarks'
-  | 'garden'
   | 'ready'
 
-export type GLBRuntimeOrchestratorProfile = 'desktop' | 'mobile' | 'debug'
+export type GLBRuntimeOrchestratorProfile = 'desktop' | 'mobile'
 
 export type GLBRuntimeOrchestratorSnapshot = {
   enabled: boolean
   phase: GLBRuntimeOrchestratorPhase
   profile: GLBRuntimeOrchestratorProfile
   landmarkGate: boolean
-  gardenGate: boolean
   landmarkDelayMs: number
-  gardenDelayMs: number
   pendingTimerCount: number
   reason: string
   updatedAt: number
@@ -26,7 +23,6 @@ export type GLBRuntimeOrchestratorInput = {
   enabled: boolean
   mapReady: boolean
   visualReady: boolean
-  debugGarden: boolean
   inkCleanMode: boolean
   mobile: boolean
   interactionLiteMode: boolean
@@ -35,18 +31,11 @@ export type GLBRuntimeOrchestratorInput = {
 type GLBRuntimeOrchestratorListener = (snapshot: GLBRuntimeOrchestratorSnapshot) => void
 
 const DESKTOP_DELAYS = {
-  landmarkDelayMs: 120,
-  gardenDelayMs: 760
+  landmarkDelayMs: 120
 }
 
 const MOBILE_DELAYS = {
-  landmarkDelayMs: 320,
-  gardenDelayMs: 1500
-}
-
-const DEBUG_DELAYS = {
-  landmarkDelayMs: 0,
-  gardenDelayMs: 0
+  landmarkDelayMs: 320
 }
 
 export class GLBRuntimeOrchestrator {
@@ -58,20 +47,17 @@ export class GLBRuntimeOrchestrator {
     phase: 'disabled',
     profile: 'desktop',
     landmarkGate: false,
-    gardenGate: false,
     landmarkDelayMs: 0,
-    gardenDelayMs: 0,
     reason: 'not-initialized'
   })
 
   update(input: GLBRuntimeOrchestratorInput) {
-    const profile = input.debugGarden ? 'debug' : input.mobile ? 'mobile' : 'desktop'
+    const profile = input.mobile ? 'mobile' : 'desktop'
     const delays = getDelays(profile)
     const nextSignature = [
       input.enabled,
       input.mapReady,
       input.visualReady,
-      input.debugGarden,
       input.inkCleanMode,
       input.mobile
     ].join('|')
@@ -89,9 +75,7 @@ export class GLBRuntimeOrchestrator {
         phase: 'disabled',
         profile,
         landmarkGate: false,
-        gardenGate: false,
         landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
         reason: input.inkCleanMode ? 'ink-clean-mode' : 'not-prototype-c'
       })
       return
@@ -103,9 +87,7 @@ export class GLBRuntimeOrchestrator {
         phase: 'waiting-map',
         profile,
         landmarkGate: false,
-        gardenGate: false,
         landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
         reason: 'map-not-ready'
       })
       return
@@ -117,37 +99,19 @@ export class GLBRuntimeOrchestrator {
         phase: 'waiting-visual',
         profile,
         landmarkGate: false,
-        gardenGate: false,
         landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
         reason: 'visual-not-ready'
       })
       return
     }
 
-    if (input.debugGarden) {
+    if (this.snapshot.landmarkGate) {
       this.setSnapshot({
         enabled: true,
         phase: 'ready',
         profile,
         landmarkGate: true,
-        gardenGate: true,
         landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
-        reason: 'debug-garden-bypass'
-      })
-      return
-    }
-
-    if (this.snapshot.landmarkGate || this.snapshot.gardenGate) {
-      this.setSnapshot({
-        enabled: true,
-        phase: 'ready',
-        profile,
-        landmarkGate: true,
-        gardenGate: true,
-        landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
         reason: 'runtime-gates-preserved'
       })
       return
@@ -159,34 +123,17 @@ export class GLBRuntimeOrchestrator {
         phase: 'landmarks',
         profile,
         landmarkGate: true,
-        gardenGate: false,
         landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
         reason: 'landmark-gate-open'
       })
     }, delays.landmarkDelayMs)
-
-    this.schedule(() => {
-      this.setSnapshot({
-        enabled: true,
-        phase: 'garden',
-        profile,
-        landmarkGate: true,
-        gardenGate: true,
-        landmarkDelayMs: delays.landmarkDelayMs,
-        gardenDelayMs: delays.gardenDelayMs,
-        reason: 'garden-gate-open'
-      })
-    }, delays.gardenDelayMs)
 
     this.setSnapshot({
       enabled: true,
       phase: 'route-poi',
       profile,
       landmarkGate: false,
-      gardenGate: false,
       landmarkDelayMs: delays.landmarkDelayMs,
-      gardenDelayMs: delays.gardenDelayMs,
       reason: input.interactionLiteMode ? 'waiting-interaction-lite' : 'staging-runtime-glb'
     })
   }
@@ -211,9 +158,7 @@ export class GLBRuntimeOrchestrator {
       phase: 'disabled',
       profile: this.snapshot.profile,
       landmarkGate: false,
-      gardenGate: false,
       landmarkDelayMs: 0,
-      gardenDelayMs: 0,
       reason: 'destroyed'
     })
   }
@@ -245,10 +190,6 @@ export class GLBRuntimeOrchestrator {
 }
 
 function getDelays(profile: GLBRuntimeOrchestratorProfile) {
-  if (profile === 'debug') {
-    return DEBUG_DELAYS
-  }
-
   if (profile === 'mobile') {
     return MOBILE_DELAYS
   }

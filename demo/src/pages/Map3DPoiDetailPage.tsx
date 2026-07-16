@@ -1,19 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
+import CAppBottomSheet from '../components/mobile/overlays/CAppBottomSheet'
+import PoiDetailArticleTitle from '../components/mobile/poi/PoiDetailArticleTitle'
+import PoiDetailCompanionCard from '../components/mobile/poi/PoiDetailCompanionCard'
+import PoiDetailHighlights from '../components/mobile/poi/PoiDetailHighlights'
+import PoiDetailPaintingFrame from '../components/mobile/poi/PoiDetailPaintingFrame'
+import PoiDetailVisitTips from '../components/mobile/poi/PoiDetailVisitTips'
+import PoiReviewCard, { type PoiVisitorReview } from '../components/mobile/poi/PoiReviewCard'
+import { openGlobalXiaoling } from '../components/guide/guideAssistantEvents'
 import { getScenicRouteConfig } from '../data/lingshanScenicRoutes'
 import { getLingshanPoiDetailById, lingshanPoiDetails, type LingshanPoiDetail } from '../data/lingshanPoiDetails'
 import { getPoiDetailContent, type PoiDetailContent } from '../data/poiDetailContent'
 import { getRecommendedStayLabel } from '../data/poiGuideMetadata'
+import { getPoiDetailPresentationConfig, getPoiReviewSamples } from '../data/poiDetailPresentationConfig'
 import { guideSpots } from '../data/guideData'
 import { lingshanPois } from '../data/lingshanMapData'
 import { getPoiMedia, type ScenicMediaEntry } from '../data/scenicMediaCatalog'
-import { goBackFromPoi, goContinueNextStop } from '../lib/mapGuideNavigation'
-import { readCAppReturnContext, resolveHomeCrowdPoiReturn } from '../lib/cAppReturnContext'
+import { goBackFromPoi, goContinueNextStop, goToMapBrowse } from '../lib/mapGuideNavigation'
+import { readCAppReturnContext, resolveHomeCrowdPoiReturn, resolveSpotsListPoiReturn } from '../lib/cAppReturnContext'
+import { resolvePoiNavigationTarget } from '../prototype-navigation/poiNavigationTarget'
+import { queuePoiShowcaseNavigation, resolveShowcaseNavigationOrigin } from '../prototype-navigation/showcaseNavigation'
 import { isPoiEntrySource, parsePoiRouteReturnContext, parseStopParam } from '../types/mapGuide'
 import '../styles/map/mapPoiDetailMobile.css'
 
 type ModelPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+const POI_REVIEW_TAGS = ['庄严震撼', '视野开阔', '值得登临', '讲解有帮助', '拍照出片']
 
 const POI_DETAIL_ID_ALIASES: Record<string, string> = {
   jiulong_bath: 'jiulong_guanyu',
@@ -32,17 +45,38 @@ function Map3DPoiDetailPage() {
   const detail = getPoiDetailView(resolvedPoiId)
   const content = getPoiDetailContent(detail?.id)
   const media = getPoiMedia(detail?.id)
+  const presentation = getPoiDetailPresentationConfig(detail?.id)
   const route = routeId ? getScenicRouteConfig(routeId) : undefined
   const routeReturnContext = route ? parsePoiRouteReturnContext(searchParams, route.stops.length) : undefined
+  const usesEditorialTemplate = Boolean(detail && presentation.template === 'editorial')
   const relatedDetails = useMemo(
     () => lingshanPoiDetails.filter((item) => item.id !== detail?.id).slice(0, 4),
     [detail?.id]
   )
+  const showcaseNavigationTarget = useMemo(
+    () => resolvePoiNavigationTarget(resolvedPoiId, detail?.name),
+    [detail?.name, resolvedPoiId]
+  )
+  const showcaseNavigationOrigin = useMemo(
+    () => resolvedPoiId ? resolveShowcaseNavigationOrigin(resolvedPoiId) : undefined,
+    [resolvedPoiId]
+  )
   const [modelPreviewOpen, setModelPreviewOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewTags, setReviewTags] = useState<string[]>([])
+  const [reviewText, setReviewText] = useState('')
+  const [visitorReviews, setVisitorReviews] = useState<PoiVisitorReview[]>([])
+  const [reviewSheetOpen, setReviewSheetOpen] = useState(false)
   const articleRef = useRef<HTMLElement | null>(null)
+  const reviewRef = useRef<HTMLElement | null>(null)
   const handleBack = () => {
     const returnContext = readCAppReturnContext()
+    const spotsListReturnTo = resolveSpotsListPoiReturn(returnContext, resolvedPoiId)
+    if (spotsListReturnTo) {
+      navigate(spotsListReturnTo, { replace: true })
+      return
+    }
     const homeReturnTo = resolveHomeCrowdPoiReturn(returnContext, resolvedPoiId)
     if (homeReturnTo) {
       navigate(homeReturnTo, { replace: true })
@@ -63,6 +97,22 @@ function Map3DPoiDetailPage() {
   useEffect(() => {
     setModelPreviewOpen(false)
     setFeedbackText('')
+    setReviewRating(5)
+    setReviewTags([])
+    setReviewText('')
+    setReviewSheetOpen(false)
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [detail?.id])
+
+  useEffect(() => {
+    if (!detail?.id) return
+    try {
+      const stored = window.localStorage.getItem(`lingshan:poi-reviews:${detail.id}`)
+      const parsed = stored ? JSON.parse(stored) : []
+      setVisitorReviews(Array.isArray(parsed) ? parsed : [])
+    } catch {
+      setVisitorReviews([])
+    }
   }, [detail?.id])
 
   useEffect(() => {
@@ -96,6 +146,64 @@ function Map3DPoiDetailPage() {
     isRouteEntry && routeId && nextStopIndex !== undefined && (!routeStopCount || nextStopIndex < routeStopCount)
   )
 
+  const handleShowcaseNavigation = () => {
+    if (!showcaseNavigationTarget || !showcaseNavigationOrigin) {
+      setFeedbackText('该景点的导航坐标尚未完善')
+      return
+    }
+    const result = queuePoiShowcaseNavigation(showcaseNavigationTarget, showcaseNavigationOrigin)
+    if (result.status === 'cancelled') return
+    if (result.status === 'unavailable') {
+      setFeedbackText(result.message)
+      return
+    }
+    goToMapBrowse(navigate, routeReturnContext?.presentation ?? 'ink2d')
+  }
+
+  const handleReviewSubmit = () => {
+    const normalizedText = reviewText.trim()
+    if (!normalizedText && !reviewTags.length) {
+      setFeedbackText('请写一句感受或选择一个印象标签')
+      return
+    }
+
+    const now = new Date()
+    const nextReview: PoiVisitorReview = {
+      id: `local-${now.getTime()}`,
+      rating: reviewRating,
+      tags: reviewTags,
+      text: normalizedText,
+      createdAt: `${now.getMonth() + 1}月${now.getDate()}日`
+    }
+    const nextReviews = [nextReview, ...visitorReviews].slice(0, 12)
+    setVisitorReviews(nextReviews)
+    try {
+      window.localStorage.setItem(`lingshan:poi-reviews:${detail.id}`, JSON.stringify(nextReviews))
+    } catch {
+      // 本地存储不可用时仍保留本次页面内评价。
+    }
+    setReviewText('')
+    setReviewTags([])
+    setFeedbackText('评价已保存，感谢分享')
+  }
+  const handleReviewDelete = (reviewId: string) => {
+    const nextReviews = visitorReviews.filter((review) => review.id !== reviewId)
+    setVisitorReviews(nextReviews)
+    try {
+      window.localStorage.setItem(`lingshan:poi-reviews:${detail.id}`, JSON.stringify(nextReviews))
+    } catch {
+      // 本地存储不可用时仍更新当前页面。
+    }
+    setFeedbackText('已删除本地评价')
+  }
+  const reviewProfile = presentation.review
+  const displayedReviews = [...visitorReviews, ...getPoiReviewSamples({
+    poiId: detail.id,
+    spotName: detail.name,
+    primaryHighlight: getHighlightItems(content, detail)[0]?.title ?? '现场细节',
+    config: presentation
+  })].slice(0, 3)
+
   return (
     <main
       className={`map-poi-detail ${isRouteEntry ? 'map-poi-detail--route' : 'map-poi-detail--browse'} ${
@@ -107,6 +215,7 @@ function Map3DPoiDetailPage() {
       data-route-id={routeId}
       data-route-stop-index={stopIndex}
       data-xiaoling-mode="poi"
+      data-poi-template={usesEditorialTemplate ? 'editorial' : undefined}
     >
       <header className="map-poi-detail__topbar">
         <button className="map-poi-detail__back" type="button" onClick={handleBack} aria-label="返回">
@@ -136,9 +245,9 @@ function Map3DPoiDetailPage() {
         </button>
       </header>
 
-      <section className={`map-poi-detail__stage map-poi-detail__stage--${detail.id}`}>
+      <PoiDetailPaintingFrame spotId={detail.id}>
         <PoiStageMedia detail={detail} media={media} />
-        {modelPreviewOpen ? <MapPoiModelPreview model={detail.model} name={detail.name} /> : null}
+        {modelPreviewOpen ? <MapPoiModelPreview model={detail.model} name={detail.name} transparentBackdrop={presentation.transparentModelBackdrop} /> : null}
 
         {detail.model ? (
           <button
@@ -146,6 +255,7 @@ function Map3DPoiDetailPage() {
             type="button"
             onClick={() => setModelPreviewOpen((open) => !open)}
             aria-pressed={modelPreviewOpen}
+            aria-label={modelPreviewOpen ? '切换到景点图片' : '查看3D模型'}
           >
             <strong>3D 模型</strong>
             <span aria-hidden="true" />
@@ -162,7 +272,7 @@ function Map3DPoiDetailPage() {
           <p>{detail.subtitle}</p>
         </div>
 
-      </section>
+      </PoiDetailPaintingFrame>
 
       <section className="map-poi-detail__entry">
         <button
@@ -173,15 +283,35 @@ function Map3DPoiDetailPage() {
           <strong>图文介绍</strong>
           <span>景点故事 / 核心看点 / 游览建议</span>
         </button>
-        {!isRouteEntry ? (
-          <button
-            className="map-poi-detail__nav-chip"
-            type="button"
-            onClick={() => setFeedbackText('导航能力建设中，后续将接入腾讯地图路线规划。')}
-          >
-            距你约 320m · 到这里
-          </button>
-        ) : null}
+        <div className="map-poi-detail__entry-actions">
+          {usesEditorialTemplate ? (
+            <button
+              className="map-poi-detail__review-jump"
+              type="button"
+              onClick={() => reviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            >
+              <span aria-hidden="true">★</span>
+              游客评价 {reviewProfile.averageRating.toFixed(1)}
+            </button>
+          ) : null}
+          {!isRouteEntry ? (
+            <div className="map-poi-detail__nav-demo">
+              <button
+                className="map-poi-detail__nav-chip"
+                type="button"
+                disabled={!showcaseNavigationTarget || !showcaseNavigationOrigin}
+                onClick={handleShowcaseNavigation}
+              >
+                导航到这里
+              </button>
+              <small>
+                {showcaseNavigationOrigin
+                  ? `虚拟定位演示 · 从${showcaseNavigationOrigin.name}出发`
+                  : '导航坐标待完善'}
+              </small>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {isRouteEntry ? (
@@ -191,33 +321,44 @@ function Map3DPoiDetailPage() {
       ) : null}
 
       <article className="map-poi-detail__article" ref={articleRef}>
+        {usesEditorialTemplate ? (
+          <PoiDetailArticleTitle title={detail.name} />
+        ) : null}
         <section className="map-poi-detail__section">
           <h2>一眼看懂</h2>
           <p>{content?.overview || detail.intro || `${detail.name} 是灵山胜境中的重要景点，适合结合图文、小灵讲解和现场游览一起了解。`}</p>
         </section>
         <PoiInlineImages content={content} afterSection="overview" />
 
-        <section className="map-poi-detail__section">
-          <h2>核心看点</h2>
-          <ul>
-            {getHighlightItems(content, detail).map((item) => (
-              <li key={item.title}>
-                <strong>{item.title}</strong>
-                {item.description ? <span>{item.description}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </section>
+        <PoiDetailHighlights items={getHighlightItems(content, detail)} />
         <PoiInlineImages content={content} afterSection="highlights" />
 
-        <section className="map-poi-detail__section">
-          <h2>游览建议</h2>
-          <ul>
-            {getLimitedList(content?.visitTips ?? detail.visitTips, ['建议先看整体环境，再靠近观察细节', '适合结合小灵讲解快速理解看点'], content?.contentLevel === 'full' ? 5 : 3).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
+        <PoiDetailVisitTips
+          tips={getLimitedList(content?.visitTips ?? detail.visitTips, ['建议先看整体环境，再靠近观察细节', '适合结合小灵讲解快速理解看点'], content?.contentLevel === 'full' ? 5 : 3)}
+        />
+
+        {usesEditorialTemplate ? (
+          <PoiDetailCompanionCard
+            spotName={detail.name}
+            onOpen={() => openGlobalXiaoling({
+                mode: 'poi',
+              autoPrompt: presentation.companionPrompt.replace('{spotName}', detail.name)
+            })}
+          />
+        ) : null}
+
+        {usesEditorialTemplate ? (
+          <div className="map-poi-detail__article-reviews">
+            <PoiReviewCard
+              ref={reviewRef}
+              spotName={detail.name}
+              averageRating={reviewProfile.averageRating}
+              reviewCount={reviewProfile.reviewCount + visitorReviews.length}
+              reviews={displayedReviews}
+              onOpen={() => setReviewSheetOpen(true)}
+            />
+          </div>
+        ) : null}
 
         <section className="map-poi-detail__section">
           <h2>继续查看</h2>
@@ -255,6 +396,92 @@ function Map3DPoiDetailPage() {
             继续下一站
           </button>
         </div>
+      ) : null}
+
+      {usesEditorialTemplate && reviewSheetOpen ? (
+        <CAppBottomSheet
+          title={`评价${detail.name}`}
+          eyebrow="游客印象 · 真实感受"
+          closeLabel="收起"
+          className="map-poi-detail__review-sheet"
+          onClose={() => setReviewSheetOpen(false)}
+        >
+          <div className="map-poi-detail__review-sheet-summary">
+            <strong>{reviewProfile.averageRating.toFixed(1)}</strong>
+            <span><b aria-label={`${reviewProfile.averageRating.toFixed(1)}星`}>★★★★★</b><small>{reviewProfile.reviewCount + visitorReviews.length} 条评价</small></span>
+          </div>
+
+          <div className="map-poi-detail__review-form">
+            <div className="map-poi-detail__review-stars" role="group" aria-label="选择评分">
+              {[1, 2, 3, 4, 5].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={value <= reviewRating ? 'is-active' : ''}
+                  onClick={() => setReviewRating(value)}
+                  aria-label={`${value}星`}
+                  aria-pressed={value === reviewRating}
+                >
+                  ★
+                </button>
+              ))}
+              <span>{reviewRating}.0</span>
+            </div>
+
+            <div className="map-poi-detail__review-tags" aria-label="选择印象标签">
+              {POI_REVIEW_TAGS.map((tag) => {
+                const active = reviewTags.includes(tag)
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    className={active ? 'is-active' : ''}
+                    onClick={() => setReviewTags((current) => active ? current.filter((item) => item !== tag) : [...current, tag])}
+                    aria-pressed={active}
+                  >
+                    {tag}
+                  </button>
+                )
+              })}
+            </div>
+
+            <label className="map-poi-detail__review-editor">
+              <span>写下你的游览感受</span>
+              <textarea
+                value={reviewText}
+                onChange={(event) => setReviewText(event.target.value.slice(0, 160))}
+                placeholder="例如：推荐的观赏位置、游览节奏或现场感受……"
+                rows={4}
+                maxLength={160}
+              />
+              <small>{reviewText.length} / 160</small>
+            </label>
+
+            <button className="map-poi-detail__review-submit" type="button" onClick={handleReviewSubmit}>
+              提交评价
+            </button>
+          </div>
+
+          <div className="map-poi-detail__review-list" aria-label="近期评价">
+            <h3>近期评价</h3>
+            {displayedReviews.map((review, index) => (
+              <article key={review.id} className="map-poi-detail__review-item">
+                <header>
+                  <span aria-hidden="true">{index === 0 && visitorReviews.length ? '我' : '游'}</span>
+                  <strong>{index === 0 && visitorReviews.length ? '我的评价' : '灵山游客'}</strong>
+                  <em>{review.createdAt}</em>
+                  <small aria-label={`${review.rating}星`}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</small>
+                </header>
+                {review.text ? <p>{review.text}</p> : null}
+                {review.tags.length ? <div>{review.tags.map((tag) => <span key={tag}>{tag}</span>)}</div> : null}
+                {review.id.startsWith('local-') ? (
+                  <button type="button" onClick={() => handleReviewDelete(review.id)}>删除</button>
+                ) : null}
+              </article>
+            ))}
+          </div>
+          <p className="map-poi-detail__review-local-note">当前为本地评价样板，内容仅保存在此浏览器中。</p>
+        </CAppBottomSheet>
       ) : null}
 
       {feedbackText ? <div className="map-poi-detail__toast">{feedbackText}</div> : null}
@@ -370,10 +597,19 @@ function PoiStageMedia({ detail, media }: { detail: LingshanPoiDetail; media: Sc
   )
 }
 
-function MapPoiModelPreview({ model, name }: { model: LingshanPoiDetail['model']; name: string }) {
+function MapPoiModelPreview({
+  model,
+  name,
+  transparentBackdrop = false
+}: {
+  model: LingshanPoiDetail['model']
+  name: string
+  transparentBackdrop?: boolean
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [status, setStatus] = useState<ModelPreviewStatus>('idle')
   const modelUrl = model?.url
+  const usesPaperBackdrop = transparentBackdrop
 
   useEffect(() => {
     if (!modelUrl || !canvasRef.current) {
@@ -420,14 +656,15 @@ function MapPoiModelPreview({ model, name }: { model: LingshanPoiDetail['model']
         if (disposed || !canvasRef.current) return
 
         scene = new THREE.Scene()
-        scene.background = new THREE.Color('#1f3b31')
+        scene.background = usesPaperBackdrop ? null : new THREE.Color('#1f3b31')
         camera = new THREE.PerspectiveCamera(38, 1, 0.1, 5000)
         renderer = new THREE.WebGLRenderer({
           canvas: canvasRef.current,
           antialias: true,
-          alpha: false,
+          alpha: usesPaperBackdrop,
           powerPreference: 'low-power'
         })
+        if (usesPaperBackdrop) renderer.setClearColor(0x000000, 0)
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
 
         const resize = () => {
@@ -440,7 +677,7 @@ function MapPoiModelPreview({ model, name }: { model: LingshanPoiDetail['model']
           camera.updateProjectionMatrix()
         }
 
-        const ambient = new THREE.HemisphereLight('#fff9e8', '#6b806d', 2.3)
+        const ambient = new THREE.HemisphereLight('#fff9e8', usesPaperBackdrop ? '#948875' : '#6b806d', 2.3)
         const key = new THREE.DirectionalLight('#fff2c1', 2.6)
         key.position.set(3, 5, 4)
         scene.add(ambient, key)
@@ -502,7 +739,7 @@ function MapPoiModelPreview({ model, name }: { model: LingshanPoiDetail['model']
       scene = null
       renderer = null
     }
-  }, [modelUrl])
+  }, [modelUrl, usesPaperBackdrop])
 
   return (
     <div className="map-poi-detail__model-preview" aria-live="polite">

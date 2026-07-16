@@ -41,11 +41,23 @@ function temporaryTargetSvg() {
 export function NavigationPrototypeLocalTestMapLayer({
   runtime,
   onStateChange,
-  onStarted
+  onStarted,
+  onTargetPreviewChange,
+  enabled: enabledOverride,
+  showControls = true,
+  restoreCameraOnFinish = true
 }: {
   runtime: NavigationPrototypeMapRuntime | null
   onStateChange?: (phase?: LocalNavigationTestState['phase']) => void
   onStarted?: () => void
+  onTargetPreviewChange?: (preview?: {
+    coordinate: Gcj02Position
+    name: string
+    distanceMeters?: number
+  }) => void
+  enabled?: boolean
+  showControls?: boolean
+  restoreCameraOnFinish?: boolean
 }) {
   const localTest = useNavigationPrototypeStore((state) => state.localNavigationTest)
   const prepare = useNavigationPrototypeStore((state) => state.prepareLocalNavigationTest)
@@ -57,7 +69,7 @@ export function NavigationPrototypeLocalTestMapLayer({
   const targetMarkerRef = useRef<any>(null)
   const selectionWasActiveRef = useRef(false)
   const previousPhaseRef = useRef(localTest?.phase)
-  const enabled = isNavigationDebugEnabled()
+  const enabled = enabledOverride ?? isNavigationDebugEnabled()
   const displayTarget = selectedTarget ?? localTest?.target
   const markerTarget = localTest?.phase === 'arrived' || localTest?.phase === 'error' ? undefined : displayTarget
   const distanceMeters = useMemo(() => {
@@ -68,6 +80,12 @@ export function NavigationPrototypeLocalTestMapLayer({
   useEffect(() => {
     onStateChange?.(localTest?.phase)
   }, [localTest?.phase, onStateChange])
+
+  useEffect(() => {
+    onTargetPreviewChange?.(displayTarget
+      ? { ...displayTarget, distanceMeters }
+      : undefined)
+  }, [displayTarget, distanceMeters, onTargetPreviewChange])
 
   useEffect(() => {
     const phase = localTest?.phase
@@ -130,7 +148,14 @@ export function NavigationPrototypeLocalTestMapLayer({
   useEffect(() => {
     const shouldRestore = selectionWasActiveRef.current
       && (!localTest || localTest.phase === 'arrived' || localTest.phase === 'error')
-    if (!shouldRestore || !runtime || !savedCameraRef.current) return
+    if (!shouldRestore) return
+    if (!restoreCameraOnFinish) {
+      savedCameraRef.current = undefined
+      selectionWasActiveRef.current = false
+      setSelectedTarget(undefined)
+      return
+    }
+    if (!runtime || !savedCameraRef.current) return
     const camera = savedCameraRef.current
     runtime.map.easeTo?.({
       center: new runtime.TMap.LatLng(camera.center.lat, camera.center.lng),
@@ -141,10 +166,10 @@ export function NavigationPrototypeLocalTestMapLayer({
     savedCameraRef.current = undefined
     selectionWasActiveRef.current = false
     setSelectedTarget(undefined)
-  }, [localTest, runtime])
+  }, [localTest, restoreCameraOnFinish, runtime])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !isNavigationDebugEnabled()) return
     ;(window as any).__LINGSHAN_NAVIGATION_MAP_DEBUG__ = {
       ...(window as any).__LINGSHAN_NAVIGATION_MAP_DEBUG__,
       localTestSelectionActive: localTest?.phase === 'awaiting-target',
@@ -157,7 +182,7 @@ export function NavigationPrototypeLocalTestMapLayer({
   useEffect(() => () => {
     targetMarkerRef.current?.setMap?.(null)
     const camera = savedCameraRef.current
-    if (runtime && camera) {
+    if (restoreCameraOnFinish && runtime && camera) {
       runtime.map.easeTo?.({
         center: new runtime.TMap.LatLng(camera.center.lat, camera.center.lng),
         zoom: camera.zoom,
@@ -165,9 +190,9 @@ export function NavigationPrototypeLocalTestMapLayer({
         rotation: camera.rotation
       }, { duration: 0 })
     }
-  }, [runtime])
+  }, [restoreCameraOnFinish, runtime])
 
-  if (!enabled) return null
+  if (!enabled || !showControls) return null
 
   return <section className="navigation-prototype-replay navigation-prototype-local-test">
     <strong className="navigation-prototype-local-test__title">测试步骤</strong>

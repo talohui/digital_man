@@ -1,0 +1,96 @@
+.map-service-panel {
+  width: min(100%, 430px);
+  max-height: min(66dvh, 560px);
+  pointer-events: auto;
+}
+
+.map-service-panel .consume-v2-overlay__header small {
+  font-size: var(--map-type-eyebrow, 10px);
+}
+
+.map-service-panel .consume-v2-overlay__header > button {
+  font-size: var(--map-type-body, 12px);
+}
+
+.map-service-panel__intro {
+  margin: 0;
+  padding: 15px 17px 12px;
+  color: rgba(32, 59, 51, .62);
+  font-size: var(--map-type-caption, 11px);
+  line-height: 1.55;
+}
+
+.map-service-panel__tabs {
+  width: calc(100% - 26px);
+  margin: 0 13px;
+}
+
+.map-service-panel .map-service-panel__tabs strong {
+  font-size: var(--map-type-eyebrow, 10px);
+}
+
+.map-service-panel__result {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  margin: 17px;
+  padding: 14px 15px 15px;
+  border: 1px solid rgba(45, 74, 62, .2);
+  border-left: 3px solid #2d4a3e;
+  background: rgba(221, 233, 231, .42);
+}
+
+.map-service-panel__result::after {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #c9a86a;
+  background: rgba(45, 74, 62, .12);
+  content: '';
+  transform: rotate(45deg);
+}
+
+.map-service-panel__result > span {
+  color: #896932;
+  font-size: var(--map-type-eyebrow, 10px);
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+
+.map-service-panel__result h3 {
+  margin: 0;
+  font-family: var(--map-font-serif);
+  font-size: 19px;
+  letter-spacing: .04em;
+}
+
+.map-service-panel__result p {
+  margin: 0;
+  color: rgba(32, 59, 51, .64);
+  font-size: var(--map-type-caption, 11px);
+  line-height: 1.55;
+}
+
+.map-service-panel__result small {
+  color: #856a3b;
+  font-size: var(--map-type-eyebrow, 10px);
+}
+
+.map-service-panel .map-service-panel__result button {
+  min-height: 38px;
+  margin-top: 7px;
+  border: 1px solid #c9a86a;
+  color: #fff;
+  background: #2d4a3e;
+  font-size: var(--map-type-body, 12px);
+  font-weight: 800;
+}
+
+.map-service-panel .map-service-panel__result button:disabled {
+  border-color: rgba(45, 74, 62, .24);
+  color: rgba(32, 59, 51, .54);
+  background: rgba(221, 233, 231, .72);
+  cursor: not-allowed;
+}

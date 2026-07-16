@@ -4,7 +4,7 @@ export type GLBSpatialPosition = {
   height?: number
 }
 
-export type GLBSpatialModelKind = 'tree' | 'landmark' | 'companion' | 'model'
+export type GLBSpatialModelKind = 'landmark' | 'companion' | 'model'
 
 export type GLBSpatialRegisterOptions = {
   baseOpacity?: number

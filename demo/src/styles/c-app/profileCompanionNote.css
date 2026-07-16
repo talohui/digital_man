@@ -1,0 +1,64 @@
+/* C APP PROFILE COMPONENT: XIAOLING JOURNEY NOTE */
+.profile-companion-note {
+  position: relative;
+  margin: 18px 0 4px;
+  padding: 18px 16px 14px;
+  border: 1px solid rgba(45, 74, 62, .58);
+  color: #203b33;
+  background:
+    linear-gradient(90deg, rgba(45, 74, 62, .035) 1px, transparent 1px) 0 0 / 27px 100%,
+    linear-gradient(145deg, rgba(252, 249, 239, .98), rgba(232, 240, 235, .96));
+  box-shadow: 5px 6px 0 rgba(45, 74, 62, .08), inset 0 0 0 5px rgba(255, 253, 247, .48);
+}
+
+.profile-companion-note::before,
+.profile-companion-note::after {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: #c9a86a;
+  border-style: solid;
+  content: '';
+  pointer-events: none;
+}
+.profile-companion-note::before { top: 7px; left: 7px; border-width: 1px 0 0 1px; }
+.profile-companion-note::after { right: 7px; bottom: 7px; border-width: 0 1px 1px 0; }
+
+.profile-companion-note__binding {
+  position: absolute;
+  top: -7px;
+  right: 22px;
+  left: 22px;
+  display: flex;
+  height: 7px;
+  align-items: center;
+  justify-content: space-around;
+  border-top: 2px solid #2d4a3e;
+  border-bottom: 1px solid #c9a86a;
+  background: #f5f1e8;
+}
+.profile-companion-note__binding i { width: 5px; height: 9px; border: 1px solid #c9a86a; background: #2d4a3e; transform: translateY(-2px); }
+
+.profile-companion-note__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 2px 11px; border-bottom: 1px solid rgba(45, 74, 62, .18); }
+.profile-companion-note__head > span { display: flex; align-items: baseline; gap: 8px; }
+.profile-companion-note__head small { color: #806536; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.profile-companion-note__head strong { font-family: var(--font-lingshan-display); font-size: 16px; letter-spacing: .1em; }
+.profile-companion-note__head > i { position: relative; display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid rgba(147, 76, 61, .72); color: #934c3d; font-family: var(--font-lingshan-display); font-size: 12px; font-style: normal; transform: rotate(5deg); }
+.profile-companion-note__head > i::after { position: absolute; width: 22px; height: 22px; border: 1px solid rgba(147, 76, 61, .38); content: ''; }
+
+.profile-companion-note__body { position: relative; padding: 17px 9px 15px 30px; }
+.profile-companion-note__quote { position: absolute; top: 9px; left: 2px; color: rgba(201, 168, 106, .68); font-family: var(--font-lingshan-display); font-size: 43px; line-height: 1; }
+.profile-companion-note__body h2 { margin: 0 0 7px; font-family: var(--font-lingshan-display); font-size: 18px; font-weight: 700; line-height: 1.45; letter-spacing: .035em; }
+.profile-companion-note__body p { margin: 0; color: rgba(32, 59, 51, .66); font-size: 11px; line-height: 1.75; }
+
+.profile-companion-note__footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 2px 0; border-top: 1px solid rgba(201, 168, 106, .48); }
+.profile-companion-note__footer > span { color: rgba(32, 59, 51, .47); font-size: 11px; line-height: 1.5; }
+.profile-companion-note__footer button { display: flex; min-height: 36px; flex: none; align-items: center; gap: 5px; padding: 0 11px; border: 1px solid #2d4a3e; color: #f9f5ea; background: #2d4a3e; font-family: var(--font-lingshan-ui); font-size: 12px; font-weight: 700; box-shadow: 2px 3px 0 rgba(201, 168, 106, .55); }
+.profile-companion-note__footer button:active { transform: translateY(1px); box-shadow: 1px 1px 0 rgba(201, 168, 106, .55); }
+.profile-companion-note__footer button:focus-visible { outline: 2px solid #c9a86a; outline-offset: 2px; }
+
+@media (max-width: 375px) {
+  .profile-companion-note { padding-right: 12px; padding-left: 12px; }
+  .profile-companion-note__body { padding-left: 26px; }
+  .profile-companion-note__footer { align-items: end; flex-direction: column; }
+}

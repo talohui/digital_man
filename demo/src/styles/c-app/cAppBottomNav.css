@@ -1,0 +1,113 @@
+.c-app-bottom-nav {
+  position: fixed;
+  z-index: 80;
+  right: auto;
+  bottom: 0;
+  left: 50%;
+  display: grid;
+  width: min(100%, 430px);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+  border: 0;
+  border-top: 1px solid rgba(45, 74, 62, 0.35);
+  border-radius: 0;
+  background: #f8f3e9;
+  box-shadow: 0 -6px 18px rgba(32, 59, 51, 0.1);
+  transform: translateX(-50%);
+}
+
+.c-app-bottom-nav__tab {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 62px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: rgba(32, 59, 51, 0.5);
+  background: transparent;
+  font-family: var(--font-lingshan-ui, "Noto Sans SC", sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.c-app-bottom-nav__tab::before {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: #c9a86a;
+  content: '';
+  transform: translateX(-50%);
+  transition: width 160ms ease;
+}
+
+.c-app-bottom-nav__tab.is-active {
+  color: #2d4a3e;
+  font-weight: 700;
+}
+
+.c-app-bottom-nav__tab.is-active::before { width: 38px; }
+
+.c-app-bottom-nav__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
+}
+
+.c-app-bottom-nav__icon > img {
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  clip-path: circle(45% at 50% 50%);
+}
+
+.c-app-bottom-nav__tab.is-active .c-app-bottom-nav__icon {
+  filter: drop-shadow(0 2px 3px rgba(45, 74, 62, 0.2));
+  transform: translateY(-1px);
+}
+
+.c-app-bottom-nav__tab.is-xiaoling .c-app-bottom-nav__icon {
+  width: 42px;
+  height: 42px;
+  margin-top: -8px;
+  padding: 3px;
+  border: 1.5px solid #c9a86a;
+  background: #2d4a3e;
+  box-shadow:
+    0 4px 10px rgba(32, 59, 51, 0.24),
+    0 0 0 3px rgba(245, 241, 232, 0.92),
+    0 0 0 4px rgba(201, 168, 106, 0.24);
+}
+
+.c-app-bottom-nav__tab.is-xiaoling .xiaoling-avatar--tab {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(247, 237, 218, 0.74);
+}
+
+.c-app-bottom-nav__tab.is-xiaoling.is-active .c-app-bottom-nav__icon {
+  box-shadow:
+    0 5px 13px rgba(32, 59, 51, 0.3),
+    0 0 0 3px rgba(245, 241, 232, 0.96),
+    0 0 0 5px rgba(201, 168, 106, 0.42);
+  transform: translateY(-2px);
+}
+
+.c-app-bottom-nav__tab:not(:disabled):active .c-app-bottom-nav__icon {
+  transform: translateY(1px) scale(0.96);
+}

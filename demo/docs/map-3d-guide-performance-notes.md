@@ -8,16 +8,13 @@
 
 - 当前正式页面默认启用本地水墨瓦片，并通过沙盘视野限制和边缘雾幕控制外部腾讯底图露出。
 - 当前沉浸播放入口只保留佛境巡游；早期章节中的路线预演 / `routePreview` 为历史性能记录，已不再作为现行功能、UI 或 debugPerf 字段存在。
-- 当前性能关注点为水墨瓦片 z20 fallback、869 树群稳定分批加载、核心地标 runtime 加载和佛境巡游相机收紧。
 
 ## 2. 背景问题
 
-优化前，应用入口包约 `2.72 MB`。该入口包过大时，普通 `/map-3d-guide-c` 容易被无关模块拖慢，包括后台、AntD、Live2D、Cubism、ScenicModel、Scenic3DMapPage、debugGarden 编辑器等。
 
 当前正确拆包原则：
 
 - 普通 `/map-3d-guide-c` 只加载真实导览必需资源。
-- `debugGarden` 只在 `debugGarden=1` 时加载。
 - `debugPerf` 只在 `debugPerf=1` 时显示诊断 UI。
 - 后台、Live2D、Cubism、ScenicModel 不进入 C 版首屏。
 
@@ -112,57 +109,6 @@ AntD Provider、AntD App 容器、中文 locale 和主题配置已从 `main.tsx`
 
 普通 `/map-3d-guide-c` 不再加载 Cubism Core / Cubism chunk。Live2D 仍可在实际需要的页面按需加载。
 
-## 7. debugGarden 拆包
-
-### 改动摘要
-
-`GardenDebugWizard` 已从 `Map3DGuidePage.tsx` 中拆出，使用 `React.lazy` + `Suspense` 条件加载：
-
-- `src/components/map3d/GardenDebugWizard.tsx`
-
-普通 `/map-3d-guide-c` 不加载该工作台。只有打开：
-
-```text
-/map-3d-guide-c?debugGarden=1
-```
-
-才会加载 `GardenDebugWizard` chunk。
-
-### 涉及文件
-
-- `src/pages/Map3DGuidePage.tsx`
-- `src/components/map3d/GardenDebugWizard.tsx`
-
-### 验收结果
-
-最新构建中 `GardenDebugWizard` 独立 chunk 约 `17.93 kB`，gzip 约 `3.98 kB`。普通 C 页不再承担该编辑器首屏成本。
-
-## 8. GLB 园林资产分批创建
-
-### 改动摘要
-
-GLB 树群 overlay 生命周期已拆到：
-
-- `src/hooks/useGardenAssetOverlays.ts`
-
-当前策略：
-
-- 先根据 `routeProgressRatio`、`debugGarden` 和重规划状态筛选可见资产。
-- 按 `priority` 和原始顺序排序。
-- 分批创建 `TMap.model.GLTFModel`。
-- 当前批大小约为 `16`。
-- 批次之间通过 `requestAnimationFrame` 和短延迟让 UI 有机会先绘制。
-- 单个 GLB 创建失败记录到 report，不阻断其它模型。
-
-### 涉及文件
-
-- `src/hooks/useGardenAssetOverlays.ts`
-- `src/pages/Map3DGuidePage.tsx`
-
-### 验收结果
-
-普通页面地图、路线、POI、导览牌、相机卡保持不变。`debugGarden` 页面仍能显示并编辑资产。
-
 ## 9. 当前生产构建体积
 
 最近一次 `npm run build` 输出中，与本说明相关的主要 chunk 为：
@@ -171,7 +117,6 @@ GLB 树群 overlay 生命周期已拆到：
 | --- | ---: | ---: | --- |
 | `index-*.js` | 约 188.09 kB | 约 61.68 kB | 当前生产入口 |
 | `Map3DGuidePage-*.js` | 约 126.28 kB | 约 37.38 kB | 3D guide 页面 chunk |
-| `GardenDebugWizard-*.js` | 约 17.93 kB | 约 3.98 kB | debugGarden 工作台 |
 | `ScenicModel-*.js` | 约 963.09 kB | 约 260.18 kB | Three / drei / GLTF 预览相关 |
 | `AdminDashboard-*.js` | 约 916.33 kB | 约 270.11 kB | 后台页面 |
 | `admin-*.js` | 约 601.51 kB | 约 166.48 kB | 后台 vendor |
@@ -184,7 +129,6 @@ GLB 树群 overlay 生命周期已拆到：
 
 ```text
 /map-3d-guide-c?debugPerf=1
-/map-3d-guide-c?debugGarden=1&debugPerf=1
 ```
 
 诊断面板记录：
@@ -239,7 +183,6 @@ public/models/lingshan/landmarks/
 
 ```text
 /map-3d-guide-c?debugPerf=1
-/map-3d-guide-c?debugGarden=1&debugPerf=1
 ```
 
 它用于人工逐个检查 raw 地标 GLB，而不是游客端的正式加载策略：
@@ -256,7 +199,6 @@ public/models/lingshan/landmarks/
 
 `debugPerf=1` 现在同时记录：
 
-- Garden GLB：园林树群资产。
 - Landmark GLB：核心景点模型。
 
 地标 GLB Inspector 和 `debugPerf` 诊断字段包括：
@@ -274,7 +216,6 @@ public/models/lingshan/landmarks/
 - `loadCount`
 - `unloadCount`
 
-注意：与园林资产一样，当前统计仍是 `TMap.model.GLTFModel` overlay 创建耗时，不等同于浏览器网络层完整下载耗时。
 
 ### 当前风险
 
@@ -805,7 +746,6 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 
 ### 问题修正
 
-`mapStatus=ready` 原本表示腾讯地图实例已创建，但不代表底图 canvas 已经完成首帧可视渲染。路线、POI、树群和 UI 可能早于底图瓦片 / 3D 底图显示，导致用户短暂看到黑底地图区域。
 
 ### 新 ready gating
 
@@ -816,7 +756,6 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - `mapVisualReady`：底图被认为可视稳定，或 900ms fallback 兜底触发。
 - `mapReadyTimedOut`：4.8s 仍未 ready 时记录慢加载状态。
 
-该逻辑不阻塞 GLB 树群加载；树群仍按原策略分批创建。
 
 ### Loading curtain
 
@@ -844,7 +783,6 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 
 ### 问题修正
 
-单独的 loading curtain 只能遮住一部分首屏问题；如果 `mapStatus=ready` 后 overlay 立即创建，而腾讯底图视觉 ready 仍滞后，路线、POI、树群就可能早于底图显示，形成“黑底半成品”。
 
 ### 新启动时序
 
@@ -855,13 +793,11 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - `waitingBaseMap`：地图实例和初始 camera 已应用，等待底图首帧稳定。
 - `baseMapReady`：收到可信底图事件后，经过最小延迟和 2 帧 RAF。
 - `overlaysReady`：开始显示路线 / POI 等地图 overlay。
-- `gardenLoading`：底图 ready 后开始树群 GLB 分批加载。
 - `ready`：启动阶段完成。
 - `slow` / `failed`：保持浅色兜底，不暴露黑底。
 
 ### Overlay gating
 
-路线、POI、用户 marker、重规划线、地标高亮、debugGarden 编辑 overlay 都改为依赖 `mapVisualReadyForOverlays`。树群 GLB 通过 `shouldLoadGardenAssets` 显式等待底图 visual ready 后再创建，继续沿用原来的 batch 和 overlay 去重逻辑。
 
 ### debugPerf 字段
 
@@ -875,82 +811,6 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - loading curtain duration
 
 这些事件只在阶段变化时记录，不参与逐帧采样，不会放大运行时开销。
-
-## 27. debugGarden 树木候选池性能边界
-
-### 本轮接入
-
-为 debugGarden 新增 5 个毛茸茸 / 圆冠 / 灌木感更强的树木候选 GLB：
-
-- `fluffy_round_tree`
-- `bushy_canopy_tree`
-- `dense_shrub_cluster`
-- `soft_forest_clump`
-- `fluffy_tree_mix`
-
-候选文件位于 `public/models/lingshan/tree-candidates/`，单体体积约 4.5 KB 到 31 KB，均未使用 Draco、Meshopt、KTX2、WebP 或 AVIF。
-
-### 加载边界
-
-- 候选只加入 debugGarden 的资产候选池。
-- `defaultEditorAssetPool`、默认 vegetation zones、默认 assets 和游客端默认树群不使用这些候选。
-- 普通 `/map-3d-guide-c` 不会因为候选池存在而自动加载新 GLB。
-- 只有在 debugGarden 中手动选择并添加候选资产，或将候选加入草稿资产池后，才会触发对应 GLB 加载。
-
-### 后续观察
-
-后续如果把候选升级为默认树群，应重新评估：
-
-- 首屏 GLB 总请求数。
-- `useGardenAssetOverlays` live overlay count。
-- 树群 batch 加载耗时。
-- debugGarden 草稿保存后对普通 prototype-c 页面加载的影响。
-
-## 28. 手动交互轻量模式与树群 LOD
-
-### 问题修正
-
-`/map-3d-guide-c` 当前约有 199 个 GLB 树群 overlay。手动缩放 / 拖动时，如果所有树群保持完整不变，同时路线、POI、地标和编辑 overlay 继续渲染，会增加交互期压力。缩得过远时，单棵树在视觉上也不再有意义，反而形成噪声。
-
-### 沙盘边界
-
-新增集中配置 `SCENIC_CAMERA_BOUNDS`：
-
-- 限制最远 / 最近 zoom，避免退回普通城市大地图或无限近看。
-- 限制地图中心离路线中心的最大距离，避免景区主体被拖到画面角落。
-- 对超出边界的情况在 `zoomend` / `moveend` / `idle` 后温和回弹，避免缩放过程中持续拉扯用户。
-
-### 交互轻量模式
-
-用户 wheel / pointer / touch 交互开始时进入 interaction lite mode：
-
-- 停止佛境巡游 / 路线预演。
-- 清理巡游 route progress 和地标 active highlight。
-- 只用 ref 记录高频运行态，React state 只做低频快照。
-- 交互结束后约 460ms 恢复普通视觉。
-
-### Garden LOD
-
-`useGardenAssetOverlays` 新增 `gardenLodState`：
-
-- overlay 生命周期仍只依赖 map ready、资产列表、enabled 等稳定输入。
-- zoom / interaction 不触发 remove / recreate。
-- LOD 只对已存在的 GLTFModel 调用 `setOpacity`。
-- normal scenic zoom：opacity 1。
-- interacting：opacity 约 0.36，debugGarden 约 0.58。
-- far zoom：opacity 约 0.08，debugGarden 约 0.22。
-
-### debugPerf
-
-面板新增：
-
-- current zoom
-- interaction kind / active
-- garden LOD tier
-- garden opacity
-- live garden overlay count
-
-相关事件只在交互状态或 LOD tier 变化时记录，不逐帧记录，不应造成诊断面板卡顿。
 
 ## 29. 三处新增 runtime-v1 地标 GLB 接入边界
 
@@ -967,12 +827,10 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 - GLB 仍通过 public URL 字符串配置，不进入 TypeScript / Vite JS chunk。
 - 普通 `/map-3d-guide-c` 不默认加载 raw GLB。
 - `/map-3d-guide-c?debugPerf=1` 的 Landmark Inspector 可单体加载、卸载、聚焦和校准这 3 个模型，并记录耗时和错误。
-- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 的核心地标参照层可加载这 3 个 runtime-v1 地标。
 - 旧 464M `bodhi-avenue.glb` 不再被正式 `modelUrl` 引用，本轮不处理、不压缩、不提交。
 
 ### 后续观察
 
-三处模型仍是初始 transform，后续应在 Landmark Inspector 中逐个校准 scale / height / rotation / offset。菩提大道为线性场景资产，加载时尤其需要关注遮挡、模型跨度和与路线 / POI / 树群的视觉关系。
 
 ## 30. 三处新增地标校准固化
 
@@ -988,7 +846,6 @@ rAF 连续时间轴消除了 waypoint 分段 `flyTo` 的明显顿挫，但如果
 
 - 三个模型仍通过 public URL 加载，不进入 JS chunk。
 - 三个模型已进入 Landmark Inspector，可继续单独加载、卸载、聚焦和校准。
-- debugGarden 核心地标参照层包含这三处地标。
 - debugPerf 本地 calibration draft 仍可覆盖默认 transform，便于后续微调。
 - 旧 464M 菩提大道 raw 文件仍不处理、不提交、不作为运行时引用。
 
@@ -1061,61 +918,11 @@ debugPerf 新增 companion model 事件：
 - 仍不采用 polygon mask，不启用 TMap polygon mask。
 - debugPerf 本地 calibration draft 仍可覆盖默认值，便于后续微调。
 
-## 34. 手动 869 树群默认加载策略
-
-### 数据来源
-
-- 用户在 Tree Candidate Lab 中手动摆放并导出的 869 个 tree assets 已成为 `/map-3d-guide-c` 默认树群。
-- 旧 deterministic 199 树群保留为 legacy，不删除数据文件、不删除 GLB。
-- 普通游客页不读取 Tree Candidate Lab 草稿，只读取固化后的手动树群数据。
-
-### 加载策略
-
-- 新默认树群按 priority 分层加载：
-  - high / tier 1：前 200 个核心树群。
-  - medium / tier 2：中间 300 个普通树群。
-  - low / tier 3：剩余 369 个背景补景。
-- `useGardenAssetOverlays` 每批创建 32 个 GLB overlay。
-- 每批之间使用 requestAnimationFrame + setTimeout，避免一次性同步创建 869 个 overlay。
-- 继续依赖 asset id Map 去重、load generation 和 batch cancel，防止 StrictMode、刷新、巡游、缩放或路线预演导致重复创建。
-
-### LOD 与交互
-
-- interactionLiteMode / 远景 LOD 不删除树群、不重建树群，只通过 opacity 降低渲染压力。
-- reduced tier 时优先压低 low/tier 3，medium 次之，high 保留更高可见度。
-- debugPerf 显示 defaultGardenAssetCount、gardenLoadedCount、gardenLoadBatchIndex、gardenTierLoaded、gardenDuplicatePrevented、gardenLoadGeneration、gardenLodState 和 live count warning。
-
-### 后续风险
-
-869 个独立 GLB overlay 仍然比旧 199 树群重。若真机或比赛机型压力较高，后续优先考虑将部分背景树团合并为 cluster GLB，而不是继续增加单树 overlay 数量。
-
-## 35. 手动树群 scale 归一化
-
-### 问题
-
-- debugGarden 中部分树点只显示锚点，树模型不明显。
-- 根因不是 asset 未导入：live overlay count 已接近 / 等于资产数。
-- 主要原因是新 869 数据混用了不同模型单位，`fluffy_bodhi_grove` 使用 0.75–1.15，而其它候选树多为 78–98。
-
-### 策略
-
-- 新增 per-kind scale normalization，只处理 `fluffy_bodhi_grove` 的旧小数尺度。
-- 旧 0.75–1.15 映射到 48–74，比上一版放大 1.2 倍；height 改为 `scale * 0.04`，参考其它树种的低位贴地高度，避免 Meshy 毛茸茸树团离地。
-- 归一化是幂等的：超过 rawScaleMax 的 scale 不再重复放大。
-- 点位、height、yaw、模型文件和加载批次不变。
-
-### 影响
-
-- 普通 `/map-3d-guide-c` 使用归一化后的 869 默认树群。
-- `/map-3d-guide-c?debugGarden=1` 会在读取旧本地测试树草稿时自动迁移 scale。
-- 后续新建 `fluffy_bodhi_grove` 测试树团默认使用归一化后的 scale 区间。
-
 ## 36. Meshy 毛茸茸树团 runtime-v2
 
 ### 压缩结果
 
 - 输入：`Meshy_AI_Create_a_stylized_low_0616093941_texture.glb`，约 11.36MiB。
-- 输出：`fluffy-bodhi-grove.runtime-v2.glb`，约 1.35MiB。
 - 压缩率约 88.08%。
 - 流程：prune、dedup、weld、simplify、resize、jpeg、tangents。
 - 未引入 Draco、Meshopt、KTX2、WebP 或 AVIF，`extensionsUsed` 为空。
@@ -1125,7 +932,6 @@ debugPerf 新增 companion model 事件：
 
 - `fluffy_bodhi_grove` 当前引用 runtime-v2。
 - 旧 runtime-v1 保留文件但不再作为当前候选路径。
-- 新默认 869 树群的 `fluffy_bodhi_grove` 不改点位，scale 归一化后约 48–72，height 约 1.9–3.0。
 - 由于 runtime-v2 在 26–39 高度下出现离地漂浮，height 改为参考其它树种的低位贴地值，只做轻微抬高。
 
 ## 37. 本地腾讯底图黑屏修复
@@ -1139,7 +945,6 @@ debugPerf 新增 companion model 事件：
 ### 处理
 
 - `/map-3d-guide-c` 在本地 `127.0.0.1` 下自动 canonicalize 到 `localhost`，避免腾讯底图服务黑屏。
-- 切换前通过 `window.name` 转移 debugGarden 的 garden assets、editor state 和 Tree Candidate Lab 草稿，降低来源切换导致的本地草稿丢失风险。
 - 地图创建后增加 3.2s fallback visual ready，防止腾讯 ready 事件缺失导致底图已可见但 overlay 一直不加载。
 - `loadTMap` 增加 `window.TMap` 轮询等待，避免 script load 先于 TMap 全局对象挂载时直接进入 failed。
 - `renderOptions.enableBloom` 改为关闭，避免实验性后处理参与首屏黑屏排查。
@@ -1149,20 +954,16 @@ debugPerf 新增 companion model 事件：
 ### 诊断
 
 - 普通 `/map-3d-guide-c` 没有自动创建核心建筑 GLB overlay，地标加载实际只挂在 GLB Beta / debugPerf Inspector 入口下。
-- debugGarden 里的核心地标参照层正常，是因为 Tree Candidate Lab 显式调用 Inspector 加载，不是普通游客页的默认路径。
 
 ### 策略
 
 - 复用 `useLandmarkModelInspector` 的 overlay Map 管理、generation / status 和 debugPerf 计数，避免普通页和 Inspector 各自创建一套 GLB。
-- 普通页 runtime 自动加载禁用 localStorage calibration draft，避免游客页被调试草稿污染；debugPerf / debugGarden 仍按原逻辑读取草稿用于校准。
 - C 版地图 visual ready 后自动分三批加载正式 runtime / safe-v2 地标，每批间隔约 520ms。
 - `xiangfu_temple_base` companion 只在配置 `enabled=true` 时跟随祥符禅寺加载。
-- debugGarden 继续使用核心地标参照层；普通 runtime 自动加载在 debugGarden 下不重复执行。
 - debugPerf 的 map visual event 记录 `landmarkRuntimeLoadStarted` 和 `landmarkRuntimeLoadBatch`，包含 batch index 和本批地标 id。
 
 ### 性能与安全
 
-- 地标加载不阻塞地图 visual ready，也不要求等待全部地标加载完成后才显示树群。
 - debugPerf 的 Landmark GLB 计数继续显示 live / total 状态，companion 事件仍记录在 Companion 诊断中。
 - 普通页正式加载只读 `lingshanMapModelOverlays.ts` 的 `modelUrl`，不使用 raw、safe-v1、draco 或旧 464M 菩提大道路径。
 
@@ -1177,7 +978,6 @@ debugPerf 新增 companion model 事件：
   - normal：地图 ready 后常驻但降低强度。
   - tour：佛境巡游 / 路线预演时 route mist 增强。
   - focus：地标聚焦时 soft glow 增强。
-- overlay 使用 `pointer-events: none`，不参与地图交互，不影响拖动、缩放、巡游或 Tree Candidate Lab 面板。
 
 ### POI 立牌
 
@@ -1188,8 +988,6 @@ debugPerf 新增 companion model 事件：
 
 ### 性能边界
 
-- 立牌数量固定为 13 个，不随 869 树群分批加载重建。
-- 本轮不修改腾讯 `style1`、路线数据、树群数据、GLB 文件或核心地标 transform。
 
 ## 40. 佛境氛围与 POI 题签第二轮视觉修正
 
@@ -1213,7 +1011,6 @@ debugPerf 新增 companion model 事件：
 ### 性能边界
 
 - 未引入 canvas 粒子、视频、大图片或新 GLB。
-- POI 数量仍固定为 13 个，氛围层为单个 DOM overlay，不参与 869 树群的生命周期。
 
 ## 41. 原生 sky/fog 与 POI lift
 
@@ -1260,7 +1057,6 @@ debugPerf 新增 companion model 事件：
 
 ### 性能边界
 
-- 水墨图是单个 DOM overlay，不参与 869 树群、核心地标 GLB 或路线 overlay 生命周期。
 - debugPerf 只记录 overlay ready / error、opacity、bounds 和实现模式，不做高频日志。
 - 后续若要正式上线水墨底图，应切片为少量 zoom 层级并改用 `ImageTileLayer`，本阶段不做。
 
@@ -1285,7 +1081,6 @@ debugPerf 新增 companion model 事件：
   - `candidate`：腾讯 walking candidate 或 `lingshanRoadNetwork` candidate 拼接。
   - `poi-polyline`：仅在缺少候选路网段时作为兜底。
   - `real`：预留给后续人工验证或正式 walking route 几何。
-- 路线切换只更新当前路线相关 overlay 和状态，不重建 869 树群，不修改核心 GLB transform。
 
 ### 路线来源
 
@@ -1330,7 +1125,6 @@ debugPerf 新增 companion model 事件：
 
 ### 性能边界
 
-- 本地水墨瓦片由腾讯 `ImageTileLayer` 管理，不重建 GLB、869 树群、路线或 POI 题签。
 - debugPerf 只记录瓦片层启用、透明度、URL 模板、zoom levels、ready / error 和 boundary 状态，不做高频事件记录。
 - 路线、POI 题签和 GLB 地标继续在瓦片层之上显示，避免水墨底图压住导览主体。
 
@@ -1348,7 +1142,6 @@ debugPerf 新增 companion model 事件：
 - 默认 `inkTileSource=v3` 会请求已校正的 `/map/ink/tiles/v3/{z}/{x}/{y}.png`。
 - `inkTileVariant=v3-rotate-270-flip-x-ccw90` 会请求保留的确认对照目录。
 - debugPerf 展示当前 `inkTileVariant`、`tileDir`、`sourceTransform`、`flipX`、`flipY`、`rotate`，方便确认当前加载的是哪个方向变体。
-- 方向变体不触发 869 树群、核心 GLB、路线或 POI 题签重建。
 
 ## 46. 水墨瓦片正式性能方案
 
@@ -1373,7 +1166,6 @@ debugPerf 新增 companion model 事件：
 
 ### 运行边界
 
-- `TMap.ImageTileLayer` 管理瓦片生命周期，不重建 GLB、869 树群、路线或 POI 题签。
 - `noInkTiles=1` 可关闭水墨瓦片用于开发对比；普通用户入口不暴露该开关。
 - debugPerf 仅显示正式瓦片状态：默认启用、基础 / 实际透明度、zoom fade、层级、z20 fallback、URL 模板、empty tile、ready / error 和 boundary 状态。
 - 历史 DOM 单图 overlay、source / variant 切换、offset / scale 微调不再作为正式运行路径展示。
@@ -1387,7 +1179,6 @@ debugPerf 新增 companion model 事件：
   - 中心点范围使用正式水墨 bounds 的内缩区域，防止用户把边缘拖到屏幕中央。
   - 视觉缓冲使用正式 bounds 的轻微外扩区域，允许边缘有少量过渡但不形成明显断层。
 - 回正只在 `dragend`、`moveend`、`zoomend`、`idle` 后触发，并使用 Tencent `easeTo` 优先，避免拖动中高频 `setCenter` 造成卡顿。
-- `debugGarden=1` 不启用正式范围限制，保证树群和候选点位编辑自由。
 - `debugPerf=1&noMapBounds=1` 可临时关闭范围限制排查；普通 `noMapBounds=1` 不关闭限制。
 
 ### 相机与雾幕
@@ -1404,7 +1195,6 @@ debugPerf 新增 companion model 事件：
 - 正式页中心点限制比例继续收紧到 `0.72`，视觉缓冲比例收紧到 `1.03`，减少画面边缘露出腾讯原底图。
 - 最远 zoom 提高到更接近景区总览的位置，避免缩远后看到完整水墨方图；最近 zoom 仅轻微约束，继续允许查看核心模型和 POI。
 - 边界回正仍只在 `dragend`、`moveend`、`zoomend`、`idle` 后触发，不做逐帧强制回拉，避免交互卡顿。
-- `debugGarden=1` 不启用正式范围限制；`debugPerf=1&noMapBounds=1` 仍可临时关闭限制排查，普通 `noMapBounds=1` 不生效。
 
 ### 氛围与相机
 
@@ -1423,7 +1213,6 @@ debugPerf 新增 companion model 事件：
 ### 视野参数
 
 - 正式中心点限制比例进一步收紧到 `0.66`，视觉缓冲比例收紧到 `0.98`，减少水墨瓦片外腾讯原底图进入主视野。
-- 正式最远 zoom 提高到 `17.72`，最大 zoom 略收紧到 `19.58`；debugGarden 和 debug override 仍使用宽松范围。
 - 边缘强雾触发更敏感：远景阈值提高到 `18.08`，靠近中心限制边界约 `26%` 内进入 strong 状态。
 
 ### 雾层与清晰区
@@ -1442,7 +1231,6 @@ debugPerf 新增 companion model 事件：
 ### 启动策略
 
 - Tencent `skyOptions.animated` 作为正式天空 / 远处动效，保持米白、青绿灰方向。
-- canvas 动态雾等地图 visual ready 后启动，不阻塞 SDK、底图、GLB、树群或路线加载。
 - loading / 入场阶段使用静态雾层营造更强氛围，ready 后 canvas 动态雾轻微常驻。
 
 ### 绘制策略
@@ -1457,11 +1245,9 @@ debugPerf 新增 companion model 事件：
 - 如果降级后仍明显卡顿，则关闭 canvas 动态雾。
 - 降级后静态边缘雾、青绿山影和 Tencent sky animation 继续保留，页面不会突然失去佛境氛围。
 - 帧间隔恢复稳定后，canvas 自动恢复到 `768`。
-- `debugGarden=1` 默认关闭 canvas 动态雾；`debugPerf=1&enableDynamicMist=1` 可在 debugGarden 中临时开启观察。
 
 ### 诊断字段
 
-- debugPerf 显示 `dynamicMistEnabled`、`dynamicMistCanvasActive`、`dynamicMistQuality`、`dynamicMistDegraded`、`dynamicMistDegradeReason`、`dynamicMistFpsEstimate`、`dynamicMistFrameMs`、`dynamicMistRecoveryState`、`skyOptionsAnimated` 和 debugGarden override 状态。
 
 ### 可见度微调
 
@@ -1505,7 +1291,6 @@ debugPerf 新增 companion model 事件：
 
 - `/map-3d-guide-c` 地图页优先使用中低模 GLB，不再把 20-90MB 级别高精模型作为游客端默认体验。
 - 当前地图页核心地标低模目标为约 5-15MB；高精 safe-v2 / safe-v3 保留给详情页、Inspector 或明确聚焦场景。
-- active window 仍控制同时活跃地标数量，树群 GLB 保持移除，避免移动端再次出现持续内存增长。
 
 ### 当前低模体积
 
@@ -1517,4 +1302,3 @@ debugPerf 新增 companion model 事件：
 
 - 保留当前运行低模与两个无扩展回退候选。
 - 清理本轮未引用的压缩中间产物，减少后续提交和资源管理混乱。
-- 本轮未使用 Draco，未修改 transform，未恢复 869 树群 GLB。

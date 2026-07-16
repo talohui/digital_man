@@ -1,4 +1,4 @@
-export type GLBMemoryModelKind = 'tree' | 'landmark' | 'companion' | 'model'
+export type GLBMemoryModelKind = 'landmark' | 'companion' | 'model'
 
 export type GLBMemoryRegisterOptions = {
   kind?: GLBMemoryModelKind
@@ -44,7 +44,6 @@ const DEFAULT_TTL_MS = 60000
 const DEFAULT_SWEEP_INTERVAL_MS = 5000
 
 const MODEL_MEMORY_ESTIMATE_MB: Record<GLBMemoryModelKind, number> = {
-  tree: 1.2,
   landmark: 36,
   companion: 2,
   model: 8

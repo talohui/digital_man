@@ -22,6 +22,12 @@
   max-width: min(82%, 360px);
 }
 
+/* chat-bubble-row is globally flex; structured guide messages must stack text and cards. */
+.guide-message.chat-bubble-row {
+  display: grid;
+  align-items: start;
+}
+
 .guide-message > p,
 .guide-message > .chat-bubble > p {
   min-width: 0;
@@ -94,31 +100,198 @@
   scroll-snap-align: start;
 }
 
+.guide-action-card-list--routes .guide-action-card--route:only-child {
+  flex-basis: min(calc(100% - 32px), 560px);
+}
+
 .guide-action-card {
+  position: relative;
   display: grid;
   gap: 6px;
   width: 100%;
   min-width: 0;
   max-width: 360px;
-  border: 1px solid rgba(201, 168, 106, 0.42);
-  border-radius: 18px;
-  padding: 12px;
-  background: linear-gradient(145deg, rgba(255, 252, 237, 0.94), rgba(226, 241, 224, 0.88));
-  box-shadow: 0 8px 18px rgba(24, 62, 48, 0.1);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(45, 74, 62, 0.76);
+  border-radius: 1px;
+  padding: 14px 14px 12px 17px;
+  background:
+    linear-gradient(90deg, transparent 0 25px, rgba(45, 74, 62, 0.055) 26px, transparent 27px) 0 0 / 27px 100%,
+    linear-gradient(180deg, rgba(251, 248, 239, 0.98), rgba(245, 239, 226, 0.98));
+  box-shadow:
+    inset 0 0 0 3px rgba(251, 248, 239, 0.9),
+    inset 0 0 0 4px rgba(201, 168, 106, 0.46),
+    3px 4px 0 rgba(201, 168, 106, 0.16);
+  color: #2d4a3e;
 }
 
 .guide-action-card--route.is-primary {
-  border-color: rgba(63, 111, 90, 0.42);
-  box-shadow: 0 10px 22px rgba(24, 62, 48, 0.14);
+  border-color: #2d4a3e;
 }
 
-.guide-action-card__eyebrow { color: #8b6b31; font: 800 11px/1 var(--map-font-sans, sans-serif); }
-.guide-action-card h3 { margin: 0; color: #214a3b; font: 800 clamp(18px, 4.7vw, 21px)/1.1 var(--map-font-serif, serif); }
-.guide-action-card p,
-.guide-action-card small { margin: 0; color: rgba(31, 59, 49, 0.7); font: 700 clamp(11px, 2.8vw, 13px)/1.42 var(--map-font-sans, sans-serif); overflow-wrap: break-word; }
-.guide-action-card__tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.guide-action-card__tags span { border: 1px solid rgba(63, 111, 90, 0.18); border-radius: 999px; padding: 3px 7px; background: rgba(220, 241, 225, 0.78); color: #214a3b; font: 700 11px/1 var(--map-font-sans, sans-serif); }
-.guide-action-card button { min-height: 34px; border: 0; border-radius: 999px; background: #214a3b; color: #fff8df; font: 800 13px/1 var(--map-font-serif, serif); }
+.guide-action-card::before {
+  position: absolute;
+  top: 0;
+  left: 17px;
+  width: 74px;
+  height: 3px;
+  background: #2d4a3e;
+  content: '';
+}
+
+.guide-action-card::after {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid rgba(116, 50, 42, 0.82);
+  color: #f8ead9;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    #914f43;
+  background-size: 5px 5px;
+  box-shadow: inset 0 0 0 2px rgba(248, 234, 217, 0.26);
+  content: '荐';
+  font-family: var(--font-lingshan-display, serif);
+  font-size: 15px;
+  transform: rotate(-2deg);
+}
+
+.guide-action-card__eyebrow {
+  width: fit-content;
+  margin-right: 38px;
+  padding: 2px 8px 3px;
+  border-right: 1px solid #c9a86a;
+  border-left: 1px solid #c9a86a;
+  color: #2d4a3e;
+  font: 800 9px/1 var(--font-lingshan-display, var(--map-font-serif, serif));
+  letter-spacing: 0.12em;
+}
+
+.guide-recommendation-card__lead {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+
+.guide-recommendation-card[data-has-image='true'] .guide-recommendation-card__lead {
+  grid-template-columns: 88px minmax(0, 1fr);
+  margin-right: 38px;
+}
+
+.guide-recommendation-card__media {
+  position: relative;
+  display: block;
+  width: 88px;
+  height: 66px;
+  overflow: hidden;
+  border: 1px solid rgba(45, 74, 62, 0.64);
+  background: #dde9e7;
+  box-shadow: inset 0 0 0 3px #f5f1e8, 2px 2px 0 rgba(201, 168, 106, 0.28);
+}
+
+.guide-recommendation-card__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.guide-action-card h3 {
+  margin: 0 38px 0 0;
+  color: #203b33;
+  font: 800 17px/1.2 var(--font-lingshan-display, var(--map-font-serif, serif));
+  letter-spacing: 0.05em;
+}
+
+.guide-recommendation-card[data-has-image='true'] h3 { margin-right: 0; }
+
+.guide-recommendation-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  color: rgba(32, 59, 51, 0.72);
+  font: 700 9px/1.25 var(--map-font-sans, sans-serif);
+}
+
+.guide-recommendation-card__facts span {
+  padding: 1px 8px;
+  border-right: 1px solid rgba(201, 168, 106, 0.55);
+}
+
+.guide-recommendation-card__facts span:first-child { padding-left: 0; }
+.guide-recommendation-card__facts span:last-child { border-right: 0; }
+
+.guide-action-card p {
+  margin: 2px 0 0;
+  padding: 6px 0;
+  border-top: 1px solid rgba(201, 168, 106, 0.36);
+  border-bottom: 1px solid rgba(201, 168, 106, 0.36);
+  color: rgba(32, 59, 51, 0.72);
+  font: 700 11px/1.45 var(--map-font-sans, sans-serif);
+  overflow-wrap: break-word;
+}
+
+.guide-action-card__tags { display: flex; flex-wrap: wrap; gap: 0; }
+.guide-action-card__tags span {
+  border: 0;
+  border-right: 1px solid rgba(201, 168, 106, 0.55);
+  border-radius: 0;
+  padding: 1px 8px;
+  color: #2d4a3e;
+  background: transparent;
+  font: 700 9px/1 var(--map-font-sans, sans-serif);
+}
+.guide-action-card__tags span:first-child { padding-left: 0; }
+.guide-action-card__tags span:last-child { border-right: 0; }
+
+.guide-action-card small {
+  position: relative;
+  display: block;
+  margin: 2px 0 0;
+  padding: 5px 8px 5px 38px;
+  border-left: 2px solid #c9a86a;
+  color: rgba(32, 59, 51, 0.72);
+  background: rgba(221, 233, 231, 0.3);
+  font: 700 10px/1.45 var(--map-font-sans, sans-serif);
+  overflow-wrap: break-word;
+}
+
+.guide-action-card small::before {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  color: #98763a;
+  content: '留注';
+  font: 800 9px/1.45 var(--font-lingshan-display, serif);
+  letter-spacing: 0.08em;
+}
+
+.guide-action-card button {
+  width: fit-content;
+  min-height: 28px;
+  margin: 2px 0 0 auto;
+  border: 1px solid #2d4a3e;
+  border-radius: 0;
+  padding: 0 10px 0 12px;
+  color: #2d4a3e;
+  background: rgba(251, 248, 239, 0.86);
+  box-shadow: inset 0 -2px 0 rgba(201, 168, 106, 0.42);
+  font: 800 11px/1 var(--map-font-serif, serif);
+}
+
+.guide-action-card button::after {
+  margin-left: 7px;
+  color: #98763a;
+  content: '›';
+  font-size: 14px;
+}
 
 .guide-action-card--route small {
   display: -webkit-box;
@@ -128,5 +301,10 @@
 }
 
 .guide-action-card--route button {
+  margin-top: auto;
+}
+
+/* Equal-height route notes keep their action on the lower writing line. */
+.xiaoling-conversation .guide-action-card-list--routes .guide-action-card--route button {
   margin-top: auto;
 }

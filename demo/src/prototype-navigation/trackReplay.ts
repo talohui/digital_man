@@ -1,5 +1,6 @@
 import { haversineDistanceMeters } from '../lib/routeProgress'
 
+import { projectPointToPolyline } from './routeDeviation'
 import type {
   Gcj02Position,
   NavigationPrototypeRoute,
@@ -15,6 +16,12 @@ type ReplayOptions = {
   noiseMode: ReplayNoiseMode
   seed: number
   startTimestamp: number
+}
+
+type ShowcaseDeviationOptions = {
+  seed: number
+  startTimestamp: number
+  startPosition?: Gcj02Position
 }
 
 export function createRouteReplay(route: NavigationPrototypeRoute, options: ReplayOptions): ReplayFix[] {
@@ -48,6 +55,9 @@ export function createRouteReplay(route: NavigationPrototypeRoute, options: Repl
 }
 
 export function createReplayScenario(route: NavigationPrototypeRoute, scenario: Exclude<ReplayScenario, 'route'>, seed: number, startTimestamp: number): ReplayFix[] {
+  if (scenario === 'showcase_off_route') {
+    return createShowcaseDeviationReplay(route, { seed, startTimestamp })
+  }
   const midpoint = route.polyline[Math.floor(route.polyline.length / 2)] ?? route.destination
   const onRoute = (index: number, timestampOffset: number, point = midpoint, progress = .5) => createFix({
     point,
@@ -100,6 +110,90 @@ export function createReplayScenario(route: NavigationPrototypeRoute, scenario: 
       ]
     }
   }
+}
+
+/**
+ * Competition-friendly deviation replay. It starts at the nearest point on
+ * the current Tencent route, moves smoothly to roughly 82m off-route, then
+ * holds enough accurate fixes for the real deviation detector to confirm.
+ */
+export function createShowcaseDeviationReplay(
+  route: NavigationPrototypeRoute,
+  options: ShowcaseDeviationOptions
+): ReplayFix[] {
+  const polyline = route.polyline.length ? route.polyline : [route.origin, route.destination]
+  const anchorIndex = findNearestPolylinePointIndex(polyline, options.startPosition ?? route.origin)
+  const anchor = polyline[anchorIndex] ?? route.origin
+  const before = polyline[Math.max(0, anchorIndex - 1)] ?? anchor
+  const after = polyline[Math.min(polyline.length - 1, anchorIndex + 1)] ?? anchor
+  const routeBearing = bearingDegrees(before, after)
+  const deviationTarget = selectShowcaseDeviationTarget(anchor, routeBearing, polyline)
+  const routeProgress = anchorIndex / Math.max(polyline.length - 1, 1)
+  const outwardDistances = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, deviationTarget.distanceMeters]
+    .filter((distance, index, distances) => distance <= deviationTarget.distanceMeters && distance !== distances[index - 1])
+  const travel = outwardDistances.map((distanceMeters, index) => createFix({
+    point: offsetPoint(anchor, distanceMeters, deviationTarget.bearing),
+    accuracy: 8,
+    noiseMode: 'clean',
+    seed: options.seed,
+    index,
+    timestamp: options.startTimestamp + index * 1_000,
+    progress: routeProgress,
+    scenario: 'showcase_off_route'
+  }))
+  const travelDuration = outwardDistances.length * 1_000
+  // Hold the selected point long enough for both hit-count and duration gates.
+  // Repeating accepted fixes still exercises the real detector; it does not
+  // mutate deviation state directly.
+  const confirmationDistances = Array.from({ length: 4 }, () => deviationTarget.distanceMeters)
+  const confirmation = confirmationDistances.map((distanceMeters, index) => createFix({
+    point: offsetPoint(anchor, distanceMeters, deviationTarget.bearing),
+    accuracy: 8,
+    noiseMode: 'clean',
+    seed: options.seed,
+    index: travel.length + index,
+    timestamp: options.startTimestamp + travelDuration + index * 4_000,
+    progress: routeProgress,
+    scenario: 'showcase_off_route'
+  }))
+  return [...travel, ...confirmation]
+}
+
+/**
+ * A fixed perpendicular offset is not reliable on a curved route: the point
+ * may leave one segment only to land beside another. Sample bounded bearings
+ * and radii, then choose the candidate farthest from the complete Tencent
+ * polyline. The visible movement remains a smooth 82–94m drift.
+ */
+function selectShowcaseDeviationTarget(
+  anchor: Gcj02Position,
+  routeBearing: number,
+  polyline: Gcj02Position[]
+) {
+  const relativeBearings = [90, -90, 180, 45, -45, 135, -135, 0]
+  const fallbackBearings = Array.from({ length: 12 }, (_, index) => index * 30)
+  const bearings = [
+    ...relativeBearings.map((offset) => (routeBearing + offset + 360) % 360),
+    ...fallbackBearings
+  ]
+  const radii = [82, 88, 94]
+  let best = {
+    bearing: (routeBearing + 90) % 360,
+    distanceMeters: radii[0],
+    distanceToRouteMeters: 0
+  }
+
+  radii.forEach((distanceMeters) => {
+    bearings.forEach((bearing) => {
+      const candidate = offsetPoint(anchor, distanceMeters, bearing)
+      const distanceToRouteMeters = projectPointToPolyline({ position: candidate, polyline })
+        ?.distanceToRouteMeters ?? 0
+      if (distanceToRouteMeters <= best.distanceToRouteMeters) return
+      best = { bearing, distanceMeters, distanceToRouteMeters }
+    })
+  })
+
+  return best
 }
 
 export function interpolateRoute(polyline: Gcj02Position[], speedMetersPerSecond: number, intervalMs: number): Gcj02Position[] {
@@ -166,6 +260,29 @@ function offsetPoint(point: Gcj02Position, meters: number, bearingDegrees: numbe
   const latOffset = meters * Math.cos(radians) / 111_320
   const lngOffset = meters * Math.sin(radians) / Math.max(1, 111_320 * Math.cos(point.lat * Math.PI / 180))
   return { lat: point.lat + latOffset, lng: point.lng + lngOffset, coordinateSystem: 'GCJ-02' }
+}
+
+function findNearestPolylinePointIndex(polyline: Gcj02Position[], position: Gcj02Position) {
+  let nearestIndex = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+  polyline.forEach((point, index) => {
+    const distance = haversineDistanceMeters(point, position)
+    if (distance >= nearestDistance) return
+    nearestDistance = distance
+    nearestIndex = index
+  })
+  return nearestIndex
+}
+
+function bearingDegrees(start: Gcj02Position, end: Gcj02Position) {
+  if (start.lat === end.lat && start.lng === end.lng) return 0
+  const startLat = start.lat * Math.PI / 180
+  const endLat = end.lat * Math.PI / 180
+  const deltaLng = (end.lng - start.lng) * Math.PI / 180
+  const y = Math.sin(deltaLng) * Math.cos(endLat)
+  const x = Math.cos(startLat) * Math.sin(endLat)
+    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
 function deterministicUnit(seed: number, index: number) {

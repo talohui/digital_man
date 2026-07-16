@@ -18,7 +18,11 @@ export function XiaolingFloatingCompanion({
 }) {
   if (mode === 'browse') {
     return (
-      <aside className="guide-floating-companion guide-floating-companion--browse" aria-label="小灵陪伴入口">
+      <aside
+        className="guide-floating-companion guide-floating-companion--browse"
+        aria-label="小灵陪伴入口"
+        data-visual-style="travel-note"
+      >
         <button type="button" className="guide-floating-companion__avatar" onClick={onOpen} aria-label="问小灵">
           <span className="guide-floating-companion__live-anchor" data-xiaoling-live2d-anchor="badge">
             <XiaolingAvatar size="floating" />

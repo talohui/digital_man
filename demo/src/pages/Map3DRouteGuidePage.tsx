@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { MapMobileChromeButton } from '../components/map/MapMobileChromeButton'
 import { MapLayerPanel } from '../components/map/MapLayerPanel'
 import { MapMobileToolRail, type MapMobileToolRailItem } from '../components/map/MapMobileToolRail'
+import { MapServicePanel, type MapServiceCategoryId } from '../components/map/MapServicePanel'
 import { getLingshanPoiDetailById } from '../data/lingshanPoiDetails'
 import { getRouteMedia, SCENIC_MEDIA_FALLBACK } from '../data/scenicMediaCatalog'
 import {
@@ -54,10 +55,17 @@ import { resolveRouteSegmentTarget } from '../prototype-navigation/routeSegmentT
 import { useNavigationPrototypeStore } from '../prototype-navigation/useNavigationPrototypeStore'
 import { useSimulatedNavigationFallback } from '../prototype-navigation/useSimulatedNavigationFallback'
 import { useMultiStopReplayStore } from '../prototype-navigation/multiStopReplay'
-import type { PrototypeNavigationTarget } from '../prototype-navigation/types'
+import type { Gcj02Position, PrototypeNavigationTarget } from '../prototype-navigation/types'
+import { saveRouteStageLogicalPosition } from '../prototype-navigation/showcaseNavigation'
+import { toGcj02Position } from '../prototype-navigation/coordinateTransform'
+import {
+  focusShowcaseMapLocation,
+  ShowcaseMapLocationLayer
+} from '../prototype-navigation/ShowcaseMapLocationLayer'
 import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
 import { closeGlobalXiaoling, guideAssistantEvents, openGlobalXiaoling } from '../components/guide'
 import '../styles/map/mapRouteMobile.css'
+import '../styles/map/mapRouteStatusFolio.css'
 import { useMapResumeMemory } from '../hooks/useMapResumeMemory'
 
 const DEFAULT_STOP_INDEX = 0
@@ -96,35 +104,12 @@ const ROUTE_TAB_LABELS: Record<string, string> = {
 const ROUTE_PREVIEW_TAB_IDS = ['historical_culture', 'prayer_meditation', 'highlights_checkin', 'natural_scenery', 'family']
 
 const ROUTE_PREVIEW_SUMMARIES: Record<string, string> = {
-  historical_culture: '覆盖灵山代表性人文主线，适合听佛教历史与建筑故事。',
+  historical_culture: '覆盖灵山代表人文主线，听佛教历史与建筑故事。',
   prayer_meditation: '串联祈福礼佛节点，适合放慢脚步感受静心氛围。',
   family: '节奏轻松、停留点清楚，适合亲子同行慢慢游览。',
   highlights_checkin: '精选大佛、梵宫等高辨识度景点，适合拍照打卡。',
   natural_scenery: '沿山水与广场空间展开，适合边走边看景区风貌。'
 }
-
-const ROUTE_SERVICE_CATEGORIES = [
-  {
-    id: 'restroom',
-    label: '洗手间',
-    description: '服务点位建设中。后续会按当前位置展示附近洗手间和步行方向。'
-  },
-  {
-    id: 'rest',
-    label: '休息区',
-    description: '服务点位建设中。当前仅展示入口，正式接入后会结合路线节奏推荐休息点。'
-  },
-  {
-    id: 'dining',
-    label: '餐饮点',
-    description: '服务点位建设中。后续可展示附近餐饮、补给与开放状态。'
-  },
-  {
-    id: 'exit',
-    label: '出口',
-    description: '服务点位建设中。后续会结合景区动线提示最近出口或返程方向。'
-  }
-] as const
 
 function getRouteTabLabel(route: Pick<ScenicRouteConfig, 'id' | 'name'>) {
   return ROUTE_TAB_LABELS[route.id] ?? route.name
@@ -561,10 +546,49 @@ function RouteArrivedCard({
 }
 
 function RouteCompletedCard({ route, onBack }: { route: ScenicRouteConfig; onBack: () => void }) {
+  const [rating, setRating] = useState(0)
+  const [submittedRating, setSubmittedRating] = useState<number | null>(null)
+  const visibleRating = submittedRating ?? rating
+
   return <section className="map-route-tour-card map-route-tour-card--arrived" aria-label="路线已完成">
     <div className="map-route-tour-card__tip">恭喜完成{route.name}，可以继续自由浏览灵山胜境。</div>
     <h2>路线已完成</h2>
     <p className="map-route-tour-desc">本次路线的到达确认均由你手动完成。</p>
+    <section className="map-route-tour-rating" aria-label="路线评价">
+      <div>
+        <strong>为本次游览评分</strong>
+        <small>{submittedRating ? `感谢你的 ${submittedRating} 星评价` : '你的反馈会帮助我们优化路线'}</small>
+      </div>
+      <div className="map-route-tour-rating__actions">
+        <div className="map-route-tour-rating__stars" role="radiogroup" aria-label="路线评分">
+          {[1, 2, 3, 4, 5].map((star) => {
+            const active = visibleRating >= star
+            return (
+              <button
+                key={star}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                aria-label={`${star} 星`}
+                disabled={submittedRating !== null}
+                className={active ? 'is-active' : ''}
+                onClick={() => setRating(star)}
+              >
+                ★
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          className="map-route-tour-rating__submit"
+          disabled={rating === 0 || submittedRating !== null}
+          onClick={() => setSubmittedRating(rating)}
+        >
+          {submittedRating ? '已提交' : '提交'}
+        </button>
+      </div>
+    </section>
     <div className="map-route-tour-actions"><button type="button" className="map-route-tour-primary" onClick={onBack}>返回地图</button></div>
   </section>
 }
@@ -668,7 +692,7 @@ function RouteTourMobileOverlay({
   const [serviceOpen, setServiceOpen] = useState(false)
   const [debugMenuOpen, setDebugMenuOpen] = useState(false)
   const [debugPanelDisplay, setDebugPanelDisplay] = useState<NavigationDebugPanelDisplay>('closed')
-  const [serviceCategory, setServiceCategory] = useState<(typeof ROUTE_SERVICE_CATEGORIES)[number]['id']>('restroom')
+  const [serviceCategory, setServiceCategory] = useState<MapServiceCategoryId>('restroom')
   const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
   const setRouteCardExpanded = useMapGuideUiStore((state) => state.setRouteCardExpanded)
   const layerPanelOpen = useMapGuideUiStore((state) => state.layerPanelOpen)
@@ -677,6 +701,7 @@ function RouteTourMobileOverlay({
   const setOverviewMode = useMapGuideUiStore((state) => state.setMapFocusMode)
   const [selectedRouteId, setSelectedRouteId] = useState(route.id)
   const [feedbackText, setFeedbackText] = useState('')
+  const [showcaseLocatePosition, setShowcaseLocatePosition] = useState<Gcj02Position>()
   const [visualViewportHeight, setVisualViewportHeight] = useState(0)
   const [visualViewportOffsetTop, setVisualViewportOffsetTop] = useState(0)
   const navigateTimerRef = useRef<number | null>(null)
@@ -697,8 +722,8 @@ function RouteTourMobileOverlay({
   const dismissPreparedNavigation = useNavigationPrototypeStore((state) => state.dismissPreparedNavigation)
   const pauseNavigation = useNavigationPrototypeStore((state) => state.pauseNavigation)
   const resumeNavigation = useNavigationPrototypeStore((state) => state.resumeNavigation)
+  const resumeReplayNavigation = useNavigationPrototypeStore((state) => state.resumeReplayNavigation)
   const cancelNavigation = useNavigationPrototypeStore((state) => state.cancelNavigation)
-  const rerouteNavigation = useNavigationPrototypeStore((state) => state.reroute)
   const continueCurrentRoute = useNavigationPrototypeStore((state) => state.continueCurrentRoute)
   const continueAfterArrivalDetection = useNavigationPrototypeStore((state) => state.continueAfterArrivalDetection)
   const raiseNavigationError = useNavigationPrototypeStore((state) => state.raiseNavigationError)
@@ -721,9 +746,10 @@ function RouteTourMobileOverlay({
     stage,
     currentStopIndex,
     joinStopIndex,
-    target: prototypeTarget
+    target: prototypeTarget,
+    purpose: 'showcase'
   })
-  const simulatedNavigationMenuVisible = navigationDebugEnabled && (stage === 'active' || stage === 'joining')
+  const simulatedNavigationMenuVisible = stage === 'active' || stage === 'joining'
   const progressText = stage === 'preview' ? undefined : `${currentStopIndex + 1}/${stopCount}站`
 
   useEffect(() => {
@@ -739,6 +765,12 @@ function RouteTourMobileOverlay({
   useEffect(() => {
     setSelectedRouteId(route.id)
   }, [route.id])
+
+  useEffect(() => {
+    if (stage === 'active' || stage === 'arrived') {
+      saveRouteStageLogicalPosition(route.id, currentStopIndex)
+    }
+  }, [currentStopIndex, route.id, stage])
 
   useEffect(() => {
     if (localNavigationTest) return
@@ -829,7 +861,25 @@ function RouteTourMobileOverlay({
   }
 
   const handleLocate = () => {
-    setFeedbackText('已回到当前位置附近')
+    const navigationPosition = navigationStoreSnapshot.locationSource === 'replay-gcj02'
+      || navigationStoreSnapshot.locationSource === 'manual-gcj02'
+      ? navigationStoreSnapshot.convertedGcj02Position
+      : undefined
+    const logicalStop = route.stops[currentStopIndex] ?? route.stops[0]
+    const logicalPosition = logicalStop?.location ? toGcj02Position(logicalStop.location) : undefined
+    const position = navigationPosition ?? logicalPosition
+    if (!position) {
+      setFeedbackText('虚拟定位点暂不可用')
+      return
+    }
+    if (!focusShowcaseMapLocation(mapRuntime, position)) {
+      setFeedbackText('地图正在加载，请稍后再试')
+      return
+    }
+    setShowcaseLocatePosition(navigationPosition ? undefined : position)
+    setFeedbackText(navigationPosition
+      ? '虚拟定位演示：已回到当前导航位置'
+      : `虚拟定位演示：${logicalStop?.name ?? '当前路线位置'}`)
   }
 
   const handleNavigateNext = () => {
@@ -850,7 +900,20 @@ function RouteTourMobileOverlay({
     setServiceOpen(false)
     setLayerPanelOpen(false)
     setRouteCardExpanded(true)
-    if (result.status === 'started') setFeedbackText(`正在模拟前往${result.targetName}`)
+    if (result.status === 'started') setFeedbackText(`正在虚拟演示前往${result.targetName}`)
+    else if (result.status === 'focused') setFeedbackText(`已显示前往${result.targetName}的导航`)
+    else setFeedbackText(result.message)
+  }, [setLayerPanelOpen, setRouteCardExpanded, simulatedNavigation])
+
+  const handleStartDeviationDemo = useCallback(() => {
+    const result = simulatedNavigation.startDeviationDemo()
+    if (result.status === 'cancelled') return
+    setDebugMenuOpen(false)
+    setDebugPanelDisplay('closed')
+    setServiceOpen(false)
+    setLayerPanelOpen(false)
+    setRouteCardExpanded(true)
+    if (result.status === 'started') setFeedbackText(`正在演示偏航，目标仍为${result.targetName}`)
     else if (result.status === 'focused') setFeedbackText(`已显示前往${result.targetName}的导航`)
     else setFeedbackText(result.message)
   }, [setLayerPanelOpen, setRouteCardExpanded, simulatedNavigation])
@@ -883,16 +946,16 @@ function RouteTourMobileOverlay({
     retryLocation: resumeNavigation,
     retryPlanning: requestPreparedNavigation,
     pause: pauseNavigation,
-    resume: resumeNavigation,
+    resume: navigationStoreSnapshot.locationSource === 'replay-gcj02' ? resumeReplayNavigation : resumeNavigation,
     cancel: cancelNavigation,
-    reroute: () => void rerouteNavigation(),
+    reroute: () => void simulatedNavigation.reroute(),
     continueCurrentRoute,
     confirmArrival: handleCommitPrototypeArrival,
     continueAfterArrivalDetection,
-    continueRestoredSession: resumeNavigation,
+    continueRestoredSession: navigationStoreSnapshot.locationSource === 'replay-gcj02' ? resumeReplayNavigation : resumeNavigation,
     discardRestoredSession: cancelNavigation,
     startSimulatedNavigation: handleStartSimulatedNavigation
-  }), [navigationStoreSnapshot, navigationDebugEnabled, prototypeTarget, stage, prepareNavigationTarget, requestPreparedNavigation, dismissPreparedNavigation, resumeNavigation, pauseNavigation, cancelNavigation, rerouteNavigation, continueCurrentRoute, handleCommitPrototypeArrival, continueAfterArrivalDetection, handleStartSimulatedNavigation])
+  }), [navigationStoreSnapshot, navigationDebugEnabled, prototypeTarget, stage, prepareNavigationTarget, requestPreparedNavigation, dismissPreparedNavigation, resumeNavigation, resumeReplayNavigation, pauseNavigation, cancelNavigation, continueCurrentRoute, handleCommitPrototypeArrival, continueAfterArrivalDetection, handleStartSimulatedNavigation, simulatedNavigation])
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -918,8 +981,8 @@ function RouteTourMobileOverlay({
   }
 
   const handleMore = () => {
-    if (!navigationDebugEnabled) {
-      setFeedbackText('更多功能建设中')
+    if (!navigationDebugEnabled && !simulatedNavigationMenuVisible) {
+      setFeedbackText(stage === 'arrived' ? '请先继续下一站，再开始导航演示' : '更多功能建设中')
       return
     }
     setDebugMenuOpen((open) => !open)
@@ -976,6 +1039,13 @@ function RouteTourMobileOverlay({
   return <>
     <NavigationPrototypeMapLayer runtime={mapRuntime} />
     <NavigationPrototypeUserMarkerLayer runtime={mapRuntime} />
+    <ShowcaseMapLocationLayer
+      runtime={mapRuntime}
+      position={navigationStoreSnapshot.locationSource === 'replay-gcj02'
+        || navigationStoreSnapshot.locationSource === 'manual-gcj02'
+        ? undefined
+        : showcaseLocatePosition}
+    />
     {createPortal(
       <div
       className={`map-route-tour-overlay map-route-tour-overlay--portal map-route-tour-overlay--${stage}`}
@@ -988,22 +1058,32 @@ function RouteTourMobileOverlay({
         onBack={() => goToMapBrowse(navigate, presentation)}
         onMore={handleMore}
       />
-      {navigationDebugEnabled && debugMenuOpen ? (
+      {debugMenuOpen ? (
         <div className="navigation-beta-debug-menu" role="menu" aria-label="更多功能">
           {simulatedNavigationMenuVisible ? (
             <>
               <button
                 type="button"
                 role="menuitem"
+                className="navigation-beta-showcase-menu-action"
                 disabled={!prototypeTarget}
                 onClick={handleStartSimulatedNavigation}
               >
-                模拟导航到下一站
+                虚拟演示
               </button>
-              <small>{prototypeTarget ? '模拟导航，仅用于开发测试' : prototypeTargetError || '已是路线最后一站'}</small>
+              <button
+                type="button"
+                role="menuitem"
+                className="navigation-beta-showcase-menu-action navigation-beta-showcase-menu-action--deviation"
+                disabled={!prototypeTarget}
+                onClick={handleStartDeviationDemo}
+              >
+                偏航与重新规划演示
+              </button>
+              <small>{prototypeTarget ? '真实偏航判定 · 手动确认重新规划' : prototypeTargetError || '已是路线最后一站'}</small>
             </>
           ) : null}
-          <button type="button" role="menuitem" onClick={openDebugPanel}>导航调试</button>
+          {navigationDebugEnabled ? <button type="button" role="menuitem" onClick={openDebugPanel}>导航调试</button> : null}
         </div>
       ) : null}
       <RouteToolRail
@@ -1115,34 +1195,16 @@ function RouteTourMobileOverlay({
       ) : null}
       {feedbackText ? <div className="map-route-tour-toast">{feedbackText}</div> : null}
       <MapLayerPanel open={layerPanelOpen} className="map-route-tour-layer-panel" />
-      {serviceOpen ? (
-        <div className="map-route-tour-service" role="dialog" aria-modal="true" aria-label="游园服务占位">
-          <button type="button" className="map-route-tour-service__scrim" onClick={() => setServiceOpen(false)} aria-label="关闭服务" />
-          <section>
-            <div className="map-route-tour-sheet__handle" aria-hidden="true" />
-            <strong>游园服务</strong>
-            <p>小灵将为你展示附近的洗手间、休息区、餐饮点和出口。服务点位建设中，当前为功能示意。</p>
-            <div className="map-route-tour-service__categories" aria-label="游园服务分类">
-              {ROUTE_SERVICE_CATEGORIES.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  className={item.id === serviceCategory ? 'is-active' : ''}
-                  onClick={() => setServiceCategory(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-            <div className="map-route-tour-service__note">
-              {ROUTE_SERVICE_CATEGORIES.find((item) => item.id === serviceCategory)?.description}
-            </div>
-            <button type="button" onClick={() => setServiceOpen(false)}>
-              知道了
-            </button>
-          </section>
-        </div>
-      ) : null}
+      <MapServicePanel
+        open={serviceOpen}
+        category={serviceCategory}
+        onCategoryChange={setServiceCategory}
+        onClose={() => setServiceOpen(false)}
+        onViewOnMap={() => {
+          setServiceOpen(false)
+          setFeedbackText('服务点位导航能力建设中')
+        }}
+      />
       </div>,
       document.body
     )}

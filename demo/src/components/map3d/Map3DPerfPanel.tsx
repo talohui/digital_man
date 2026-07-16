@@ -214,12 +214,6 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           </dd>
         </div>
         <div>
-          <dt>Tree GLB</dt>
-          <dd>
-            removed · active 0
-          </dd>
-        </div>
-        <div>
           <dt>Landmark GLB</dt>
           <dd>
             {snapshot.landmarkLoaded}/{snapshot.landmarkTotal}
@@ -260,15 +254,11 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
         </div>
         <div>
           <dt>Failed</dt>
-          <dd>{snapshot.gardenFailed + snapshot.landmarkFailed}</dd>
+          <dd>{snapshot.landmarkFailed}</dd>
         </div>
         <div>
-          <dt>First batch</dt>
-          <dd>{formatMs(snapshot.gardenFirstBatchMs)}</dd>
-        </div>
-        <div>
-          <dt>All done</dt>
-          <dd>{formatMs(snapshot.gardenAllDoneMs)}</dd>
+          <dt>Landmarks done</dt>
+          <dd>{formatMs(snapshot.landmarkAllDoneMs)}</dd>
         </div>
       </dl>
 
@@ -321,7 +311,7 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
               <li>
                 <span>Startup stage</span>
                 <small>
-                  {snapshot.startupStage} · overlays {formatMs(snapshot.overlaysStartedMs)} · route/poi {formatMs(snapshot.routePoiShownMs)} · garden after ready {formatMs(snapshot.gardenLoadStartedAfterMapReadyMs)}
+                  {snapshot.startupStage} · overlays {formatMs(snapshot.overlaysStartedMs)} · route/poi {formatMs(snapshot.routePoiShownMs)}
                 </small>
               </li>
               {snapshot.mapVisualEvents.slice(-6).map((event, index) => (
@@ -437,7 +427,6 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   {snapshot.dynamicMistFpsEstimate !== undefined ? ` · fps ${snapshot.dynamicMistFpsEstimate}` : ''}
                   {snapshot.dynamicMistDegraded ? ` · degraded ${snapshot.dynamicMistDegradeReason ?? ''}` : ''}
                   {snapshot.enableDynamicMistDebugOverride ? ' · debug override' : ''}
-                  {snapshot.debugGardenDynamicMistDisabled ? ' · debugGarden disabled' : ''}
                   {snapshot.skyOptionsAnimated ? ' · sky animated' : ''}
                 </small>
               </li>
@@ -472,16 +461,6 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   {snapshot.latestTourEvent?.tourMarkerUpdateFps ? ` · route ${snapshot.latestTourEvent.tourMarkerUpdateFps}fps` : ''}
                   {snapshot.latestTourEvent?.tourBoundsClampPaused ? ' · bounds paused' : ''}
                 </small>
-              </li>
-            </ol>
-          </section>
-
-          <section>
-            <h3>树群 GLB</h3>
-            <ol>
-              <li>
-                <span>Tree GLB system</span>
-                <small>treeGlbMode removed · activeTreeGlbCount 0 · Tree Candidate Lab disabled</small>
               </li>
             </ol>
           </section>

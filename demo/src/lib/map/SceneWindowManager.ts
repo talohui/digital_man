@@ -3,7 +3,7 @@ export type SceneWindowPosition = {
   lng: number
 }
 
-export type SceneWindowModelKind = 'tree' | 'landmark' | 'companion' | 'model' | 'poi'
+export type SceneWindowModelKind = 'landmark' | 'companion' | 'model' | 'poi'
 
 export type SceneWindowRegisterOptions = {
   kind?: SceneWindowModelKind
@@ -59,7 +59,6 @@ const DEFAULT_BEHIND_PROGRESS_WINDOW = 0.035
 const DEFAULT_UPDATE_INTERVAL_MS = 1000
 
 const MODEL_MEMORY_ESTIMATE_MB: Record<SceneWindowModelKind, number> = {
-  tree: 1.2,
   landmark: 36,
   companion: 2,
   model: 8,

@@ -14,7 +14,7 @@ import { requestPrototypeWalkingRoute } from './tencentWalkingRoute'
 import { classifyNavigationError, type NavigationBetaErrorKind } from './navigationBetaErrors'
 import { resolveNavigationHeading } from './navigationHeading'
 import { requestDeviceOrientationPermission, startDeviceOrientation, stopDeviceOrientation, subscribeDeviceOrientation, type DeviceOrientationPermissionState } from './deviceOrientation'
-import { isNavigationDebugEnabled } from './navigationDebug'
+import { isLocalNavigationTestEnabled } from './navigationValidation'
 import { haversineDistanceMeters } from '../lib/routeProgress'
 import type {
   BrowserWgs84Location,
@@ -26,6 +26,7 @@ import type {
   NavigationPrototypeStatus,
   NavigationPrototypeTraceRecord,
   NavigationPrototypeLocationSource,
+  NavigationReplayPurpose,
   NavigationHeadingSnapshot,
   LocalNavigationTestState,
   LocalNavigationTestTarget,
@@ -143,7 +144,11 @@ type NavigationPrototypeStore = {
   error?: string
   start: (origin: NavigationPrototypeEndpoint, destination: NavigationPrototypeEndpoint) => Promise<void>
   startTarget: (target: PrototypeNavigationTarget) => void
-  startReplayTarget: (target: PrototypeNavigationTarget, origin: ConvertedGcj02Location) => void
+  startReplayTarget: (
+    target: PrototypeNavigationTarget,
+    origin: ConvertedGcj02Location,
+    options?: { purpose?: NavigationReplayPurpose; originLabel?: string }
+  ) => void
   prepareTarget: (target: PrototypeNavigationTarget) => void
   requestPreparedNavigation: () => void
   dismissPreparedNavigation: () => void
@@ -272,7 +277,16 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       },
       onError: ({ message }) => {
         if (generation === requestGeneration && get().locationSource !== 'replay-gcj02') {
-          set({ status: 'error', error: message, errorKind: classifyNavigationError(message), permissionRequestInFlight: false })
+          const state = get()
+          set({
+            status: 'error',
+            error: message,
+            errorKind: classifyNavigationError(message),
+            permissionRequestInFlight: false,
+            localNavigationTest: state.localNavigationTest
+              ? { ...state.localNavigationTest, phase: 'error' }
+              : undefined
+          })
         }
       }
     })
@@ -565,13 +579,16 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       startGeolocationWatch()
       if (priorLocation) void requestTargetRoute(target, priorLocation, session.id)
     },
-    startReplayTarget(target, origin) {
-      if (!import.meta.env.DEV) return
+    startReplayTarget(target, origin, options) {
+      const replayPurpose = options?.purpose ?? 'debug'
+      if (!import.meta.env.DEV && replayPurpose !== 'showcase') return
       const priorRouteProgress = get().routeProgress
       const session: PrototypeNavigationSession = {
         id: `prototype-navigation-${++navigationSessionSequence}`,
         target,
         originStage: target.mode === 'joining' ? 'joining' : target.mode === 'route-segment' ? 'active' : undefined,
+        replayPurpose,
+        replayOriginLabel: options?.originLabel,
         committed: false,
         targetChangedAt: Date.now()
       }
@@ -614,18 +631,39 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       set({ status: 'error', errorKind: kind, error: message })
     },
     prepareLocalNavigationTest() {
-      if (!isNavigationDebugEnabled()) return
+      if (!isLocalNavigationTestEnabled()) return
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        set({
+          status: 'error',
+          localNavigationTest: { phase: 'error' },
+          errorKind: 'insecure-context',
+          error: '浏览器需要在 HTTPS 或 localhost 下才能使用真实定位。'
+        })
+        return
+      }
       set({ localNavigationTest: { phase: 'permission-intro' }, error: undefined, errorKind: undefined })
     },
     startLocalNavigationTest() {
       const localTest = get().localNavigationTest
-      if (!isNavigationDebugEnabled() || !localTest || localTest.phase !== 'permission-intro') return
+      if (!isLocalNavigationTestEnabled() || !localTest || localTest.phase !== 'permission-intro') return
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        set({
+          status: 'error',
+          localNavigationTest: { ...localTest, phase: 'error' },
+          errorKind: 'insecure-context',
+          error: '浏览器需要在 HTTPS 或 localhost 下才能使用真实定位。'
+        })
+        return
+      }
       nextRequestGeneration()
+      const conversionGeneration = nextCoordinateConversionGeneration()
       stopLocationWatch?.()
       stopLocationWatch = null
       set({
         status: 'locating', route: undefined, session: undefined, progress: undefined,
-        convertedGcj02Position: undefined, locationSource: undefined, heading: undefined,
+        rawWgs84Position: undefined, convertedGcj02Position: undefined, locationSource: undefined, heading: undefined,
+        lastConversionInputWgs84Position: undefined, conversionStatus: 'idle', conversionError: undefined,
+        coordinateOffsetMeters: undefined, conversionGeneration,
         localNavigationTest: { ...localTest, phase: 'locating' },
         arrivalLocationHits: 0, candidateStepIndex: undefined, candidateStepHitCount: 0,
         lastConfirmedStepIndex: undefined, lastAnnouncedStepIndex: undefined,
@@ -637,7 +675,7 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     setLocalNavigationTestTarget(target) {
       const localTest = get().localNavigationTest
-      if (!isNavigationDebugEnabled() || !localTest || !Number.isFinite(target.coordinate.lat) || !Number.isFinite(target.coordinate.lng)) return
+      if (!isLocalNavigationTestEnabled() || !localTest || !Number.isFinite(target.coordinate.lat) || !Number.isFinite(target.coordinate.lng)) return
       const next = { ...localTest, target }
       set({ localNavigationTest: next })
       const origin = next.origin ?? get().convertedGcj02Position
@@ -647,8 +685,21 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
       })
     },
     cancelLocalNavigationTest() {
+      const conversionGeneration = nextCoordinateConversionGeneration()
       if (get().session?.target.mode === 'local-test' || get().localNavigationTest) get().cancelNavigation()
-      set({ localNavigationTest: undefined })
+      set({
+        localNavigationTest: undefined,
+        rawWgs84Position: undefined,
+        convertedGcj02Position: undefined,
+        locationSource: undefined,
+        heading: undefined,
+        deviceHeading: undefined,
+        lastConversionInputWgs84Position: undefined,
+        conversionStatus: 'idle',
+        conversionError: undefined,
+        coordinateOffsetMeters: undefined,
+        conversionGeneration
+      })
     },
     syncTarget(target) {
       const session = get().session
@@ -714,13 +765,21 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
     },
     resumeReplayNavigation() {
       const state = get()
-      if (!import.meta.env.DEV || state.status !== 'paused' || !state.session || !state.route) return
+      const replayAllowed = import.meta.env.DEV || state.session?.replayPurpose === 'showcase'
+      if (!replayAllowed || state.status !== 'paused' || !state.session || !state.route) return
       set({ status: 'navigating', restoredFromSessionStorage: false, backgroundPaused: false, permissionRequestInFlight: false, locationSource: 'replay-gcj02' })
     },
     continueAfterArrivalDetection() {
       const state = get()
       if (state.status !== 'arrived' || !state.route || !state.session || state.session.committed) return
-      set({ status: 'navigating', arrivalLocationHits: 0, routeStageCommitReason: '已继续当前导航，尚未提交路线阶段' })
+      set({
+        status: 'navigating',
+        arrivalLocationHits: 0,
+        routeStageCommitReason: '已继续当前导航，尚未提交路线阶段',
+        localNavigationTest: state.localNavigationTest?.phase === 'arrived'
+          ? { ...state.localNavigationTest, phase: 'navigating' }
+          : state.localNavigationTest
+      })
       startGeolocationWatch()
       persistSession()
     },
@@ -816,7 +875,8 @@ export const useNavigationPrototypeStore = create<NavigationPrototypeStore>((set
         })
     },
     acceptSimulatedGcj02Location(location) {
-      if (!import.meta.env.DEV) return
+      const replayAllowed = import.meta.env.DEV || get().session?.replayPurpose === 'showcase'
+      if (!replayAllowed) return
       if (!isAcceptedPrototypeLocation(location)) {
         set({ locationSource: location.source, conversionError: '模拟定位精度超过 100m，已拒绝。' })
         return

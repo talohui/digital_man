@@ -3,7 +3,7 @@ export type SceneStatePosition = {
   lng: number
 }
 
-export type SceneStateModelKind = 'tree' | 'landmark' | 'companion' | 'model' | 'poi'
+export type SceneStateModelKind = 'landmark' | 'companion' | 'model' | 'poi'
 export type SceneStateStatus = 'loaded' | 'visible' | 'hidden' | 'disposed' | 'cached'
 
 export type SceneStateRecord = {

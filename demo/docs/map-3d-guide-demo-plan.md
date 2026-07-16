@@ -122,38 +122,6 @@
 
 素材记录见 `docs/map-3d-guide-asset-licenses.md`。
 
-## 8.1 /map-3d-guide-c：沉稳 3D 园林资产版
-
-`/map-3d-guide-c` 是新的 3D 园林资产视觉原型，用于验证比 A/B PNG 贴片更沉稳的低模园林沙盘方向。
-
-它复用 `/map-3d-guide` 的腾讯地图初始化、`mapStyleId: 'style1'`、历史文化路线、模拟定位、模拟偏航、腾讯 walking route 重规划和 GLB 模型 Beta 逻辑，但禁用 PNG / SVG 路线装饰贴片，改为通过腾讯 `TMap.model.GLTFModel` 加载低模 GLB 园林资产。
-
-当前 C 版已经收敛为“树群 / 山林氛围”版本，使用项目自制低模 fallback GLB：
-
-- 松群。
-- 混合树群。
-- 竹林。
-- 低矮灌木。
-- 林缘。
-
-桥、院墙、香炉、法轮、莲台、石阶等非树类资产暂时不进入默认配置。原因是这些符号如果没有精确位置和正式模型质量，容易比树群更像 debug 占位。
-
-这些资产全部绑定经纬度，随腾讯地图缩放、旋转和平移移动，不使用固定屏幕大贴图。
-
-### debugGarden
-
-访问 `/map-3d-guide-c?debugGarden=1` 可打开 3D 园林资产调试面板，支持调整：
-
-- 经纬度。
-- scale。
-- height。
-- yaw。
-- visible。
-- priority。
-- routeFraction。
-
-调试结果保存到 localStorage，并支持复制 TS 配置片段，后续可整理为稳定配置。
-
 ## 9. 验收点
 
 - `/map-3d-guide` 可打开。
@@ -162,8 +130,6 @@
 - 页面主视觉不只是腾讯地图滤镜，而是有地图锚定水墨树木、水体、院落、桥、山石、云雾、莲花、光点、金色游线和 POI 立牌。
 - 水墨装饰随模拟进度逐步显现。
 - `/map-3d-guide?debugDecor=1` 可调试装饰点并导出配置。
-- `/map-3d-guide-c` 可打开，并能看到沉稳低模 3D 园林资产沿历史文化路线布置。
-- `/map-3d-guide-c?debugGarden=1` 可调试 3D 园林资产并导出配置。
 - 历史文化路线、当前位置、下一站和终点清楚。
 - 模拟前进可更新当前位置和进度。
 - 模拟偏航会调用腾讯 walking route 到下一站。

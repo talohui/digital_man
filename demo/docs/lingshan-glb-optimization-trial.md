@@ -400,7 +400,6 @@ gltf-transform resize <tmp-simplify.glb> <safe-v2.glb> --width 1024 --height 102
 - 旧 464M `bodhi-avenue.glb` 本轮不处理、不压缩、不提交、不作为运行时引用。
 - 九龙灌浴从 `missing_model` 切换为 `model_ready`。
 - 灵山大照壁新增 overlay 配置，便于 Landmark Inspector 单体加载、卸载、聚焦和校准。
-- debugGarden 核心地标参照层纳入三处 runtime-v1 地标。
 
 ### 后续测试
 
@@ -408,7 +407,6 @@ gltf-transform resize <tmp-simplify.glb> <safe-v2.glb> --width 1024 --height 102
 
 1. 是否能在腾讯地图 `GLTFModel` 中稳定显示和卸载。
 2. 尺寸、朝向、高度和偏移是否需要校准。
-3. 菩提大道作为线性场景资产是否遮挡路线、POI 或树群。
 4. debugPerf 是否记录加载耗时和错误。
 
 树候选方向暂时暂停，后续树木可考虑用 Meshy AI 统一生成更明亮、更毛茸茸的树团资产。
@@ -428,5 +426,4 @@ gltf-transform resize <tmp-simplify.glb> <safe-v2.glb> --width 1024 --height 102
 - 本次提交包含 3 个 runtime-v1 GLB：菩提大道约 23M、九龙灌浴约 44M、灵山大照壁约 28M。
 - 旧 464M 菩提大道 raw 文件不处理、不提交、不作为运行时引用。
 - 不提交 raw / safe-v1 / draco。
-- 这 3 个模型已进入 Landmark Inspector 和 debugGarden 核心地标参照层。
 - 后续仍可通过 `/map-3d-guide-c?debugPerf=1` 的本地 calibration draft 覆盖默认值继续微调。

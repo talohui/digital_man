@@ -6,6 +6,7 @@ import { GuideMessageTimeline } from './GuideMessageTimeline'
 import type { XiaolingDrawerBackground } from './resolveXiaolingDrawerBackground'
 
 type SurfaceMode = 'drawer' | 'fullscreen'
+type SurfaceLayout = 'companion' | 'reading'
 
 const connectionLabels = {
   idle: '语音服务待命',
@@ -50,7 +51,22 @@ export function XiaolingConversationSurface({
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const shouldFollowRef = useRef(true)
   const didInitialScrollRef = useRef(false)
+  const hasUserMessage = messages.some((message) => message.role === 'user')
+  const hadUserMessageRef = useRef(hasUserMessage)
+  const [fullscreenLayout, setFullscreenLayout] = useState<SurfaceLayout>(() => hasUserMessage ? 'reading' : 'companion')
   const [resolvedBackgroundUrl, setResolvedBackgroundUrl] = useState('')
+  const surfaceLayout: SurfaceLayout = mode === 'drawer' ? 'reading' : fullscreenLayout
+
+  useEffect(() => {
+    if (mode !== 'fullscreen') {
+      hadUserMessageRef.current = hasUserMessage
+      return
+    }
+
+    if (!hasUserMessage) setFullscreenLayout('companion')
+    else if (!hadUserMessageRef.current) setFullscreenLayout('reading')
+    hadUserMessageRef.current = hasUserMessage
+  }, [hasUserMessage, mode])
 
   useEffect(() => {
     const timeline = timelineRef.current
@@ -66,6 +82,7 @@ export function XiaolingConversationSurface({
   const submit = (event: FormEvent) => {
     event.preventDefault()
     shouldFollowRef.current = true
+    if (mode === 'fullscreen') setFullscreenLayout('reading')
     onSend()
   }
 
@@ -80,6 +97,8 @@ export function XiaolingConversationSurface({
   const content = (
     <main
       className={`immersive-guide xiaoling-conversation xiaoling-conversation--${mode}`}
+      data-xiaoling-layout={surfaceLayout}
+      data-xiaoling-robot-state={runtime.robotState}
       {...debugBackgroundAttributes}
     >
       <ScenicBackdrop
@@ -87,24 +106,33 @@ export function XiaolingConversationSurface({
         enabled={Boolean(backgroundMedia)}
         onResolved={(url) => setResolvedBackgroundUrl(url)}
       />
-      <div className="immersive-guide__aura immersive-guide__aura--left" />
-      <div className="immersive-guide__aura immersive-guide__aura--right" />
-
       <div className="xiaoling-conversation__handle" aria-hidden="true" />
 
       <header className="immersive-guide__topbar xiaoling-conversation__topbar">
         <button type="button" className="xiaoling-conversation__round-action" onClick={onClose} aria-label={mode === 'drawer' ? '关闭小灵' : '返回'}>
           {mode === 'drawer' ? '×' : '‹'}
         </button>
-        <div>
+        <div className="xiaoling-conversation__heading">
           <span>{subtitle}</span>
           <strong>{title}</strong>
         </div>
-        {mode === 'drawer' && onFullscreen ? (
-          <button type="button" className="xiaoling-conversation__text-action" onClick={onFullscreen}>全屏</button>
-        ) : (
-          <button type="button" className="xiaoling-conversation__text-action" onClick={onOpenMap}>地图</button>
-        )}
+        <div className="xiaoling-conversation__topbar-actions">
+          {mode === 'fullscreen' ? (
+            <button
+              type="button"
+              className="xiaoling-conversation__layout-action"
+              aria-pressed={surfaceLayout === 'companion'}
+              onClick={() => setFullscreenLayout((current) => current === 'reading' ? 'companion' : 'reading')}
+            >
+              {surfaceLayout === 'reading' ? '看小灵' : '看对话'}
+            </button>
+          ) : null}
+          {mode === 'drawer' && onFullscreen ? (
+            <button type="button" className="xiaoling-conversation__text-action" onClick={onFullscreen}>全屏</button>
+          ) : (
+            <button type="button" className="xiaoling-conversation__text-action" onClick={onOpenMap}>地图</button>
+          )}
+        </div>
       </header>
 
       <div className={`immersive-guide__status xiaoling-conversation__status xiaoling-conversation__status--${runtime.connectionState}`}>
@@ -124,6 +152,7 @@ export function XiaolingConversationSurface({
             {suggestedQuestions.map((question) => (
               <button key={question} type="button" onClick={() => {
                 shouldFollowRef.current = true
+                if (mode === 'fullscreen') setFullscreenLayout('reading')
                 onSuggestedQuestion(question)
               }}>
                 {question}
@@ -134,6 +163,13 @@ export function XiaolingConversationSurface({
         <div
           ref={timelineRef}
           className="chat-card__messages xiaoling-conversation__messages"
+          data-guide-message-scroll="true"
+          onTouchStart={() => {
+            shouldFollowRef.current = false
+          }}
+          onWheel={() => {
+            shouldFollowRef.current = false
+          }}
           onScroll={(event) => {
             const element = event.currentTarget
             shouldFollowRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96
@@ -282,8 +318,6 @@ function ScenicBackdrop({
           title={incoming.alt}
         />
       ) : null}
-      <span className="xiaoling-conversation__scenic-tint xiaoling-conversation__scenic-tint--blue" />
-      <span className="xiaoling-conversation__scenic-tint xiaoling-conversation__scenic-tint--light" />
     </div>
   )
 }

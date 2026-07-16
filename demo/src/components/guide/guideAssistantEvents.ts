@@ -8,6 +8,7 @@ export type GuideAssistantOpenRequest = {
 
 const GUIDE_ASSISTANT_OPEN_EVENT = 'lingshan:guide-assistant-open'
 const GUIDE_ASSISTANT_CLOSE_EVENT = 'lingshan:guide-assistant-close'
+const GUIDE_ASSISTANT_COMPANION_SUPPRESSION_EVENT = 'lingshan:guide-assistant-companion-suppression'
 
 /**
  * Temporary UI bridge. Guide Core will replace this event adapter with its
@@ -21,7 +22,12 @@ export function closeGlobalXiaoling() {
   window.dispatchEvent(new Event(GUIDE_ASSISTANT_CLOSE_EVENT))
 }
 
+export function setGlobalXiaolingCompanionSuppressed(suppressed: boolean) {
+  window.dispatchEvent(new CustomEvent(GUIDE_ASSISTANT_COMPANION_SUPPRESSION_EVENT, { detail: { suppressed } }))
+}
+
 export const guideAssistantEvents = {
   open: GUIDE_ASSISTANT_OPEN_EVENT,
-  close: GUIDE_ASSISTANT_CLOSE_EVENT
+  close: GUIDE_ASSISTANT_CLOSE_EVENT,
+  companionSuppression: GUIDE_ASSISTANT_COMPANION_SUPPRESSION_EVENT
 } as const

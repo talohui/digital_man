@@ -13,13 +13,14 @@ function isFullbleedRoute(pathname: string) {
 function FloatingGuide() {
   const location = useLocation()
   const navigate = useNavigate()
+  const isHome = location.pathname === '/'
 
   if (shouldHideOnRoute(location.pathname)) return null
 
   return (
     <button
       type="button"
-      className={`floating-guide__fab ${isFullbleedRoute(location.pathname) ? 'is-fullbleed' : ''}`}
+      className={`floating-guide__fab ${isFullbleedRoute(location.pathname) ? 'is-fullbleed' : ''} ${isHome ? 'is-home' : ''}`.trim()}
       onClick={() => {
         const returnTo = `${location.pathname}${location.search}${location.hash}`
         saveCAppReturnContext({

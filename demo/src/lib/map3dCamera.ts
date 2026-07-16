@@ -251,11 +251,8 @@ export const SCENIC_CAMERA_BOUNDS = {
     reducedZoom: 16.82,
     normalOpacity: 1,
     interactionOpacity: 0.36,
-    interactionDebugGardenOpacity: 0.58,
     farOpacity: 0.08,
-    farDebugGardenOpacity: 0.22,
     reducedOpacity: 0.18,
-    reducedDebugGardenOpacity: 0.4
   }
 } as const
 

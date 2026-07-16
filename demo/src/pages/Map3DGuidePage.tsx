@@ -21,12 +21,6 @@ import {
   type ScenicPoiBillboardMode
 } from '../components/map3d/ScenicPoiBillboards'
 import { guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
-import type {
-  Map3DGardenAssetKind,
-  Map3DGardenAssetPriority,
-  LingshanMap3DForestPatch,
-  LingshanMap3DGardenAsset
-} from '../data/lingshanMap3DGardenAssets'
 import {
   getLingshanPoisForLayer,
   lingshanPois,
@@ -183,49 +177,6 @@ type RouteCameraIntentSnapshot = {
   lastCompletedGeneration: number
   lastFailure?: string
 }
-type GardenLodState = {
-  opacity: number
-  visibleTier: 'none' | 'reduced' | 'full'
-  isInteracting: boolean
-  currentZoom?: number
-}
-type GardenModelReport = {
-  createdCount: number
-  visibleCount: number
-  patchCount: number
-  patchFallback: boolean
-  unavailable: boolean
-  assetUrls: string[]
-  loadedIds: string[]
-  errorIds: string[]
-}
-
-// Tree GLB system removed due to mobile memory pressure.
-const lingshanMap3DForestPatches: LingshanMap3DForestPatch[] = []
-
-function getDefaultMap3DGardenAssets(): LingshanMap3DGardenAsset[] {
-  return []
-}
-
-function getLegacyMap3DGardenAssets(): LingshanMap3DGardenAsset[] {
-  return []
-}
-
-function getMap3DGardenAssetUrl(_kind: Map3DGardenAssetKind) {
-  return ''
-}
-
-function getMap3DGardenLicenseId() {
-  return 'tree-glb-system-removed'
-}
-
-function normalizeLingshanTreeAssetScale<T extends LingshanMap3DGardenAsset>(asset: T): T {
-  return asset
-}
-
-function normalizeLingshanTreeScaleRange(_kind: Map3DGardenAssetKind, scaleMin: number, scaleMax: number) {
-  return { scaleMin, scaleMax }
-}
 
 const MAP_3D_GUIDE_MIN_BASEMAP_READY_MS = 1050
 const MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS = 3200
@@ -308,93 +259,6 @@ type DecorSmokeReport = {
 type AssetLoadState = Record<string, 'loaded' | 'error'>
 type InkMapBoundCorner = 'northWest' | 'northEast' | 'southEast' | 'southWest'
 type InkMapBoundsDraft = Record<InkMapBoundCorner, LatLngPoint | null>
-
-type GardenAssetFilterState = {
-  zoneId: string
-  kind: string
-  priority: string
-  visible: string
-}
-
-type GardenBatchAdjustState = {
-  scaleMultiplier: number
-  heightDelta: number
-  opacityDelta: number
-  latOffset: number
-  lngOffset: number
-}
-
-type GardenEditorZoneKind = 'forest' | 'axis_grove' | 'water_edge' | 'node_green'
-type GardenKeepoutReason = string
-type GardenEditorMode = 'inspect' | 'drawVegetation' | 'drawKeepout' | 'addAsset'
-type GardenAssetSourceMode = 'manual' | 'legacy'
-type TreeCandidateType =
-  | 'fluffy_bodhi_grove'
-  | 'fluffy_round_tree'
-  | 'fluffy_tree_mix'
-  | 'bushy_canopy_tree'
-  | 'dense_shrub_cluster'
-  | 'soft_forest_clump'
-type TreeCandidateClusterMode = 'single' | 'smallCluster' | 'mediumCluster' | 'backgroundGrove'
-type TreeCandidateLabClickMode = 'idle' | 'addCluster' | 'compareSet'
-
-type TreeCandidateLabParams = {
-  count: number
-  radiusMeters: number
-  minDistanceMeters: number
-  scaleMin: number
-  scaleMax: number
-  heightOffset: number
-  randomSeed: number
-}
-
-type TreeCandidateLabState = {
-  selectedCandidateType: TreeCandidateType
-  clusterMode: TreeCandidateClusterMode
-  params: TreeCandidateLabParams
-  testTrees: LingshanMap3DGardenAsset[]
-  defaultGardenHidden: boolean
-  landmarkReferenceLoaded: boolean
-}
-
-type GardenAssetRatios = Partial<Record<Map3DGardenAssetKind, number>>
-
-type GardenEditorVegetationZone = {
-  id: string
-  name: string
-  kind: GardenEditorZoneKind
-  vertices: LatLngPoint[]
-  density: number
-  assetPool: Map3DGardenAssetKind[]
-  assetRatios: GardenAssetRatios
-  minScale: number
-  maxScale: number
-  minHeight: number
-  maxHeight: number
-  opacity: number
-  priority: Map3DGardenAssetPriority
-  visible: boolean
-}
-
-type GardenEditorKeepoutZone = {
-  id: string
-  name: string
-  reason: GardenKeepoutReason
-  vertices: LatLngPoint[]
-  visible: boolean
-}
-
-type GardenEditorState = {
-  zones: GardenEditorVegetationZone[]
-  keepouts: GardenEditorKeepoutZone[]
-  previewAssets: LingshanMap3DGardenAsset[]
-  appliedAssets: LingshanMap3DGardenAsset[]
-}
-
-type GardenDraftPolygon = {
-  mode: 'vegetation' | 'keepout'
-  vertices: LatLngPoint[]
-} | null
 
 type TourWaypoint = LatLngPoint & {
   progress: number
@@ -571,153 +435,6 @@ const inkMapBoundCornerShortLabels: Record<InkMapBoundCorner, string> = {
 const MAP_3D_GUIDE_LOCAL_TMAP_HOST = '127.0.0.1'
 const MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST = 'localhost'
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v8-manual-trees'
-const MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY = 'lingshan-map-3d-guide-garden-editor-v1'
-const TREE_CANDIDATE_LAB_STORAGE_KEY = 'lingshan_tree_candidate_lab_draft_v1'
-const MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX = 'lingshan-map-3d-guide-localhost-transfer:'
-const MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS = [
-  MAP_3D_GUIDE_GARDEN_STORAGE_KEY,
-  MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY,
-  TREE_CANDIDATE_LAB_STORAGE_KEY
-] as const
-const TREE_CANDIDATE_LAB_ZONE_ID = 'tree-candidate-lab'
-const recommendedTreeCandidateTypes: TreeCandidateType[] = ['fluffy_bodhi_grove']
-const legacyTreeCandidateTypes: TreeCandidateType[] = [
-  'fluffy_round_tree',
-  'fluffy_tree_mix',
-  'bushy_canopy_tree',
-  'dense_shrub_cluster',
-  'soft_forest_clump'
-]
-const treeCandidateTypes: TreeCandidateType[] = [
-  ...recommendedTreeCandidateTypes,
-  ...legacyTreeCandidateTypes
-]
-const treeCandidateLabels: Record<TreeCandidateType, string> = {
-  fluffy_bodhi_grove: '毛茸茸菩提树团',
-  fluffy_round_tree: 'fluffy_round_tree',
-  fluffy_tree_mix: 'fluffy_tree_mix',
-  bushy_canopy_tree: 'bushy_canopy_tree',
-  dense_shrub_cluster: 'dense_shrub_cluster',
-  soft_forest_clump: 'soft_forest_clump'
-}
-const treeCandidateDescriptions: Record<TreeCandidateType, string> = {
-  fluffy_bodhi_grove: '主树团候选；适合背景林、边界林、地标侧后方树群。',
-  fluffy_round_tree: 'Kenney legacy 圆冠矮树候选。',
-  fluffy_tree_mix: 'Kenney legacy 块状圆冠树候选。',
-  bushy_canopy_tree: 'Kenney legacy 深绿橡树冠候选。',
-  dense_shrub_cluster: 'Kenney legacy 大灌木候选。',
-  soft_forest_clump: 'Kenney legacy 深绿树候选。'
-}
-const treeCandidateRecommendedModes: Record<TreeCandidateType, TreeCandidateClusterMode[]> = {
-  fluffy_bodhi_grove: ['smallCluster', 'mediumCluster', 'backgroundGrove'],
-  fluffy_round_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  fluffy_tree_mix: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  bushy_canopy_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  dense_shrub_cluster: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  soft_forest_clump: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove']
-}
-const treeCandidateTypesForCompare = treeCandidateTypes
-const treeCandidateLegacyDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
-  single: {
-    count: 1,
-    radiusMeters: 0,
-    minDistanceMeters: 0,
-    scaleMin: 84,
-    scaleMax: 94,
-    heightOffset: 2.2,
-    randomSeed: 1207
-  },
-  smallCluster: {
-    count: 4,
-    radiusMeters: 10,
-    minDistanceMeters: 3,
-    scaleMin: 78,
-    scaleMax: 98,
-    heightOffset: 2.1,
-    randomSeed: 2401
-  },
-  mediumCluster: {
-    count: 8,
-    radiusMeters: 18,
-    minDistanceMeters: 4,
-    scaleMin: 74,
-    scaleMax: 106,
-    heightOffset: 2,
-    randomSeed: 3613
-  },
-  backgroundGrove: {
-    count: 14,
-    radiusMeters: 36,
-    minDistanceMeters: 6,
-    scaleMin: 66,
-    scaleMax: 116,
-    heightOffset: 1.8,
-    randomSeed: 4817
-  }
-}
-const treeCandidateBodhiGroveDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
-  single: {
-    count: 1,
-    radiusMeters: 0,
-    minDistanceMeters: 0,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9201
-  },
-  smallCluster: {
-    count: 3,
-    radiusMeters: 14,
-    minDistanceMeters: 8,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9301
-  },
-  mediumCluster: {
-    count: 5,
-    radiusMeters: 26,
-    minDistanceMeters: 10,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9401
-  },
-  backgroundGrove: {
-    count: 8,
-    radiusMeters: 48,
-    minDistanceMeters: 14,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9501
-  }
-}
-const treeCandidateRecommendedDefaults: Record<TreeCandidateType, Record<TreeCandidateClusterMode, TreeCandidateLabParams>> = {
-  fluffy_bodhi_grove: treeCandidateBodhiGroveDefaults,
-  fluffy_round_tree: treeCandidateLegacyDefaults,
-  fluffy_tree_mix: treeCandidateLegacyDefaults,
-  bushy_canopy_tree: treeCandidateLegacyDefaults,
-  dense_shrub_cluster: treeCandidateLegacyDefaults,
-  soft_forest_clump: treeCandidateLegacyDefaults
-}
-const treeCandidateClusterDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = treeCandidateBodhiGroveDefaults
-const coreLandmarkReferenceIds = [
-  'giant_buddha',
-  'fan_gong',
-  'puti_avenue',
-  'jiulong_guanyu',
-  'lingshan_dazhaobi',
-  'wuyin_tancheng',
-  'foshou_square',
-  'foqian_square',
-  'xiangfu_temple',
-  'sansheng_hall',
-  'baizi_mile',
-  'manlong_flying_tower',
-  'shengjing_square'
-]
 const scenicPoiBillboardConfigs: Array<{
   id: string
   description: string
@@ -755,47 +472,6 @@ const LANDMARK_FORCE_LOW_DETAIL_GLB = true
 const MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS = 34
 const MOBILE_BUDDHA_TOUR_ROUTE_FRAME_MS = 72
 const BUDDHA_TOUR_EARLY_PRELOAD_PROGRESS = 0.06
-const treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string> = {
-  single: '单棵',
-  smallCluster: '小树团',
-  mediumCluster: '中树团',
-  backgroundGrove: '背景林团'
-}
-const defaultGardenFilters: GardenAssetFilterState = {
-  zoneId: 'all',
-  kind: 'all',
-  priority: 'all',
-  visible: 'all'
-}
-const defaultGardenBatchAdjust: GardenBatchAdjustState = {
-  scaleMultiplier: 1.08,
-  heightDelta: 0,
-  opacityDelta: 0.05,
-  latOffset: 0,
-  lngOffset: 0
-}
-const gardenAssetKindOptions: Map3DGardenAssetKind[] = [
-  'pine_cluster',
-  'mixed_grove',
-  'bamboo_grove',
-  'forest_edge',
-  'shrub_mass',
-  'rock_cluster',
-  'stone_mass',
-  'fluffy_round_tree',
-  'bushy_canopy_tree',
-  'dense_shrub_cluster',
-  'soft_forest_clump',
-  'fluffy_tree_mix'
-]
-const defaultEditorAssetPool: Map3DGardenAssetKind[] = ['pine_cluster', 'mixed_grove', 'forest_edge', 'shrub_mass', 'rock_cluster']
-const defaultEditorAssetRatios: GardenAssetRatios = {
-  pine_cluster: 40,
-  mixed_grove: 24,
-  forest_edge: 16,
-  shrub_mass: 14,
-  rock_cluster: 6
-}
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
@@ -814,7 +490,7 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     className: 'map-3d-guide-shell--prototype-a',
     kicker: '视觉原型 A · 少量高质素材',
     title: '青绿佛境精品导览',
-    subtitle: '稀疏园林资产 · 路线优先',
+    subtitle: '核心地标资产 · 路线优先',
     statusTitle: '游线导览牌',
     stationPanelTitle: '当前路线节点',
     controlTitle: '精品导览控制',
@@ -836,9 +512,9 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
   'prototype-c': {
     id: 'prototype-c',
     className: 'map-3d-guide-shell--prototype-c',
-    kicker: '视觉原型 C · 沉稳 3D 园林资产',
+    kicker: '视觉原型 C · 沉稳 3D 地标资产',
     title: '低模园林路线沙盘',
-    subtitle: 'GLB 园林资产 · 地图坐标锚定',
+    subtitle: 'GLB 地标资产 · 地图坐标锚定',
     statusTitle: '3D 园林导览牌',
     stationPanelTitle: '园林化路线节点',
     controlTitle: '3D 园林导览控制',
@@ -873,6 +549,8 @@ export type Map3DGuideMapRuntime = {
   mapInstanceId: number
 }
 
+export type Map3DGuideCameraScope = 'scenic' | 'navigation'
+
 type Map3DGuideExperienceProps = {
   variant?: Map3DGuideVariant
   guideState?: MapGuideState
@@ -882,6 +560,14 @@ type Map3DGuideExperienceProps = {
   onMapRuntimeChange?: (runtime: Map3DGuideMapRuntime | null) => void
   /** Temporary map presentation override; never mutates the user's POI preference. */
   navigationPoiOverrideActive?: boolean
+  /** Lets the standalone real-navigation page leave the scenic camera bounds. */
+  cameraScope?: Map3DGuideCameraScope
+  /**
+   * Restores the Tencent runtime only for standalone prototype shells that do
+   * not participate in the C-app map lifecycle. Kept opt-in so the regular
+   * C-app route remains untouched while its map runtime is being refactored.
+   */
+  bootstrapMapRuntime?: boolean
 }
 
 function resolveScenicMapPresentation(
@@ -1017,7 +703,9 @@ export function Map3DGuideExperience({
   presentation,
   onPresentationTransitionChange,
   onMapRuntimeChange,
-  navigationPoiOverrideActive = false
+  navigationPoiOverrideActive = false,
+  cameraScope = 'scenic',
+  bootstrapMapRuntime = true
 }: Map3DGuideExperienceProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
@@ -1114,7 +802,6 @@ export function Map3DGuideExperience({
   const rerouteLayerRef = useRef<any>(null)
   const landmarkHighlightLayerRef = useRef<any>(null)
   const decorMarkerLayerRef = useRef<any>(null)
-  const forestPatchLayerRef = useRef<any>(null)
   const inkOverlayLayerRef = useRef<HTMLDivElement | null>(null)
   const inkTileLayerRef = useRef<any>(null)
   const tencentCustomLayerInitKeyRef = useRef('')
@@ -1134,12 +821,6 @@ export function Map3DGuideExperience({
   const formalInkBoundsFillLayerRef = useRef<any>(null)
   const inkBoundsMarkerLayerRef = useRef<any>(null)
   const inkBoundsBoundaryLayerRef = useRef<any>(null)
-  const gardenEditorPolygonLayerRef = useRef<any>(null)
-  const gardenEditorVertexLayerRef = useRef<any>(null)
-  const gardenPreviewMarkerLayerRef = useRef<any>(null)
-  const gardenAssetEditMarkerLayerRef = useRef<any>(null)
-  const treeCandidateMarkerLayerRef = useRef<any>(null)
-  const treeCandidateEditMarkerLayerRef = useRef<any>(null)
   const gltfModelRefs = useRef<Map<string, any>>(new Map())
   const landmarkLastEvictedAtRef = useRef<Map<string, number>>(new Map())
   const landmarkLastLoadAttemptAtRef = useRef<Map<string, number>>(new Map())
@@ -1205,16 +886,14 @@ export function Map3DGuideExperience({
   })
   const entryCameraPlayedRef = useRef(false)
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
-  // Tree GLB system removed due to memory pressure; debugGarden/Tree Candidate Lab is no longer active.
-  const debugGarden = false
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
   const debugPoiCalibration = useMemo(() => isQueryEnabled('debugPoiCalibration'), [])
   const debugInkBounds = false
   const exportInkBase = false
   const isInkCleanMode = debugInkBounds || exportInkBase
   const noMapBoundsDebugOverride = useMemo(() => debugPerf && isQueryEnabled('noMapBounds'), [debugPerf])
-  const mapBoundsDisabledReason = debugGarden
-    ? 'debugGarden'
+  const mapBoundsDisabledReason = cameraScope === 'navigation'
+    ? 'navigationScope'
     : noMapBoundsDebugOverride
       ? 'debugPerfNoMapBounds'
       : 'none'
@@ -1387,18 +1066,10 @@ export function Map3DGuideExperience({
       getRouteStopLocation('foqian_square') ?? currentRouteCenter,
       getRouteStopLocation('giant_buddha') ?? currentRouteCenter
     ]) ?? currentRouteCenter
-  const landmarkModelOverlays = useMemo(() => {
-    const overlays = getVisibleMapModelOverlays()
-
-    if (!debugGarden) {
-      return orderMapModelOverlaysForLoading(overlays)
-    }
-
-    const coreIds = new Set(coreLandmarkReferenceIds)
-    return orderMapModelOverlaysForLoading(
-      overlays.filter((overlay) => coreIds.has(getMapModelOverlayInspectorId(overlay)))
-    )
-  }, [debugGarden])
+  const landmarkModelOverlays = useMemo(
+    () => orderMapModelOverlaysForLoading(getVisibleMapModelOverlays()),
+    []
+  )
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
   const [presentationTransition, setPresentationTransition] = useState<MapPresentationTransition>('idle')
   const [cameraTransitionPhase, setCameraTransitionPhase] = useState<CameraTransitionPhase>('idle')
@@ -1466,26 +1137,6 @@ export function Map3DGuideExperience({
     assetUrls: []
   })
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
-  const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
-  const [gardenAssetSourceMode, setGardenAssetSourceMode] = useState<GardenAssetSourceMode>('manual')
-  const [selectedGardenId, setSelectedGardenId] = useState(() => (debugGarden ? '' : loadStoredGardenAssets(visualVariant.id)[0]?.id ?? ''))
-  const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
-  const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
-  const [forestPatchesVisible, setForestPatchesVisible] = useState(false)
-  const [gardenEditorMode, setGardenEditorMode] = useState<GardenEditorMode>('inspect')
-  const [gardenEditorState, setGardenEditorState] = useState<GardenEditorState>(() => loadStoredGardenEditorState())
-  const [gardenEditorUsesStoredDraft, setGardenEditorUsesStoredDraft] = useState(() => hasStoredGardenEditorDraft())
-  const [gardenDraftPolygon, setGardenDraftPolygon] = useState<GardenDraftPolygon>(null)
-  const [selectedEditorZoneId, setSelectedEditorZoneId] = useState('')
-  const [selectedKeepoutZoneId, setSelectedKeepoutZoneId] = useState('')
-  const [selectedGardenVertexId, setSelectedGardenVertexId] = useState('')
-  const [gardenAssetEditDraft, setGardenAssetEditDraft] = useState<LingshanMap3DGardenAsset | null>(null)
-  const [editorAddAssetKind, setEditorAddAssetKind] = useState<Map3DGardenAssetKind>('pine_cluster')
-  const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
-  const [treeCandidateLabState, setTreeCandidateLabState] = useState<TreeCandidateLabState>(() => loadTreeCandidateLabDraft(debugGarden))
-  const [treeCandidateLabClickMode, setTreeCandidateLabClickMode] = useState<TreeCandidateLabClickMode>(() => (debugGarden ? 'addCluster' : 'idle'))
-  const [selectedTreeCandidateId, setSelectedTreeCandidateId] = useState('')
-  const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
   const [inkBoundsDraft, setInkBoundsDraft] = useState<InkMapBoundsDraft>(() => createEmptyInkMapBoundsDraft())
   const [inkBoundsCopyStatus, setInkBoundsCopyStatus] = useState('尚未复制')
   const [inkExportUiHidden, setInkExportUiHidden] = useState(false)
@@ -1801,13 +1452,13 @@ export function Map3DGuideExperience({
 
   const landmarkInspector = useLandmarkModelInspector({
     active:
-      (visualVariant.id === 'prototype-c' || debugPerf || debugGarden) &&
+      (visualVariant.id === 'prototype-c' || debugPerf) &&
       !isInkCleanMode &&
       !isInk2DPresentation &&
       appliedPresentationRef.current === 'scenic3d' &&
       cameraTransitionPhase === 'ready',
     layerManager,
-    useLocalDrafts: debugPerf || debugGarden,
+    useLocalDrafts: debugPerf,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
     isMapCurrent: isMapInstanceCurrent,
@@ -1956,17 +1607,6 @@ export function Map3DGuideExperience({
   const isScenic3DModelsReady =
     !isInk2DPresentation && appliedPresentationRef.current === 'scenic3d' && cameraTransitionPhase === 'ready'
   const shouldRunGlbRuntime = visualVariant.id === 'prototype-c' && !isInkCleanMode && isScenic3DModelsReady
-  const baseShouldLoadGardenAssets = false
-  const shouldLoadGardenAssets = false
-  const gardenLodState = useMemo(
-    () =>
-      getGardenLodState({
-        currentZoom: mapInteractionSnapshot.currentZoom,
-        debugGarden,
-        isInteracting: mapInteractionSnapshot.isInteracting
-      }),
-    [debugGarden, mapInteractionSnapshot.currentZoom, mapInteractionSnapshot.isInteracting]
-  )
 
   useEffect(() => {
     landmarkInspectorRef.current = landmarkInspector
@@ -1985,9 +1625,7 @@ export function Map3DGuideExperience({
         glbRuntimePhase: snapshot.phase,
         glbRuntimeProfile: snapshot.profile,
         glbRuntimeLandmarkGate: snapshot.landmarkGate,
-        glbRuntimeGardenGate: false,
         glbRuntimeLandmarkDelayMs: snapshot.landmarkDelayMs,
-        glbRuntimeGardenDelayMs: 0,
         glbRuntimePendingTimerCount: snapshot.pendingTimerCount,
         reason: snapshot.reason
       })
@@ -1999,13 +1637,11 @@ export function Map3DGuideExperience({
       enabled: shouldRunGlbRuntime,
       mapReady: mapStatus === 'ready',
       visualReady: mapVisualReadyForOverlays,
-      debugGarden,
       inkCleanMode: isInkCleanMode,
       mobile: isMobileViewport,
       interactionLiteMode: mapInteractionSnapshot.isInteracting
     })
   }, [
-    debugGarden,
     glbRuntimeOrchestrator,
     isInkCleanMode,
     isMobileViewport,
@@ -2020,7 +1656,7 @@ export function Map3DGuideExperience({
     landmarkRuntimeLoadTimersRef.current = []
     landmarkRuntimeLoadGenerationRef.current += 1
 
-    if (!ENABLE_LANDMARK_GLB || visualVariant.id !== 'prototype-c' || debugGarden || isInkCleanMode || !isScenic3DModelsReady) {
+    if (!ENABLE_LANDMARK_GLB || visualVariant.id !== 'prototype-c' || isInkCleanMode || !isScenic3DModelsReady) {
       if (isInk2DPresentation) {
         setModelStatus('移动端 2D 地图模式：核心地标 GLB 暂不加载')
       } else if (!isInkCleanMode) {
@@ -2432,7 +2068,6 @@ export function Map3DGuideExperience({
       landmarkRuntimeLoadTimersRef.current = []
     }
   }, [
-    debugGarden,
     glbMemoryManager,
     glbRuntimeSnapshot.landmarkGate,
     glbRuntimeSnapshot.phase,
@@ -2566,7 +2201,6 @@ export function Map3DGuideExperience({
       dynamicMistRecoveryState: 'disabled',
       skyOptionsAnimated: false,
       enableDynamicMistDebugOverride: false,
-      debugGardenDynamicMistDisabled: true,
       coreClearMaskEnabled: false,
       poiLiftMode: 'raised',
       activePoiLiftPx,
@@ -2664,24 +2298,6 @@ export function Map3DGuideExperience({
   )
   const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
-  const selectedGardenAsset = selectedGardenId ? gardenAssets.find((asset) => asset.id === selectedGardenId) : undefined
-  const selectedGardenAssetDraft = selectedGardenAsset && gardenAssetEditDraft?.id === selectedGardenId ? gardenAssetEditDraft : selectedGardenAsset
-  const selectedTreeCandidateAsset = selectedTreeCandidateId
-    ? treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    : undefined
-  const selectedEditorZone = selectedEditorZoneId ? gardenEditorState.zones.find((zone) => zone.id === selectedEditorZoneId) : undefined
-  const selectedKeepoutZone = selectedKeepoutZoneId ? gardenEditorState.keepouts.find((zone) => zone.id === selectedKeepoutZoneId) : undefined
-  const filteredGardenAssets = useMemo(
-    () => gardenAssets.filter((asset) => matchesGardenFilters(asset, gardenFilters)),
-    [gardenAssets, gardenFilters]
-  )
-  const defaultGardenHidden = true
-  const testTreeAssets: LingshanMap3DGardenAsset[] = []
-  const overlayGardenAssets: LingshanMap3DGardenAsset[] = []
-  const spatialGardenAssetLookup = useMemo(() => {
-    const lookup = new Map<string, LingshanMap3DGardenAsset>()
-    return lookup
-  }, [])
   const spatialLandmarkOverlayLookup = useMemo(() => {
     const lookup = new Map<string, LingshanMapModelOverlay>()
     landmarkModelOverlays.forEach((overlay) => {
@@ -2791,7 +2407,7 @@ export function Map3DGuideExperience({
               kind: record.kind,
               protected: protectedSceneModelIdsRef.current.has(modelId),
               sceneState: record.state,
-              estimatedMemoryMB: record.kind === 'landmark' ? 36 : record.kind === 'tree' ? 1.2 : record.kind === 'companion' ? 2 : 8,
+              estimatedMemoryMB: record.kind === 'landmark' ? 36 : record.kind === 'companion' ? 2 : 8,
               reason: 'scene-state-rehydrate'
             }
           })
@@ -2824,46 +2440,33 @@ export function Map3DGuideExperience({
       }
     }
   }, [sceneStateManager])
-  const liveDefaultGardenOverlayCount = 0
-  const liveTestTreeOverlayCount = 0
-  const gardenModelReport: GardenModelReport = {
-    createdCount: 0,
-    visibleCount: 0,
-    patchCount: 0,
-    patchFallback: false,
-    unavailable: false,
-    assetUrls: [],
-    loadedIds: [],
-    errorIds: []
-  }
-
   useEffect(() => {
     glbSpatialController.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
       mobile: isMobileViewport,
       intervalMs: 200,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, glbSpatialController, isInk2DPresentation, isInkCleanMode, isMobileViewport, mapStatus, protectedSceneModelIds, visualVariant.id])
+  }, [glbSpatialController, isInk2DPresentation, isInkCleanMode, isMobileViewport, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
     glbMemoryManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
       maxActiveModels: 80,
       ttlMs: 60000,
       sweepIntervalMs: 5000,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, glbMemoryManager, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, visualVariant.id])
+  }, [glbMemoryManager, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
     sceneArbiter.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden,
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
       maxActiveGLB: 80,
       memoryPressureThresholdMB: 360,
       debounceMs: 300
     })
-  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, sceneArbiter, visualVariant.id])
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, sceneArbiter, visualVariant.id])
 
   useEffect(() => {
     return sceneArbiter.subscribe((snapshot) => {
@@ -2901,25 +2504,25 @@ export function Map3DGuideExperience({
 
   useEffect(() => {
     sceneWindowManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden && tourMode === 'buddhaRealmTour',
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && tourMode === 'buddhaRealmTour',
       activeWindowMeters: 300,
       forwardWindowMeters: 800,
       behindProgressWindow: 0.035,
       updateIntervalMs: 1000,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneWindowManager, tourMode, visualVariant.id])
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneWindowManager, tourMode, visualVariant.id])
 
   useEffect(() => {
     sceneStateManager.configure({
-      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && !debugGarden && tourMode === 'buddhaRealmTour',
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && tourMode === 'buddhaRealmTour',
       activeWindowMeters: 300,
       forwardWindowMeters: 800,
       behindProgressWindow: 0.035,
       rehydrateDebounceMs: 300,
       protectedModelIds: protectedSceneModelIds
     })
-  }, [debugGarden, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneStateManager, tourMode, visualVariant.id])
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneStateManager, tourMode, visualVariant.id])
 
   useEffect(() => {
     return sceneWindowManager.subscribe((snapshot) => {
@@ -3083,7 +2686,6 @@ export function Map3DGuideExperience({
   }, [
     currentRouteCumulativeDistances,
     currentRoutePath,
-    gardenLodState,
     glbMemoryManager,
     glbSpatialController,
     layerManager,
@@ -3115,150 +2717,15 @@ export function Map3DGuideExperience({
     perfRecorder.recordMapVisualEvent({
       type: 'startupStageChanged',
       startupStage: 'ready',
-      reason: visualVariant.id === 'prototype-c' ? 'tree-glb-removed' : 'overlays-ready'
+      reason: 'overlays-ready'
     })
   }, [mapVisualReadyForOverlays, perfRecorder, startupStage, visualVariant.id])
-
-  const focusMapOnVertices = (vertices: LatLngPoint[]) => {
-    const center = getPathCenter(vertices)
-
-    if (!center || !vertices.length) {
-      return
-    }
-
-    const bounds = getPolygonBounds(vertices)
-    const diagonalMeters = haversineDistanceMeters(
-      { lat: bounds.minLat, lng: bounds.minLng },
-      { lat: bounds.maxLat, lng: bounds.maxLng }
-    )
-    const zoom = diagonalMeters > 520 ? 17.25 : diagonalMeters > 260 ? 18 : 18.7
-
-    moveMapCamera(center, {
-      id: 'routeOverview',
-      label: '编辑视角',
-      description: '聚焦当前编辑区域',
-      zoom,
-      pitch: 42,
-      rotation: activeCameraPreset.rotation,
-      durationMs: 700
-    })
-  }
-
-  const selectEditorZone = (zoneId: string) => {
-    const zone = gardenEditorState.zones.find((item) => item.id === zoneId)
-    setSelectedEditorZoneId(zoneId)
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setSelectedGardenVertexId('')
-
-    if (zone) {
-      focusMapOnVertices(zone.vertices)
-    }
-  }
-
-  const selectKeepoutZone = (zoneId: string) => {
-    const zone = gardenEditorState.keepouts.find((item) => item.id === zoneId)
-    setSelectedKeepoutZoneId(zoneId)
-    setSelectedEditorZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setSelectedGardenVertexId('')
-
-    if (zone) {
-      focusMapOnVertices(zone.vertices)
-    }
-  }
-
-  const selectGardenAssetForEditing = (assetId: string) => {
-    const asset = gardenAssets.find((item) => item.id === assetId)
-    setSelectedGardenId(assetId)
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenAssetEditDraft(asset ? cloneGardenAsset(asset) : null)
-
-    if (asset) {
-      moveMapCamera(asset.location, {
-        id: 'closeInspect',
-        label: '资产编辑',
-        description: '聚焦当前资产点',
-        zoom: 19.2,
-        pitch: 54,
-        rotation: activeCameraPreset.rotation,
-        durationMs: 720
-      })
-    }
-  }
-
-  const updateGardenAssetEditDraft = (patch: Partial<LingshanMap3DGardenAsset>) => {
-    setGardenAssetEditDraft((current) => {
-      if (!current) {
-        return current
-      }
-
-      return {
-        ...current,
-        ...patch,
-        location: patch.location ?? current.location
-      }
-    })
-  }
-
-  const persistGardenDraft = (nextEditorState: GardenEditorState, nextAssets: LingshanMap3DGardenAsset[]) => {
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(nextEditorState))
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(nextAssets))
-    setGardenEditorUsesStoredDraft(true)
-  }
-
-  const completeDraftGardenPolygon = (extraPoint?: LatLngPoint | null) => {
-    setGardenDraftPolygon((current) => {
-      if (!current) {
-        setGardenCopyStatus('当前没有正在绘制的多边形')
-        return current
-      }
-
-      const vertices = extraPoint && !isSameLatLngPoint(current.vertices[current.vertices.length - 1], extraPoint)
-        ? [...current.vertices, extraPoint]
-        : current.vertices
-
-      if (vertices.length < 3) {
-        setGardenCopyStatus('至少需要 3 个顶点才能完成多边形')
-        return current
-      }
-
-      if (current.mode === 'vegetation') {
-        const zone = createEditorVegetationZone(vertices, gardenEditorState.zones.length)
-        setGardenEditorState((state) => ({
-          ...state,
-          zones: [...state.zones, zone]
-        }))
-        setSelectedEditorZoneId(zone.id)
-        setSelectedKeepoutZoneId('')
-        setGardenCopyStatus(`已创建 vegetation zone：${zone.name}`)
-      } else {
-        const keepout = createEditorKeepoutZone(vertices, gardenEditorState.keepouts.length)
-        setGardenEditorState((state) => ({
-          ...state,
-          keepouts: [...state.keepouts, keepout]
-        }))
-        setSelectedKeepoutZoneId(keepout.id)
-        setSelectedEditorZoneId('')
-        setGardenCopyStatus(`已创建 keepout zone：${keepout.name}`)
-      }
-
-      setGardenEditorMode('inspect')
-      setSelectedGardenVertexId('')
-      return null
-    })
-  }
 
   useEffect(() => {
     if (!shouldRedirectLocalTMapHost) {
       return
     }
 
-    stashLocalhostTransferDrafts()
     setStartupStage('loadingSdk')
     setPageMessage('正在切换到 localhost 以加载腾讯底图...')
     perfRecorder.recordMapVisualEvent({
@@ -3274,42 +2741,48 @@ export function Map3DGuideExperience({
   }, [perfRecorder, shouldRedirectLocalTMapHost])
 
   useEffect(() => {
-    const generation = ++presentationGenerationRef.current
-    const initialPresentation = activePresentationRef.current
-    const mapInitAbortController = new AbortController()
-    let cancelled = false
-    const isCurrentGeneration = () => !cancelled && generation === presentationGenerationRef.current
-
-    if (shouldRedirectLocalTMapHost) {
+    if (!bootstrapMapRuntime || shouldRedirectLocalTMapHost) {
       return
     }
 
+    const generation = ++presentationGenerationRef.current
+    const initialPresentation = activePresentationRef.current
+    const abortController = new AbortController()
+    let cancelled = false
     let createdMap: any = null
-    let visualReadyTimer: number | null = null
-    let visualReadyFallbackTimer: number | null = null
-    let visualTimeoutTimer: number | null = null
-    let curtainHideTimer: number | null = null
-    let visualReadyRafIds: number[] = []
+    let readyTimer: number | null = null
+    let readyFallbackTimer: number | null = null
+    let slowTimer: number | null = null
+    let curtainTimer: number | null = null
+    let readyRafIds: number[] = []
     let visualReadyScheduled = false
-    let presentationValidationInProgress = false
     let mapCreatedAt = 0
-    let lastHandledFailureAttempt = -1
-    const mapVisualEventCleanups: Array<() => void> = []
-    const mapInteractionEventCleanups: Array<() => void> = []
+    const mapEventCleanups: Array<() => void> = []
+    const interactionCleanups: Array<() => void> = []
+    const isCurrentGeneration = () => !cancelled && generation === presentationGenerationRef.current
 
-    const clearAttemptTimersAndListeners = () => {
-      if (visualReadyTimer !== null) window.clearTimeout(visualReadyTimer)
-      if (visualReadyFallbackTimer !== null) window.clearTimeout(visualReadyFallbackTimer)
-      if (visualTimeoutTimer !== null) window.clearTimeout(visualTimeoutTimer)
-      if (curtainHideTimer !== null) window.clearTimeout(curtainHideTimer)
-      visualReadyTimer = null
-      visualReadyFallbackTimer = null
-      visualTimeoutTimer = null
-      curtainHideTimer = null
-      visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
-      visualReadyRafIds = []
-      mapVisualEventCleanups.splice(0).forEach((cleanup) => cleanup())
-      mapInteractionEventCleanups.splice(0).forEach((cleanup) => cleanup())
+    const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
+      setStartupStage(stage)
+      perfRecorder.recordMapVisualEvent({
+        type: 'startupStageChanged',
+        startupStage: stage,
+        reason
+      })
+    }
+
+    const clearTimersAndListeners = () => {
+      if (readyTimer !== null) window.clearTimeout(readyTimer)
+      if (readyFallbackTimer !== null) window.clearTimeout(readyFallbackTimer)
+      if (slowTimer !== null) window.clearTimeout(slowTimer)
+      if (curtainTimer !== null) window.clearTimeout(curtainTimer)
+      readyTimer = null
+      readyFallbackTimer = null
+      slowTimer = null
+      curtainTimer = null
+      readyRafIds.forEach((id) => window.cancelAnimationFrame(id))
+      readyRafIds = []
+      mapEventCleanups.splice(0).forEach((cleanup) => cleanup())
+      interactionCleanups.splice(0).forEach((cleanup) => cleanup())
     }
 
     const clearOverlayRefs = () => {
@@ -3320,45 +2793,33 @@ export function Map3DGuideExperience({
       rerouteLayerRef.current = null
       landmarkHighlightLayerRef.current = null
       decorMarkerLayerRef.current = null
-      forestPatchLayerRef.current = null
       formalInkBoundsMarkerLayerRef.current = null
       formalInkBoundsBoundaryLayerRef.current = null
       formalInkBoundsFillLayerRef.current = null
       inkBoundsMarkerLayerRef.current = null
       inkBoundsBoundaryLayerRef.current = null
-      gardenEditorPolygonLayerRef.current = null
-      gardenEditorVertexLayerRef.current = null
-      gardenPreviewMarkerLayerRef.current = null
-      gardenAssetEditMarkerLayerRef.current = null
-      treeCandidateMarkerLayerRef.current = null
-      treeCandidateEditMarkerLayerRef.current = null
       inkTileLayerRef.current = null
       inkTileGroundFallbackLayerRef.current = null
       tencentCustomLayerInitKeyRef.current = ''
-      updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'map-destroyed' })
+      updateCustomTileLayerRuntime({
+        attached: false,
+        visible: false,
+        lastRefreshReason: 'standalone-map-destroyed'
+      })
     }
 
-    const disposeCreatedMap = (preserveViewport: boolean) => {
+    const disposeMap = () => {
       const map = createdMap
-      clearAttemptTimersAndListeners()
+      clearTimersAndListeners()
       if (!map || !isMapInstanceUsable(map)) {
         createdMap = null
         return
-      }
-
-      if (preserveViewport) {
-        const preservedCenter = readMapCenterForProjection(map)
-        const preservedZoom = readMapZoomForProjection(map)
-        if (preservedCenter && preservedZoom != null) {
-          presentationViewportRef.current = { center: preservedCenter, zoom: preservedZoom }
-        }
       }
 
       if (mapRef.current === map) {
         onMapRuntimeChangeRef.current?.(null)
         mapRef.current = null
       }
-
       gltfModelRefs.current = new Map()
       sceneWindowManager.destroy()
       glbMemoryManager.destroy()
@@ -3375,171 +2836,82 @@ export function Map3DGuideExperience({
         mapDestroyCountRef.current += 1
       } catch (error) {
         if (debugPerf) {
-          console.warn('[map-presentation] map destroy ignored', error)
+          console.warn('[map-validation] map destroy ignored', error)
         }
       }
       createdMap = null
     }
 
-    const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
-      setStartupStage(stage)
-      perfRecorder.recordMapVisualEvent({
-        type: 'startupStageChanged',
-        startupStage: stage,
-        reason
-      })
-    }
-
-    const recordCurtainHidden = () => {
-      const shownAt = mapLoadingCurtainShownAtRef.current
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      perfRecorder.recordMapVisualEvent({
-        type: 'loadingCurtainHidden',
-        curtainDurationMs: shownAt !== null ? Math.round(now - shownAt) : undefined
-      })
-    }
-
-    const markMapVisualReady = async (reason: string) => {
-      if (
-        !isCurrentGeneration() ||
-        !createdMap ||
-        !isMapInstanceCurrent(createdMap) ||
-        mapVisualReadyRef.current ||
-        presentationValidationInProgress
-      ) {
+    const markVisualReady = (reason: string) => {
+      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current) {
         return
-      }
-
-      presentationValidationInProgress = true
-      const currentCamera = readMapCameraState(createdMap, scenicCenter)
-      const requestedCamera: CameraState = {
-        ...currentCamera,
-        pitch: initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-        rotation: initialPresentation === 'ink2d' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation
-      }
-      const presentationResult = await applyPresentationToExistingMap({
-        map: createdMap,
-        TMap: window.TMap,
-        presentation: initialPresentation,
-        requestedCamera,
-        isCurrent: () => isCurrentGeneration() && Boolean(createdMap) && isMapInstanceCurrent(createdMap),
-        onPhase: updateCameraTransitionPhase
-      })
-
-      presentationValidationInProgress = false
-      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap)) {
-        return
-      }
-      if (!presentationResult.ok) {
-        const message = presentationResult.error ?? '腾讯地图视图模式验证失败'
-        setLastMapError(message)
-        setPresentationSwitchError(message)
-        setPresentationTransition('failed')
-        updateCameraTransitionPhase('failed')
-        setPageMessage(message)
-        return
-      }
-
-      const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, requestedCamera, initialPresentation)
-      if (initialPresentation === 'ink2d') {
-        camera2DStateRef.current = verifiedCamera
-      } else {
-        camera3DStateRef.current = verifiedCamera
-        lastMeaningful3DCameraRef.current = verifiedCamera
-        cameraPersistenceDiagnosticsRef.current.lastPersistReason = 'initial-verified-3d'
       }
 
       mapVisualReadyRef.current = true
-      if (visualTimeoutTimer !== null) {
-        window.clearTimeout(visualTimeoutTimer)
-        visualTimeoutTimer = null
+      if (slowTimer !== null) {
+        window.clearTimeout(slowTimer)
+        slowTimer = null
       }
-      if (visualReadyFallbackTimer !== null) {
-        window.clearTimeout(visualReadyFallbackTimer)
-        visualReadyFallbackTimer = null
-      }
+      setIsMapIdle(true)
       setIsMapVisualReady(true)
       setMapReadyTimedOut(false)
       initializedPresentationRef.current = initialPresentation
       appliedPresentationRef.current = initialPresentation
       setPresentationTransition('ready')
       updateCameraTransitionPhase('ready')
-      if (!presentationFallback) {
-        setPresentationSwitchError(undefined)
-      }
+      setPresentationSwitchError(undefined)
       recordStartupStage('baseMapReady', reason)
-      setPageMessage('真实 3D 地图导览模式已就绪')
-      perfRecorder.recordMapVisualEvent({
-        type: 'mapVisualReady',
-        reason
-      })
-      curtainHideTimer = window.setTimeout(() => {
-        if (!isCurrentGeneration()) {
-          return
-        }
+      setPageMessage('腾讯地图与真实定位验证已就绪')
+      perfRecorder.recordMapVisualEvent({ type: 'mapVisualReady', reason })
+
+      curtainTimer = window.setTimeout(() => {
+        if (!isCurrentGeneration()) return
         setLoadingCurtainVisible(false)
-        recordCurtainHidden()
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        perfRecorder.recordMapVisualEvent({
+          type: 'loadingCurtainHidden',
+          curtainDurationMs: mapLoadingCurtainShownAtRef.current === null
+            ? undefined
+            : Math.round(now - mapLoadingCurtainShownAtRef.current)
+        })
       }, MAP_3D_GUIDE_CURTAIN_FADE_MS)
     }
 
-    const scheduleMapVisualReady = (reason: string) => {
-      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current || visualReadyScheduled) {
+    const scheduleVisualReady = (reason: string) => {
+      if (
+        !isCurrentGeneration() ||
+        !createdMap ||
+        !isMapInstanceCurrent(createdMap) ||
+        mapVisualReadyRef.current ||
+        visualReadyScheduled
+      ) {
         return
-      }
-
-      perfRecorder.recordMapVisualEvent({
-        type: 'baseMapEventReceived',
-        reason
-      })
-
-      if (!mapFirstIdleRef.current) {
-        mapFirstIdleRef.current = true
-        setIsMapIdle(true)
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapFirstIdle',
-          reason
-        })
       }
 
       visualReadyScheduled = true
+      if (!mapFirstIdleRef.current) {
+        mapFirstIdleRef.current = true
+        setIsMapIdle(true)
+        perfRecorder.recordMapVisualEvent({ type: 'mapFirstIdle', reason })
+      }
+      perfRecorder.recordMapVisualEvent({ type: 'baseMapEventReceived', reason })
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const remainingDelay = Math.max(0, MAP_3D_GUIDE_MIN_BASEMAP_READY_MS - (now - mapCreatedAt))
-
-      visualReadyTimer = window.setTimeout(() => {
-        if (!createdMap || !isMapInstanceCurrent(createdMap)) {
-          return
-        }
-        visualReadyRafIds = [
-          window.requestAnimationFrame(() => {
-            const secondRafId = window.requestAnimationFrame(() => {
-              void markMapVisualReady(reason)
-            })
-            visualReadyRafIds = [...visualReadyRafIds, secondRafId]
-          })
-        ]
+      readyTimer = window.setTimeout(() => {
+        readyRafIds = [window.requestAnimationFrame(() => {
+          const secondRaf = window.requestAnimationFrame(() => markVisualReady(reason))
+          readyRafIds.push(secondRaf)
+        })]
       }, remainingDelay)
     }
 
-    async function initMap(attempt = 0) {
-      const attemptGeneration = ++mapAttemptGenerationRef.current
-      const isCurrentAttempt = () =>
-        isCurrentGeneration() && attemptGeneration === mapAttemptGenerationRef.current
+    async function initStandaloneMap() {
       const mapElement = mapElementRef.current
-      if (!mapElement || !isCurrentAttempt()) {
-        return
-      }
+      if (!mapElement || !isCurrentGeneration()) return
 
-      setPresentationTransition(
-        initializedPresentationRef.current !== null && initializedPresentationRef.current !== initialPresentation
-          ? 'destroying'
-          : 'waiting-container'
-      )
-      updateCameraTransitionPhase('idle')
-      if (!presentationFallback) {
-        setPresentationSwitchError(undefined)
-      }
       setMapStatus('loading')
-      recordStartupStage('loadingSdk', 'init')
+      setPresentationTransition('waiting-container')
+      updateCameraTransitionPhase('idle')
       setIsMapCreated(false)
       setIsMapIdle(false)
       setIsMapVisualReady(false)
@@ -3549,262 +2921,147 @@ export function Map3DGuideExperience({
       mapFirstIdleRef.current = false
       mapOverlaysStartedRef.current = false
       mapRoutePoiShownRef.current = false
-      visualReadyScheduled = false
       entryCameraPlayedRef.current = false
       mapLoadingCurtainShownAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
       setPageMessage('正在加载腾讯地图真实底座...')
+      recordStartupStage('loadingSdk', 'standalone-validation-init')
       perfRecorder.markStageStart('mapInit')
-      perfRecorder.recordMapVisualEvent({
-        type: 'loadingCurtainShown'
-      })
-      perfRecorder.recordMapVisualEvent({
-        type: 'tmapScriptLoadStarted',
-        reason: 'loadTMap'
-      })
+      perfRecorder.recordMapVisualEvent({ type: 'loadingCurtainShown' })
+      perfRecorder.recordMapVisualEvent({ type: 'tmapScriptLoadStarted', reason: 'standalone-validation' })
 
-      const containerReady = await waitForMapContainerLayout(mapElement, isCurrentAttempt, mapInitAbortController.signal)
-      if (!containerReady || !isCurrentAttempt()) {
-        if (isCurrentAttempt()) {
-          await handleMapAttemptFailure(new Error('地图容器尚未完成布局'), attempt)
-        }
-        return
+      const containerReady = await waitForMapContainerLayout(mapElement, isCurrentGeneration, abortController.signal)
+      if (!containerReady || !isCurrentGeneration()) {
+        throw new Error('地图容器尚未完成布局')
       }
 
       setPresentationTransition('initializing')
-
-      visualTimeoutTimer = window.setTimeout(() => {
-        if (!isCurrentAttempt() || mapVisualReadyRef.current) {
-          return
-        }
-
+      slowTimer = window.setTimeout(() => {
+        if (!isCurrentGeneration() || mapVisualReadyRef.current) return
         setMapReadyTimedOut(true)
-        setPageMessage('地图底图加载较慢，正在继续展开佛境沙盘')
-        recordStartupStage('slow', 'visual-ready-timeout')
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapReadyTimedOut',
-          reason: 'visual-ready-timeout'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapSlow',
-          reason: 'visual-ready-timeout'
-        })
+        setPageMessage('地图底图加载较慢，正在继续连接腾讯地图')
+        recordStartupStage('slow', 'standalone-visual-ready-timeout')
       }, MAP_3D_GUIDE_SLOW_READY_MS)
 
-      try {
-        const TMap = await loadTMap()
-        if (!isCurrentAttempt()) {
-          return
-        }
-        perfRecorder.recordMapVisualEvent({
-          type: 'tmapScriptLoaded',
-          reason: 'loadTMap'
-        })
-        recordStartupStage('creatingMap', 'tmap-loaded')
+      const TMap = await loadTMap()
+      if (!isCurrentGeneration() || !mapElementRef.current) return
+      perfRecorder.recordMapVisualEvent({ type: 'tmapScriptLoaded', reason: 'standalone-validation' })
+      recordStartupStage('creatingMap', 'standalone-tmap-loaded')
 
-        if (!isCurrentAttempt() || !mapElementRef.current) {
-          return
-        }
+      const preservedViewport = presentationViewportRef.current
+      const initialViewMode = initialPresentation === 'ink2d' ? '2D' : '3D'
+      mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const map = new TMap.Map(mapElementRef.current, {
+        center: new TMap.LatLng(
+          preservedViewport?.center.lat ?? scenicCenter.lat,
+          preservedViewport?.center.lng ?? scenicCenter.lng
+        ),
+        zoom: preservedViewport?.zoom ?? (initialPresentation === 'ink2d' ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
+        minZoom: INK_2D_MIN_ZOOM,
+        maxZoom: INK_MAP_MAX_ZOOM,
+        viewMode: initialViewMode,
+        pitch: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+        rotation: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+        mapStyleId: MAP_3D_GUIDE_STYLE_ID,
+        showControl: false,
+        baseMap: getMapBaseMapConfig({ clean: false, showNativePoiLabels: poiLayerMode === 'all' }),
+        renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
+      })
 
-        mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-        const inkExportCamera = isInkCleanMode
-          ? getConfiguredInkBoundsCamera(mapElementRef.current, { squareViewport: inkUseSquareExportCamera })
-          : null
-        const preservedViewport = presentationViewportRef.current
-        const exportMapCenter = inkExportCamera?.center ?? preservedViewport?.center ?? (isRouteGuideView ? currentRouteCenter : scenicCenter)
-        const initialViewMode = isInkCleanMode || initialPresentation === 'ink2d' ? '2D' : '3D'
-        const map = new TMap.Map(mapElementRef.current, {
-          center: new TMap.LatLng(exportMapCenter.lat, exportMapCenter.lng),
-          zoom: inkExportCamera?.zoom ?? preservedViewport?.zoom ?? (initialPresentation === 'ink2d' ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
-          // A single map instance must accept both presentations. Per-mode
-          // camera constraints are applied later without reconstructing TMap.
-          minZoom: INK_2D_MIN_ZOOM,
-          maxZoom: INK_MAP_MAX_ZOOM,
-          viewMode: initialViewMode,
-          pitch: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-          rotation: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
-          mapStyleId: MAP_3D_GUIDE_STYLE_ID,
-          // TMap GLJS exposes showControl/getShowControl/setShowControl. The
-          // application owns its tool rail, so native zoom and compass UI
-          // must never be mounted for either presentation.
-          showControl: false,
-          baseMap: getMapBaseMapConfig({
-            clean: isInkCleanMode,
-            showNativePoiLabels: poiLayerMode === 'all'
-          }),
-          renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
-        })
-        if (!isCurrentAttempt()) {
-          if (map && (typeof map === 'object' || typeof map === 'function')) {
-            destroyedMapInstancesRef.current.add(map)
-          }
-          try {
-            map?.destroy?.()
-          } catch {
-            // The stale constructor result is already detached from React state.
-          }
-          return
-        }
-        createdMap = map
-        const mapInstanceGeneration = ++mapInstanceGenerationCounterRef.current
-        mapInstanceGenerationsRef.current.set(map, mapInstanceGeneration)
-        activeMapInstanceGenerationRef.current = mapInstanceGeneration
-        mapRef.current = map
-        onMapRuntimeChangeRef.current?.({ map, TMap, mapInstanceId: mapInstanceGeneration })
-        layerManager.init(map)
-        poiLayerController.init(map)
-        glbSpatialController.init(map)
-        glbMemoryManager.init(map)
-        sceneWindowManager.init()
-        mapCreateCountRef.current += 1
-        setMapInstanceId(mapInstanceGeneration)
-        setIsMapCreated(true)
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapCreated'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'scenicMapPresentationChanged',
-          scenicMapPresentation: initialPresentation,
-          reason: initialPresentation === 'ink2d' ? 'mobile-ink2d-map-mode' : 'scenic3d-map-mode'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'nativeSkyConfigured',
-          nativeSkyEnabled: false,
-          nativeSkyApplied: false,
-          nativeFogApplied: false,
-          skyOptionsAnimated: false,
-          reason: 'persistent-atmosphere-removed'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'initialCameraApplied',
-          reason: 'constructor-camera'
-        })
-        recordStartupStage('waitingBaseMap', 'map-created')
-        setMapStyleSupport(inspectMapStyleSupport(map, TMap))
-        setMapStatus('ready')
-        setPageMessage('正在展开佛境沙盘底图...')
-        perfRecorder.markStageEnd('mapInit')
-
-        const visualReadyEventNames = ['idle', 'tilesloaded', 'rendercomplete']
-        visualReadyEventNames.forEach((eventName) => {
-          const handler = () => scheduleMapVisualReady(eventName)
-          map.on?.(eventName, handler)
-          mapVisualEventCleanups.push(() => map.off?.(eventName, handler))
-        })
-        visualReadyFallbackTimer = window.setTimeout(() => {
-          scheduleMapVisualReady('fallback-localhost-ready-delay')
-        }, MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS)
-
-        const mapElement = mapElementRef.current
-
-        if (mapElement) {
-          const handleWheel = () => startMapInteractionLiteMode('zoom')
-          const handlePointerDown = () => startMapInteractionLiteMode('drag')
-          const handleTouchStart = () => startMapInteractionLiteMode('move')
-          const handlePointerUp = () => scheduleMapInteractionLiteExit('drag', 'pointerup')
-          const handleTouchEnd = () => scheduleMapInteractionLiteExit('move', 'touchend')
-
-          mapElement.addEventListener('wheel', handleWheel, { passive: true })
-          mapElement.addEventListener('pointerdown', handlePointerDown, { passive: true })
-          mapElement.addEventListener('touchstart', handleTouchStart, { passive: true })
-          window.addEventListener('pointerup', handlePointerUp)
-          window.addEventListener('touchend', handleTouchEnd)
-          mapInteractionEventCleanups.push(() => {
-            mapElement.removeEventListener('wheel', handleWheel)
-            mapElement.removeEventListener('pointerdown', handlePointerDown)
-            mapElement.removeEventListener('touchstart', handleTouchStart)
-            window.removeEventListener('pointerup', handlePointerUp)
-            window.removeEventListener('touchend', handleTouchEnd)
-          })
-        }
-
-        const interactionEndEventNames = ['zoomend', 'dragend', 'moveend', 'idle']
-        interactionEndEventNames.forEach((eventName) => {
-          const handler = () => {
-            if (!isCurrentAttempt() || !isMapInstanceCurrent(map)) {
-              return
-            }
-            updateCurrentMapZoomSnapshot()
-            scheduleMapInteractionLiteExit(eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move', eventName)
-            clampScenicCameraBounds(eventName)
-          }
-          map.on?.(eventName, handler)
-          mapInteractionEventCleanups.push(() => map.off?.(eventName, handler))
-        })
-
-        const requestContextRecovery = (reason: string, error?: unknown) => {
-          if (!isCurrentAttempt() || !isMapInstanceCurrent(map)) {
-            return
-          }
-          hardRecoveryRequestRef.current(reason, error)
-        }
-        const handleContextLost = (event: Event) => {
-          event.preventDefault?.()
-          requestContextRecovery('webglcontextlost')
-        }
-        const handleMapContextLost = (event: any) => requestContextRecovery('tmap-context_lost', event)
-        mapElement?.addEventListener('webglcontextlost', handleContextLost)
-        map.on?.('context_lost', handleMapContextLost)
-        mapInteractionEventCleanups.push(() => {
-          mapElement?.removeEventListener('webglcontextlost', handleContextLost)
-          map.off?.('context_lost', handleMapContextLost)
-        })
-      } catch (error) {
-        if (!isCurrentAttempt()) {
-          return
-        }
-        await handleMapAttemptFailure(error, attempt)
-      }
-    }
-
-    async function handleMapAttemptFailure(error: unknown, attempt: number) {
-      if (!isCurrentGeneration() || attempt <= lastHandledFailureAttempt) {
+      if (!isCurrentGeneration()) {
+        try { map?.destroy?.() } catch { /* stale constructor result */ }
         return
       }
-      lastHandledFailureAttempt = attempt
-      mapAttemptGenerationRef.current += 1
 
-      const message = error instanceof Error ? error.message : '腾讯地图加载失败'
-      disposeCreatedMap(true)
-
+      createdMap = map
+      const mapInstanceGeneration = ++mapInstanceGenerationCounterRef.current
+      mapInstanceGenerationsRef.current.set(map, mapInstanceGeneration)
+      activeMapInstanceGenerationRef.current = mapInstanceGeneration
+      mapRef.current = map
+      onMapRuntimeChangeRef.current?.({ map, TMap, mapInstanceId: mapInstanceGeneration })
+      layerManager.init(map)
+      poiLayerController.init(map)
+      glbSpatialController.init(map)
+      glbMemoryManager.init(map)
+      sceneWindowManager.init()
+      mapCreateCountRef.current += 1
+      setMapInstanceId(mapInstanceGeneration)
+      setIsMapCreated(true)
+      setMapStyleSupport(inspectMapStyleSupport(map, TMap))
+      setMapStatus('ready')
+      setPageMessage('正在等待腾讯底图首帧...')
+      recordStartupStage('waitingBaseMap', 'standalone-map-created')
       perfRecorder.markStageEnd('mapInit')
+      perfRecorder.recordMapVisualEvent({ type: 'mapCreated' })
+
+      ;['idle', 'tilesloaded', 'rendercomplete'].forEach((eventName) => {
+        const handler = () => scheduleVisualReady(eventName)
+        map.on?.(eventName, handler)
+        mapEventCleanups.push(() => map.off?.(eventName, handler))
+      })
+      readyFallbackTimer = window.setTimeout(
+        () => scheduleVisualReady('standalone-ready-fallback'),
+        MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS
+      )
+
+      const interactionEndEvents = ['zoomend', 'dragend', 'moveend', 'idle']
+      interactionEndEvents.forEach((eventName) => {
+        const handler = () => {
+          if (!isCurrentGeneration() || !isMapInstanceCurrent(map)) return
+          updateCurrentMapZoomSnapshot()
+          scheduleMapInteractionLiteExit(
+            eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move',
+            eventName
+          )
+        }
+        map.on?.(eventName, handler)
+        interactionCleanups.push(() => map.off?.(eventName, handler))
+      })
+    }
+
+    void initStandaloneMap().catch((error) => {
+      if (!isCurrentGeneration()) return
+      const message = error instanceof Error ? error.message : '腾讯地图加载失败'
+      perfRecorder.markStageEnd('mapInit')
+      setLastMapError(message)
       setMapStatus('error')
       setMapReadyTimedOut(true)
       setIsMapVisualReady(false)
       setLoadingCurtainVisible(true)
-      recordStartupStage('failed', 'map-load-error')
-      setPageMessage(message)
       setPresentationSwitchError(message)
       setPresentationTransition('failed')
       updateCameraTransitionPhase('failed')
-      perfRecorder.recordMapVisualEvent({
-        type: 'mapReadyTimedOut',
-        reason: 'map-load-error'
-      })
-      perfRecorder.recordMapVisualEvent({
-        type: 'mapFailed',
-        reason: 'map-load-error'
-      })
-      if (initialPresentation === 'scenic3d') {
-        setPresentationFallback('ink2d')
-        replaceMapPresentationInUrl(navigate, 'ink2d')
-      }
-    }
-
-    void initMap()
+      setPageMessage(message)
+      recordStartupStage('failed', 'standalone-map-load-error')
+      perfRecorder.recordMapVisualEvent({ type: 'mapFailed', reason: 'standalone-map-load-error' })
+    })
 
     return () => {
       cancelled = true
-      mapInitAbortController.abort()
+      abortController.abort()
       presentationGenerationRef.current += 1
       mapAttemptGenerationRef.current += 1
       if (mapInteractionRef.current.exitTimerId !== undefined) {
         window.clearTimeout(mapInteractionRef.current.exitTimerId)
         mapInteractionRef.current.exitTimerId = undefined
       }
-      stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
-      disposeCreatedMap(true)
+      disposeMap()
     }
-  }, [debugPerf, glbMemoryManager, glbSpatialController, inkUseSquareExportCamera, isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapRuntimeGeneration, perfRecorder, poiLayerController, sceneWindowManager, shouldRedirectLocalTMapHost, updateCameraTransitionPhase, updateCustomTileLayerRuntime])
+  }, [
+    bootstrapMapRuntime,
+    debugPerf,
+    glbMemoryManager,
+    glbSpatialController,
+    isMapInstanceCurrent,
+    isMapInstanceUsable,
+    layerManager,
+    mapRuntimeGeneration,
+    perfRecorder,
+    poiLayerController,
+    sceneWindowManager,
+    shouldRedirectLocalTMapHost,
+    updateCameraTransitionPhase,
+    updateCustomTileLayerRuntime
+  ])
 
   useEffect(() => {
     const targetMap = mapRef.current
@@ -3957,7 +3214,7 @@ export function Map3DGuideExperience({
   ])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden || isInkCleanMode) {
+    if (mapStatus !== 'ready' || entryCameraPlayedRef.current || isInkCleanMode || cameraScope === 'navigation') {
       return
     }
 
@@ -3978,7 +3235,7 @@ export function Map3DGuideExperience({
 
     setActiveCameraMode('overviewEstate')
     moveMapCamera(entryTarget, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
-  }, [debugGarden, isInk2DPresentation, isInkCleanMode, isRouteGuideView, mapStatus])
+  }, [cameraScope, isInk2DPresentation, isInkCleanMode, isRouteGuideView, mapStatus])
 
   useEffect(() => {
     if (!isInkCleanMode || mapStatus !== 'ready' || !mapRef.current || !window.TMap) {
@@ -5256,149 +4513,6 @@ export function Map3DGuideExperience({
   }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
 
   useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
-      return
-    }
-
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
-  }, [debugGarden, gardenAssets, gardenEditorUsesStoredDraft, visualVariant.id])
-
-  useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
-      return
-    }
-
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
-  }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
-
-  useEffect(() => {
-    if (!debugGarden || typeof window === 'undefined') {
-      return
-    }
-
-    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
-  }, [debugGarden, treeCandidateLabState])
-
-  useEffect(() => {
-    if (isInkCleanMode || !debugGarden || !mapVisualReadyForOverlays || treeCandidateLabState.landmarkReferenceLoaded) {
-      return
-    }
-
-    loadCoreLandmarkReferences()
-  }, [debugGarden, isInkCleanMode, mapVisualReadyForOverlays, treeCandidateLabState.landmarkReferenceLoaded])
-
-  useEffect(() => {
-    if (!debugGarden) {
-      return
-    }
-
-    perfRecorder.recordMapVisualEvent({
-      type: 'treeCandidateLabEnabled',
-      defaultGardenHidden: treeCandidateLabState.defaultGardenHidden,
-      landmarkReferenceLoaded: treeCandidateLabState.landmarkReferenceLoaded,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveDefaultGardenOverlayCount,
-      liveTestTreeOverlayCount,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-  }, [
-    debugGarden,
-    gardenAssets.length,
-    liveDefaultGardenOverlayCount,
-    liveTestTreeOverlayCount,
-    perfRecorder,
-    treeCandidateLabState.clusterMode,
-    treeCandidateLabState.defaultGardenHidden,
-    treeCandidateLabState.landmarkReferenceLoaded,
-    treeCandidateLabState.selectedCandidateType,
-    treeCandidateLabState.testTrees.length
-  ])
-
-  useEffect(() => {
-    if (isInkCleanMode || !debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !mapRef.current) {
-      return
-    }
-
-    const handleMapClick = (event: any) => {
-      const point = extractMapEventLatLng(event)
-
-      if (!point) {
-        return
-      }
-
-      if (gardenEditorMode === 'drawVegetation') {
-        setGardenDraftPolygon((current) => ({
-          mode: 'vegetation',
-          vertices: [...(current?.mode === 'vegetation' ? current.vertices : []), point]
-        }))
-        setGardenCopyStatus('已添加 vegetation zone 顶点')
-        return
-      }
-
-      if (gardenEditorMode === 'drawKeepout') {
-        setGardenDraftPolygon((current) => ({
-          mode: 'keepout',
-          vertices: [...(current?.mode === 'keepout' ? current.vertices : []), point]
-        }))
-        setGardenCopyStatus('已添加 keepout zone 顶点')
-        return
-      }
-
-      if (gardenEditorMode === 'addAsset') {
-        const asset = createSingleEditorAsset(point, editorAddAssetKind, gardenEditorState.previewAssets.length)
-        setGardenEditorState((current) => ({
-          ...current,
-          previewAssets: [...current.previewAssets, asset]
-        }))
-        setSelectedGardenId('')
-        setGardenCopyStatus(`已添加单个资产：${asset.name}`)
-        return
-      }
-
-      if (treeCandidateLabClickMode === 'addCluster') {
-        addTreeCandidateCluster(point)
-        return
-      }
-
-      if (treeCandidateLabClickMode === 'compareSet') {
-        addTreeCandidateCompareSet(point)
-      }
-    }
-
-    const handleMapDoubleClick = (event: any) => {
-      if (gardenEditorMode !== 'drawVegetation' && gardenEditorMode !== 'drawKeepout') {
-        return
-      }
-
-      event?.preventDefault?.()
-      completeDraftGardenPolygon(extractMapEventLatLng(event))
-    }
-
-    mapRef.current.on?.('click', handleMapClick)
-    mapRef.current.on?.('dblclick', handleMapDoubleClick)
-
-    return () => {
-      mapRef.current?.off?.('click', handleMapClick)
-      mapRef.current?.off?.('dblclick', handleMapDoubleClick)
-    }
-  }, [
-    addTreeCandidateCluster,
-    addTreeCandidateCompareSet,
-    completeDraftGardenPolygon,
-    debugGarden,
-    isInkCleanMode,
-    editorAddAssetKind,
-    gardenEditorMode,
-    gardenEditorState.previewAssets.length,
-    mapVisualReadyForOverlays,
-    treeCandidateLabClickMode,
-    visualVariant.id
-  ])
-
-  useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
       return
     }
@@ -5984,443 +5098,6 @@ export function Map3DGuideExperience({
       decorMarkerLayerRef.current = null
     }
   }, [assetLoadState, debugDecor, decorOverlays, isInkCleanMode, mapVisualReadyForOverlays, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
-
-  useEffect(() => {
-    forestPatchLayerRef.current?.setMap?.(null)
-    forestPatchLayerRef.current = null
-
-    if (isInkCleanMode || visualVariant.id !== 'prototype-c' || !debugGarden || !forestPatchesVisible) {
-      setGardenPatchReport({
-        patchCount: 0,
-        patchFallback: false
-      })
-      return
-    }
-
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
-      return
-    }
-
-    const visiblePatches = lingshanMap3DForestPatches.filter((patch) => patch.visible)
-
-    try {
-      if (window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
-        forestPatchLayerRef.current = new window.TMap.MultiPolygon({
-          map: mapRef.current,
-          styles: Object.fromEntries(
-            visiblePatches.map((patch) => [
-              patch.id,
-              new window.TMap.PolygonStyle({
-                color: colorWithOpacity(patch.color, getForestPatchOpacity(patch, {
-                  debugGarden,
-                  routeProgressRatio,
-                  rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
-                })),
-                showBorder: false
-              })
-            ])
-          ),
-          geometries: visiblePatches.map((patch) => ({
-            id: patch.id,
-            styleId: patch.id,
-            paths: buildForestPatchPath(patch),
-            rank: 1
-          }))
-        })
-        setGardenPatchReport({
-          patchCount: visiblePatches.length,
-          patchFallback: false
-        })
-        return () => {
-          forestPatchLayerRef.current?.setMap?.(null)
-          forestPatchLayerRef.current = null
-        }
-      }
-
-      forestPatchLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          visiblePatches.map((patch) => {
-            const opacity = getForestPatchOpacity(patch, {
-              debugGarden,
-              routeProgressRatio,
-              rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
-            })
-            const width = Math.max(80, Math.round(patch.radiusX * 1.15))
-            const height = Math.max(50, Math.round(patch.radiusY * 1.15))
-            return [
-              patch.id,
-              new window.TMap.MarkerStyle({
-                width,
-                height,
-                anchor: { x: width / 2, y: height / 2 },
-                src: createSvgDataUrl(forestPatchSvg({
-                  color: patch.color,
-                  opacity,
-                  rotation: patch.rotation,
-                  width,
-                  height
-                }))
-              })
-            ]
-          })
-        ),
-        geometries: visiblePatches.map((patch) => ({
-          id: patch.id,
-          styleId: patch.id,
-          position: toTMapLatLng(patch.center),
-          rank: patch.priority === 'high' ? 3 : patch.priority === 'medium' ? 2 : 1,
-          properties: {
-            title: patch.name
-          }
-        }))
-      })
-      setGardenPatchReport({
-        patchCount: visiblePatches.length,
-        patchFallback: true
-      })
-    } catch {
-      setGardenPatchReport({
-        patchCount: 0,
-        patchFallback: true
-      })
-    }
-
-    return () => {
-      forestPatchLayerRef.current?.setMap?.(null)
-      forestPatchLayerRef.current = null
-    }
-  }, [debugGarden, forestPatchesVisible, isInkCleanMode, mapVisualReadyForOverlays, rerouteStatus, routeProgressRatio, visualVariant.id])
-
-  useEffect(() => {
-    gardenEditorPolygonLayerRef.current?.setMap?.(null)
-    gardenEditorVertexLayerRef.current?.setMap?.(null)
-    gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-    gardenEditorPolygonLayerRef.current = null
-    gardenEditorVertexLayerRef.current = null
-    gardenPreviewMarkerLayerRef.current = null
-
-    if (isInkCleanMode || !debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
-      return
-    }
-
-    const polygonItems = buildGardenEditorPolygonItems(
-      gardenEditorState,
-      gardenDraftPolygon,
-      selectedEditorZoneId,
-      selectedKeepoutZoneId
-    )
-
-    if (polygonItems.length && window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
-      gardenEditorPolygonLayerRef.current = new window.TMap.MultiPolygon({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          polygonItems.map((item) => [
-            item.id,
-            new window.TMap.PolygonStyle({
-              color: item.fill,
-              borderColor: item.border,
-              borderWidth: 2,
-              showBorder: true,
-              ...(item.dashed ? { borderDashArray: [8, 6] } : {})
-            })
-          ])
-        ),
-        geometries: polygonItems.map((item) => ({
-          id: item.id,
-          styleId: item.id,
-          paths: item.vertices.map(toTMapLatLng),
-          rank: item.type === 'keepout' ? 29 : 28,
-          properties: {
-            title: item.name
-          }
-        }))
-      })
-    }
-
-    const vertices = buildGardenEditorVertexItems(
-      gardenEditorState,
-      gardenDraftPolygon,
-      selectedEditorZoneId,
-      selectedKeepoutZoneId
-    )
-    if (vertices.length) {
-      gardenEditorVertexLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        enableDragging: true,
-        styles: {
-          vegetationVertex: new window.TMap.MarkerStyle({
-            width: 20,
-            height: 20,
-            anchor: { x: 10, y: 10 },
-            src: createSvgDataUrl(editorVertexSvg('#2f7a4d', '#f9f0cf'))
-          }),
-          keepoutVertex: new window.TMap.MarkerStyle({
-            width: 20,
-            height: 20,
-            anchor: { x: 10, y: 10 },
-            src: createSvgDataUrl(editorVertexSvg('#b45309', '#fff7ed'))
-          }),
-          draftVertex: new window.TMap.MarkerStyle({
-            width: 22,
-            height: 22,
-            anchor: { x: 11, y: 11 },
-            src: createSvgDataUrl(editorVertexSvg('#2563eb', '#eff6ff'))
-          })
-        },
-        geometries: vertices.map((vertex) => ({
-          id: vertex.id,
-          styleId: vertex.styleId,
-          position: toTMapLatLng(vertex.position),
-          draggable: true,
-          rank: 40,
-          properties: {
-            title: vertex.id
-          }
-        }))
-      })
-
-      const handleVertexDragEnd = (event: any) => {
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        const point = extractMapEventLatLng(event)
-        if (!id || !point) {
-          return
-        }
-        updateGardenEditorVertex(String(id), point)
-      }
-      gardenEditorVertexLayerRef.current.on?.('dragend', handleVertexDragEnd)
-      gardenEditorVertexLayerRef.current.on?.('click', (event: any) => {
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        if (id) {
-          setSelectedGardenVertexId(String(id))
-        }
-      })
-    }
-
-    const previewAssets = gardenEditorState.previewAssets.filter((asset) => asset.visible)
-    if (previewAssets.length) {
-      gardenPreviewMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          gardenAssetKindOptions.map((kind) => [
-            kind,
-            new window.TMap.MarkerStyle({
-              width: kind.includes('rock') || kind.includes('stone') ? 24 : 28,
-              height: kind.includes('rock') || kind.includes('stone') ? 24 : 28,
-              anchor: {
-                x: kind.includes('rock') || kind.includes('stone') ? 12 : 14,
-                y: kind.includes('rock') || kind.includes('stone') ? 12 : 14
-              },
-              src: createSvgDataUrl(gardenPreviewPointSvg(kind))
-            })
-          ])
-        ),
-        geometries: previewAssets.map((asset) => ({
-          id: `preview-${asset.id}`,
-          styleId: asset.kind,
-          position: toTMapLatLng(asset.location),
-          rank: 34,
-          properties: {
-            title: asset.name
-          }
-        }))
-      })
-    }
-
-    return () => {
-      gardenEditorPolygonLayerRef.current?.setMap?.(null)
-      gardenEditorVertexLayerRef.current?.setMap?.(null)
-      gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-      gardenEditorPolygonLayerRef.current = null
-      gardenEditorVertexLayerRef.current = null
-      gardenPreviewMarkerLayerRef.current = null
-    }
-  }, [debugGarden, gardenDraftPolygon, gardenEditorState, isInkCleanMode, mapVisualReadyForOverlays, selectedEditorZoneId, selectedKeepoutZoneId, visualVariant.id])
-
-  useEffect(() => {
-    gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
-    gardenAssetEditMarkerLayerRef.current = null
-
-    if (
-      !debugGarden ||
-      isInkCleanMode ||
-      visualVariant.id !== 'prototype-c' ||
-      !mapVisualReadyForOverlays ||
-      !window.TMap ||
-      !mapRef.current ||
-      !selectedGardenAssetDraft
-    ) {
-      return
-    }
-
-    gardenAssetEditMarkerLayerRef.current = new window.TMap.MultiMarker({
-      map: mapRef.current,
-      enableDragging: true,
-      styles: {
-        assetEditVertex: new window.TMap.MarkerStyle({
-          width: 26,
-          height: 26,
-          anchor: { x: 13, y: 13 },
-          src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
-        })
-      },
-      geometries: [
-        {
-          id: `asset:${selectedGardenAssetDraft.id}`,
-          styleId: 'assetEditVertex',
-          position: toTMapLatLng(selectedGardenAssetDraft.location),
-          draggable: true,
-          rank: 45,
-          properties: {
-            title: selectedGardenAssetDraft.name
-          }
-        }
-      ]
-    })
-
-    const handleAssetDragEnd = (event: any) => {
-      const point = extractMapEventLatLng(event)
-
-      if (!point) {
-        return
-      }
-
-      updateGardenAssetEditDraft({
-        location: {
-          lat: roundNumber(point.lat, 6),
-          lng: roundNumber(point.lng, 6)
-        }
-      })
-      setGardenCopyStatus('已移动资产编辑点，点击“保存当前资产修改”后写入本地草稿')
-    }
-
-    gardenAssetEditMarkerLayerRef.current.on?.('dragend', handleAssetDragEnd)
-
-    return () => {
-      gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
-      gardenAssetEditMarkerLayerRef.current = null
-    }
-  }, [debugGarden, isInkCleanMode, mapVisualReadyForOverlays, selectedGardenAssetDraft, visualVariant.id])
-
-  useEffect(() => {
-    treeCandidateMarkerLayerRef.current?.setMap?.(null)
-    treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
-    treeCandidateMarkerLayerRef.current = null
-    treeCandidateEditMarkerLayerRef.current = null
-
-    if (
-      !debugGarden ||
-      isInkCleanMode ||
-      visualVariant.id !== 'prototype-c' ||
-      !mapVisualReadyForOverlays ||
-      !window.TMap ||
-      !mapRef.current ||
-      !treeCandidateLabState.testTrees.length
-    ) {
-      return
-    }
-
-    const visibleTestTrees = treeCandidateLabState.testTrees.filter((asset) => asset.visible)
-
-    if (visibleTestTrees.length) {
-      treeCandidateMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: {
-          testTree: new window.TMap.MarkerStyle({
-            width: 22,
-            height: 22,
-            anchor: { x: 11, y: 11 },
-            src: createSvgDataUrl(editorVertexSvg('#6f8e73', '#fff7d6'))
-          }),
-          selectedTestTree: new window.TMap.MarkerStyle({
-            width: 26,
-            height: 26,
-            anchor: { x: 13, y: 13 },
-            src: createSvgDataUrl(editorVertexSvg('#d6b46a', '#fff7d6'))
-          })
-        },
-        geometries: visibleTestTrees.map((asset) => ({
-          id: asset.id,
-          styleId: asset.id === selectedTreeCandidateId ? 'selectedTestTree' : 'testTree',
-          position: toTMapLatLng(asset.location),
-          rank: asset.id === selectedTreeCandidateId ? 48 : 42,
-          properties: {
-            title: asset.name
-          }
-        }))
-      })
-
-      treeCandidateMarkerLayerRef.current.on?.('click', (event: any) => {
-        event?.stopPropagation?.()
-        event?.preventDefault?.()
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        if (id) {
-          setSelectedTreeCandidateId(String(id))
-          setGardenCopyStatus('已选中测试树，可在基础摆树面板调参数或拖动紫色点')
-        }
-      })
-    }
-
-    if (selectedTreeCandidateAsset) {
-      treeCandidateEditMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        enableDragging: true,
-        styles: {
-          testTreeEdit: new window.TMap.MarkerStyle({
-            width: 30,
-            height: 30,
-            anchor: { x: 15, y: 15 },
-            src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
-          })
-        },
-        geometries: [
-          {
-            id: `tree-candidate:${selectedTreeCandidateAsset.id}`,
-            styleId: 'testTreeEdit',
-            position: toTMapLatLng(selectedTreeCandidateAsset.location),
-            draggable: true,
-            rank: 50,
-            properties: {
-              title: selectedTreeCandidateAsset.name
-            }
-          }
-        ]
-      })
-
-      const handleTestTreeDragEnd = (event: any) => {
-        const point = extractMapEventLatLng(event)
-
-        if (!point) {
-          return
-        }
-
-        updateSelectedTreeCandidateAsset({
-          location: {
-            lat: roundNumber(point.lat, 6),
-            lng: roundNumber(point.lng, 6)
-          }
-        })
-        setGardenCopyStatus('已移动选中测试树')
-      }
-
-      treeCandidateEditMarkerLayerRef.current.on?.('dragend', handleTestTreeDragEnd)
-    }
-
-    return () => {
-      treeCandidateMarkerLayerRef.current?.setMap?.(null)
-      treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
-      treeCandidateMarkerLayerRef.current = null
-      treeCandidateEditMarkerLayerRef.current = null
-    }
-  }, [
-    debugGarden,
-    isInkCleanMode,
-    mapVisualReadyForOverlays,
-    selectedTreeCandidateAsset,
-    selectedTreeCandidateId,
-    treeCandidateLabState.testTrees,
-    visualVariant.id
-  ])
 
   useEffect(() => {
     if (isInkCleanMode) {
@@ -7982,844 +6659,6 @@ export function Map3DGuideExperience({
     setDecorCopyStatus(ok ? '已复制调试摘要' : '复制失败，请查看浏览器权限')
   }
 
-  const updateSelectedGardenAsset = (patch: Partial<LingshanMap3DGardenAsset>) => {
-    if (!selectedGardenAsset) {
-      return
-    }
-
-    setGardenAssets((items) =>
-      items.map((asset) =>
-        asset.id === selectedGardenAsset.id
-          ? {
-              ...asset,
-              ...patch,
-              location: patch.location ?? asset.location
-            }
-          : asset
-      )
-    )
-  }
-
-  const saveGardenAssetEditDraft = () => {
-    if (!selectedGardenAssetDraft) {
-      setGardenCopyStatus('请先选择一个资产点')
-      return
-    }
-
-    const nextAssets = gardenAssets.map((asset) =>
-      asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-    )
-    const nextEditorState = {
-      ...gardenEditorState,
-      previewAssets: gardenEditorState.previewAssets.map((asset) =>
-        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-      ),
-      appliedAssets: gardenEditorState.appliedAssets.map((asset) =>
-        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-      )
-    }
-
-    setGardenAssets(nextAssets)
-    setGardenEditorState(nextEditorState)
-    setGardenAssetEditDraft(cloneGardenAsset(selectedGardenAssetDraft))
-    persistGardenDraft(nextEditorState, nextAssets)
-    setGardenCopyStatus(`已保存当前资产修改：${selectedGardenAssetDraft.name}`)
-  }
-
-  const deleteSelectedGardenAsset = () => {
-    if (!selectedGardenAsset) {
-      setGardenCopyStatus('请先选择一个资产点')
-      return
-    }
-
-    if (!window.confirm(`确认删除资产点“${selectedGardenAsset.name}”？此操作会写入本地草稿。`)) {
-      return
-    }
-
-    const nextAssets = gardenAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
-    const nextEditorState = {
-      ...gardenEditorState,
-      previewAssets: gardenEditorState.previewAssets.filter((asset) => asset.id !== selectedGardenAsset.id),
-      appliedAssets: gardenEditorState.appliedAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
-    }
-
-    setGardenAssets(nextAssets)
-    setGardenEditorState(nextEditorState)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    persistGardenDraft(nextEditorState, nextAssets)
-    setGardenCopyStatus(`已删除资产点：${selectedGardenAsset.name}`)
-  }
-
-  function loadCoreLandmarkReferences() {
-    coreLandmarkReferenceIds.forEach((id) => {
-      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
-
-      if (item) {
-        if (item.status !== 'loaded' && item.status !== 'loading') {
-          const modelId = `model_landmark:${id}`
-          const decision = sceneArbiter.requestAction({
-            type: 'load',
-            modelId,
-            context: {
-              source: 'runtime',
-              kind: 'landmark',
-              estimatedMemoryMB: 36,
-              reason: 'core-reference-load'
-            }
-          })
-
-          if (decision.allowed) {
-            landmarkInspector.loadLandmark(id)
-            sceneArbiter.releaseLoad(modelId)
-          }
-        }
-
-        item.companions.forEach((companion) => {
-          if (!companion.enabled || companion.status === 'loaded' || companion.status === 'loading') {
-            return
-          }
-
-          const companionModelId = `model_landmark_companion:${id}::${companion.id}`
-          const companionDecision = sceneArbiter.requestAction({
-            type: 'load',
-            modelId: companionModelId,
-            context: {
-              source: 'runtime',
-              kind: 'companion',
-              estimatedMemoryMB: 2,
-              reason: 'core-reference-companion-load'
-            }
-          })
-
-          if (companionDecision.allowed) {
-            landmarkInspector.loadCompanionModel(id, companion.id)
-            sceneArbiter.releaseLoad(companionModelId)
-          }
-        })
-      }
-    })
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      landmarkReferenceLoaded: true
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'landmarkReferenceLoaded',
-      landmarkReferenceLoaded: true,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已加载核心地标参照层')
-  }
-
-  function unloadCoreLandmarkReferences() {
-    coreLandmarkReferenceIds.forEach((id) => {
-      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
-
-      item?.companions.forEach((companion) => {
-        const companionModelId = `model_landmark_companion:${id}::${companion.id}`
-        const decision = sceneArbiter.requestAction({
-          type: 'dispose',
-          modelId: companionModelId,
-          context: {
-            source: 'window',
-            kind: 'companion',
-            sceneState: 'disposed',
-            memoryState: 'disposed',
-            reason: 'core-reference-companion-unload'
-          }
-        })
-
-        if (decision.allowed) {
-          landmarkInspector.unloadCompanionModel(id, companion.id)
-        }
-      })
-
-      const modelId = `model_landmark:${id}`
-      const decision = sceneArbiter.requestAction({
-        type: 'dispose',
-        modelId,
-        context: {
-          source: 'window',
-          kind: 'landmark',
-          sceneState: 'disposed',
-          memoryState: 'disposed',
-          reason: 'core-reference-unload'
-        }
-      })
-
-      if (decision.allowed) {
-        landmarkInspector.unloadLandmark(id)
-      }
-    })
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      landmarkReferenceLoaded: false
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'landmarkReferenceLoaded',
-      landmarkReferenceLoaded: false,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已卸载核心地标参照层')
-  }
-
-  function updateTreeCandidateLab(patch: Partial<TreeCandidateLabState>) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      ...patch,
-      params:
-        patch.selectedCandidateType || patch.clusterMode
-          ? {
-              ...getTreeCandidateRecommendedParams(
-                patch.selectedCandidateType ?? current.selectedCandidateType,
-                patch.clusterMode ?? current.clusterMode
-              ),
-              randomSeed: current.params.randomSeed
-            }
-          : current.params
-    }))
-  }
-
-  function updateTreeCandidateLabParams(patch: Partial<TreeCandidateLabParams>) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      params: {
-        ...current.params,
-        ...patch
-      }
-    }))
-  }
-
-  function setTreeCandidateClusterMode(mode: TreeCandidateClusterMode) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      clusterMode: mode,
-      params: {
-        ...getTreeCandidateRecommendedParams(current.selectedCandidateType, mode),
-        randomSeed: current.params.randomSeed
-      }
-    }))
-  }
-
-  function setDefaultGardenHidden(hidden: boolean) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      defaultGardenHidden: hidden
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'defaultGardenHidden',
-      defaultGardenHidden: hidden,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: hidden ? 'blank-lab' : 'default-garden-visible',
-      liveDefaultGardenOverlayCount: hidden ? 0 : gardenAssets.filter((asset) => asset.visible).length,
-      liveTestTreeOverlayCount,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(hidden ? `已隐藏默认 ${gardenAssets.length} 个树群，进入空白园林试验场` : '已显示默认树群作为参照')
-  }
-
-  function setGardenAssetSource(mode: GardenAssetSourceMode) {
-    const nextAssets = mode === 'legacy' ? getLegacyMap3DGardenAssets() : getDefaultMap3DGardenAssets()
-    setGardenAssetSourceMode(mode)
-    setGardenAssets(nextAssets)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenFilters(defaultGardenFilters)
-    perfRecorder.recordMapVisualEvent({
-      type: 'gardenAssetSourceChanged',
-      defaultGardenAssetCount: nextAssets.length,
-      liveDefaultGardenOverlayCount: treeCandidateLabState.defaultGardenHidden ? 0 : nextAssets.filter((asset) => asset.visible).length,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible'
-    })
-    setGardenCopyStatus(mode === 'legacy' ? `已切换查看 legacy 旧树群 ${nextAssets.length} assets` : `已切换回新手动树群 ${nextAssets.length} assets`)
-  }
-
-  function startAddTreeCandidateCluster() {
-    setTreeCandidateLabClickMode('addCluster')
-    setGardenEditorMode('inspect')
-    setGardenDraftPolygon(null)
-    setGardenCopyStatus(`点击地图添加 ${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
-  }
-
-  function startCompareTreeCandidates() {
-    setTreeCandidateLabClickMode('compareSet')
-    setGardenEditorMode('inspect')
-    setGardenDraftPolygon(null)
-    setGardenCopyStatus(`点击地图生成 ${treeCandidateTypesForCompare.length} 种候选对比：${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}`)
-  }
-
-  function addTreeCandidateCluster(center: LatLngPoint) {
-    const clusterId = `tree-lab-${treeCandidateLabState.selectedCandidateType}-${Date.now()}`
-    const assets = buildTreeCandidateClusterAssets({
-      center,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterId,
-      clusterIndex: treeCandidateLabState.testTrees.length,
-      clusterMode: treeCandidateLabState.clusterMode,
-      params: treeCandidateLabState.params
-    })
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: [...current.testTrees, ...assets],
-      params: {
-        ...current.params,
-        randomSeed: current.params.randomSeed + 17
-      }
-    }))
-    setTreeCandidateLabClickMode('addCluster')
-    setSelectedTreeCandidateId(assets[0]?.id ?? '')
-    perfRecorder.recordMapVisualEvent({
-      type: 'manualTreeAdded',
-      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      clusterGeneratedCount: assets.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已添加 ${assets.length} 棵测试树：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
-  }
-
-  function addTreeCandidateCompareSet(center: LatLngPoint) {
-    const spacing = getTreeCandidateCompareSpacing(treeCandidateLabState.clusterMode)
-    const startOffset = -((treeCandidateTypesForCompare.length - 1) * spacing) / 2
-    const assets = treeCandidateTypesForCompare.flatMap((candidateType, index) => {
-      const clusterCenter = offsetLatLngMeters(center, startOffset + index * spacing, 0)
-      const params = getTreeCandidateRecommendedParams(candidateType, treeCandidateLabState.clusterMode)
-      return buildTreeCandidateClusterAssets({
-        center: clusterCenter,
-        candidateType,
-        clusterId: `tree-lab-compare-${candidateType}-${Date.now()}-${index}`,
-        clusterIndex: treeCandidateLabState.testTrees.length + index * 100,
-        clusterMode: treeCandidateLabState.clusterMode,
-        params: {
-          ...params,
-          randomSeed: treeCandidateLabState.params.randomSeed + index * 101
-        }
-      })
-    })
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: [...current.testTrees, ...assets],
-      params: {
-        ...current.params,
-        randomSeed: current.params.randomSeed + 53
-      }
-    }))
-    setTreeCandidateLabClickMode('addCluster')
-    perfRecorder.recordMapVisualEvent({
-      type: 'treeCandidateCompareSetGenerated',
-      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      clusterGeneratedCount: assets.length,
-      compareSetGenerated: true,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已生成 ${treeCandidateTypesForCompare.length} 种候选对比，共 ${assets.length} 棵测试树`)
-  }
-
-  function updateSelectedTreeCandidateAsset(patch: Partial<LingshanMap3DGardenAsset>) {
-    if (!selectedTreeCandidateId) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.map((asset) =>
-        asset.id === selectedTreeCandidateId
-          ? {
-              ...asset,
-              ...patch,
-              location: patch.location ? { ...patch.location } : asset.location
-            }
-          : asset
-      )
-    }))
-  }
-
-  function clearTreeCandidateTestTrees() {
-    if (treeCandidateLabState.testTrees.length && !window.confirm('确认清空全部测试树？')) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: []
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeCleared',
-      testTreeCount: 0,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: 0,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已清空测试树')
-  }
-
-  function deleteSelectedTreeCandidate() {
-    if (!selectedTreeCandidateId) {
-      setGardenCopyStatus('请先选择一个测试树')
-      return
-    }
-
-    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    if (!selectedAsset || !window.confirm(`确认删除测试树“${selectedAsset.name}”？`)) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.filter((asset) => asset.id !== selectedTreeCandidateId)
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeDeleted',
-      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
-      candidateType: selectedAsset.kind,
-      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
-      clusterGeneratedCount: 1,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已删除选中测试树')
-  }
-
-  function deleteSelectedTreeCandidateCluster() {
-    if (!selectedTreeCandidateId) {
-      setGardenCopyStatus('请先选择一个测试树')
-      return
-    }
-
-    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    const clusterId = parseTreeCandidateNote(selectedAsset?.note).clusterId
-
-    if (!selectedAsset || !clusterId) {
-      deleteSelectedTreeCandidate()
-      return
-    }
-
-    const clusterAssets = treeCandidateLabState.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId === clusterId)
-
-    if (!window.confirm(`确认删除测试树团“${clusterId}”？共 ${clusterAssets.length} 棵。`)) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId !== clusterId)
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeDeleted',
-      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
-      candidateType: selectedAsset.kind,
-      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
-      clusterGeneratedCount: clusterAssets.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已删除测试树团：${clusterAssets.length} 棵`)
-  }
-
-  async function copyTreeCandidateAssets() {
-    const exported = treeCandidateLabState.testTrees.map((asset) => ({
-      id: asset.id,
-      type: 'gardenAsset',
-      assetUrl: asset.assetUrl,
-      modelUrl: asset.assetUrl,
-      lng: asset.location.lng,
-      lat: asset.location.lat,
-      scale: asset.scale,
-      height: asset.height,
-      rotationY: asset.yaw,
-      source: 'treeCandidateLab',
-      clusterId: parseTreeCandidateNote(asset.note).clusterId,
-      clusterMode: parseTreeCandidateNote(asset.note).clusterMode,
-      candidateType: asset.kind
-    }))
-    const ok = await copyText(JSON.stringify(exported, null, 2))
-    setGardenCopyStatus(ok ? `已复制 ${exported.length} 个测试树 assets` : '复制失败，请查看浏览器权限')
-  }
-
-  function saveTreeCandidateDraft() {
-    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
-    setGardenCopyStatus('已保存 Tree Candidate Lab 草稿')
-  }
-
-  function clearTreeCandidateDraft() {
-    if (!window.confirm('确认清空 Tree Candidate Lab 草稿和测试树？')) {
-      return
-    }
-
-    window.localStorage.removeItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
-    setTreeCandidateLabState(buildDefaultTreeCandidateLabState())
-    setTreeCandidateLabClickMode('addCluster')
-    setSelectedTreeCandidateId('')
-    setGardenCopyStatus('已清空 Tree Candidate Lab 草稿')
-  }
-
-  const deleteSelectedEditorZone = () => {
-    if (!selectedEditorZone) {
-      setGardenCopyStatus('请先选择一个 vegetation zone')
-      return
-    }
-
-    if (!window.confirm(`确认删除放树区“${selectedEditorZone.name}”？`)) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      zones: current.zones.filter((zone) => zone.id !== selectedEditorZone.id)
-    }))
-    setSelectedEditorZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenCopyStatus(`已删除 vegetation zone：${selectedEditorZone.name}`)
-  }
-
-  const deleteSelectedKeepoutZone = () => {
-    if (!selectedKeepoutZone) {
-      setGardenCopyStatus('请先选择一个 keepout zone')
-      return
-    }
-
-    if (!window.confirm(`确认删除禁放区“${selectedKeepoutZone.name}”？`)) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.filter((zone) => zone.id !== selectedKeepoutZone.id)
-    }))
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenCopyStatus(`已删除 keepout zone：${selectedKeepoutZone.name}`)
-  }
-
-  const updateGardenFilter = (patch: Partial<GardenAssetFilterState>) => {
-    setGardenFilters((current) => ({ ...current, ...patch }))
-  }
-
-  const updateGardenBatchAdjust = (patch: Partial<GardenBatchAdjustState>) => {
-    setGardenBatchAdjust((current) => ({ ...current, ...patch }))
-  }
-
-  const updateFilteredGardenAssets = (mapper: (asset: LingshanMap3DGardenAsset) => LingshanMap3DGardenAsset) => {
-    const filteredIds = new Set(filteredGardenAssets.map((asset) => asset.id))
-    if (!filteredIds.size) {
-      setGardenCopyStatus('当前筛选没有资产可调整')
-      return
-    }
-
-    setGardenAssets((items) => items.map((asset) => (filteredIds.has(asset.id) ? mapper(asset) : asset)))
-  }
-
-  const selectFirstFilteredGardenAsset = () => {
-    if (!filteredGardenAssets[0]) {
-      setGardenCopyStatus('当前筛选没有资产')
-      return
-    }
-
-    selectGardenAssetForEditing(filteredGardenAssets[0].id)
-    setGardenCopyStatus(`已选中筛选结果首项：${filteredGardenAssets[0].name}`)
-  }
-
-  const applyFilteredGardenVisibility = (visible: boolean) => {
-    updateFilteredGardenAssets((asset) => ({ ...asset, visible }))
-    setGardenCopyStatus(visible ? '已显示当前筛选资产' : '已隐藏当前筛选资产')
-  }
-
-  const applyFilteredGardenScale = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      scale: clampNumber(Math.round(asset.scale * gardenBatchAdjust.scaleMultiplier), 1, 2400)
-    }))
-    setGardenCopyStatus(`已按 ${gardenBatchAdjust.scaleMultiplier} 倍缩放当前筛选资产`)
-  }
-
-  const applyFilteredGardenHeight = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      height: roundNumber(asset.height + gardenBatchAdjust.heightDelta, 2)
-    }))
-    setGardenCopyStatus(`已调整当前筛选资产 height：${gardenBatchAdjust.heightDelta}`)
-  }
-
-  const applyFilteredGardenOpacity = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      opacity: clampNumber(roundNumber(asset.opacity + gardenBatchAdjust.opacityDelta, 2), 0, 1)
-    }))
-    setGardenCopyStatus(`已调整当前筛选资产 opacity：${gardenBatchAdjust.opacityDelta}`)
-  }
-
-  const applyFilteredGardenOffset = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      location: {
-        lat: roundNumber(asset.location.lat + gardenBatchAdjust.latOffset, 6),
-        lng: roundNumber(asset.location.lng + gardenBatchAdjust.lngOffset, 6)
-      }
-    }))
-    setGardenCopyStatus(`已平移当前筛选资产：lat ${gardenBatchAdjust.latOffset}, lng ${gardenBatchAdjust.lngOffset}`)
-  }
-
-  const beginVegetationZoneDrawing = () => {
-    setGardenEditorMode('drawVegetation')
-    setGardenDraftPolygon({ mode: 'vegetation', vertices: [] })
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus('开始绘制 vegetation zone：点击地图添加顶点')
-  }
-
-  const beginKeepoutZoneDrawing = () => {
-    setGardenEditorMode('drawKeepout')
-    setGardenDraftPolygon({ mode: 'keepout', vertices: [] })
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus('开始绘制 keepout zone：点击地图添加顶点')
-  }
-
-  const finishDraftGardenPolygon = () => {
-    completeDraftGardenPolygon()
-  }
-
-  const cancelDraftGardenPolygon = () => {
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setGardenCopyStatus('已取消当前绘制')
-  }
-
-  const updateSelectedEditorZone = (patch: Partial<GardenEditorVegetationZone>) => {
-    if (!selectedEditorZone) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      zones: current.zones.map((zone) => (zone.id === selectedEditorZone.id ? { ...zone, ...patch } : zone))
-    }))
-  }
-
-  const updateSelectedKeepoutZone = (patch: Partial<GardenEditorKeepoutZone>) => {
-    if (!selectedKeepoutZone) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.map((zone) => (zone.id === selectedKeepoutZone.id ? { ...zone, ...patch } : zone))
-    }))
-  }
-
-  const updateGardenEditorVertex = (vertexId: string, point: LatLngPoint) => {
-    const match = vertexId.match(/^(zone|keepout|draft):(.+):(\d+)$/)
-
-    if (!match) {
-      return
-    }
-
-    const [, scope, id, indexValue] = match
-    const vertexIndex = Number(indexValue)
-
-    if (!Number.isFinite(vertexIndex)) {
-      return
-    }
-
-    if (scope === 'draft') {
-      setGardenDraftPolygon((current) => {
-        if (!current || current.mode !== id) {
-          return current
-        }
-
-        return {
-          ...current,
-          vertices: current.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-        }
-      })
-      setSelectedGardenVertexId(vertexId)
-      setGardenCopyStatus('已拖拽当前草稿顶点')
-      return
-    }
-
-    if (scope === 'zone') {
-      setGardenEditorState((current) => ({
-        ...current,
-        zones: current.zones.map((zone) =>
-          zone.id === id
-            ? {
-                ...zone,
-                vertices: zone.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-              }
-            : zone
-        )
-      }))
-      setSelectedEditorZoneId(id)
-      setSelectedGardenVertexId(vertexId)
-      setGardenCopyStatus('已拖拽 vegetation zone 顶点')
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.map((zone) =>
-        zone.id === id
-          ? {
-              ...zone,
-              vertices: zone.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-            }
-          : zone
-      )
-    }))
-    setSelectedKeepoutZoneId(id)
-    setSelectedGardenVertexId(vertexId)
-    setGardenCopyStatus('已拖拽 keepout zone 顶点')
-  }
-
-  const generateGardenPreviewAssets = () => {
-    const previewAssets = generateGardenAssetsFromEditor(gardenEditorState.zones, gardenEditorState.keepouts)
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets
-    }))
-    setGardenCopyStatus(`已生成 ${previewAssets.length} 个半透明预览点`)
-  }
-
-  const applyGardenPreviewAsGlb = () => {
-    if (!gardenEditorState.previewAssets.length) {
-      setGardenCopyStatus('请先在第 3 步生成预览点')
-      return
-    }
-
-    const generatedAssets = gardenEditorState.previewAssets.map(cloneGardenAsset)
-
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets: generatedAssets,
-      appliedAssets: generatedAssets
-    }))
-    setGardenAssets(generatedAssets)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus(`已应用 ${generatedAssets.length} 个 GLB 树群资产`)
-  }
-
-  const clearGardenPreviewAssets = () => {
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets: []
-    }))
-    setGardenCopyStatus('已清空预览点')
-  }
-
-  const resetGardenEditorState = () => {
-    const editorState = buildDefaultGardenEditorState()
-    const defaultAssets = getDefaultMap3DGardenAssets()
-    setGardenEditorState(editorState)
-    setGardenAssets(defaultAssets)
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    clearGardenEditorLocalStorage()
-    setGardenEditorUsesStoredDraft(false)
-    setGardenCopyStatus('已重置为默认航拍参考布局，并清空本地草稿')
-  }
-
-  const clearGardenLocalDraft = () => {
-    const editorState = buildDefaultGardenEditorState()
-    const defaultAssets = getDefaultMap3DGardenAssets()
-    setGardenEditorState(editorState)
-    setGardenAssets(defaultAssets)
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    clearGardenEditorLocalStorage()
-    setGardenEditorUsesStoredDraft(false)
-    setGardenCopyStatus('已清空 debugGarden 本地草稿，恢复默认航拍参考布局')
-  }
-
-  const saveGardenEditorStateToLocalStorage = () => {
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
-    setGardenEditorUsesStoredDraft(true)
-    setGardenCopyStatus('已保存 zones、keepouts、preview 和当前 GLB 树群到 localStorage')
-  }
-
-  const copyEditorAssetsConfig = async () => {
-    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyEditorZonesConfig = async () => {
-    const snippet = `export const gardenEditorVegetationZones = ${JSON.stringify(gardenEditorState.zones, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 vegetation zones TS 配置' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyEditorKeepoutsConfig = async () => {
-    const snippet = `export const gardenEditorKeepoutZones = ${JSON.stringify(gardenEditorState.keepouts, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 keepout zones TS 配置' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyCompleteGardenSourceSnippet = async () => {
-    const snippet = [
-      `export const lingshanMap3DEditorVegetationZones = ${JSON.stringify(gardenEditorState.zones, null, 2)} as const`,
-      `export const lingshanMap3DEditorKeepoutZones = ${JSON.stringify(gardenEditorState.keepouts, null, 2)} as const`,
-      `export const lingshanMap3DGardenGenerationParams = ${JSON.stringify(buildGardenGenerationParamsSnapshot(gardenEditorState), null, 2)} as const`,
-      `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const`
-    ].join('\n\n')
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyGardenSummary = async () => {
-    const summary = [
-      `debugGarden=${debugGarden ? '1' : '0'}`,
-      `variant=${visualVariant.id}`,
-      `gardenAssetCount=${gardenAssets.length}`,
-      `forestPatchCount=${gardenModelReport.patchCount}/${lingshanMap3DForestPatches.length}`,
-      `forestPatchFallback=${gardenModelReport.patchFallback ? 'true' : 'false'}`,
-      `forestPatchesVisible=${forestPatchesVisible ? 'true' : 'false'}`,
-      `visibleAssets=${gardenModelReport.visibleCount}`,
-      `createdModels=${gardenModelReport.createdCount}`,
-      `selectedGarden=${selectedGardenAsset?.id ?? 'none'}`,
-      `selectedScale=${selectedGardenAsset?.scale ?? 'none'}`,
-      `selectedHeight=${selectedGardenAsset?.height ?? 'none'}`,
-      `selectedYaw=${selectedGardenAsset?.yaw ?? 'none'}`,
-      `GLTFModelUnavailable=${gardenModelReport.unavailable ? 'true' : 'false'}`
-    ].join('\n')
-    const ok = await copyText(summary)
-    setGardenCopyStatus(ok ? '已复制 3D 园林调试摘要' : '复制失败，请查看浏览器权限')
-  }
-
   const copyInkBoundsConfig = async () => {
     const ok = await copyText(buildInkBoundsExportSnippet(inkBoundsDraft))
     setInkBoundsCopyStatus(ok ? '已复制四角经纬度配置' : '复制失败，请查看浏览器权限')
@@ -8863,7 +6702,7 @@ export function Map3DGuideExperience({
 
   return (
     <main
-      className={`map-3d-guide-shell ${visualVariant.className} ${debugGarden ? 'map-3d-guide-shell--debug-garden' : ''} ${
+      className={`map-3d-guide-shell ${visualVariant.className} ${''} ${
         debugPerf ? 'map-3d-guide-shell--debug-perf' : ''
       } ${debugInkBounds ? 'map-3d-guide-shell--debug-ink-bounds' : ''} ${
         exportInkBase ? 'map-3d-guide-shell--export-ink-base' : ''
@@ -8886,6 +6725,7 @@ export function Map3DGuideExperience({
       data-presentation-switch-error={presentationSwitchError ?? ''}
       data-presentation-cloud={presentationCloudPhase}
       data-map-view-mode={effectiveGuideState.viewMode}
+      data-map-camera-scope={cameraScope}
       data-route-id={effectiveGuideState.routeId}
       data-route-stage={effectiveGuideState.routeStage}
       data-route-stop-index={effectiveGuideState.stopIndex}
@@ -9150,14 +6990,14 @@ export function Map3DGuideExperience({
               {mapReadyTimedOut
                 ? startupStage === 'failed'
                   ? '已保留浅色佛境兜底，可重新加载地图'
-                  : '正在继续展开佛境沙盘，底图可见后再显示路线与园林资产'
+                  : '正在继续展开佛境沙盘，底图可见后再显示路线与核心地标'
                 : startupStage === 'loadingSdk'
                   ? '加载腾讯地图 SDK'
                   : startupStage === 'creatingMap'
                     ? '创建地图实例与初始视角'
                     : startupStage === 'waitingBaseMap'
                       ? '等待底图瓦片完成首帧渲染'
-                      : '加载地图底图与园林资产'}
+                      : '加载地图底图与核心地标'}
             </span>
             {mapReadyTimedOut ? (
               <div className="map-3d-guide-loading-curtain__actions">
@@ -9220,7 +7060,7 @@ export function Map3DGuideExperience({
             <strong>腾讯无 POI 底图导出</strong>
             <span>{showRoadCheck ? 'road check 占位已开' : 'exportInkBase=1'}</span>
           </div>
-          <p>当前为正北俯视导出模式：已使用正式 V2 水墨边界，并隐藏项目 GLB、869 树群、路线、POI 题签和佛境氛围层。</p>
+          <p>当前为正北俯视导出模式：已使用正式 V2 水墨边界，并隐藏项目 GLB、路线、POI 题签和佛境氛围层。</p>
           <div className="map-3d-guide-ink-tool__bounds-note">水墨底图正式覆盖范围 / 4096×4096</div>
           <dl>
             {inkMapBoundCornerOrder.map((corner) => {
@@ -9255,7 +7095,7 @@ export function Map3DGuideExperience({
           <small>准备截图后按 Esc 恢复 UI。</small>
         </aside>
       ) : null}
-      {!debugGarden ? (
+      {(
         <header className="map-3d-guide-mobile-topbar">
           <div>
             <strong>灵山胜境 AI 导览</strong>
@@ -9265,8 +7105,8 @@ export function Map3DGuideExperience({
             {mobilePanelToggleLabel}
           </button>
         </header>
-      ) : null}
-      {!debugGarden ? (
+      )}
+      {(
         <section className={`map-3d-guide-mobile-guide ${mobilePanelsCollapsed ? 'is-collapsed' : 'is-expanded'}`}>
           <div
             className="map-3d-guide-mobile-guide__summary"
@@ -9383,8 +7223,8 @@ export function Map3DGuideExperience({
             </div>
           ) : null}
         </section>
-      ) : null}
-      {!debugGarden ? (
+      )}
+      {(
         <section className="map-3d-guide-hero">
           <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
           <h1>{visualVariant.title}</h1>
@@ -9398,9 +7238,9 @@ export function Map3DGuideExperience({
             </button>
           </div>
         </section>
-      ) : null}
+      )}
 
-      {!debugGarden ? (
+      {(
         <section className="map-3d-guide-routes" aria-label="3D 导览路线切换">
           <div className="map-3d-guide-routes__header">
             <strong>主题路线</strong>
@@ -9421,7 +7261,7 @@ export function Map3DGuideExperience({
             ))}
           </div>
         </section>
-      ) : null}
+      )}
 
       <section className="map-3d-guide-camera">
         <div>
@@ -9597,11 +7437,7 @@ export function Map3DGuideExperience({
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
         <h2>{visualVariant.statusTitle}</h2>
-        {debugGarden ? (
-          <button type="button" className="map-3d-guide-debug-exit" onClick={() => navigate('/map-3d-guide-c')}>
-            退出调试 / 返回普通导览页
-          </button>
-        ) : null}
+        {null}
         <dl>
           <div>
             <dt>当前路线</dt>
@@ -9679,16 +7515,6 @@ export function Map3DGuideExperience({
               ) : null}
             </div>
           ) : null}
-          {visualVariant.id === 'prototype-c' ? (
-            <div className="map-3d-guide-style-audit">
-              <strong>树群 GLB 状态</strong>
-              <span>当前原型类型：C</span>
-              <span>treeGlbMode：removed</span>
-              <span>activeTreeGlbCount：0</span>
-              <span>GardenDebugWizard / Tree Candidate Lab：已停用</span>
-              <p>树群 GLB 系统已因移动端内存压力移除；当前页面只保留水墨底图、路线、POI、核心地标 GLB 和景点级沉浸切换。</p>
-            </div>
-          ) : null}
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
@@ -9742,7 +7568,7 @@ export function Map3DGuideExperience({
         </details>
       </aside>
 
-      {!debugGarden ? (
+      {(
       <section className="map-3d-guide-pois">
         <strong>{visualVariant.stationPanelTitle}</strong>
         <div>
@@ -9775,9 +7601,9 @@ export function Map3DGuideExperience({
           })}
         </div>
       </section>
-      ) : null}
+      )}
 
-      {!debugGarden ? (
+      {(
       <footer className="map-3d-guide-controlbar">
         <div className="map-3d-guide-progress">
           <span style={{ width: `${routeProgressPercent}%` }} />
@@ -9829,7 +7655,7 @@ export function Map3DGuideExperience({
           </button>
         </div>
       </footer>
-      ) : null}
+      )}
 
       <style>{map3DGuideCss}</style>
     </main>
@@ -10893,21 +8719,6 @@ function getModelOverlayLocation(overlay: LingshanMapModelOverlay): LatLngPoint 
   return overlay.positionSource === 'displayLocation'
     ? poi.displayLocation ?? poi.navLocation
     : poi.navLocation ?? poi.displayLocation
-}
-
-function getSpatialGardenAssetBaseOpacity(asset: LingshanMap3DGardenAsset, lodState: GardenLodState) {
-  const tierOpacity =
-    lodState.visibleTier === 'none'
-      ? 0.04
-      : lodState.visibleTier === 'reduced'
-        ? asset.priority === 'low'
-          ? 0.08
-          : asset.priority === 'medium'
-            ? 0.38
-            : 0.72
-        : 1
-
-  return Number(Math.max(0, Math.min(1, asset.opacity * lodState.opacity * tierOpacity)).toFixed(3))
 }
 
 function getSceneWindowRouteProgress(
@@ -12455,596 +10266,6 @@ function buildCanonicalLocalhostUrl() {
   return url.toString()
 }
 
-function stashLocalhostTransferDrafts() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    const items = MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.reduce<Record<string, string>>((drafts, key) => {
-      const value = window.localStorage.getItem(key)
-      if (value) {
-        drafts[key] = value
-      }
-      return drafts
-    }, {})
-
-    if (!Object.keys(items).length) {
-      return
-    }
-
-    window.name = `${MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX}${JSON.stringify({
-      fromHost: window.location.host,
-      transferredAt: new Date().toISOString(),
-      items
-    })}`
-  } catch {
-    // Redirect should still proceed; losing a local debug draft is better than blocking the map.
-  }
-}
-
-function restoreLocalhostTransferDrafts() {
-  if (typeof window === 'undefined' || window.location.hostname !== MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST) {
-    return
-  }
-
-  if (!window.name.startsWith(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX)) {
-    return
-  }
-
-  try {
-    const payload = JSON.parse(window.name.slice(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX.length)) as {
-      items?: Record<string, string>
-    }
-    Object.entries(payload.items ?? {}).forEach(([key, value]) => {
-      if (MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.includes(key as (typeof MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS)[number])) {
-        window.localStorage.setItem(key, value)
-      }
-    })
-  } catch {
-    // Ignore malformed transfer payloads; the page can fall back to default debugGarden state.
-  } finally {
-    window.name = ''
-  }
-}
-
-function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
-  restoreLocalhostTransferDrafts()
-  const defaults = getDefaultMap3DGardenAssets()
-
-  if (variant !== 'prototype-c' || typeof window === 'undefined') {
-    return defaults
-  }
-
-  try {
-    const stored = window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-
-    if (!stored) {
-      return defaults
-    }
-
-    const parsed = JSON.parse(stored) as LingshanMap3DGardenAsset[]
-
-    if (!Array.isArray(parsed) || !parsed.length) {
-      return defaults
-    }
-
-    return parsed.map((asset) => ({
-      ...asset,
-      location: { ...asset.location }
-    }))
-  } catch {
-    return defaults
-  }
-}
-
-function hasStoredGardenEditorDraft() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  try {
-    return Boolean(
-      window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY) ||
-        window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-    )
-  } catch {
-    return false
-  }
-}
-
-function clearGardenEditorLocalStorage() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-
-    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-      const key = window.localStorage.key(index)
-      if (key?.startsWith('lingshan-map-3d-guide-garden-editor-') || key?.startsWith('lingshan-map-3d-guide-garden-assets-')) {
-        window.localStorage.removeItem(key)
-      }
-    }
-  } catch {
-    // Browser storage can be disabled; reset still works for in-memory state.
-  }
-}
-
-function buildDefaultGardenEditorState(): GardenEditorState {
-  return {
-    zones: [
-      {
-        id: 'editor-zone-buddha-north-forest',
-        name: '大佛背后密林编辑区',
-        kind: 'forest',
-        vertices: [
-          { lat: 31.43038, lng: 120.09435 },
-          { lat: 31.43222, lng: 120.09505 },
-          { lat: 31.43212, lng: 120.09808 },
-          { lat: 31.43018, lng: 120.09818 },
-          { lat: 31.42946, lng: 120.09642 }
-        ],
-        density: 42,
-        assetPool: ['pine_cluster', 'mixed_grove', 'bamboo_grove', 'forest_edge', 'shrub_mass', 'rock_cluster'],
-        assetRatios: {
-          pine_cluster: 34,
-          mixed_grove: 26,
-          bamboo_grove: 12,
-          forest_edge: 16,
-          shrub_mass: 8,
-          rock_cluster: 4
-        },
-        minScale: 118,
-        maxScale: 198,
-        minHeight: 5,
-        maxHeight: 14,
-        opacity: 0.92,
-        priority: 'high',
-        visible: true
-      },
-      {
-        id: 'editor-zone-central-axis-belts',
-        name: '中轴两侧林带编辑区',
-        kind: 'axis_grove',
-        vertices: [
-          { lat: 31.42378, lng: 120.09812 },
-          { lat: 31.42798, lng: 120.09784 },
-          { lat: 31.42828, lng: 120.09963 },
-          { lat: 31.42398, lng: 120.10012 }
-        ],
-        density: 34,
-        assetPool: ['forest_edge', 'pine_cluster', 'mixed_grove', 'shrub_mass', 'rock_cluster'],
-        assetRatios: {
-          forest_edge: 32,
-          pine_cluster: 24,
-          mixed_grove: 18,
-          shrub_mass: 20,
-          rock_cluster: 6
-        },
-        minScale: 72,
-        maxScale: 138,
-        minHeight: 2,
-        maxHeight: 7,
-        opacity: 0.82,
-        priority: 'medium',
-        visible: true
-      },
-      {
-        id: 'editor-zone-fangong-tancheng-edge',
-        name: '梵宫坛城边缘绿化编辑区',
-        kind: 'node_green',
-        vertices: [
-          { lat: 31.4259, lng: 120.10035 },
-          { lat: 31.4295, lng: 120.1001 },
-          { lat: 31.42918, lng: 120.10242 },
-          { lat: 31.42562, lng: 120.10262 }
-        ],
-        density: 24,
-        assetPool: ['mixed_grove', 'forest_edge', 'shrub_mass', 'bamboo_grove', 'stone_mass'],
-        assetRatios: {
-          mixed_grove: 28,
-          forest_edge: 24,
-          shrub_mass: 26,
-          bamboo_grove: 12,
-          stone_mass: 10
-        },
-        minScale: 54,
-        maxScale: 116,
-        minHeight: 1,
-        maxHeight: 5,
-        opacity: 0.76,
-        priority: 'medium',
-        visible: true
-      }
-    ],
-    keepouts: [
-      {
-        id: 'editor-keepout-main-route',
-        name: '主路线与中轴留白',
-        reason: 'route',
-        vertices: [
-          { lat: 31.42342, lng: 120.09872 },
-          { lat: 31.42972, lng: 120.09582 },
-          { lat: 31.43002, lng: 120.09655 },
-          { lat: 31.42372, lng: 120.09948 }
-        ],
-        visible: true
-      },
-      {
-        id: 'editor-keepout-jiulong-plaza',
-        name: '九龙灌浴广场留白',
-        reason: 'plaza',
-        vertices: [
-          { lat: 31.42392, lng: 120.0987 },
-          { lat: 31.42508, lng: 120.09855 },
-          { lat: 31.42528, lng: 120.09975 },
-          { lat: 31.42402, lng: 120.10002 }
-        ],
-        visible: true
-      },
-      {
-        id: 'editor-keepout-buddha-plaza',
-        name: '佛前广场留白',
-        reason: 'plaza',
-        vertices: [
-          { lat: 31.42838, lng: 120.09544 },
-          { lat: 31.42972, lng: 120.09528 },
-          { lat: 31.42986, lng: 120.09698 },
-          { lat: 31.4285, lng: 120.09705 }
-        ],
-        visible: true
-      }
-    ],
-    previewAssets: [],
-    appliedAssets: []
-  }
-}
-
-function loadStoredGardenEditorState(): GardenEditorState {
-  const defaults = buildDefaultGardenEditorState()
-
-  if (typeof window === 'undefined') {
-    return defaults
-  }
-
-  try {
-    const stored = window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
-
-    if (!stored) {
-      return defaults
-    }
-
-    const parsed = JSON.parse(stored) as Partial<GardenEditorState>
-
-    if (!Array.isArray(parsed.zones) || !Array.isArray(parsed.keepouts)) {
-      return defaults
-    }
-
-    return {
-      zones: parsed.zones.filter((zone) => Array.isArray(zone.vertices) && zone.vertices.length >= 3) as GardenEditorVegetationZone[],
-      keepouts: parsed.keepouts.filter((zone) => Array.isArray(zone.vertices) && zone.vertices.length >= 3) as GardenEditorKeepoutZone[],
-      previewAssets: Array.isArray(parsed.previewAssets) ? parsed.previewAssets as LingshanMap3DGardenAsset[] : [],
-      appliedAssets: Array.isArray(parsed.appliedAssets) ? parsed.appliedAssets as LingshanMap3DGardenAsset[] : []
-    }
-  } catch {
-    return defaults
-  }
-}
-
-function createEditorVegetationZone(vertices: LatLngPoint[], index: number): GardenEditorVegetationZone {
-  return {
-    id: `editor-zone-manual-${Date.now()}-${index + 1}`,
-    name: `手绘林地 ${index + 1}`,
-    kind: 'forest',
-    vertices: vertices.map((vertex) => ({ lat: roundNumber(vertex.lat, 6), lng: roundNumber(vertex.lng, 6) })),
-    density: 24,
-    assetPool: [...defaultEditorAssetPool],
-    assetRatios: { ...defaultEditorAssetRatios },
-    minScale: 72,
-    maxScale: 150,
-    minHeight: 2,
-    maxHeight: 8,
-    opacity: 0.82,
-    priority: 'medium',
-    visible: true
-  }
-}
-
-function createEditorKeepoutZone(vertices: LatLngPoint[], index: number): GardenEditorKeepoutZone {
-  return {
-    id: `editor-keepout-manual-${Date.now()}-${index + 1}`,
-    name: `手绘留白 ${index + 1}`,
-    reason: 'plaza',
-    vertices: vertices.map((vertex) => ({ lat: roundNumber(vertex.lat, 6), lng: roundNumber(vertex.lng, 6) })),
-    visible: true
-  }
-}
-
-function getEditorAssetDefaults(kind: Map3DGardenAssetKind) {
-  if (kind === 'rock_cluster' || kind === 'stone_mass') {
-    return { scale: 62, height: 0.8, opacity: 0.9 }
-  }
-
-  if (kind === 'fluffy_bodhi_grove') {
-    return { scale: 62, height: 2.5, opacity: 0.92 }
-  }
-
-  if (kind === 'dense_shrub_cluster') {
-    return { scale: 74, height: 1.2, opacity: 0.88 }
-  }
-
-  if (
-    kind === 'fluffy_round_tree' ||
-    kind === 'bushy_canopy_tree' ||
-    kind === 'soft_forest_clump' ||
-    kind === 'fluffy_tree_mix'
-  ) {
-    return { scale: 88, height: 2.2, opacity: 0.88 }
-  }
-
-  return { scale: 112, height: 3, opacity: 0.9 }
-}
-
-function createSingleEditorAsset(point: LatLngPoint, kind: Map3DGardenAssetKind, index: number): LingshanMap3DGardenAsset {
-  const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
-  const assetDefaults = getEditorAssetDefaults(kind)
-
-  return {
-    id: `editor-single-${kind}-${Date.now()}-${index + 1}`,
-    zoneId: 'editor-single-assets',
-    kind,
-    name: `单点 ${kind} ${index + 1}`,
-    assetUrl: getMap3DGardenAssetUrl(kind),
-    location: {
-      lat: roundNumber(point.lat, 6),
-      lng: roundNumber(point.lng, 6)
-    },
-    scale: assetDefaults.scale,
-    height: assetDefaults.height,
-    yaw: 0,
-    opacity: assetDefaults.opacity,
-    visible: true,
-    priority: 'medium',
-    routeFraction: roundNumber(routeProgress, 3),
-    licenseId: getMap3DGardenLicenseId(),
-    note: '由 debugGarden 图形化编辑器单点添加。'
-  }
-}
-
-function buildDefaultTreeCandidateLabState(): TreeCandidateLabState {
-  return {
-    selectedCandidateType: 'fluffy_bodhi_grove',
-    clusterMode: 'smallCluster',
-    params: { ...getTreeCandidateRecommendedParams('fluffy_bodhi_grove', 'smallCluster') },
-    testTrees: [],
-    defaultGardenHidden: true,
-    landmarkReferenceLoaded: false
-  }
-}
-
-function loadTreeCandidateLabDraft(enabled: boolean): TreeCandidateLabState {
-  const fallback = buildDefaultTreeCandidateLabState()
-
-  if (!enabled || typeof window === 'undefined') {
-    return fallback
-  }
-
-  try {
-    const stored = window.localStorage.getItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
-
-    if (!stored) {
-      return fallback
-    }
-
-    const parsed = JSON.parse(stored) as Partial<TreeCandidateLabState>
-    const selectedCandidateType = sanitizeTreeCandidateType(parsed.selectedCandidateType)
-    const clusterMode = sanitizeTreeCandidateClusterMode(parsed.clusterMode)
-
-    return {
-      selectedCandidateType,
-      clusterMode,
-      params: sanitizeTreeCandidateParams(parsed.params, clusterMode, selectedCandidateType),
-      testTrees: Array.isArray(parsed.testTrees) ? parsed.testTrees.filter(isTreeCandidateAsset).map(cloneGardenAsset).map(normalizeLingshanTreeAssetScale) : [],
-      defaultGardenHidden: parsed.defaultGardenHidden !== false,
-      landmarkReferenceLoaded: false
-    }
-  } catch {
-    return fallback
-  }
-}
-
-function sanitizeTreeCandidateType(value: unknown): TreeCandidateType {
-  return treeCandidateTypes.includes(value as TreeCandidateType) ? (value as TreeCandidateType) : 'fluffy_bodhi_grove'
-}
-
-function sanitizeTreeCandidateClusterMode(value: unknown): TreeCandidateClusterMode {
-  const modes = Object.keys(treeCandidateClusterDefaults) as TreeCandidateClusterMode[]
-  return modes.includes(value as TreeCandidateClusterMode) ? (value as TreeCandidateClusterMode) : 'single'
-}
-
-function getTreeCandidateRecommendedParams(candidateType: TreeCandidateType, mode: TreeCandidateClusterMode) {
-  return treeCandidateRecommendedDefaults[candidateType]?.[mode] ?? treeCandidateClusterDefaults[mode]
-}
-
-function sanitizeTreeCandidateParams(
-  value: unknown,
-  mode: TreeCandidateClusterMode,
-  candidateType: TreeCandidateType = 'fluffy_bodhi_grove'
-): TreeCandidateLabParams {
-  const defaults = getTreeCandidateRecommendedParams(candidateType, mode)
-  const params = typeof value === 'object' && value ? (value as Partial<TreeCandidateLabParams>) : {}
-  const scaleMin = clampNumber(Number(params.scaleMin ?? defaults.scaleMin), 0.1, 220)
-  const scaleMax = clampNumber(Number(params.scaleMax ?? defaults.scaleMax), 0.1, 240)
-  const normalizedScaleRange = normalizeLingshanTreeScaleRange(candidateType, scaleMin, scaleMax)
-
-  return {
-    count: Math.round(clampNumber(Number(params.count ?? defaults.count), 1, 40)),
-    radiusMeters: clampNumber(Number(params.radiusMeters ?? defaults.radiusMeters), 0, 90),
-    minDistanceMeters: clampNumber(Number(params.minDistanceMeters ?? defaults.minDistanceMeters), 0, 28),
-    scaleMin: roundNumber(Math.min(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
-    scaleMax: roundNumber(Math.max(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
-    heightOffset: roundNumber(clampNumber(Number(params.heightOffset ?? defaults.heightOffset), -5, 16), 1),
-    randomSeed: Math.round(clampNumber(Number(params.randomSeed ?? defaults.randomSeed), 1, 999999))
-  }
-}
-
-function isTreeCandidateAsset(asset: unknown): asset is LingshanMap3DGardenAsset {
-  if (!asset || typeof asset !== 'object') {
-    return false
-  }
-
-  const candidate = asset as Partial<LingshanMap3DGardenAsset>
-  return (
-    typeof candidate.id === 'string' &&
-    sanitizeTreeCandidateType(candidate.kind) === candidate.kind &&
-    typeof candidate.assetUrl === 'string' &&
-    typeof candidate.location?.lat === 'number' &&
-    typeof candidate.location?.lng === 'number'
-  )
-}
-
-function buildTreeCandidateClusterAssets({
-  center,
-  candidateType,
-  clusterId,
-  clusterIndex,
-  clusterMode,
-  params
-}: {
-  center: LatLngPoint
-  candidateType: TreeCandidateType
-  clusterId: string
-  clusterIndex: number
-  clusterMode: TreeCandidateClusterMode
-  params: TreeCandidateLabParams
-}): LingshanMap3DGardenAsset[] {
-  const sanitizedParams = sanitizeTreeCandidateParams(params, clusterMode, candidateType)
-  const points = sampleTreeCandidateClusterPoints(center, sanitizedParams)
-
-  return points.map((point, index) => {
-    const seedIndex = clusterIndex + index + 1
-    const scale = roundNumber(lerpNumber(sanitizedParams.scaleMin, sanitizedParams.scaleMax, seeded01(sanitizedParams.randomSeed, seedIndex, 71)), 2)
-    const height = roundNumber(sanitizedParams.heightOffset + (seeded01(sanitizedParams.randomSeed, seedIndex, 73) - 0.5) * 0.8, 1)
-    const yaw = roundNumber(-180 + seeded01(sanitizedParams.randomSeed, seedIndex, 79) * 360, 0)
-    const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
-
-    return normalizeLingshanTreeAssetScale({
-      id: `${clusterId}-${index + 1}`,
-      zoneId: TREE_CANDIDATE_LAB_ZONE_ID,
-      kind: candidateType,
-      name: `候选树 ${treeCandidateLabels[candidateType]} ${treeCandidateClusterLabels[clusterMode]} ${index + 1}`,
-      assetUrl: getMap3DGardenAssetUrl(candidateType),
-      location: {
-        lat: roundNumber(point.lat, 6),
-        lng: roundNumber(point.lng, 6)
-      },
-      scale,
-      height,
-      yaw,
-      opacity: 0.92,
-      visible: true,
-      priority: 'high',
-      routeFraction: roundNumber(routeProgress, 3),
-      licenseId: getMap3DGardenLicenseId(),
-      note: buildTreeCandidateNote({ clusterId, clusterMode, candidateType })
-    })
-  })
-}
-
-function sampleTreeCandidateClusterPoints(center: LatLngPoint, params: TreeCandidateLabParams): LatLngPoint[] {
-  const count = Math.max(1, Math.round(params.count))
-
-  if (count === 1 || params.radiusMeters <= 0) {
-    return [center]
-  }
-
-  const points: LatLngPoint[] = []
-  const maxAttempts = Math.max(count * 80, 80)
-
-  for (let attempt = 0; attempt < maxAttempts && points.length < count; attempt += 1) {
-    const angle = seeded01(params.randomSeed, attempt, 83) * Math.PI * 2
-    const radius = Math.sqrt(seeded01(params.randomSeed, attempt, 89)) * params.radiusMeters
-    const point = offsetLatLngMeters(center, Math.cos(angle) * radius, Math.sin(angle) * radius)
-    const farEnough = points.every((existing) => haversineDistanceMeters(existing, point) >= params.minDistanceMeters)
-
-    if (farEnough) {
-      points.push(point)
-    }
-  }
-
-  if (!points.length) {
-    points.push(center)
-  }
-
-  return points
-}
-
-function getTreeCandidateCompareSpacing(mode: TreeCandidateClusterMode) {
-  if (mode === 'backgroundGrove') {
-    return 72
-  }
-
-  if (mode === 'mediumCluster') {
-    return 58
-  }
-
-  if (mode === 'smallCluster') {
-    return 46
-  }
-
-  return 36
-}
-
-function buildTreeCandidateNote({
-  clusterId,
-  clusterMode,
-  candidateType
-}: {
-  clusterId: string
-  clusterMode: TreeCandidateClusterMode
-  candidateType: TreeCandidateType
-}) {
-  return `treeCandidateLab|source=treeCandidateLab|clusterId=${clusterId}|clusterMode=${clusterMode}|candidateType=${candidateType}`
-}
-
-function parseTreeCandidateNote(note: string | undefined) {
-  const fallback = {
-    clusterId: '',
-    clusterMode: 'single' as TreeCandidateClusterMode,
-    candidateType: 'fluffy_bodhi_grove' as TreeCandidateType
-  }
-
-  if (!note?.startsWith('treeCandidateLab|')) {
-    return fallback
-  }
-
-  const entries = Object.fromEntries(
-    note
-      .split('|')
-      .slice(1)
-      .map((item) => {
-        const [key, value] = item.split('=')
-        return [key, value]
-      })
-  )
-
-  return {
-    clusterId: entries.clusterId ?? '',
-    clusterMode: sanitizeTreeCandidateClusterMode(entries.clusterMode),
-    candidateType: sanitizeTreeCandidateType(entries.candidateType)
-  }
-}
-
-function cloneGardenAsset(asset: LingshanMap3DGardenAsset): LingshanMap3DGardenAsset {
-  return {
-    ...asset,
-    location: { ...asset.location }
-  }
-}
-
 function isSameLatLngPoint(a: LatLngPoint | undefined, b: LatLngPoint | undefined) {
   if (!a || !b) {
     return false
@@ -13059,213 +10280,6 @@ function areStringArraysEqual(left: string[], right: string[]) {
   }
 
   return left.every((value, index) => value === right[index])
-}
-
-function buildGardenGenerationParamsSnapshot(state: GardenEditorState) {
-  return {
-    generator: 'generateGardenAssetsFromEditor',
-    trigger: 'manual preview button',
-    seed: 'hashString(zone.id)',
-    maxAttempts: 'Math.max(80, zone.density * 28)',
-    routeKeepoutMetersByZoneKind: {
-      forest: 18,
-      axis_grove: 13,
-      water_edge: 10,
-      node_green: 18
-    },
-    assetKindOptions: gardenAssetKindOptions,
-    zones: state.zones.map((zone) => ({
-      id: zone.id,
-      kind: zone.kind,
-      density: zone.density,
-      assetPool: zone.assetPool,
-      assetRatios: zone.assetRatios,
-      minScale: zone.minScale,
-      maxScale: zone.maxScale,
-      minHeight: zone.minHeight,
-      maxHeight: zone.maxHeight,
-      opacity: zone.opacity,
-      priority: zone.priority,
-      visible: zone.visible
-    })),
-    keepoutCount: state.keepouts.length
-  }
-}
-
-function generateGardenAssetsFromEditor(
-  zones: GardenEditorVegetationZone[],
-  keepouts: GardenEditorKeepoutZone[]
-): LingshanMap3DGardenAsset[] {
-  const activeKeepouts = keepouts.filter((zone) => zone.visible && zone.vertices.length >= 3)
-  const assets: LingshanMap3DGardenAsset[] = []
-
-  zones
-    .filter((zone) => zone.visible && zone.vertices.length >= 3 && zone.density > 0)
-    .forEach((zone) => {
-      const bounds = getPolygonBounds(zone.vertices)
-      const seed = hashString(zone.id)
-      let created = 0
-      let attempt = 0
-      const maxAttempts = Math.max(80, zone.density * 28)
-
-      while (created < zone.density && attempt < maxAttempts) {
-        const candidate = {
-          lat: roundNumber(bounds.minLat + (bounds.maxLat - bounds.minLat) * seeded01(seed, attempt, 7), 6),
-          lng: roundNumber(bounds.minLng + (bounds.maxLng - bounds.minLng) * seeded01(seed, attempt, 13), 6)
-        }
-        attempt += 1
-
-        if (!isPointInPolygon(candidate, zone.vertices)) {
-          continue
-        }
-
-        if (activeKeepouts.some((keepout) => isPointInPolygon(candidate, keepout.vertices))) {
-          continue
-        }
-
-        const routeDistance = findNearestRoutePoint(candidate, demoRoutePath)?.distanceMeters ?? Number.POSITIVE_INFINITY
-        const routeKeepout = zone.kind === 'axis_grove' ? 13 : zone.kind === 'water_edge' ? 10 : 18
-
-        if (routeDistance < routeKeepout) {
-          continue
-        }
-
-        const kind = chooseEditorAssetKind(zone, seed, attempt)
-        const routeProgress = findNearestRoutePoint(candidate, demoRoutePath)?.progressRatio ?? 0
-        const scale = roundNumber(lerpNumber(zone.minScale, zone.maxScale, seeded01(seed, attempt, 19)), 0)
-        const height = roundNumber(lerpNumber(zone.minHeight, zone.maxHeight, seeded01(seed, attempt, 23)), 1)
-        const yaw = roundNumber(-180 + seeded01(seed, attempt, 31) * 360, 0)
-        const opacity = clampNumber(roundNumber(zone.opacity * (0.86 + seeded01(seed, attempt, 37) * 0.2), 2), 0.2, 1)
-
-        assets.push({
-          id: `editor-${zone.id}-${created + 1}`,
-          zoneId: zone.id,
-          kind,
-          name: `${zone.name} ${created + 1}`,
-          assetUrl: getMap3DGardenAssetUrl(kind),
-          location: candidate,
-          scale,
-          height,
-          yaw,
-          opacity,
-          visible: true,
-          priority: zone.priority,
-          routeFraction: roundNumber(routeProgress, 3),
-          licenseId: getMap3DGardenLicenseId(),
-          note: `由 debugGarden 图形化编辑器基于 ${zone.name} 生成。`
-        })
-        created += 1
-      }
-    })
-
-  return assets
-}
-
-function chooseEditorAssetKind(zone: GardenEditorVegetationZone, seed: number, attempt: number) {
-  const pool = zone.assetPool.length ? zone.assetPool : defaultEditorAssetPool
-  const weightedPool = pool.map((kind) => ({
-    kind,
-    weight: Math.max(1, Number(zone.assetRatios[kind] ?? 1))
-  }))
-  const total = weightedPool.reduce((sum, item) => sum + item.weight, 0)
-  const pick = seeded01(seed, attempt, 41) * total
-  let cursor = 0
-
-  for (const item of weightedPool) {
-    cursor += item.weight
-    if (pick <= cursor) {
-      return item.kind
-    }
-  }
-
-  return weightedPool[0]?.kind ?? 'mixed_grove'
-}
-
-function buildGardenEditorPolygonItems(
-  state: GardenEditorState,
-  draft: GardenDraftPolygon,
-  selectedZoneId: string,
-  selectedKeepoutZoneId: string
-) {
-  const items = [
-    ...state.zones
-      .filter((zone) => zone.id === selectedZoneId && zone.vertices.length >= 3)
-      .map((zone) => ({
-        id: `zone-${zone.id}`,
-        type: 'vegetation' as const,
-        name: zone.name,
-        vertices: zone.vertices,
-        fill: 'rgba(38, 92, 63, 0)',
-        border: zone.kind === 'forest' ? 'rgba(31, 106, 72, 0.92)' : zone.kind === 'axis_grove' ? 'rgba(75, 111, 61, 0.90)' : 'rgba(48, 122, 99, 0.88)',
-        dashed: false
-      })),
-    ...state.keepouts
-      .filter((zone) => zone.id === selectedKeepoutZoneId && zone.vertices.length >= 3)
-      .map((zone) => ({
-        id: `keepout-${zone.id}`,
-        type: 'keepout' as const,
-        name: zone.name,
-        vertices: zone.vertices,
-        fill: 'rgba(180, 83, 9, 0)',
-        border: 'rgba(158, 67, 32, 0.94)',
-        dashed: true
-      }))
-  ]
-
-  if (draft && draft.vertices.length >= 3) {
-    items.push({
-      id: `draft-${draft.mode}`,
-      type: draft.mode === 'vegetation' ? 'vegetation' : 'keepout',
-      name: draft.mode === 'vegetation' ? '绘制中的 vegetation zone' : '绘制中的 keepout zone',
-      vertices: draft.vertices,
-      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0)' : 'rgba(217, 119, 6, 0)',
-      border: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.90)' : 'rgba(217, 119, 6, 0.90)',
-      dashed: draft.mode === 'keepout'
-    })
-  }
-
-  return items
-}
-
-function buildGardenEditorVertexItems(
-  state: GardenEditorState,
-  draft: GardenDraftPolygon,
-  selectedZoneId: string,
-  selectedKeepoutZoneId: string
-) {
-  const vertices: Array<{ id: string; styleId: 'vegetationVertex' | 'keepoutVertex' | 'draftVertex'; position: LatLngPoint }> = []
-
-  state.zones.filter((zone) => zone.id === selectedZoneId).forEach((zone) => {
-    zone.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `zone:${zone.id}:${index}`,
-        styleId: 'vegetationVertex',
-        position
-      })
-    })
-  })
-
-  state.keepouts.filter((zone) => zone.id === selectedKeepoutZoneId).forEach((zone) => {
-    zone.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `keepout:${zone.id}:${index}`,
-        styleId: 'keepoutVertex',
-        position
-      })
-    })
-  })
-
-  if (draft) {
-    draft.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `draft:${draft.mode}:${index}`,
-        styleId: 'draftVertex',
-        position
-      })
-    })
-  }
-
-  return vertices
 }
 
 function extractMapEventLatLng(event: any): LatLngPoint | null {
@@ -13355,104 +10369,6 @@ function editorVertexSvg(fill: string, stroke: string) {
     <circle cx="12" cy="12" r="7" fill="${fill}" stroke="${stroke}" stroke-width="3"/>
     <circle cx="12" cy="12" r="2.6" fill="${stroke}" opacity=".9"/>
   </svg>`
-}
-
-function gardenPreviewPointSvg(kind: Map3DGardenAssetKind) {
-  const isStone = kind === 'rock_cluster' || kind === 'stone_mass'
-  const isCandidateTree =
-    kind === 'fluffy_bodhi_grove' ||
-    kind === 'fluffy_round_tree' ||
-    kind === 'bushy_canopy_tree' ||
-    kind === 'dense_shrub_cluster' ||
-    kind === 'soft_forest_clump' ||
-    kind === 'fluffy_tree_mix'
-  const fill = isStone ? '#7b8174' : kind === 'shrub_mass' ? '#527e5d' : isCandidateTree ? '#6f8e73' : '#2f6f54'
-  const stroke = isStone ? '#ede7d3' : '#f8efd1'
-  const shape = isStone
-    ? '<path d="M6 15.5 9 7.5l6-2 4 6.5-3.5 5.5H9z"/>'
-    : '<path d="M12 3c3.6 1.8 6 4.6 6 7.5 0 3.6-2.6 6.5-6 6.5s-6-2.9-6-6.5C6 7.6 8.4 4.8 12 3Z"/><path d="M12 10v9"/>'
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
-    <g fill="${fill}" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
-      ${shape}
-    </g>
-  </svg>`
-}
-
-function getGardenAssetZoneId(asset: LingshanMap3DGardenAsset) {
-  if (asset.zoneId) {
-    return asset.zoneId
-  }
-
-  const match = asset.id.match(/^c-zone-(.*)-\d+$/)
-  return match?.[1] ?? 'manual'
-}
-
-function matchesGardenFilters(asset: LingshanMap3DGardenAsset, filters: GardenAssetFilterState) {
-  if (filters.zoneId !== 'all' && getGardenAssetZoneId(asset) !== filters.zoneId) {
-    return false
-  }
-
-  if (filters.kind !== 'all' && asset.kind !== filters.kind) {
-    return false
-  }
-
-  if (filters.priority !== 'all' && asset.priority !== filters.priority) {
-    return false
-  }
-
-  if (filters.visible !== 'all' && String(asset.visible) !== filters.visible) {
-    return false
-  }
-
-  return true
-}
-
-function getGardenLodState({
-  currentZoom,
-  debugGarden,
-  isInteracting
-}: {
-  currentZoom: number
-  debugGarden: boolean
-  isInteracting: boolean
-}): GardenLodState {
-  const zoom = Number.isFinite(currentZoom) ? currentZoom : SCENIC_CAMERA_BOUNDS.defaultZoom
-  const lod = SCENIC_CAMERA_BOUNDS.lod
-
-  if (zoom <= lod.farZoom) {
-    return {
-      opacity: debugGarden ? lod.farDebugGardenOpacity : lod.farOpacity,
-      visibleTier: 'none',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  if (isInteracting) {
-    return {
-      opacity: debugGarden ? lod.interactionDebugGardenOpacity : lod.interactionOpacity,
-      visibleTier: 'reduced',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  if (zoom <= lod.reducedZoom) {
-    return {
-      opacity: debugGarden ? lod.reducedDebugGardenOpacity : lod.reducedOpacity,
-      visibleTier: 'reduced',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  return {
-    opacity: lod.normalOpacity,
-    visibleTier: 'full',
-    isInteracting,
-    currentZoom: roundNumber(zoom, 2)
-  }
 }
 
 function clampScenicCenter(center: LatLngPoint) {
@@ -13775,42 +10691,6 @@ function materializeDecorSpec(spec: DecorSpec): InkDecorOverlay {
   }
 }
 
-function buildForestPatchPath(patch: LingshanMap3DForestPatch) {
-  const steps = 28
-  const rotation = (patch.rotation * Math.PI) / 180
-  const points: any[] = []
-
-  for (let index = 0; index < steps; index += 1) {
-    const angle = (index / steps) * Math.PI * 2
-    const x = Math.cos(angle) * patch.radiusX
-    const y = Math.sin(angle) * patch.radiusY
-    const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation)
-    const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation)
-    const point = offsetLatLngMeters(patch.center, rotatedX, rotatedY)
-    points.push(toTMapLatLng(point))
-  }
-
-  return points
-}
-
-function getForestPatchOpacity(
-  patch: LingshanMap3DForestPatch,
-  options: {
-    debugGarden: boolean
-    routeProgressRatio: number
-    rerouteActive: boolean
-  }
-) {
-  if (options.debugGarden) {
-    return Math.min(0.42, Math.max(patch.opacity, 0.22))
-  }
-
-  const distanceFromProgress = patch.routeFraction - Math.max(0, Math.min(1, options.routeProgressRatio))
-  const currentBoost = Math.abs(distanceFromProgress) <= 0.14 ? 1.18 : distanceFromProgress < -0.14 ? 1.04 : 0.9
-  const rerouteDimming = options.rerouteActive && patch.priority !== 'high' ? 0.82 : 1
-  return Number(Math.max(0.08, Math.min(0.38, patch.opacity * currentBoost * rerouteDimming)).toFixed(3))
-}
-
 function offsetLatLngMeters(origin: LatLngPoint, eastMeters: number, northMeters: number): LatLngPoint {
   const metersPerDegreeLat = 111_320
   const metersPerDegreeLng = 111_320 * Math.cos(origin.lat * (Math.PI / 180))
@@ -13836,31 +10716,6 @@ function colorWithOpacity(color: string, opacity: number) {
   const green = parseInt(normalized.slice(2, 4), 16)
   const blue = parseInt(normalized.slice(4, 6), 16)
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`
-}
-
-function forestPatchSvg(options: {
-  color: string
-  opacity: number
-  rotation: number
-  width: number
-  height: number
-}) {
-  const width = Math.max(80, options.width)
-  const height = Math.max(50, options.height)
-  const cx = width / 2
-  const cy = height / 2
-  const rx = width * 0.44
-  const ry = height * 0.38
-  const wash = colorWithOpacity(options.color, options.opacity)
-  const inner = colorWithOpacity(options.color, Math.min(0.42, options.opacity * 1.2))
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <g transform="rotate(${options.rotation} ${cx} ${cy})">
-      <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${wash}"/>
-      <ellipse cx="${cx - width * 0.08}" cy="${cy - height * 0.06}" rx="${rx * 0.54}" ry="${ry * 0.48}" fill="${inner}" opacity=".42"/>
-      <ellipse cx="${cx + width * 0.14}" cy="${cy + height * 0.05}" rx="${rx * 0.42}" ry="${ry * 0.38}" fill="${inner}" opacity=".30"/>
-    </g>
-  </svg>`
 }
 
 function buildVisibleDecorGeometries(
@@ -15373,8 +12228,7 @@ const map3DGuideCss = `
   border-right: 5px solid rgba(33, 91, 75, .58);
 }
 
-.map-3d-guide-decor-debug,
-.map-3d-guide-garden-debug {
+.map-3d-guide-decor-debug {
   position: absolute;
   z-index: 6;
   top: 320px;
@@ -15392,237 +12246,9 @@ const map3DGuideCss = `
   backdrop-filter: blur(18px);
 }
 
-.map-3d-guide-garden-debug {
-  border-color: rgba(83, 89, 67, .24);
-  background:
-    linear-gradient(135deg, rgba(250, 247, 232, .96), rgba(229, 238, 224, .92));
-}
-
-.map-3d-guide-garden-debug--editor {
-  position: absolute;
-  z-index: 18;
-  top: auto;
-  left: auto;
-  width: 390px;
-  max-height: calc(100vh - 96px);
-  resize: both;
-}
-
-.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-garden-debug--editor {
-  max-height: min(calc(100vh - 356px), 404px);
-}
-
-.map-3d-guide-garden-debug__drag-handle {
-  cursor: move;
-  user-select: none;
-}
-
-.map-3d-guide-shell--debug-garden .map-3d-guide-camera {
-  top: 18px;
-}
-
-.map-3d-guide-shell--debug-garden .map-3d-guide-status {
-  top: 118px;
-}
-
 .map-3d-guide-debug-exit {
   width: 100%;
   margin: 0 0 10px;
-}
-
-.map-3d-guide-garden-debug__steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 5px;
-  margin: 10px 0;
-}
-
-.map-3d-guide-garden-debug__steps button {
-  min-height: 34px;
-  padding: 0 5px;
-  font-size: 11px;
-}
-
-.map-3d-guide-garden-debug__object-lists {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.map-3d-guide-garden-debug__list-group {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .32);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.54);
-}
-
-.map-3d-guide-garden-debug__list-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.map-3d-guide-garden-debug__list-heading strong {
-  font-size: 13px;
-}
-
-.map-3d-guide-garden-debug__list-heading span {
-  display: inline-grid;
-  place-items: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: rgba(36, 72, 60, .10);
-  color: #24483c;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-debug__list-scroll {
-  display: grid;
-  gap: 5px;
-  max-height: 86px;
-  overflow: auto;
-}
-
-.map-3d-guide-garden-debug__list-scroll--assets {
-  max-height: 118px;
-}
-
-.map-3d-guide-garden-debug__list-scroll button {
-  display: grid;
-  justify-items: start;
-  gap: 2px;
-  min-height: 38px;
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.map-3d-guide-garden-debug__list-scroll button span {
-  width: 100%;
-  overflow: hidden;
-  color: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-guide-garden-debug__list-scroll button small {
-  width: 100%;
-  overflow: hidden;
-  color: #7b8176;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-guide-garden-debug__section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.map-3d-guide-garden-debug__primary {
-  border-color: rgba(32, 96, 72, .40) !important;
-  background: rgba(220, 241, 226, .96) !important;
-  color: #245640 !important;
-}
-
-.map-3d-guide-garden-debug__danger {
-  border-color: rgba(185, 74, 40, .34) !important;
-  background: rgba(255, 239, 229, .96) !important;
-  color: #9a3412 !important;
-}
-
-.map-3d-guide-garden-debug__draft-state,
-.map-3d-guide-garden-debug__stat-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 10px;
-}
-
-.map-3d-guide-garden-debug__draft-state span,
-.map-3d-guide-garden-debug__stat-row span {
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: rgba(255, 249, 229, .78);
-  color: #6f4a12;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-debug__advanced {
-  margin-top: 10px;
-  border-top: 1px solid rgba(94, 112, 102, .12);
-}
-
-.map-3d-guide-garden-debug__advanced summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  color: #6d756e;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-  list-style: none;
-}
-
-.map-3d-guide-garden-debug__advanced summary::-webkit-details-marker {
-  display: none;
-}
-
-.map-3d-guide-garden-debug__advanced summary::after {
-  content: "展开";
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255, 249, 229, .72);
-  color: #8a6a28;
-  font-size: 11px;
-}
-
-.map-3d-guide-garden-debug__advanced[open] summary::after {
-  content: "收起";
-}
-
-.map-3d-guide-garden-debug__status {
-  display: block;
-  margin-top: 10px;
-  padding: 8px 9px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .42);
-  color: #24483c;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-load {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  z-index: 9;
-  padding: 8px 11px;
-  border-radius: 10px;
-  border: 1px solid rgba(50, 88, 75, .16);
-  background: rgba(250, 252, 238, .88);
-  color: #24483c;
-  font-size: 12px;
-  font-weight: 900;
-  box-shadow: 0 10px 28px rgba(20, 45, 36, .14), inset 0 0 0 1px rgba(255,255,255,.52);
-  backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-
-.map-3d-guide-garden-load.is-warning {
-  color: #8a3512;
-  border-color: rgba(182, 83, 24, .26);
-  background: rgba(255, 244, 228, .90);
 }
 
 .map-3d-guide-perf-panel {
@@ -15640,11 +12266,6 @@ const map3DGuideCss = `
   color: #24483c;
   box-shadow: 0 18px 48px rgba(20, 45, 36, .18), inset 0 0 0 1px rgba(255,255,255,.58);
   backdrop-filter: blur(16px);
-}
-
-.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-perf-panel {
-  bottom: 18px;
-  max-height: min(46vh, 420px);
 }
 
 .map-3d-guide-perf-panel__header {
@@ -15973,14 +12594,6 @@ const map3DGuideCss = `
   font-size: 11px;
 }
 
-.map-3d-guide-garden-debug__subsection {
-  margin: 12px 0;
-  padding: 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .34);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
-}
-
 .map-3d-guide-decor-debug__header {
   display: flex;
   align-items: flex-start;
@@ -15990,14 +12603,12 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-decor-debug__header div,
-.map-3d-guide-decor-debug label,
-.map-3d-guide-garden-debug label {
+.map-3d-guide-decor-debug label {
   display: grid;
   gap: 5px;
 }
 
-.map-3d-guide-decor-debug strong,
-.map-3d-guide-garden-debug strong {
+.map-3d-guide-decor-debug strong {
   color: #24483c;
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
   font-size: 15px;
@@ -16006,20 +12617,14 @@ const map3DGuideCss = `
 .map-3d-guide-decor-debug span,
 .map-3d-guide-decor-debug label,
 .map-3d-guide-decor-debug p,
-.map-3d-guide-decor-debug small,
-.map-3d-guide-garden-debug span,
-.map-3d-guide-garden-debug label,
-.map-3d-guide-garden-debug p,
-.map-3d-guide-garden-debug small {
+.map-3d-guide-decor-debug small {
   color: #68746c;
   font-size: 12px;
   line-height: 1.45;
 }
 
 .map-3d-guide-decor-debug select,
-.map-3d-guide-decor-debug input,
-.map-3d-guide-garden-debug select,
-.map-3d-guide-garden-debug input {
+.map-3d-guide-decor-debug input {
   width: 100%;
   min-height: 30px;
   border: 1px solid rgba(50, 88, 75, .18);
@@ -16036,8 +12641,7 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug button,
-.map-3d-guide-garden-debug button {
+.map-3d-guide-decor-debug button {
   border: 1px solid rgba(143, 101, 28, .24);
   border-radius: 9px;
   background: rgba(255, 249, 229, .90);
@@ -16049,8 +12653,7 @@ const map3DGuideCss = `
   cursor: pointer;
 }
 
-.map-3d-guide-decor-debug button.is-active,
-.map-3d-guide-garden-debug button.is-active {
+.map-3d-guide-decor-debug button.is-active {
   border-color: rgba(42, 96, 72, .50);
   background: rgba(218, 238, 220, .94);
   color: #245640;
@@ -16064,8 +12667,7 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug p,
-.map-3d-guide-garden-debug p {
+.map-3d-guide-decor-debug p {
   margin: 10px 0 4px;
 }
 

@@ -142,7 +142,7 @@ function NavigationProgressBody({
   return (
     <>
       <NavigationCardHeader
-        eyebrow={viewModel.target?.mode === 'local-test' ? '本地测试' : '正在前往'}
+        eyebrow={viewModel.target?.mode === 'local-test' ? '本地测试' : viewModel.location.isReplay ? '虚拟定位演示 · 正在前往' : '正在前往'}
         targetName={targetName}
         stepText={progress?.stepText}
         companion
@@ -175,6 +175,7 @@ function NavigationProgressBody({
       {showLocationStatus ? (
         <p className={`navigation-beta-card__quality${viewModel.location.isReplay ? ' is-replay' : ' is-warning'}`}>
           {viewModel.location.statusText}
+          {viewModel.location.isReplay && viewModel.location.originLabel ? ` · 起点：${viewModel.location.originLabel}` : ''}
         </p>
       ) : null}
 
@@ -348,24 +349,35 @@ export function NavigationPrototypeCard({ viewModel }: NavigationPrototypeCardPr
       )
       break
     case 'arrival-confirm':
-      content = (
-        <>
-          <NavigationCardHeader
-            eyebrow={viewModel.arrival?.kind === 'joining-arrival' ? '已抵达路线加入点' : '已抵达目标附近'}
-            targetName={viewModel.arrival?.targetName ?? targetName}
-          />
-          <p className="navigation-beta-card__copy">
-            {viewModel.arrival?.kind === 'joining-arrival' ? '请确认你已经到达加入位置。' : '请确认你已经到达景点。'}
-          </p>
-          <NavigationActionPair
-            primaryLabel={viewModel.arrival?.kind === 'joining-arrival' ? '确认加入路线' : '确认到达'}
-            onPrimary={viewModel.actions.confirmArrival}
-            secondaryLabel="继续导航"
-            onSecondary={viewModel.actions.continueAfterArrivalDetection}
-          />
-        </>
-      )
-      break
+      {
+        const isJoiningArrival = viewModel.arrival?.kind === 'joining-arrival'
+        const isPoiArrival = viewModel.arrival?.kind === 'poi-arrival'
+        const isLocalTestArrival = viewModel.target?.mode === 'local-test'
+        content = (
+          <>
+            <NavigationCardHeader
+              eyebrow={isJoiningArrival ? '已抵达路线加入点' : '已抵达目标附近'}
+              targetName={viewModel.arrival?.targetName ?? targetName}
+            />
+            <p className="navigation-beta-card__copy">
+              {isJoiningArrival
+                ? '请确认你已经到达加入位置。'
+                : isPoiArrival
+                  ? '虚拟定位已进入景点附近，请确认本次演示结果。'
+                : isLocalTestArrival
+                  ? '请确认你已经到达目的地。'
+                  : '请确认你已经到达景点。'}
+            </p>
+            <NavigationActionPair
+              primaryLabel={isJoiningArrival ? '确认加入路线' : isPoiArrival ? '确认到达并查看详情' : '确认到达'}
+              onPrimary={viewModel.actions.confirmArrival}
+              secondaryLabel="继续导航"
+              onSecondary={viewModel.actions.continueAfterArrivalDetection}
+            />
+          </>
+        )
+        break
+      }
     case 'recoverable-error':
       content = <NavigationErrorCard viewModel={viewModel} />
       break

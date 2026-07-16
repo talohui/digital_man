@@ -4,8 +4,6 @@
 
 本文记录最近几轮 `/map-3d-guide-c` 的工程优化和调试能力整理，重点覆盖：
 
-- `debugGarden` 5 步园林配置工作台。
-- 第一阶段加载优化：`debugGarden` 拆分与 GLB 分批创建。
 - 第二阶段加载优化：路由级拆包与重资源隔离。
 - 第三阶段准备：`debugPerf=1` 运行时加载诊断。
 
@@ -19,114 +17,10 @@
 
 ## 2. 当前背景
 
-`/map-3d-guide-c` 是 3D 园林资产版真实地图导览原型。它以腾讯地图 Web JS API GL 为坐标底座，通过地图锚定的路线、POI、模拟定位、重规划线、GLB 模型和园林资产形成导览表达。
 
-C 版已经从早期“工程调试面板 + 树群撒点”推进到：
-
-- Kenney Nature Kit 青绿材质树群资产。
 - 航拍参考的中轴林带和大佛背后山林布局。
-- debugGarden 图形化园林编辑器。
 - 普通页与调试页分离。
 - 路由级拆包和运行时诊断准备。
-
-## 3. debugGarden 配置工作台优化
-
-### 背景问题
-
-早期 `debugGarden` 偏工程调试面板，字段多、入口散，容易遮挡地图和导览信息。用户需要的是可以按流程完成园林校准的工具，而不是长期暴露的游客 UI。
-
-### 改动摘要
-
-当前 `/map-3d-guide-c?debugGarden=1` 已改为 5 步向导式园林配置工作台：
-
-1. 禁放区。
-2. 放树区。
-3. 生成预览。
-4. 应用 GLB。
-5. 导出配置。
-
-编辑页会隐藏普通导览 UI，只保留：
-
-- 3D 园林导览牌。
-- 3D 视角切换卡片。
-- `debugGarden` 面板。
-- 返回普通页按钮。
-
-地图编辑显示逻辑已收敛：
-
-- zone / keepout 默认在地图上不显示边界和底色。
-- 点击某个 zone / keepout 后才显示边框和可拖拽顶点。
-- 选中区域仍不显示大面积底色。
-- 支持双击地图完成绘制。
-- 资产点默认显示 GLB 模型，但不显示编辑点。
-- 选中资产点后才显示编辑标记。
-- 资产点位置通过地图拖动修改。
-- `scale`、`height`、`rotation` / `yaw` 在面板中修改。
-- 资产修改必须点击“保存当前资产修改”才写入本地草稿。
-- zone / keepout / asset 删除均有二次确认。
-- 导出支持“复制完整配置”和“仅复制 assets”。
-
-### 涉及文件
-
-- `src/pages/Map3DGuidePage.tsx`
-- `src/components/map3d/GardenDebugWizard.tsx`
-- `docs/map-3d-guide-garden-editor-usage.md`
-
-### 验收结果
-
-- `/map-3d-guide-c` 普通页不显示编辑器。
-- `/map-3d-guide-c?debugGarden=1` 显示 5 步工作台。
-- 编辑模式下 zone / keepout 不再用大面积色块覆盖地图。
-- 单个资产拖拽后需保存才写入草稿。
-- 可以复制完整 TS 配置或只复制 assets。
-
-### 后续注意事项
-
-`debugGarden` 结果应最终固化到源码配置，不应依赖浏览器 `localStorage` 作为正式数据来源。
-
-## 4. 第一阶段加载优化：debugGarden 拆分与 GLB 分批加载
-
-### 背景问题
-
-普通 `/map-3d-guide-c` 不需要加载完整园林编辑器。GLB 树群一次性创建过多也会影响首屏响应和地图、路线、POI 的可见时机。
-
-### 改动摘要
-
-当前代码已将 `debugGarden` 主体拆成独立 chunk：
-
-- `Map3DGuidePage.tsx` 使用 `React.lazy` + `Suspense` 条件加载 `GardenDebugWizard`。
-- 普通 `/map-3d-guide-c` 不直接加载 `GardenDebugWizard` 编辑器主体代码。
-- 只有 `/map-3d-guide-c?debugGarden=1` 才加载工作台。
-
-GLB 园林资产 overlay 生命周期已拆到：
-
-- `src/hooks/useGardenAssetOverlays.ts`
-
-该 hook 负责：
-
-- 筛选当前可见 GLB 园林资产。
-- 按 `priority` 和原始顺序排序。
-- 分批创建 `TMap.model.GLTFModel`。
-- 当前批大小为 `16`。
-- 批次之间使用 `requestAnimationFrame` 和短延迟，让地图、路线、POI 和控制 UI 先完成绘制。
-- 汇报 `createdCount`、`visibleCount`、`loadedIds`、`errorIds`、`assetUrls` 等轻量状态。
-
-### 涉及文件
-
-- `src/pages/Map3DGuidePage.tsx`
-- `src/components/map3d/GardenDebugWizard.tsx`
-- `src/hooks/useGardenAssetOverlays.ts`
-
-### 验收结果
-
-- 普通页面地图、路线、POI、导览牌、相机卡保持不变。
-- `debugGarden` 页功能保持不变。
-- 普通页出现轻量园林资产加载进度提示，但不显示编辑器。
-- 单个 GLB 创建失败不会阻断其它资产。
-
-### 后续注意事项
-
-当前统计和进度偏向 overlay 创建过程。腾讯 `GLTFModel` 网络下载和 GPU 完整可见时机如果需要更精细判断，需要后续结合浏览器资源时序或腾讯事件能力再做专项分析。
 
 ## 5. 第二阶段加载优化：路由级拆包与重资源隔离
 
@@ -154,7 +48,6 @@ GLB 园林资产 overlay 生命周期已拆到：
 - 后台 chunk。
 - Cubism Core / Cubism chunk。
 
-`/map-3d-guide-c?debugGarden=1` 会加载 `GardenDebugWizard`，但仍不加载 `ScenicModel`。
 
 ### 涉及文件
 
@@ -196,7 +89,6 @@ GLB 园林资产 overlay 生命周期已拆到：
 
 ```text
 /map-3d-guide-c?debugPerf=1
-/map-3d-guide-c?debugGarden=1&debugPerf=1
 ```
 
 诊断信息包括：
@@ -224,19 +116,16 @@ GLB 园林资产 overlay 生命周期已拆到：
 
 - `src/lib/map3dPerf.ts`
 - `src/components/map3d/Map3DPerfPanel.tsx`
-- `src/hooks/useGardenAssetOverlays.ts`
 - `src/pages/Map3DGuidePage.tsx`
 
 ### 验收结果
 
 - 普通 `/map-3d-guide-c` 默认不显示诊断面板。
 - `/map-3d-guide-c?debugPerf=1` 显示性能诊断面板。
-- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 可同时显示工作台和诊断面板。
 - 诊断记录当前统计 `TMap.model.GLTFModel` overlay 创建耗时，不等同于网络层 GLB 完整下载耗时。
 
 ### 后续注意事项
 
-下一步上传核心景点 GLB 前，应先用 `debugPerf=1` 记录现有树群加载基线。接入每个新模型后，再比较 map 初始化、路线/POI 绘制、GLB 批次和失败列表，避免只凭肉眼判断性能。
 
 ## 7. 核心景点 GLB 正式配置接入
 
@@ -305,7 +194,6 @@ public/models/lingshan/landmarks/
 
 ```text
 /map-3d-guide-c?debugPerf=1
-/map-3d-guide-c?debugGarden=1&debugPerf=1
 ```
 
 Inspector 复用 `src/data/lingshanMapModelOverlays.ts` 的配置，不维护第二份地标清单。每个地标支持：
@@ -418,7 +306,6 @@ lingshan_landmark_calibration_draft_v1
 - `setRotation`
 - `setPosition`
 
-如果当前覆盖物缺少这些方法或调用失败，则只重建当前地标模型 overlay，不重载全部地标，也不影响树群、路线或 POI。实时预览做了短延迟处理，避免输入框连续输入时频繁重建。
 
 ### 导出能力
 
@@ -531,7 +418,6 @@ lingshan_landmark_calibration_draft_v1
 
 ### 注意事项
 
-本轮只固化已确认参数，不做模型压缩、不替换 GLB、不修改 POI 坐标、不改变路线或树群生成逻辑。`debugPerf` 本地校准草稿仍可继续覆盖这些默认值，方便后续微调。
 
 ## 11. 第二批核心地标校准 patch 固化与祥符禅寺白模冲突记录
 
@@ -575,7 +461,6 @@ lingshan_landmark_calibration_draft_v1
 
 ### 注意事项
 
-本轮不修改 GLB 文件、不压缩模型、不修改路线、POI 数据语义、树群生成算法或 debugGarden 5 步工作台。旧灵山大佛模型仍保留，已固化的灵山大佛、五印坛城、梵宫参数不受影响。
 
 ### npm run build 结果
 
@@ -717,7 +602,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 背景问题
 
-`/map-3d-guide-c` 已具备腾讯真实底图、路线、POI、树群和核心地标 GLB，但默认视角和地标聚焦仍偏普通地图操作感。为了让 C 版更像“酒庄航拍 / 水墨杭州式”的沉浸导览，需要将镜头从普通平面导航视角收敛为斜俯、慢推、主轴线和地标停顿的 3D 沙盘镜头。
 
 ### 改动摘要
 
@@ -741,11 +625,9 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - `npm run build` 通过。
 - 普通游客页不显示 debugPerf 面板。
 - debugPerf JSON 和面板可查看最近相机事件。
-- 本阶段未修改 GLB、树群算法、路线逻辑、POI 语义、Tencent key 或 `mapStyleId: 'style1'`。
 
 ### 后续注意事项
 
-后续视觉优化仍应继续围绕腾讯底图配色、白模弱化、树群资产筛选、建筑底座和游客端加载节奏推进。本阶段只处理镜头体验，不改变资产和底图策略。
 
 ## 阶段：佛境沙盘导览第一轮特色交互
 
@@ -762,7 +644,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 新增 active landmark highlight：用 TMap marker 绘制克制的淡金呼吸环，巡游和路线预演经过地标时显示，停止后清除。
 - 新增 `tourMode`、`activeTourStepId`、`activeLandmarkId` 和 `routePreviewProgressIndex` 等轻量状态，避免巡游、预演和手动相机打架。
 - 用户点击地图、切换相机预设、切站点、模拟前进、模拟偏航、回到路线或再次点击播放按钮时，会中止当前巡游 / 预演。
-- `debugGarden` 下不自动播放巡游，保留按钮但不影响绘制入口。
 - `debugPerf` 记录 tour / route preview 事件，并在诊断面板展示最近事件。
 
 ### 设计目标
@@ -781,11 +662,9 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮未修改 Tencent key，未修改 `mapStyleId: 'style1'`，未修改底图配色，未修改 GLB 文件，未压缩模型，未处理菩提大道，未修改树群生成算法，未修改 POI 数据语义，未改地标 scale / height / rotationY / offset，未重新启用 `fan_gong.footprintMask`，未让游客页默认加载 raw GLB。
 
 ### 验收结果
 
-`npm run build` 通过。由于 in-app Browser 安全策略拒绝访问 `http://127.0.0.1:5173`，本轮浏览器交互验收未能在当前工具中完成，需要人工打开 `/map-3d-guide-c`、`/map-3d-guide-c?debugPerf=1` 和 `/map-3d-guide-c?debugGarden=1&debugPerf=1` 继续确认按钮、播放、停止、呼吸光和诊断事件。
 
 ## 阶段：佛境巡游 route-following 体验修正
 
@@ -816,7 +695,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只改佛境巡游镜头逻辑和诊断文档。未修改底图配色，未修改 `mapStyleId: 'style1'`，未修改 GLB 文件，未压缩模型，未处理菩提大道，未修改树群生成算法，未修改 POI 数据语义，未改地标 scale / height / rotationY / offset，未重新启用 `fan_gong.footprintMask`，未让游客页默认加载 raw GLB。
 
 ### 路线预演关系
 
@@ -848,7 +726,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只修佛境巡游运动连续性。路线预演保持现有 waypoint 预演实现；底图、`style1`、Tencent key、GLB、树群、POI 语义、地标 transform 和游客端 raw GLB 加载策略均未修改。
 
 ### 验收结果
 
@@ -876,7 +753,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只优化佛境巡游的平稳性和遨游感。路线预演保持现有逻辑；底图配色、`style1`、Tencent key、GLB、模型压缩、菩提大道、树群算法、POI 语义、地标 transform、梵宫 footprint mask 和游客端 raw GLB 加载策略均未修改。
 
 ## 阶段：佛境巡游路线进度连续化
 
@@ -907,13 +783,11 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只修佛境巡游路线进度渲染和重叠路线显示稳定性。未改相机手感主逻辑，未改底图、模型、树群、POI 语义、地标 transform 或 GLB 加载策略。
 
 ## 阶段：首屏地图黑底 ready gating
 
 ### 背景问题
 
-进入 `/map-3d-guide-c` 时，`new TMap.Map(...)` 完成后页面会立即把 `mapStatus` 置为 ready，路线、POI、树群和 UI 也会开始显示。但腾讯底图瓦片 / 3D 底图可能还没有完成首帧稳定渲染，用户会短暂看到黑色地图 canvas，视觉上像黑色沙盘。
 
 ### 改动摘要
 
@@ -923,7 +797,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 新增浅色佛境 loading curtain，使用米白 / 浅青绿 / 雾感样式，覆盖地图主体但不遮挡主要 UI 面板。
 - 地图容器本身增加浅米绿背景，腾讯 canvas 未绘制或透明时不再露出黑色。
 - visual loading 期间降低 skin / paperedge 的压暗效果，避免首屏被视觉 overlay 压黑。
-- 不等待全部 GLB 树群加载，树群仍可后台分批创建；curtain 只防止底图首帧黑底暴露。
 
 ### debugPerf
 
@@ -940,21 +813,17 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮未修改 Tencent key、`mapStyleId: 'style1'`、底图 style、模型、树群算法、路线数据、POI 语义或地标 transform。佛境巡游、路线预演、地标呼吸光和树群 overlay 去重逻辑保持兼容。
 
 ## 阶段：首屏启动阶段分层 gating
 
 ### 背景问题
 
-上一轮已经加入浅色 loading curtain，但 `mapStatus=ready` 后路线、POI 和树群仍可能开始创建；如果腾讯底图瓦片 / 3D 底图视觉 ready 晚于这些 overlay，用户仍可能看到路线或树群先出现在黑底 canvas 上。
 
 ### 改动摘要
 
 - 新增 `MapStartupStage`：`loadingSdk`、`creatingMap`、`waitingBaseMap`、`baseMapReady`、`overlaysReady`、`gardenLoading`、`ready`、`slow`、`failed`。
 - `mapVisualReady` 判断改为更保守：地图实例创建 + 初始 camera 参数已应用 + 收到 `idle` / `tilesloaded` / `rendercomplete` 之一 + 最小可视延迟 + 2 帧 `requestAnimationFrame`。
 - 移除 900ms 直接 ready fallback；4.8s 未 ready 时进入 `slow`，继续保持浅米绿 / 雾感 curtain，不暴露黑底。
-- `mapVisualReadyForOverlays` 成为路线、POI、用户点、重规划线、地标高亮、debugGarden 编辑 overlay 的统一显示开关。
-- `useGardenAssetOverlays` 新增 `shouldLoadGardenAssets`，树群 GLB 只有底图 visual ready 后才开始分批创建；不改变树群生成算法和资产数据。
 - loading curtain 在慢加载 / 失败时提供“继续等待 / 重新加载地图”轻操作，仍保持浅色兜底。
 
 ### debugPerf
@@ -976,38 +845,11 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只重排启动阶段时序和首屏 gating。未修改 Tencent key、`mapStyleId: 'style1'`、底图配色、GLB 文件、模型压缩、树群生成算法、POI 语义、地标 transform、菩提大道、梵宫 footprint mask、佛境巡游相机逻辑或路线预演逻辑。
-
-## 阶段：debugGarden 毛茸茸树木候选池
-
-### 背景问题
-
-当前默认树群仍偏“单棵树撒点”，后续需要测试更圆冠、更蓬松、更像林团的树木资产。但直接替换默认树群风险较高，容易同时影响游客页视觉、树群生成密度和已有编辑数据。
-
-### 改动摘要
-
-- 新增 `public/models/lingshan/tree-candidates/` 候选目录。
-- 从项目已有 Kenney Nature Kit 官方 CC0 源包中抽取 5 个未接入的圆冠 / 灌木候选 GLB。
-- 新增候选类型：`fluffy_round_tree`、`bushy_canopy_tree`、`dense_shrub_cluster`、`soft_forest_clump`、`fluffy_tree_mix`。
-- 候选类型只加入 debugGarden 资产候选池，普通游客页和默认树群布局不自动使用。
-- 单点添加候选树时使用更保守的 scale / height，避免手动测试时尺寸过大。
-- 新增 `docs/lingshan-tree-asset-candidates.md`，记录来源、许可、路径、体积和接入状态。
-
-### 资产与许可
-
-- 已接入候选来自 Kenney Nature Kit，许可为 CC0 1.0 Universal，无需署名。
-- 本轮同时评估 Quaternius Stylized Nature MegaKit；该资源为 CC0，但官方下载走 itch.io 流程，没有稳定直接下载链接，因此本轮未导入。
-- 候选 GLB 未使用 Draco、Meshopt、KTX2、WebP 或 AVIF；仅移除 `KHR_materials_unlit` 扩展标记，最终 `extensionsUsed` 为空。
-
-### 边界
-
-本轮只接入 debugGarden 候选资源。未替换现有 Kenney 树群，未修改默认 199 个树群资产、vegetation zones、keepout zones、树群生成算法、路线逻辑、POI 语义、地标模型配置、腾讯底图或 `style1`。
 
 ## 阶段：沙盘视野边界与交互轻量模式
 
 ### 背景问题
 
-手动缩放 / 拖动时，199 个 GLB 树群和多层 route / POI overlay 同时参与渲染，容易造成缩放手感不够流畅。用户缩得过远时，灵山核心景区会缩到画面角落或变得过小，削弱 3D 沙盘导览感。
 
 ### 改动摘要
 
@@ -1015,8 +857,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 地图初始化增加 `minZoom` / `maxZoom`，并在 `zoomend` / `moveend` / `idle` 后做温和兜底回弹。
 - 新增用户交互轻量模式：wheel / pointer / touch 开始时停止佛境巡游和路线预演，清理临时 progress 与地标高亮。
 - 交互结束后延迟约 460ms 恢复普通视觉层级，避免缩放过程中频繁切换。
-- 新增树群 zoom LOD：远景或交互中只降低现有 GLB overlay opacity，不销毁、不重建。
-- debugGarden 下保留更高可见度，避免编辑时完全看不见树群。
 
 ### debugPerf
 
@@ -1032,39 +872,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只优化手动缩放 / 拖动流畅性、沙盘视野边界和树群显示策略。未修改 Tencent key、`mapStyleId: 'style1'`、底图、路线数据、POI 语义、地标 transform、GLB 文件、模型压缩、树群生成算法或默认资产数据。
-
-## 阶段：debugGarden 空白园林试验场
-
-### 背景问题
-
-默认 199 个树群会遮挡候选树比选，也会让调试者难以判断新的圆冠 / 灌木候选在空白园林中的比例、颜色和林团观感。直接删除或替换默认树群风险较高，因此本轮只在 `debugGarden` 中提供临时空白试验场。
-
-### 改动摘要
-
-- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 默认隐藏默认 199 个树群 overlay，但默认 assets、vegetation zones、keepout zones 和生成算法保持不变。
-- 新增默认树群显示 / 隐藏开关，可随时恢复默认树群作为参照。
-- 地图 visual ready 后自动加载核心地标参照层，使用现有 safe-v2 runtime modelUrl；不加载 raw GLB，不加载菩提大道。
-- 新增 Tree Candidate Lab，支持选择 5 个候选树类型、4 种林团模式和 count / radius / minDistance / scale / height / seed 参数。
-- 支持“点击地图添加”和“一键生成 5 种候选对比”；对比组按路线外横向间距展开，便于人工比较。
-- 测试树使用独立 localStorage 草稿 `lingshan_tree_candidate_lab_draft_v1`，不会写入默认 garden assets 草稿。
-
-### debugPerf
-
-新增或补充字段：
-
-- `treeCandidateLabEnabled`
-- `defaultGardenHidden`
-- `landmarkReferenceLoaded`
-- `testTreeCount`
-- `candidateType`
-- `clusterMode`
-- `liveDefaultGardenOverlayCount`
-- `liveTestTreeOverlayCount`
-
-### 边界
-
-本轮只修改 debugGarden 试验模式和候选树 overlay 输入。普通 `/map-3d-guide-c` 默认视觉不变，未修改 Tencent key、`mapStyleId: 'style1'`、底图、路线数据、POI 语义、地标模型 transform、GLB 文件、模型压缩、树群生成算法、默认 vegetation zones / keepout zones / assets 数据或菩提大道。
 
 ## 阶段：新增三处核心景点 runtime-v1 GLB 接入
 
@@ -1078,7 +885,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 九龙灌浴 `jiulong_guanyu` 从 `missing_model` 切换为 `/models/lingshan/optimized/jiulong-guanyu.runtime-v1.glb`。
 - 灵山大照壁新增 overlay：POI anchor 使用现有 `lingshan_wall`，Inspector id 使用 `lingshan_dazhaobi`，modelUrl 为 `/models/lingshan/optimized/lingshan-dazhaobi.runtime-v1.glb`。
 - 三个模型均加入 Landmark Inspector，可单独加载、卸载、聚焦、进入校准并复制 patch。
-- debugGarden 核心地标参照层增加这三处新 runtime-v1 地标。
 
 ### 后续校准
 
@@ -1086,7 +892,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮未修改 GLB 文件、未压缩模型、未处理旧 464M `bodhi-avenue.glb`、未修改 Tree Candidate Lab、未改树群生成算法或默认树群数据、未改路线逻辑、POI 语义、Tencent key、`mapStyleId: 'style1'`、底图配色或佛境巡游。树候选方向暂时暂停，后续树木可考虑用 Meshy AI 统一生成更明亮、更毛茸茸的树团资产。
 
 ## 阶段：新增三处核心景点人工校准 patch 固化
 
@@ -1095,7 +900,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 灵山大照壁 `lingshan_dazhaobi` 固化人工校准：scale 150、height 6、rotationY 28、lngOffset -0.00005、latOffset 0。
 - 菩提大道 `puti_avenue` runtime-v1 固化人工校准：scale 180、height 11、rotationY 30、lngOffset 0.00009、latOffset 0.00005。
 - 九龙灌浴 `jiulong_guanyu` 固化人工校准：scale 240、height 51、rotationY 0、lngOffset 0.00003、latOffset 0。
-- 三处模型继续使用 runtime-v1 路径，并已进入 Landmark Inspector 与 debugGarden 核心地标参照层。
 
 ### 资产边界
 
@@ -1107,7 +911,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只固化三处新增地标 transform 和对应文档 / runtime-v1 资产。未修改 Tree Candidate Lab、树群算法、默认树群数据、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'`，也未重新启用 `fan_gong.footprintMask`。
 
 ## 阶段：祥符禅寺 3D 底座实验入口
 
@@ -1125,7 +928,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮未生成或修改 GLB 文件，未改游客端默认加载，未修改树群、路线数据、POI 语义、其它地标 transform、Tencent key、`mapStyleId: 'style1'`，也未重新启用 `fan_gong.footprintMask`。后续可由 Meshy / Blender 生成浅米灰石台或院落铺装 GLB 后放入约定路径继续校准。
 
 ## 阶段：祥符禅寺轻量 3D 底座 GLB 生成
 
@@ -1142,7 +944,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-本轮只生成简单底座 GLB 和记录文档，未修改祥符禅寺主模型 transform，未修改树群、路线数据、POI 语义、Tencent key、`mapStyleId: 'style1'`，未重新启用 polygon footprint mask 或 TMap polygon mask。
 
 ## 阶段：祥符禅寺主模型与 3D 底座校准固化
 
@@ -1166,111 +967,29 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 底座是 Three.js 纯几何生成的轻量 GLB，约 35KB，用于增强祥符禅寺落地感、弱化腾讯白模穿插。当前仍不采用 polygon footprint mask 方案，也不启用 TMap polygon mask；`fan_gong.footprintMask` 仍保持默认关闭。
 
-## 阶段：Meshy 毛茸茸菩提树团接入 Tree Candidate Lab
-
-### 改动摘要
-
-- 将 `fluffy-bodhi-grove.runtime-v1.glb` 接入 debugGarden 的 Tree Candidate Lab。
-- 新增候选 id：`fluffy_bodhi_grove`，显示为“毛茸茸菩提树团”。
-- Tree Candidate Lab 候选下拉分为“推荐候选”和“旧候选 / legacy”，新树团作为推荐主树团候选，原 5 个 Kenney 候选保留。
-- 一键候选对比从 5 种扩展为 6 种，包含 `fluffy_bodhi_grove`。
-- 新树团默认参数为 scaleMin 0.75、scaleMax 1.15、heightOffset 0，推荐小树团、中树团、背景林团测试。
-
-### 资产与边界
-
-- raw 输入约 9.87MiB，runtime-v1 约 1.20MiB，压缩率约 87.88%。
-- runtime-v1 `extensionsUsed` 为空，validate 无 error / warning。
-- 本轮只接入 Tree Candidate Lab 候选池，普通 `/map-3d-guide-c` 不默认加载新树团。
-- 默认 199 个树群、vegetation zones、keepout zones、路线、POI、地标配置和底图配置均保持不变。
-
-## 阶段：Tree Candidate Lab 手动摆树流程简化
-
-### 改动摘要
-
-- Tree Candidate Lab 默认改为“选树种 → 选模式 → 点击地图添加”的手动摆树模式。
-- 进入 `debugGarden=1` 后默认保持点击地图添加状态，点击地图会直接生成测试树或测试树团。
-- 添加后自动选中第一棵测试树，并保留继续点击添加的状态。
-- 新增测试树 marker：点击 marker 可选中，选中后可拖动紫色编辑点调整位置。
-- 选中测试树可直接在基础面板调整 scale、height、rotationY。
-- 删除选中树、删除选中树团、清空全部测试树均增加确认。
-
-### 高级功能边界
-
-- count、radiusMeters、minDistanceMeters、scaleMin / scaleMax、randomSeed 和一键候选对比收进“高级：树团参数 / 候选对比”。
-- 原放置区、禁放区、5 步工作台、预览、应用 GLB、导出完整配置保留在“高级：区域生成 / 禁放区 / 5 步工作台”。
-- 默认 199 个树群、默认 vegetation zones / keepout zones / assets 数据不变。
-- 普通 `/map-3d-guide-c` 不显示 Tree Candidate Lab，默认游客页表现不变。
-
-## 阶段：手动 869 树群接入为默认园林
-
-### 改动摘要
-
-- 将用户在 Tree Candidate Lab 手动摆放并导出的 869 个 tree assets 接入为 `/map-3d-guide-c` 新默认树群。
-- 新增 `src/data/lingshanMap3DManualTreeAssets.ts`，保留用户原始经纬度、scale、height、rotationY、modelUrl / assetUrl 和 cluster 信息。
-- 旧 deterministic 199 树群不删除，保留为 `DEFAULT_LINGSHAN_GARDEN_ASSETS_LEGACY` / `lingshanMap3DGardenAssetsLegacy`，debugGarden 高级区可临时切换查看。
-- 普通游客页默认读取新手动树群，不再叠加旧 199 树群。
-
-### 加载与性能
-
-- 869 个手动树群按顺序分层：tier 1/high 200 个、tier 2/medium 300 个、tier 3/low 369 个。
-- `useGardenAssetOverlays` 继续使用 id Map 去重、load generation 和 pending batch cancel，避免重影和旧 batch 残留。
-- GLB overlay 创建批次调整为每批 32 个，每批之间继续通过 requestAnimationFrame + setTimeout 让出主线程。
-- interaction / 远景 LOD 会优先压低 low/tier 3 透明度，idle 后恢复。
-- debugPerf 增加 default asset count、batch index、tier loaded、loaded count 和 live count warning。
-
-### 数据校验
-
-- 输入总数 869。
-- id 唯一：869 / 869，无重复。
-- lng / lat、modelUrl / assetUrl、scale、height、rotationY 均合法。
-- 引用的 6 个树模型路径均存在。
-- 未跳过、未重命名、未删除任何 GLB。
-
-## 阶段：默认手动树群按树种 scale 归一化
-
-### 改动摘要
-
-- 发现 869 手动树群混用了两套模型单位：Kenney legacy 树种 scale 约 78–98，Meshy `fluffy_bodhi_grove` 原始 scale 约 0.75–1.15。
-- `fluffy_bodhi_grove.runtime-v2.glb` 原始包围盒约 1.9m 量级，scale 1 在地图沙盘中容易只看到锚点而看不到树团。
-- 新增按树种的 scale 归一化：仅对 `fluffy_bodhi_grove` 的旧小数 scale 映射到 48–74 的地图显示尺度。
-- 已经是 30+ 的 scale 不会重复放大，避免 localStorage 草稿刷新后叠乘。
-- 不改经纬度点位、yaw、高度、模型文件、路线或 POI。
-
-### 覆盖范围
-
-- 新默认 869 手动树群导出时自动归一化。
-- Tree Candidate Lab 读取旧草稿时自动迁移 `fluffy_bodhi_grove` 测试树 scale。
-- 后续手动新增 `fluffy_bodhi_grove` 默认使用 48–74 scale 区间，并按 scale 自动设置贴地 height。
-
 ## 阶段：毛茸茸树团替换为 Meshy runtime-v2
 
 ### 改动摘要
 
-- 将用户新增的 `Meshy_AI_Create_a_stylized_low_0616093941_texture.glb` 按 safe-compatible 流程优化为 `fluffy-bodhi-grove.runtime-v2.glb`。
 - 原始文件约 11.36MiB，runtime-v2 约 1.35MiB，压缩率约 88.08%。
 - `extensionsUsed` / `extensionsRequired` 均为空，validate 无 error / warning。
 - `fluffy_bodhi_grove` 候选模型路径切换到 runtime-v2。
-- 默认 869 树群中 `fluffy_bodhi_grove` 自动引用 runtime-v2，不改任何经纬度点位。
 
 ### scale / height 调整
 
 - runtime-v2 的原始包围盒仍约 1.9m 量级，但模型原点在树团中部附近。
 - `fluffy_bodhi_grove` 的旧 0.75–1.15 scale 归一化到约 48–74，比上一版放大 1.2 倍。
-- height 从上一版 `scale * 0.54` 继续降为 `scale * 0.04`，默认 869 手动树群中该树种约为 1.9–3.0，参考其它树种的贴地高度，避免毛茸茸树离地。
 - 其它树种 scale / height 保持不变。
 
 ## 阶段：修复本地 127.0.0.1 腾讯底图黑屏
 
 ### 现象
 
-- `/map-3d-guide-c?debugGarden=1&debugPerf=1` 在 `127.0.0.1:5173` 下会出现腾讯 WebGL canvas 黑底。
-- 腾讯水印、指南针、路线、POI、GLB 地标和树群 overlay 均正常，说明 SDK 与 overlay 层已运行，但底图瓦片 / 3D 底图没有出图。
 - 切换到 `localhost:5173` 后底图恢复，判断与本地 Web Key 白名单 / Referer 来源有关。
 
 ### 修复
 
 - 本地检测到 `127.0.0.1` 时自动切换到 `localhost`，保留 query 参数。
-- 切换前用 `window.name` 临时搬运 debugGarden / Tree Candidate Lab 草稿，避免 127 来源下的手动树群草稿丢失。
 - 腾讯 ready 事件未触发时增加本地延迟 fallback，避免底图已显示但页面一直停留在 loading curtain。
 - `loadTMap` 不再在 script `onload` 当下立刻判失败，改为轮询等待 `window.TMap` 最多 10 秒，避免腾讯 GL 脚本异步挂载全局对象时误报加载失败。
 - 关闭实验性的 `renderOptions.enableBloom`，降低腾讯 GL 后处理兼容风险。
@@ -1280,14 +999,11 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 问题
 
-- `/map-3d-guide-c` 普通游客页只显示路线、POI 和树群，核心建筑 GLB 没有默认出现。
 - 根因是地标 GLB 创建路径仍被旧的 “3D 景点模型 Beta” / debugPerf Inspector 入口控制，普通页没有在地图视觉 ready 后启动正式 runtime 地标加载。
-- debugGarden 的核心地标参照层能加载，是因为它显式调用 Landmark Inspector，不代表普通页有默认加载逻辑。
 
 ### 修复
 
 - C 版页面复用现有 Landmark Inspector 的 overlay 生命周期管理，普通页不显示 Inspector UI，但使用同一套 id Map、加载状态和 debugPerf 计数。
-- 普通页自动加载不读取本地 calibration draft，确保游客页使用正式固化 transform；debugPerf / debugGarden 继续允许本地草稿覆盖。
 - 地图 visual ready 后按批次加载正式配置中的核心地标：
   - 第一批：灵山大佛、梵宫、五印坛城。
   - 第二批：佛手广场、佛前广场、祥符禅寺、九龙灌浴。
@@ -1301,7 +1017,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 正式游客页只使用 `src/data/lingshanMapModelOverlays.ts` 中的 runtime / safe-v2 路径。
 - 菩提大道继续使用 `/models/lingshan/optimized/bodhi-avenue.runtime-v1.glb`，不引用旧 464M raw 文件。
 - raw / safe-v1 / draco 仍只作为 debugPerf Inspector 的本地候选，不进入普通页自动加载。
-- 未修改任何地标 scale、height、rotationY、offset、POI 语义、路线数据、树群数据或 `fan_gong.footprintMask`。
 
 ## 阶段：佛境沙盘氛围与 POI 3D 立牌第一版
 
@@ -1322,7 +1037,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 - 本轮不修改 Tencent key、不修改 `mapStyleId: 'style1'`、不调整腾讯底图样式。
-- 不修改 GLB 文件、核心地标 transform、869 树群数据、路线数据或 `fan_gong.footprintMask`。
 - debugPerf 增加 atmosphere mode、POI billboard count / level / active id 诊断。
 
 ## 阶段：佛境沙盘氛围与 POI 题签第二轮修正
@@ -1338,7 +1052,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 - 氛围、水纹和林影均为 `pointer-events: none` 的视觉层，不新增 GLB、不增加 garden live overlay count。
-- 不修改 Tencent key、`mapStyleId: 'style1'`、GLB 文件、869 树群数据、路线数据、POI 语义或核心地标 transform。
 - 水体只是浅青水纹氛围，不新增真实湖泊或改变地理语义。
 
 ## 阶段：天空雾化与 POI 题签抬高微调
@@ -1355,14 +1068,12 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 - 未新增 tile server、静态瓦片目录、ImageTileLayer 或大面积图片底图覆盖。
-- 未修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据、POI 语义或核心地标 transform。
 
 ## 阶段：AI 水墨 ImageTileLayer 前置导出工具
 
 ### 改动摘要
 
 - 新增 `/map-3d-guide-c?debugInkBounds=1` 四角拾取模式，用于依次点击 northwest、northeast、southeast、southwest 并复制 `LINGSHAN_INK_MAP_BOUNDS` 配置。
-- 新增 `/map-3d-guide-c?exportInkBase=1` 腾讯无 POI 底图导出模式：正北、俯视、隐藏项目 GLB、869 树群、路线、POI 题签和佛境氛围层。
 - export 模式使用无 label 的 Tencent vector baseMap，尽量只保留道路、水体、绿地、建筑平面轮廓。
 - 新增 `showRoadCheck=1` 道路校验占位开关，仅显示轻量网格/说明，不做 OCR、道路提取或图像识别。
 - 新增 `src/data/lingshanInkMapBounds.ts` 占位配置，后续由拾取结果替换。
@@ -1389,7 +1100,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 ### 边界
 
 - 本轮只更新水墨边界配置和导出模式定位，不生成水墨图、不切瓦片、不接入 `TMap.ImageTileLayer`。
-- 未修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
 
 ## 阶段：AI 水墨底图单图覆盖验证
 
@@ -1414,7 +1124,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 - 本轮是单图覆盖验证，不切瓦片、不接入正式 `TMap.ImageTileLayer` 多级瓦片方案。
 - 不删除 GPT 图和腾讯 base 图；即梦图仅作为新的候选覆盖源。
-- 未修改 `LINGSHAN_INK_MAP_BOUNDS`、Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
 
 ## 阶段：多路线 3D 导览扩展
 
@@ -1462,7 +1171,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本阶段不修改 `LINGSHAN_INK_MAP_BOUNDS`、Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据或核心地标 transform。
 - 本地瓦片验证层应位于路线、POI 题签和 GLB 地标下方；正式默认开启需等人工确认对齐和视觉强度。
 
 ## 阶段：水墨瓦片方向校正
@@ -1478,7 +1186,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮只修复切片方向，不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
 
 ## 阶段：水墨瓦片正式默认接入
 
@@ -1495,7 +1202,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
 - 水墨瓦片层仍位于腾讯底图之上、GLB 地标 / 金色路线 / 自定义 POI 题签之下。
 
 ## 阶段：水墨沙盘正式视野限制
@@ -1504,7 +1210,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 - 在水墨瓦片默认启用后，新增正式页视野限制，避免用户拖出或缩远后看到大面积腾讯原底图。
 - 限制采用两层范围：`LINGSHAN_INK_MAP_BOUNDS` 内缩为中心点可移动范围，外扩为视觉缓冲范围，边缘允许少量露出但不让水墨图像纸片。
-- 普通 `/map-3d-guide-c` 默认启用范围限制；`debugGarden=1` 禁用限制，方便继续编辑树群和点位。
 - 只有 `/map-3d-guide-c?debugPerf=1&noMapBounds=1` 可临时关闭范围限制排查；普通 `noMapBounds=1` 不关闭正式限制。
 - 最远 zoom 收紧到水墨沙盘总览仍占主体的位置，最近 zoom 保留查看模型和 POI 的能力。
 - 收紧 `overviewEstate`、`axisCruise`、`routeOverview` 三个总览 / 巡游类相机预设；`landmarkFocus` 和 `closeInspect` 近景手感不动。
@@ -1513,7 +1218,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据或核心地标 transform。
 - 本轮不重新切水墨瓦片，不重新生成水墨图，不提交或推送。
 
 ## 阶段：水墨沙盘视野二次收口与路线预演移除
@@ -1527,11 +1231,9 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 佛境巡游保留并加入动态相机收紧：开头 / 结尾保留开阔感，中段更贴近路线和当前景点，减少巡游时看到水墨范围外部。
 - 路线预演已从正式交互中完全移除：删除按钮、状态、事件、计时器、相机逻辑、临时高亮和 debugPerf 字段。
 - debugPerf 当前只保留佛境巡游、路线状态、地图边界、zoom、edgeMist 和 tour camera tighten 状态。
-- `debugGarden=1` 继续禁用正式视野限制和动态边缘雾增强，保证树群和点位编辑不受影响。
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据语义或核心地标 transform。
 - 本轮不重新切水墨瓦片，不重新生成水墨图，不提交或推送。
 
 ## 阶段：水墨沙盘视野三次收口与强雾遮边
@@ -1548,7 +1250,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、`LINGSHAN_INK_MAP_BOUNDS`、GLB、869 树群数据、路线数据语义或核心地标 transform。
 - 本轮不重新切水墨瓦片，不重新生成水墨图，不恢复路线预演，不提交或推送。
 
 ## 阶段：轻量动态水墨云雾
@@ -1558,15 +1259,12 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 - 正式页继续使用 Tencent `skyOptions.animated: true`，负责天空 / 远处的原生轻微动态。
 - 在 `BuddhaRealmAtmosphere` 内新增轻量 canvas 水墨雾纹层，覆盖四周边缘、顶部远处和少量角落山影。
 - 动态雾默认 `768` 分辨率绘制，中心 clear mask 仍保持约 70% 核心区域清楚，不遮挡核心模型、金色路线和核心 POI。
-- 动态雾只在地图 visual ready 后启动；loading / 入场阶段仍由静态 CSS 雾和远山层表现更明显的佛境氛围，避免阻塞腾讯地图和 GLB / 树群加载。
 - 性能降级策略：检测明显慢帧后先降到 `512`，持续慢帧则关闭 canvas 动态雾；静态雾和 sky animation 继续保留。
 - 恢复策略：地图空闲且帧间隔恢复稳定后自动恢复到 `768` 动态雾，避免手动开关。
-- `debugGarden=1` 默认关闭 canvas 动态雾，保证编辑树群和地图时不受影响；`debugGarden=1&debugPerf=1&enableDynamicMist=1` 可临时开启观察。
 - debugPerf 增加 dynamic mist 状态：enabled、canvas active、quality、degraded、reason、fps、frame ms、recovery state、sky animated 和 debug override。
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据语义、核心地标 transform 或 `LINGSHAN_INK_MAP_BOUNDS`。
 - 本轮不重新切水墨瓦片，不重新生成水墨图，不恢复路线预演，不提交或推送。
 
 ## 阶段：动态水墨云雾可见度微调
@@ -1580,7 +1278,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不修改 Tencent key、`mapStyleId: 'style1'`、GLB、869 树群数据、路线数据语义、核心地标 transform、水墨瓦片或路线预演状态。
 
 ## 阶段：三圣殿 / 祥符禅寺 safe-v3 模型压缩
 
@@ -1628,7 +1325,6 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不修改地标 transform，不切换现有高精模型，不恢复树群，不重新生成或提交 GLB。
 
 ## 阶段：游客页地标 GLB 中低模收口
 
@@ -1654,5 +1350,4 @@ raw 地标 GLB 体积较大，影响后续游客端按需加载策略。第一�
 
 ### 边界
 
-- 本轮不恢复树群 GLB，不修改地标 scale / height / rotation / offset，不改路线和 POI 语义。
 - 地图页继续只加载 active window 附近核心地标，高精模型仍保留给详情页、Inspector 或后续明确聚焦场景。

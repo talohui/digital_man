@@ -192,6 +192,7 @@ export function useLandmarkModelInspector({
 }: UseLandmarkModelInspectorOptions): LandmarkModelInspector {
   const modelsRef = useRef<Map<string, any>>(new Map())
   const companionModelsRef = useRef<Map<string, any>>(new Map())
+  const activeRef = useRef(active)
   const loadedModelUrlsRef = useRef<Map<string, string>>(new Map())
   const footprintMaskLayerRef = useRef<any>(null)
   const versionsRef = useRef<Map<string, number>>(new Map())
@@ -214,7 +215,18 @@ export function useLandmarkModelInspector({
   >(() => buildInitialCompanionCalibrationEdits(overlays, active && useLocalDrafts ? loadCalibrationDrafts() : {}))
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
   const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
+  activeRef.current = active
   const canTouchRuntimeMap = () => Boolean(map && (isMapCurrent ? isMapCurrent(map) : true))
+  const invalidatePendingModelLoads = () => {
+    overlays.forEach((overlay) => {
+      const id = getMapModelOverlayInspectorId(overlay)
+      versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
+      overlay.companionModels?.forEach((companion) => {
+        const key = getCompanionKey(id, companion.id)
+        companionVersionsRef.current.set(key, (companionVersionsRef.current.get(key) ?? 0) + 1)
+      })
+    })
+  }
   const detachRuntimeModel = (layerName: string, model: any) => {
     if (!model) {
       return
@@ -229,6 +241,7 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     if (!active) {
+      invalidatePendingModelLoads()
       clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchRuntimeMap())
       modelsRef.current = new Map()
       loadedModelUrlsRef.current = new Map()
@@ -346,6 +359,8 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     return () => {
+      activeRef.current = false
+      invalidatePendingModelLoads()
       const canTouchMap = canTouchRuntimeMap()
       clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchMap)
       modelsRef.current = new Map()
@@ -998,7 +1013,7 @@ export function useLandmarkModelInspector({
       })
 
       const health = await inspectGlbModelUrl(runtimeModelUrl)
-      if (versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
+      if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
         return false
       }
       if (!health.ok) {
@@ -1015,7 +1030,7 @@ export function useLandmarkModelInspector({
     }
 
     try {
-      if (!canTouchRuntimeMap()) {
+      if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
         return false
       }
       const model = new window.TMap.model.GLTFModel({
@@ -1047,7 +1062,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
+          if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)
@@ -1154,7 +1169,7 @@ export function useLandmarkModelInspector({
 
     if (options.trackLoad) {
       const exists = await modelUrlLooksAvailable(companion.modelUrl)
-      if (!canTouchRuntimeMap() || companionVersionsRef.current.get(key) !== version) {
+      if (!activeRef.current || !canTouchRuntimeMap() || companionVersionsRef.current.get(key) !== version) {
         return false
       }
       if (!exists) {
@@ -1179,7 +1194,7 @@ export function useLandmarkModelInspector({
       }
 
       const health = await inspectGlbModelUrl(companion.modelUrl)
-      if (companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
+      if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
         return false
       }
       if (!health.ok) {
@@ -1205,7 +1220,7 @@ export function useLandmarkModelInspector({
     }
 
     try {
-      if (!canTouchRuntimeMap()) {
+      if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
         return false
       }
       const model = new window.TMap.model.GLTFModel({
@@ -1244,7 +1259,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
+          if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)

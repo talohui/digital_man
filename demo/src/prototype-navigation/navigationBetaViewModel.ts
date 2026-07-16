@@ -49,11 +49,11 @@ export type NavigationBetaViewModel = {
     locationQualityText: string
   }
   heading: { degrees?: number; source: NavigationHeadingSnapshot['source']; available: boolean }
-  location: { source?: NavigationPrototypeLocationSource; isReplay: boolean; statusText: string }
+  location: { source?: NavigationPrototypeLocationSource; isReplay: boolean; statusText: string; originLabel?: string }
   deviation?: { state: 'on-route' | 'suspected' | 'confirmed' | 'rerouting'; message?: string }
   error?: ReturnType<typeof resolveNavigationBetaError>
   restoredSession?: { targetName: string }
-  arrival?: { kind: 'route-arrival' | 'joining-arrival'; targetName: string }
+  arrival?: { kind: 'route-arrival' | 'joining-arrival' | 'poi-arrival'; targetName: string }
   simulation: { available: boolean; insecureContextFallback: boolean; disclaimer: string }
   debugEnabled: boolean
   actions: NavigationBetaActions
@@ -96,6 +96,7 @@ export function resolveNavigationBetaUiState(snapshot: NavigationBetaSnapshot): 
 export function createNavigationBetaViewModel(snapshot: NavigationBetaSnapshot, actions: NavigationBetaActions): NavigationBetaViewModel {
   const state = resolveNavigationBetaUiState(snapshot)
   const target = snapshot.session?.target ?? snapshot.preparedTarget
+  const isFreePoi = target?.mode === 'free-poi'
   const quality = snapshot.accuracy === undefined ? 'unavailable' : snapshot.accuracy <= 20 ? 'good' : snapshot.accuracy <= 50 ? 'usable' : 'poor'
   const isReplay = snapshot.locationSource === 'replay-gcj02'
   const qualityText = isReplay ? '模拟导航回放中' : quality === 'good' ? '定位良好' : quality === 'usable' ? '定位可用' : quality === 'poor' ? '定位精度较低，正在继续校准' : '暂时无法获取可靠位置'
@@ -120,14 +121,22 @@ export function createNavigationBetaViewModel(snapshot: NavigationBetaSnapshot, 
       locationQualityText: qualityText
     } : undefined,
     heading: { degrees: snapshot.heading?.selectedHeading, source: snapshot.heading?.source ?? 'unavailable', available: snapshot.heading?.selectedHeading !== undefined },
-    location: { source: snapshot.locationSource, isReplay, statusText: isReplay ? '模拟导航回放中' : qualityText },
+    location: {
+      source: snapshot.locationSource,
+      isReplay,
+      statusText: isReplay ? '虚拟定位演示 · 腾讯真实步行路线' : qualityText,
+      originLabel: snapshot.session?.replayOriginLabel
+    },
     deviation: snapshot.deviation.state === 'on_route' ? undefined : {
       state: snapshot.deviation.state === 'suspected_off_route' ? 'suspected' : 'confirmed',
       message: snapshot.deviation.state === 'suspected_off_route' ? '当前位置可能偏离路线，正在继续确认。' : '你似乎已偏离当前步行路线。'
     },
     error: errorKind ? resolveNavigationBetaError(errorKind, snapshot.debugEnabled ? snapshot.error : undefined) : undefined,
     restoredSession: snapshot.restoredFromSessionStorage && target ? { targetName: target.name } : undefined,
-    arrival: state === 'arrival-confirm' && target ? { kind: target.mode === 'joining' ? 'joining-arrival' : 'route-arrival', targetName: target.name } : undefined,
+    arrival: state === 'arrival-confirm' && target ? {
+      kind: target.mode === 'joining' ? 'joining-arrival' : isFreePoi ? 'poi-arrival' : 'route-arrival',
+      targetName: target.name
+    } : undefined,
     simulation: {
       available: snapshot.debugEnabled && snapshot.simulatedNavigationAvailable,
       insecureContextFallback: snapshot.debugEnabled && snapshot.simulatedNavigationAvailable && errorKind === 'insecure-context',

@@ -11,3 +11,8 @@ test('drawer and fullscreen share one conversation timeline', () => {
   assert.equal((source.match(/<GuideMessageTimeline/g) ?? []).length, 1)
 })
 
+test('drawer always uses reading layout while fullscreen can switch layouts', () => {
+  assert.match(source, /mode === 'drawer' \? 'reading' : fullscreenLayout/)
+  assert.match(source, /data-xiaoling-layout=\{surfaceLayout\}/)
+  assert.match(source, /surfaceLayout === 'reading' \? '看小灵' : '看对话'/)
+})

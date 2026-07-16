@@ -1,0 +1,20 @@
+.map-browse-navigation-sheet {
+  position: fixed;
+  z-index: 28100;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  left: max(14px, env(safe-area-inset-left, 0px));
+  width: auto;
+  max-width: 620px;
+  margin-inline: auto;
+  pointer-events: auto;
+}
+
+@media (min-width: 881px) {
+  .map-browse-navigation-sheet {
+    right: 24px;
+    bottom: 24px;
+    left: auto;
+    width: min(430px, calc(100vw - 48px));
+  }
+}

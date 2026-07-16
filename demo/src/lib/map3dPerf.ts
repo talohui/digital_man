@@ -2,7 +2,7 @@ import type { Map3DCameraEvent, Map3DCameraPresetId, Map3DTourMode, Map3DTourSto
 export type Map3DPerfStage = 'mapInit' | 'routeDraw' | 'poiInit'
 
 export type Map3DPerfAssetStatus = 'loaded' | 'failed' | 'pending' | 'unloaded'
-export type Map3DPerfAssetCategory = 'garden' | 'landmark'
+export type Map3DPerfAssetCategory = 'landmark'
 export type Map3DPerfLandmarkVariant = 'raw' | 'safe-v1' | 'safe-v2' | 'safe-v3'
 
 export type Map3DPerfBatchSnapshot = {
@@ -126,18 +126,11 @@ export type Map3DPerfMapVisualEventType =
   | 'mapFailed'
   | 'overlaysStart'
   | 'routePoiShown'
-  | 'gardenLoadStartedAfterMapReady'
   | 'loadingCurtainShown'
   | 'loadingCurtainHidden'
   | 'mapInteractionStarted'
   | 'mapInteractionEnded'
   | 'zoomClamped'
-  | 'gardenLodChanged'
-  | 'gardenInteractionLiteMode'
-  | 'gardenOpacityUpdated'
-  | 'treeCandidateLabEnabled'
-  | 'defaultGardenHidden'
-  | 'landmarkReferenceLoaded'
   | 'landmarkRuntimeLoadStarted'
   | 'landmarkRuntimeLoadBatch'
   | 'atmosphereStateChanged'
@@ -146,13 +139,6 @@ export type Map3DPerfMapVisualEventType =
   | 'nativeSkyConfigured'
   | 'inkOverlayStateChanged'
   | 'inkTileLayerStateChanged'
-  | 'treeCandidateClusterGenerated'
-  | 'treeCandidateCompareSetGenerated'
-  | 'manualTreeAdded'
-  | 'testTreeDeleted'
-  | 'testTreeCleared'
-  | 'gardenAssetSourceChanged'
-  | 'gardenLoadBatch'
   | 'layerManagerStateChanged'
   | 'glbRuntimeOrchestratorStateChanged'
   | 'glbMemoryManagerStateChanged'
@@ -166,7 +152,6 @@ export type Map3DStartupStage =
   | 'waitingBaseMap'
   | 'baseMapReady'
   | 'overlaysReady'
-  | 'gardenLoading'
   | 'ready'
   | 'slow'
   | 'failed'
@@ -178,7 +163,6 @@ export type Map3DPerfGLBRuntimePhase =
   | 'waiting-visual'
   | 'route-poi'
   | 'landmarks'
-  | 'garden'
   | 'ready'
 export type Map3DPerfGLBRuntimeProfile = 'desktop' | 'mobile' | 'debug'
 
@@ -195,7 +179,7 @@ export type Map3DPerfMapVisualEvent = {
   requestedZoom?: number
   clampedZoom?: number
   mapBoundsEnabled?: boolean
-  mapBoundsDisabledReason?: 'none' | 'debugGarden' | 'debugPerfNoMapBounds'
+  mapBoundsDisabledReason?: 'none' | 'debugPerfNoMapBounds' | 'navigationScope'
   mapCenterLimitBounds?: string
   mapVisualBufferBounds?: string
   currentMapCenter?: string
@@ -214,25 +198,8 @@ export type Map3DPerfMapVisualEvent = {
   cameraPresetTightened?: boolean
   lastBoundsCorrection?: string
   noMapBoundsDebugOverride?: boolean
-  gardenLodTier?: 'none' | 'reduced' | 'full'
-  gardenOpacity?: number
-  liveGardenOverlayCount?: number
-  treeCandidateLabEnabled?: boolean
-  defaultGardenHidden?: boolean
-  landmarkReferenceLoaded?: boolean
-  testTreeCount?: number
-  candidateType?: string
-  clusterMode?: string
   clusterGeneratedCount?: number
   compareSetGenerated?: boolean
-  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
-  liveDefaultGardenOverlayCount?: number
-  liveTestTreeOverlayCount?: number
-  defaultGardenAssetCount?: number
-  gardenLoadedCount?: number
-  gardenLoadBatchIndex?: number
-  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
-  gardenLiveCountWarning?: boolean
   landmarkRuntimeBatchIndex?: number
   landmarkRuntimeBatchCount?: number
   landmarkRuntimeIds?: string[]
@@ -266,7 +233,6 @@ export type Map3DPerfMapVisualEvent = {
   dynamicMistSpeedScale?: number
   dynamicMistContrastScale?: number
   enableDynamicMistDebugOverride?: boolean
-  debugGardenDynamicMistDisabled?: boolean
   coreClearMaskEnabled?: boolean
   poiLiftMode?: 'ground' | 'raised'
   activePoiLiftPx?: number
@@ -325,9 +291,7 @@ export type Map3DPerfMapVisualEvent = {
   glbRuntimePhase?: Map3DPerfGLBRuntimePhase
   glbRuntimeProfile?: Map3DPerfGLBRuntimeProfile
   glbRuntimeLandmarkGate?: boolean
-  glbRuntimeGardenGate?: boolean
   glbRuntimeLandmarkDelayMs?: number
-  glbRuntimeGardenDelayMs?: number
   glbRuntimePendingTimerCount?: number
   glbActiveCount?: number
   glbCachedCount?: number
@@ -397,7 +361,6 @@ export type Map3DPerfSnapshot = {
   startupStage: Map3DStartupStage
   overlaysStartedMs?: number
   routePoiShownMs?: number
-  gardenLoadStartedAfterMapReadyMs?: number
   routeDrawMs?: number
   poiInitMs?: number
   currentRouteId?: string
@@ -411,21 +374,9 @@ export type Map3DPerfSnapshot = {
   routeGeometryMode: Map3DPerfRouteGeometryMode
   guideDataRouteSource: boolean
   unmappedGuideStopCount: number
-  gardenTotal: number
-  gardenLoaded: number
-  gardenFailed: number
-  gardenFirstBatchMs?: number
-  gardenAllDoneMs?: number
-  gardenOverlayCreated: number
-  gardenOverlayRemoved: number
-  gardenOverlayDuplicatePrevented: number
-  gardenOverlayLiveCount: number
-  gardenLoadGeneration: number
-  treeGlbMode: 'removed'
-  activeTreeGlbCount: number
   currentZoom?: number
   mapBoundsEnabled: boolean
-  mapBoundsDisabledReason: 'none' | 'debugGarden' | 'debugPerfNoMapBounds'
+  mapBoundsDisabledReason: 'none' | 'debugPerfNoMapBounds' | 'navigationScope'
   mapCenterLimitBounds?: string
   mapVisualBufferBounds?: string
   currentMapCenter?: string
@@ -446,22 +397,6 @@ export type Map3DPerfSnapshot = {
   noMapBoundsDebugOverride: boolean
   mapInteracting: boolean
   mapInteractionKind?: 'zoom' | 'drag' | 'move'
-  gardenLodTier: 'none' | 'reduced' | 'full'
-  gardenOpacity: number
-  treeCandidateLabEnabled: boolean
-  defaultGardenHidden: boolean
-  landmarkReferenceLoaded: boolean
-  testTreeCount: number
-  candidateType?: string
-  clusterMode?: string
-  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
-  liveDefaultGardenOverlayCount: number
-  liveTestTreeOverlayCount: number
-  defaultGardenAssetCount: number
-  gardenLoadedCount: number
-  gardenLoadBatchIndex?: number
-  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
-  gardenLiveCountWarning: boolean
   atmosphereMode: 'intro' | 'normal' | 'tour' | 'focus'
   atmosphereVisible: boolean
   poiBillboardCount: number
@@ -491,7 +426,6 @@ export type Map3DPerfSnapshot = {
   dynamicMistSpeedScale?: number
   dynamicMistContrastScale?: number
   enableDynamicMistDebugOverride: boolean
-  debugGardenDynamicMistDisabled: boolean
   coreClearMaskEnabled: boolean
   poiLiftMode: 'ground' | 'raised'
   activePoiLiftPx: number
@@ -550,9 +484,7 @@ export type Map3DPerfSnapshot = {
   glbRuntimePhase: Map3DPerfGLBRuntimePhase
   glbRuntimeProfile: Map3DPerfGLBRuntimeProfile
   glbRuntimeLandmarkGate: boolean
-  glbRuntimeGardenGate: boolean
   glbRuntimeLandmarkDelayMs: number
-  glbRuntimeGardenDelayMs: number
   glbRuntimePendingTimerCount: number
   glbActiveCount: number
   glbCachedCount: number
@@ -620,18 +552,6 @@ export type Map3DPerfRecorder = {
   getSnapshot: () => Map3DPerfSnapshot
   markStageStart: (stage: Map3DPerfStage) => void
   markStageEnd: (stage: Map3DPerfStage) => void
-  setGardenTotal: (total: number) => void
-  startGardenBatch: (batchIndex: number, count: number) => void
-  finishGardenBatch: (batchIndex: number) => void
-  startGardenAsset: (asset: {
-    id: string
-    assetUrl: string
-    name?: string
-    priority?: string
-    batchIndex?: number
-  }) => void
-  finishGardenAsset: (id: string) => void
-  failGardenAsset: (id: string, error: unknown) => void
   setLandmarkTotal: (total: number) => void
   startLandmarkAsset: (asset: {
     id: string
@@ -677,13 +597,6 @@ export type Map3DPerfRecorder = {
   recordCompanionModelEvent: (
     event: Omit<Map3DPerfCompanionModelEvent, 'recordedAt'> & { recordedAt?: string }
   ) => void
-  recordGardenOverlayEvent: (event: {
-    created?: number
-    removed?: number
-    duplicatePrevented?: number
-    liveCount?: number
-    generation?: number
-  }) => void
   recordMapVisualEvent: (event: Omit<Map3DPerfMapVisualEvent, 'recordedAt'> & { recordedAt?: string }) => void
   subscribe: (listener: () => void) => () => void
 }
@@ -702,7 +615,6 @@ type MutableMap3DPerfState = {
   startupStage: Map3DStartupStage
   overlaysStartedMs?: number
   routePoiShownMs?: number
-  gardenLoadStartedAfterMapReadyMs?: number
   routeDrawMs?: number
   poiInitMs?: number
   currentRouteId?: string
@@ -716,22 +628,9 @@ type MutableMap3DPerfState = {
   routeGeometryMode: Map3DPerfRouteGeometryMode
   guideDataRouteSource: boolean
   unmappedGuideStopCount: number
-  gardenStartedAt?: number
-  gardenTotal: number
-  gardenLoaded: number
-  gardenFailed: number
-  gardenFirstBatchMs?: number
-  gardenAllDoneMs?: number
-  gardenOverlayCreated: number
-  gardenOverlayRemoved: number
-  gardenOverlayDuplicatePrevented: number
-  gardenOverlayLiveCount: number
-  gardenLoadGeneration: number
-  treeGlbMode: 'removed'
-  activeTreeGlbCount: number
   currentZoom?: number
   mapBoundsEnabled: boolean
-  mapBoundsDisabledReason: 'none' | 'debugGarden' | 'debugPerfNoMapBounds'
+  mapBoundsDisabledReason: 'none' | 'debugPerfNoMapBounds' | 'navigationScope'
   mapCenterLimitBounds?: string
   mapVisualBufferBounds?: string
   currentMapCenter?: string
@@ -752,22 +651,6 @@ type MutableMap3DPerfState = {
   noMapBoundsDebugOverride: boolean
   mapInteracting: boolean
   mapInteractionKind?: 'zoom' | 'drag' | 'move'
-  gardenLodTier: 'none' | 'reduced' | 'full'
-  gardenOpacity: number
-  treeCandidateLabEnabled: boolean
-  defaultGardenHidden: boolean
-  landmarkReferenceLoaded: boolean
-  testTreeCount: number
-  candidateType?: string
-  clusterMode?: string
-  gardenReferenceMode?: 'blank-lab' | 'default-garden-visible'
-  liveDefaultGardenOverlayCount: number
-  liveTestTreeOverlayCount: number
-  defaultGardenAssetCount: number
-  gardenLoadedCount: number
-  gardenLoadBatchIndex?: number
-  gardenTierLoaded?: 'high' | 'medium' | 'low' | 'mixed'
-  gardenLiveCountWarning: boolean
   atmosphereMode: 'intro' | 'normal' | 'tour' | 'focus'
   atmosphereVisible: boolean
   poiBillboardCount: number
@@ -797,7 +680,6 @@ type MutableMap3DPerfState = {
   dynamicMistSpeedScale?: number
   dynamicMistContrastScale?: number
   enableDynamicMistDebugOverride: boolean
-  debugGardenDynamicMistDisabled: boolean
   coreClearMaskEnabled: boolean
   poiLiftMode: 'ground' | 'raised'
   activePoiLiftPx: number
@@ -856,9 +738,7 @@ type MutableMap3DPerfState = {
   glbRuntimePhase: Map3DPerfGLBRuntimePhase
   glbRuntimeProfile: Map3DPerfGLBRuntimeProfile
   glbRuntimeLandmarkGate: boolean
-  glbRuntimeGardenGate: boolean
   glbRuntimeLandmarkDelayMs: number
-  glbRuntimeGardenDelayMs: number
   glbRuntimePendingTimerCount: number
   glbActiveCount: number
   glbCachedCount: number
@@ -958,89 +838,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         state.poiInitMs = durationMs
       }
       state.stageStarts.delete(stage)
-      notify()
-    },
-    setGardenTotal: (total) => {
-      if (!enabled) {
-        return
-      }
-      state.gardenStartedAt = now()
-      state.gardenTotal = total
-      state.gardenLoaded = 0
-      state.gardenFailed = 0
-      state.gardenFirstBatchMs = undefined
-      state.gardenAllDoneMs = undefined
-      state.batches = new Map()
-      removeAssetsByCategory(state, 'garden')
-      notify()
-    },
-    startGardenBatch: (batchIndex, count) => {
-      if (!enabled) {
-        return
-      }
-      state.batches.set(batchIndex, {
-        batchIndex,
-        count,
-        startedAt: Date.now()
-      })
-      notify()
-    },
-    finishGardenBatch: (batchIndex) => {
-      if (!enabled) {
-        return
-      }
-      const batch = state.batches.get(batchIndex)
-      if (!batch || batch.finishedAt) {
-        return
-      }
-      const finishedAt = Date.now()
-      batch.finishedAt = finishedAt
-      batch.durationMs = roundDuration(finishedAt - batch.startedAt)
-      state.batches.set(batchIndex, batch)
-      if (batchIndex === 0 && state.gardenStartedAt !== undefined) {
-        state.gardenFirstBatchMs = roundDuration(now() - state.gardenStartedAt)
-      }
-      updateGardenAllDone(state)
-      notify()
-    },
-    startGardenAsset: ({ id, assetUrl, name, priority, batchIndex }) => {
-      if (!enabled) {
-        return
-      }
-      state.urlCounts.set(assetUrl, (state.urlCounts.get(assetUrl) ?? 0) + 1)
-      state.assets.set(id, {
-        id,
-        assetUrl,
-        name,
-        modelUrl: assetUrl,
-        category: 'garden',
-        priority,
-        batchIndex,
-        startedAt: Date.now(),
-        status: 'pending'
-      })
-      notify()
-    },
-    finishGardenAsset: (id) => {
-      if (!enabled) {
-        return
-      }
-      const asset = state.assets.get(id)
-      if (!asset || asset.status === 'loaded') {
-        return
-      }
-      const finishedAt = Date.now()
-      const wasFailed = asset.status === 'failed'
-      asset.status = 'loaded'
-      asset.finishedAt = finishedAt
-      asset.durationMs = roundDuration(finishedAt - asset.startedAt)
-      asset.error = undefined
-      state.assets.set(id, asset)
-      state.gardenLoaded += 1
-      if (wasFailed) {
-        state.gardenFailed = Math.max(0, state.gardenFailed - 1)
-      }
-      updateGardenAllDone(state)
       notify()
     },
     setLandmarkTotal: (total) => {
@@ -1204,21 +1001,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       ].slice(-24)
       notify()
     },
-    recordGardenOverlayEvent: ({ created = 0, removed = 0, duplicatePrevented = 0, liveCount, generation }) => {
-      if (!enabled) {
-        return
-      }
-      state.gardenOverlayCreated += created
-      state.gardenOverlayRemoved += removed
-      state.gardenOverlayDuplicatePrevented += duplicatePrevented
-      if (liveCount !== undefined) {
-        state.gardenOverlayLiveCount = liveCount
-      }
-      if (generation !== undefined) {
-        state.gardenLoadGeneration = generation
-      }
-      notify()
-    },
     recordMapVisualEvent: (event) => {
       if (!enabled) {
         return
@@ -1254,8 +1036,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
         state.overlaysStartedMs = elapsedMs
       } else if (event.type === 'routePoiShown') {
         state.routePoiShownMs = elapsedMs
-      } else if (event.type === 'gardenLoadStartedAfterMapReady') {
-        state.gardenLoadStartedAfterMapReadyMs = elapsedMs
       } else if (event.type === 'loadingCurtainShown') {
         state.loadingCurtainShownMs = elapsedMs
       } else if (event.type === 'loadingCurtainHidden') {
@@ -1269,24 +1049,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       } else if (event.type === 'mapInteractionEnded') {
         state.mapInteracting = false
         state.mapInteractionKind = undefined
-      } else if (event.type === 'gardenLodChanged' || event.type === 'gardenInteractionLiteMode' || event.type === 'gardenOpacityUpdated') {
-        if (event.gardenLodTier) {
-          state.gardenLodTier = event.gardenLodTier
-        }
-        if (event.gardenOpacity !== undefined) {
-          state.gardenOpacity = event.gardenOpacity
-        }
-      } else if (
-        event.type === 'treeCandidateLabEnabled' ||
-        event.type === 'defaultGardenHidden' ||
-        event.type === 'landmarkReferenceLoaded' ||
-        event.type === 'treeCandidateClusterGenerated' ||
-        event.type === 'treeCandidateCompareSetGenerated' ||
-        event.type === 'manualTreeAdded' ||
-        event.type === 'testTreeDeleted' ||
-        event.type === 'testTreeCleared'
-      ) {
-        state.treeCandidateLabEnabled = true
       }
 
       if (event.currentZoom !== undefined) {
@@ -1373,14 +1135,8 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       if (event.glbRuntimeLandmarkGate !== undefined) {
         state.glbRuntimeLandmarkGate = event.glbRuntimeLandmarkGate
       }
-      if (event.glbRuntimeGardenGate !== undefined) {
-        state.glbRuntimeGardenGate = event.glbRuntimeGardenGate
-      }
       if (event.glbRuntimeLandmarkDelayMs !== undefined) {
         state.glbRuntimeLandmarkDelayMs = event.glbRuntimeLandmarkDelayMs
-      }
-      if (event.glbRuntimeGardenDelayMs !== undefined) {
-        state.glbRuntimeGardenDelayMs = event.glbRuntimeGardenDelayMs
       }
       if (event.glbRuntimePendingTimerCount !== undefined) {
         state.glbRuntimePendingTimerCount = event.glbRuntimePendingTimerCount
@@ -1469,51 +1225,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       if (event.arbiterMemoryPressureEstimateMB !== undefined) {
         state.arbiterMemoryPressureEstimateMB = event.arbiterMemoryPressureEstimateMB
       }
-      if (event.liveGardenOverlayCount !== undefined) {
-        state.gardenOverlayLiveCount = event.liveGardenOverlayCount
-      }
-      if (event.treeCandidateLabEnabled !== undefined) {
-        state.treeCandidateLabEnabled = event.treeCandidateLabEnabled
-      }
-      if (event.defaultGardenHidden !== undefined) {
-        state.defaultGardenHidden = event.defaultGardenHidden
-      }
-      if (event.landmarkReferenceLoaded !== undefined) {
-        state.landmarkReferenceLoaded = event.landmarkReferenceLoaded
-      }
-      if (event.testTreeCount !== undefined) {
-        state.testTreeCount = event.testTreeCount
-      }
-      if (event.candidateType !== undefined) {
-        state.candidateType = event.candidateType
-      }
-      if (event.clusterMode !== undefined) {
-        state.clusterMode = event.clusterMode
-      }
-      if (event.gardenReferenceMode !== undefined) {
-        state.gardenReferenceMode = event.gardenReferenceMode
-      }
-      if (event.liveDefaultGardenOverlayCount !== undefined) {
-        state.liveDefaultGardenOverlayCount = event.liveDefaultGardenOverlayCount
-      }
-      if (event.liveTestTreeOverlayCount !== undefined) {
-        state.liveTestTreeOverlayCount = event.liveTestTreeOverlayCount
-      }
-      if (event.defaultGardenAssetCount !== undefined) {
-        state.defaultGardenAssetCount = event.defaultGardenAssetCount
-      }
-      if (event.gardenLoadedCount !== undefined) {
-        state.gardenLoadedCount = event.gardenLoadedCount
-      }
-      if (event.gardenLoadBatchIndex !== undefined) {
-        state.gardenLoadBatchIndex = event.gardenLoadBatchIndex
-      }
-      if (event.gardenTierLoaded !== undefined) {
-        state.gardenTierLoaded = event.gardenTierLoaded
-      }
-      if (event.gardenLiveCountWarning !== undefined) {
-        state.gardenLiveCountWarning = event.gardenLiveCountWarning
-      }
       if (event.atmosphereMode !== undefined) {
         state.atmosphereMode = event.atmosphereMode
       }
@@ -1600,9 +1311,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
       }
       if (event.enableDynamicMistDebugOverride !== undefined) {
         state.enableDynamicMistDebugOverride = event.enableDynamicMistDebugOverride
-      }
-      if (event.debugGardenDynamicMistDisabled !== undefined) {
-        state.debugGardenDynamicMistDisabled = event.debugGardenDynamicMistDisabled
       }
       if (event.coreClearMaskEnabled !== undefined) {
         state.coreClearMaskEnabled = event.coreClearMaskEnabled
@@ -1771,28 +1479,6 @@ export function createMap3DPerfRecorder(enabled: boolean): Map3DPerfRecorder {
 
       notify()
     },
-    failGardenAsset: (id, error) => {
-      if (!enabled) {
-        return
-      }
-      const asset = state.assets.get(id)
-      if (!asset || asset.status === 'failed') {
-        return
-      }
-      const finishedAt = Date.now()
-      const wasLoaded = asset.status === 'loaded'
-      asset.status = 'failed'
-      asset.finishedAt = finishedAt
-      asset.durationMs = roundDuration(finishedAt - asset.startedAt)
-      asset.error = normalizeError(error)
-      state.assets.set(id, asset)
-      state.gardenFailed += 1
-      if (wasLoaded) {
-        state.gardenLoaded = Math.max(0, state.gardenLoaded - 1)
-      }
-      updateGardenAllDone(state)
-      notify()
-    },
     subscribe: (listener) => {
       if (!enabled) {
         return () => undefined
@@ -1811,16 +1497,6 @@ function createInitialState(): MutableMap3DPerfState {
     perfPageStartedAt: now(),
     mapReadyTimedOut: false,
     startupStage: 'loadingSdk',
-    gardenTotal: 0,
-    gardenLoaded: 0,
-    gardenFailed: 0,
-    gardenOverlayCreated: 0,
-    gardenOverlayRemoved: 0,
-    gardenOverlayDuplicatePrevented: 0,
-    gardenOverlayLiveCount: 0,
-    gardenLoadGeneration: 0,
-    treeGlbMode: 'removed',
-    activeTreeGlbCount: 0,
     mapBoundsEnabled: false,
     mapBoundsDisabledReason: 'none',
     zoomLimited: false,
@@ -1837,17 +1513,6 @@ function createInitialState(): MutableMap3DPerfState {
     routeGeometryMode: 'poi-polyline',
     guideDataRouteSource: false,
     unmappedGuideStopCount: 0,
-    gardenLodTier: 'full',
-    gardenOpacity: 1,
-    treeCandidateLabEnabled: false,
-    defaultGardenHidden: false,
-    landmarkReferenceLoaded: false,
-    testTreeCount: 0,
-    liveDefaultGardenOverlayCount: 0,
-    liveTestTreeOverlayCount: 0,
-    defaultGardenAssetCount: 0,
-    gardenLoadedCount: 0,
-    gardenLiveCountWarning: false,
     atmosphereMode: 'intro',
     atmosphereVisible: false,
     poiBillboardCount: 0,
@@ -1872,7 +1537,6 @@ function createInitialState(): MutableMap3DPerfState {
     dynamicMistSpeedScale: 1,
     dynamicMistContrastScale: 1,
     enableDynamicMistDebugOverride: false,
-    debugGardenDynamicMistDisabled: false,
     coreClearMaskEnabled: false,
     poiLiftMode: 'ground',
     activePoiLiftPx: 0,
@@ -1907,9 +1571,7 @@ function createInitialState(): MutableMap3DPerfState {
     glbRuntimePhase: 'disabled',
     glbRuntimeProfile: 'desktop',
     glbRuntimeLandmarkGate: false,
-    glbRuntimeGardenGate: false,
     glbRuntimeLandmarkDelayMs: 0,
-    glbRuntimeGardenDelayMs: 0,
     glbRuntimePendingTimerCount: 0,
     glbActiveCount: 0,
     glbCachedCount: 0,
@@ -1981,7 +1643,6 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     startupStage: state.startupStage,
     overlaysStartedMs: state.overlaysStartedMs,
     routePoiShownMs: state.routePoiShownMs,
-    gardenLoadStartedAfterMapReadyMs: state.gardenLoadStartedAfterMapReadyMs,
     routeDrawMs: state.routeDrawMs,
     poiInitMs: state.poiInitMs,
     currentRouteId: state.currentRouteId,
@@ -1995,18 +1656,6 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     routeGeometryMode: state.routeGeometryMode,
     guideDataRouteSource: state.guideDataRouteSource,
     unmappedGuideStopCount: state.unmappedGuideStopCount,
-    gardenTotal: state.gardenTotal,
-    gardenLoaded: state.gardenLoaded,
-    gardenFailed: state.gardenFailed,
-    gardenFirstBatchMs: state.gardenFirstBatchMs,
-    gardenAllDoneMs: state.gardenAllDoneMs,
-    gardenOverlayCreated: state.gardenOverlayCreated,
-    gardenOverlayRemoved: state.gardenOverlayRemoved,
-    gardenOverlayDuplicatePrevented: state.gardenOverlayDuplicatePrevented,
-    gardenOverlayLiveCount: state.gardenOverlayLiveCount,
-    gardenLoadGeneration: state.gardenLoadGeneration,
-    treeGlbMode: state.treeGlbMode,
-    activeTreeGlbCount: state.activeTreeGlbCount,
     currentZoom: state.currentZoom,
     mapBoundsEnabled: state.mapBoundsEnabled,
     mapBoundsDisabledReason: state.mapBoundsDisabledReason,
@@ -2030,22 +1679,6 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     noMapBoundsDebugOverride: state.noMapBoundsDebugOverride,
     mapInteracting: state.mapInteracting,
     mapInteractionKind: state.mapInteractionKind,
-    gardenLodTier: state.gardenLodTier,
-    gardenOpacity: state.gardenOpacity,
-    treeCandidateLabEnabled: state.treeCandidateLabEnabled,
-    defaultGardenHidden: state.defaultGardenHidden,
-    landmarkReferenceLoaded: state.landmarkReferenceLoaded,
-    testTreeCount: state.testTreeCount,
-    candidateType: state.candidateType,
-    clusterMode: state.clusterMode,
-    gardenReferenceMode: state.gardenReferenceMode,
-    liveDefaultGardenOverlayCount: state.liveDefaultGardenOverlayCount,
-    liveTestTreeOverlayCount: state.liveTestTreeOverlayCount,
-    defaultGardenAssetCount: state.defaultGardenAssetCount,
-    gardenLoadedCount: state.gardenLoadedCount,
-    gardenLoadBatchIndex: state.gardenLoadBatchIndex,
-    gardenTierLoaded: state.gardenTierLoaded,
-    gardenLiveCountWarning: state.gardenLiveCountWarning,
     atmosphereMode: state.atmosphereMode,
     atmosphereVisible: state.atmosphereVisible,
     poiBillboardCount: state.poiBillboardCount,
@@ -2075,7 +1708,6 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     dynamicMistSpeedScale: state.dynamicMistSpeedScale,
     dynamicMistContrastScale: state.dynamicMistContrastScale,
     enableDynamicMistDebugOverride: state.enableDynamicMistDebugOverride,
-    debugGardenDynamicMistDisabled: state.debugGardenDynamicMistDisabled,
     coreClearMaskEnabled: state.coreClearMaskEnabled,
     poiLiftMode: state.poiLiftMode,
     activePoiLiftPx: state.activePoiLiftPx,
@@ -2134,9 +1766,7 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     glbRuntimePhase: state.glbRuntimePhase,
     glbRuntimeProfile: state.glbRuntimeProfile,
     glbRuntimeLandmarkGate: state.glbRuntimeLandmarkGate,
-    glbRuntimeGardenGate: state.glbRuntimeGardenGate,
     glbRuntimeLandmarkDelayMs: state.glbRuntimeLandmarkDelayMs,
-    glbRuntimeGardenDelayMs: state.glbRuntimeGardenDelayMs,
     glbRuntimePendingTimerCount: state.glbRuntimePendingTimerCount,
     glbActiveCount: state.glbActiveCount,
     glbCachedCount: state.glbCachedCount,
@@ -2187,16 +1817,6 @@ function buildSnapshot(enabled: boolean, state: MutableMap3DPerfState): Map3DPer
     latestTourEvent: state.tourEvents[state.tourEvents.length - 1],
     companionModelEvents: state.companionModelEvents,
     latestCompanionModelEvent: state.companionModelEvents[state.companionModelEvents.length - 1]
-  }
-}
-
-function updateGardenAllDone(state: MutableMap3DPerfState) {
-  if (
-    state.gardenStartedAt !== undefined &&
-    state.gardenTotal > 0 &&
-    state.gardenLoaded + state.gardenFailed >= state.gardenTotal
-  ) {
-    state.gardenAllDoneMs = roundDuration(now() - state.gardenStartedAt)
   }
 }
 
