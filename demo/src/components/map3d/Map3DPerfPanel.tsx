@@ -55,6 +55,11 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
   const landmarkRuntimeEvents = snapshot.mapVisualEvents
     .filter((event) => event.type === 'landmarkRuntimeLoadStarted' || event.type === 'landmarkRuntimeLoadBatch')
     .slice(-6)
+  const inkTileFallbackLabel =
+    snapshot.inkTileUsingFallbackZoom && snapshot.inkTileFallbackFromZ !== undefined
+      ? ` · z${snapshot.inkTileFallbackFromZ}->z${snapshot.inkTileFallbackToZ ?? snapshot.inkTileMaxNativeZoom}`
+      : ''
+  const landmarkDebugRows = snapshot.landmarkGlbDebugRows ?? []
 
   return (
     <section className={`map-3d-guide-perf-panel ${expanded ? 'is-expanded' : ''}`}>
@@ -83,17 +88,129 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
         </div>
         <div>
           <dt>Route</dt>
-          <dd>{formatMs(snapshot.routeDrawMs)}</dd>
+          <dd>
+            {snapshot.currentRouteName ?? '-'} · {snapshot.currentRouteId ?? '-'} · {snapshot.routeStopCount} stops · {snapshot.routeGeometryPointCount} pts · {snapshot.routeGeometryMode} · {formatMs(snapshot.routeDrawMs)}
+          </dd>
         </div>
         <div>
           <dt>POI</dt>
           <dd>{formatMs(snapshot.poiInitMs)}</dd>
         </div>
         <div>
-          <dt>Garden GLB</dt>
+          <dt>Atmosphere</dt>
           <dd>
-            {snapshot.gardenLoaded}/{snapshot.gardenTotal}
-            {snapshot.gardenOverlayLiveCount ? ` · live ${snapshot.gardenOverlayLiveCount}` : ''}
+            {snapshot.atmosphereMode}
+            {snapshot.atmosphereVisible ? '' : ' · hidden'}
+            {snapshot.horizonMaskEnabled ? ` · horizon ${Math.round(snapshot.horizonMaskIntensity * 100)}%` : ''}
+            {snapshot.coreClearMaskEnabled ? ' · clear-core' : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Native Sky</dt>
+          <dd>
+            {snapshot.nativeSkyEnabled ? (snapshot.nativeSkyApplied ? 'applied' : 'configured') : 'off'}
+            {snapshot.nativeFogApplied ? ' · fog' : ''}
+            {snapshot.nativeSkyColor ? ` · ${snapshot.nativeSkyColor}` : ''}
+            {snapshot.skyOptionsAnimated ? ' · animated' : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Dynamic Mist</dt>
+          <dd>
+            {snapshot.dynamicMistEnabled ? (snapshot.dynamicMistCanvasActive ? 'active' : 'idle') : 'off'} · {snapshot.dynamicMistQuality}
+            {snapshot.dynamicMistSpeedScale ? ` · speed ${snapshot.dynamicMistSpeedScale.toFixed(2)}x` : ''}
+            {snapshot.dynamicMistContrastScale ? ` · contrast ${snapshot.dynamicMistContrastScale.toFixed(2)}x` : ''}
+            {snapshot.dynamicMistFpsEstimate ? ` · ${snapshot.dynamicMistFpsEstimate}fps` : ''}
+            {snapshot.dynamicMistDegraded ? ' · degraded' : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>POI Labels</dt>
+          <dd>
+            {snapshot.poiBillboardMode} · {snapshot.poiBillboardCount}
+            {snapshot.poiLiftMode === 'raised' ? ` · lift ${snapshot.activePoiLiftPx}` : ''}
+            {snapshot.tourPoiSuppressionEnabled ? ` · muted ${snapshot.mutedPoiCount}` : ''}
+            {snapshot.activePoiBillboardId ? ` · ${snapshot.activePoiBillboardId}` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Water Hints</dt>
+          <dd>{snapshot.waterHintsEnabled ? `${snapshot.waterHintsCount} · active ${snapshot.activePoiCount}` : 'hidden'}</dd>
+        </div>
+        <div>
+          <dt>Ink Tiles</dt>
+          <dd>
+            {snapshot.inkTilesEnabled
+              ? `${snapshot.inkTileMode === 'tencent-custom-layer' ? 'Tencent custom' : 'v3'} · ${snapshot.inkTileMode} · ${Math.round(snapshot.inkTileOpacityEffective * 100)}%/${Math.round(snapshot.inkTileOpacityBase * 100)}%${inkTileFallbackLabel}`
+              : snapshot.noInkTilesOverride
+                ? 'disabled by noInkTiles'
+                : 'off'}
+            {snapshot.inkTileLayerReady ? ' · ready' : ''}
+            {snapshot.inkTileLayerError ? ' · error' : ''}
+            {snapshot.mapBoundaryEnabled ? ' · bounded' : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Layer Manager</dt>
+          <dd title={snapshot.layerManagerSnapshot ?? undefined}>
+            {snapshot.layerManagerCount}
+            {snapshot.layerManagerActiveLayers.length ? ` · ${snapshot.layerManagerActiveLayers.slice(0, 4).join(', ')}` : ' · none'}
+            {snapshot.layerManagerActiveLayers.length > 4 ? ` +${snapshot.layerManagerActiveLayers.length - 4}` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>GLB Runtime</dt>
+          <dd>
+            {snapshot.glbRuntimeEnabled ? `${snapshot.glbRuntimePhase} · ${snapshot.glbRuntimeProfile}` : 'off'}
+            {snapshot.glbRuntimeLandmarkGate ? ' · landmarks' : ''}
+            {snapshot.glbRuntimePendingTimerCount ? ` · timers ${snapshot.glbRuntimePendingTimerCount}` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>GLB Memory</dt>
+          <dd>
+            active {snapshot.glbActiveCount}/{snapshot.glbMemoryMaxActive} · cached {snapshot.glbCachedCount}
+            {snapshot.glbSoftDetachedCount ? ` · detached ${snapshot.glbSoftDetachedCount}` : ''}
+            {snapshot.glbDisposedCount ? ` · disposed ${snapshot.glbDisposedCount}` : ''}
+            {snapshot.glbMemoryEstimateMB ? ` · ~${snapshot.glbMemoryEstimateMB}MB` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Scene Window</dt>
+          <dd>
+            visible {snapshot.windowVisibleCount}/{snapshot.windowActiveCount}
+            {snapshot.windowCachedCount ? ` · cached ${snapshot.windowCachedCount}` : ''}
+            {snapshot.windowBehindCount ? ` · behind ${snapshot.windowBehindCount}` : ''}
+            {snapshot.windowDisposedCount ? ` · disposed ${snapshot.windowDisposedCount}` : ''}
+            {snapshot.sceneMemoryPressureEstimate ? ` · ~${snapshot.sceneMemoryPressureEstimate}MB` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Scene State</dt>
+          <dd>
+            {snapshot.sceneStateVisible}/{snapshot.sceneStateLoaded} · disposed {snapshot.sceneStateDisposed}
+            {snapshot.sceneStateRehydrated ? ` · rehydrated ${snapshot.sceneStateRehydrated}` : ''}
+            {snapshot.sceneStateActiveLoads ? ` · loading ${snapshot.sceneStateActiveLoads}` : ''}
+            {snapshot.sceneCacheHitRate ? ` · hit ${Math.round(snapshot.sceneCacheHitRate * 100)}%` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Scene Arbiter</dt>
+          <dd>
+            decisions {snapshot.arbiterDecisionCount}
+            {snapshot.arbiterDeniedCount ? ` · denied ${snapshot.arbiterDeniedCount}` : ''}
+            {snapshot.arbiterLoadThrottleCount ? ` · throttle ${snapshot.arbiterLoadThrottleCount}` : ''}
+            {snapshot.arbiterConflictResolveCount ? ` · conflicts ${snapshot.arbiterConflictResolveCount}` : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Map Bounds</dt>
+          <dd>
+            {snapshot.mapBoundsEnabled
+              ? `${snapshot.mapMinZoom?.toFixed(2) ?? '-'}-${snapshot.mapMaxZoom?.toFixed(2) ?? '-'} · ${snapshot.edgeMistLevel}`
+              : `off · ${snapshot.mapBoundsDisabledReason}`}
+            {snapshot.edgeMistStrength !== undefined ? ` · mist ${Math.round(snapshot.edgeMistStrength * 100)}%` : ''}
+            {snapshot.zoomLimited ? ' · limited' : ''}
           </dd>
         </div>
         <div>
@@ -121,14 +238,15 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
           </dd>
         </div>
         <div>
-          <dt>Garden LOD</dt>
-          <dd>
-            {snapshot.gardenLodTier} · {Math.round(snapshot.gardenOpacity * 100)}%
-          </dd>
-        </div>
-        <div>
           <dt>Tour</dt>
-          <dd>{snapshot.latestTourEvent?.type ?? '-'}</dd>
+          <dd>
+            {snapshot.tourStatus}
+            {snapshot.latestTourEvent?.tourCameraTightenMode ? ` · ${snapshot.latestTourEvent.tourCameraTightenMode}` : ''}
+            {snapshot.latestTourEvent?.tourCameraTightenStrength !== undefined
+              ? ` ${Math.round(snapshot.latestTourEvent.tourCameraTightenStrength * 100)}%`
+              : ''}
+            {snapshot.latestTourEvent?.type ? ` · ${snapshot.latestTourEvent.type}` : ''}
+          </dd>
         </div>
         <div>
           <dt>Companion</dt>
@@ -136,21 +254,49 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
         </div>
         <div>
           <dt>Failed</dt>
-          <dd>{snapshot.gardenFailed + snapshot.landmarkFailed}</dd>
+          <dd>{snapshot.landmarkFailed}</dd>
         </div>
         <div>
-          <dt>First batch</dt>
-          <dd>{formatMs(snapshot.gardenFirstBatchMs)}</dd>
-        </div>
-        <div>
-          <dt>All done</dt>
-          <dd>{formatMs(snapshot.gardenAllDoneMs)}</dd>
+          <dt>Landmarks done</dt>
+          <dd>{formatMs(snapshot.landmarkAllDoneMs)}</dd>
         </div>
       </dl>
 
       {expanded ? (
         <div className="map-3d-guide-perf-panel__details">
           {landmarkInspector ? <LandmarkGLBInspector inspector={landmarkInspector} /> : null}
+
+          <section>
+            <h3>Landmark GLB Debug</h3>
+            {landmarkDebugRows.length ? (
+              <ol>
+                {landmarkDebugRows.map((row) => (
+                  <li key={row.id}>
+                    <span>
+                      {row.displayName} · {row.id}
+                    </span>
+                    <small>
+                      {row.desiredState} · {row.actualState} · arbiter {row.arbiterDecision}
+                      {row.denyReason ? ` (${row.denyReason})` : ''}
+                      {row.distanceToMapCenter !== undefined ? ` · ${row.distanceToMapCenter}m` : ''}
+                      {row.activeBudgetUsed !== undefined ? ` · active ${row.activeBudgetUsed}/${row.activeBudgetMax ?? '-'}` : ''}
+                      {row.activeSlotIndex !== undefined ? ` · slot ${row.activeSlotIndex + 1}` : ''}
+                      {row.evictable ? ` · evictable${row.evictReason ? `:${row.evictReason}` : ''}` : ''}
+                      {row.lastEvictedAt ? ` · evicted ${new Date(row.lastEvictedAt).toLocaleTimeString()}` : ''}
+                      {row.lastLoadAllowReason ? ` · load ${row.lastLoadAllowReason}` : ''}
+                      {row.lastLoadDenyReason ? ` · deny ${row.lastLoadDenyReason}` : ''}
+                      {row.isTourFocus ? ' · tour focus' : ''}
+                      {row.isProtected ? ' · protected' : ''}
+                      {row.lastError ? ` · ${row.lastError}` : ''}
+                    </small>
+                    {row.glbUrl ? <code>{row.glbUrl}</code> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>暂无 landmark GLB 调度诊断</p>
+            )}
+          </section>
 
           <section>
             <h3>地图视觉 Ready</h3>
@@ -165,7 +311,7 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
               <li>
                 <span>Startup stage</span>
                 <small>
-                  {snapshot.startupStage} · overlays {formatMs(snapshot.overlaysStartedMs)} · route/poi {formatMs(snapshot.routePoiShownMs)} · garden after ready {formatMs(snapshot.gardenLoadStartedAfterMapReadyMs)}
+                  {snapshot.startupStage} · overlays {formatMs(snapshot.overlaysStartedMs)} · route/poi {formatMs(snapshot.routePoiShownMs)}
                 </small>
               </li>
               {snapshot.mapVisualEvents.slice(-6).map((event, index) => (
@@ -197,39 +343,125 @@ export function Map3DPerfPanel({ recorder, landmarkInspector }: Map3DPerfPanelPr
                   </small>
                 </li>
               ) : null}
+              {snapshot.inkTilesEnabled ? (
+                <li>
+                  <span>ink tiles</span>
+                  <small>
+                    {snapshot.inkTileUrlTemplate ?? '-'} · levels {(snapshot.inkTileZoomLevels ?? []).join(', ') || '-'} · base{' '}
+                    {Math.round(snapshot.inkTileOpacityBase * 100)}% · effective {Math.round(snapshot.inkTileOpacityEffective * 100)}% · fade{' '}
+                    {Math.round(snapshot.inkTileZoomFade * 100)}%
+                    {snapshot.inkTileDefaultEnabled ? ' · default-on' : ''}
+                    {snapshot.noInkTilesOverride ? ' · noInkTiles' : ''}
+                    {snapshot.inkTileMaxNativeZoom ? ` · max native z${snapshot.inkTileMaxNativeZoom}` : ''}
+                    {snapshot.inkTileUsingFallbackZoom ? ` · fallback z${snapshot.inkTileFallbackFromZ}->z${snapshot.inkTileFallbackToZ}` : ''}
+                    {snapshot.inkTileEmptyUrl ? ` · empty ${snapshot.inkTileEmptyUrl}` : ''}
+                    {snapshot.sourceImageWidth && snapshot.sourceImageHeight ? ` · source ${snapshot.sourceImageWidth}x${snapshot.sourceImageHeight}` : ''}
+                    {snapshot.sourceImageStandard === false ? ' · non-standard' : ''}
+                    {snapshot.sourceImageWarning ? ` · ${snapshot.sourceImageWarning}` : ''}
+                    {snapshot.inkTileXRangeByZoom ? ` · x ${snapshot.inkTileXRangeByZoom}` : ''}
+                    {snapshot.inkTileYRangeByZoom ? ` · y ${snapshot.inkTileYRangeByZoom}` : ''}
+                    {snapshot.inkTileLayerReady ? ' · ready' : ' · pending'}
+                    {snapshot.mapBoundaryEnabled ? ' · boundary' : ''}
+                    {snapshot.inkTileBounds ? ` · ${snapshot.inkTileBounds}` : ''}
+                    {snapshot.inkTileLayerError ? ` · ${snapshot.inkTileLayerError}` : ''}
+                  </small>
+                </li>
+              ) : null}
+              <li>
+                <span>map bounds</span>
+                <small>
+                  {snapshot.mapBoundsEnabled ? 'enabled' : `disabled ${snapshot.mapBoundsDisabledReason}`} · center {snapshot.currentMapCenter ?? '-'} ·
+                  zoom {snapshot.currentZoom?.toFixed(2) ?? '-'} · range {snapshot.mapMinZoom?.toFixed(2) ?? '-'}-
+                  {snapshot.mapMaxZoom?.toFixed(2) ?? '-'} · mist {snapshot.edgeMistLevel}
+                  {snapshot.edgeMistReason ? ` (${snapshot.edgeMistReason})` : ''}
+                  {snapshot.edgeMistStrength !== undefined ? ` · strength ${Math.round(snapshot.edgeMistStrength * 100)}%` : ''}
+                  {snapshot.nearInkBoundary ? ' · near boundary' : ''}
+                  {snapshot.distanceToInkBoundary !== undefined ? ` · boundary ${snapshot.distanceToInkBoundary}m` : ''}
+                  {snapshot.clearMaskMode ? ` · clear ${snapshot.clearMaskMode}/${snapshot.clearMaskSize ?? '-'}/${snapshot.clearMaskShape ?? '-'}` : ''}
+                  {snapshot.clearMaskCenter ? ` · ${snapshot.clearMaskCenter}` : ''}
+                  {snapshot.lastBoundsCorrection ? ` · corrected ${snapshot.lastBoundsCorrection}` : ''}
+                  {snapshot.noMapBoundsDebugOverride ? ' · debug override' : ''}
+                  {snapshot.mapCenterLimitBounds ? ` · center ${snapshot.mapCenterLimitBounds}` : ''}
+                  {snapshot.mapVisualBufferBounds ? ` · buffer ${snapshot.mapVisualBufferBounds}` : ''}
+                </small>
+              </li>
+              <li>
+                <span>glb memory lifecycle</span>
+                <small>
+                  active {snapshot.glbActiveCount}/{snapshot.glbMemoryMaxActive} · cached {snapshot.glbCachedCount} · detached{' '}
+                  {snapshot.glbSoftDetachedCount} · disposed {snapshot.glbDisposedCount} · ttl {Math.round(snapshot.glbMemoryTtlMs / 1000)}s ·
+                  estimate ~{snapshot.glbMemoryEstimateMB}MB
+                </small>
+              </li>
+              <li>
+                <span>scene window</span>
+                <small>
+                  visible {snapshot.windowVisibleCount}/{snapshot.windowActiveCount} · cached {snapshot.windowCachedCount} · behind{' '}
+                  {snapshot.windowBehindCount} · disposed {snapshot.windowDisposedCount} · pressure ~{snapshot.sceneMemoryPressureEstimate}MB
+                </small>
+              </li>
+              <li>
+                <span>scene state</span>
+                <small>
+                  loaded {snapshot.sceneStateLoaded} · visible {snapshot.sceneStateVisible} · hidden {snapshot.sceneStateHidden} · cached{' '}
+                  {snapshot.sceneStateCached} · disposed {snapshot.sceneStateDisposed} · rehydrated {snapshot.sceneStateRehydrated} · loading{' '}
+                  {snapshot.sceneStateActiveLoads} · cache hit {Math.round(snapshot.sceneCacheHitRate * 100)}%
+                </small>
+              </li>
+              <li>
+                <span>scene arbiter</span>
+                <small>
+                  decisions {snapshot.arbiterDecisionCount} · denied {snapshot.arbiterDeniedCount} · throttled {snapshot.arbiterLoadThrottleCount} ·
+                  conflicts {snapshot.arbiterConflictResolveCount} · active loads {snapshot.arbiterActiveLoadCount} · active models{' '}
+                  {snapshot.arbiterActiveModelCount} · pressure ~{snapshot.arbiterMemoryPressureEstimateMB}MB
+                </small>
+              </li>
+              <li>
+                <span>dynamic mist</span>
+                <small>
+                  {snapshot.dynamicMistEnabled ? 'enabled' : 'disabled'} · canvas {snapshot.dynamicMistCanvasActive ? 'active' : 'off'} · quality{' '}
+                  {snapshot.dynamicMistQuality} · recovery {snapshot.dynamicMistRecoveryState ?? '-'}
+                  {snapshot.dynamicMistSpeedScale ? ` · speed ${snapshot.dynamicMistSpeedScale.toFixed(2)}x` : ''}
+                  {snapshot.dynamicMistContrastScale ? ` · contrast ${snapshot.dynamicMistContrastScale.toFixed(2)}x` : ''}
+                  {snapshot.dynamicMistFrameMs !== undefined ? ` · frame ${snapshot.dynamicMistFrameMs}ms` : ''}
+                  {snapshot.dynamicMistFpsEstimate !== undefined ? ` · fps ${snapshot.dynamicMistFpsEstimate}` : ''}
+                  {snapshot.dynamicMistDegraded ? ` · degraded ${snapshot.dynamicMistDegradeReason ?? ''}` : ''}
+                  {snapshot.enableDynamicMistDebugOverride ? ' · debug override' : ''}
+                  {snapshot.skyOptionsAnimated ? ' · sky animated' : ''}
+                </small>
+              </li>
             </ol>
           </section>
 
           <section>
-            <h3>园林 Overlay</h3>
+            <h3>多路线导览</h3>
             <ol>
               <li>
-                <span>Live garden overlays</span>
+                <span>{snapshot.currentRouteName ?? 'pending'}</span>
                 <small>
-                  default {snapshot.defaultGardenAssetCount} · live {snapshot.gardenOverlayLiveCount}
-                  {snapshot.gardenLiveCountWarning ? ' · live-count warning' : ''}
-                  {' · '}
-                  loaded {snapshot.gardenLoadedCount || snapshot.gardenLoaded}/{snapshot.gardenTotal}
-                  {snapshot.gardenLoadBatchIndex !== undefined ? ` · batch ${snapshot.gardenLoadBatchIndex + 1}` : ''}
-                  {snapshot.gardenTierLoaded ? ` · tier ${snapshot.gardenTierLoaded}` : ''}
-                  {' · '}
-                  created {snapshot.gardenOverlayCreated} · removed {snapshot.gardenOverlayRemoved} · duplicate prevented {snapshot.gardenOverlayDuplicatePrevented} · generation {snapshot.gardenLoadGeneration}
-                  {' · '}
-                  LOD {snapshot.gardenLodTier} · opacity {Math.round(snapshot.gardenOpacity * 100)}%
-                  {snapshot.mapInteracting ? ` · interacting ${snapshot.mapInteractionKind ?? 'move'}` : ''}
-                  {snapshot.currentZoom !== undefined ? ` · zoom ${snapshot.currentZoom.toFixed(2)}` : ''}
+                  id {snapshot.currentRouteId ?? '-'} · stops {snapshot.routeStopCount} · current {snapshot.currentStopId ?? '-'} · next {snapshot.nextStopId ?? '-'}
                 </small>
               </li>
-              {snapshot.treeCandidateLabEnabled ? (
-                <li>
-                  <span>Tree candidate lab</span>
-                  <small>
-                    default {snapshot.defaultGardenHidden ? 'hidden' : 'visible'} · refs {snapshot.landmarkReferenceLoaded ? 'loaded' : 'off'} · test trees {snapshot.testTreeCount} · live default {snapshot.liveDefaultGardenOverlayCount} · live test {snapshot.liveTestTreeOverlayCount}
-                    {snapshot.candidateType ? ` · ${snapshot.candidateType}` : ''}
-                    {snapshot.clusterMode ? ` · ${snapshot.clusterMode}` : ''}
-                  </small>
-                </li>
-              ) : null}
+              <li>
+                <span>routeGeometry</span>
+                <small>
+                  {snapshot.routeGeometryMode} · points {snapshot.routeGeometryPointCount} · guideData {snapshot.guideDataRouteSource ? 'true' : 'false'} · unmapped {snapshot.unmappedGuideStopCount}
+                </small>
+              </li>
+              <li>
+                <span>interaction</span>
+                <small>
+                  tour {snapshot.tourStatus} · switches {snapshot.routeSwitchCount}
+                  {snapshot.latestTourEvent?.tourCameraTightenMode ? ` · camera ${snapshot.latestTourEvent.tourCameraTightenMode}` : ''}
+                  {snapshot.latestTourEvent?.tourCameraTightenStrength !== undefined
+                    ? ` ${Math.round(snapshot.latestTourEvent.tourCameraTightenStrength * 100)}%`
+                    : ''}
+                  {snapshot.latestTourEvent?.tourProfile ? ` · ${snapshot.latestTourEvent.tourProfile}` : ''}
+                  {snapshot.latestTourEvent?.tourCameraUpdateFps ? ` · camera ${snapshot.latestTourEvent.tourCameraUpdateFps}fps` : ''}
+                  {snapshot.latestTourEvent?.tourMarkerUpdateFps ? ` · route ${snapshot.latestTourEvent.tourMarkerUpdateFps}fps` : ''}
+                  {snapshot.latestTourEvent?.tourBoundsClampPaused ? ' · bounds paused' : ''}
+                </small>
+              </li>
             </ol>
           </section>
 

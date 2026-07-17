@@ -1,3 +1,4 @@
+/** @deprecated Legacy mobile map retained for rollback; formal routes use /map-3d-guide-c. */
 import {
   AimOutlined,
   ArrowLeftOutlined,

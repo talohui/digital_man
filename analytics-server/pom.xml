@@ -34,6 +34,12 @@
       <artifactId>spring-boot-starter-data-jpa</artifactId>
     </dependency>
 
+    <!-- QQ SMTP HTML 邮件发送（账号和授权码仅从部署环境变量读取） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+
     <!-- H2 内嵌数据库（file 模式持久化） -->
     <dependency>
       <groupId>com.h2database</groupId>

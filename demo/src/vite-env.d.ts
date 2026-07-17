@@ -4,6 +4,9 @@ interface Window {
   TMap?: any
   __tmapLoader?: Promise<any>
   __tmapScriptLoader?: Promise<any>
+  __LINGSHAN_MAP_DEBUG__?: Record<string, unknown>
+  LINGSHAN_MAP_DEBUG?: Record<string, unknown>
+  __GET_LINGSHAN_MAP_SNAPSHOT__?: () => Record<string, unknown>
 }
 
 interface ImportMetaEnv {
@@ -13,4 +16,5 @@ interface ImportMetaEnv {
   readonly VITE_TMAP_WEB_KEY?: string
   readonly VITE_TMAP_ROUTE_KEY?: string
   readonly VITE_VOICE_ASR_MODE?: 'auto' | 'browser' | 'cloud'
+  readonly VITE_ADMIN_DEMO_DATA?: string
 }

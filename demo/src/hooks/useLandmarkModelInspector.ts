@@ -12,11 +12,10 @@ import {
   type LandmarkOptimizedModelCandidate
 } from '../data/lingshanOptimizedModelCandidates'
 import type { LatLngPoint } from '../data/guideData'
+import type { LayerManager } from '../lib/map/LayerManager'
 import type { Map3DPerfRecorder } from '../lib/map3dPerf'
 
 export const LANDMARK_CALIBRATION_DRAFT_STORAGE_KEY = 'lingshan_landmark_calibration_draft_v1'
-const LANDMARK_MODEL_READY_RETRY_MS = 500
-const LANDMARK_MODEL_READY_MAX_RETRIES = 12
 
 export type LandmarkInspectorStatus = 'idle' | 'loading' | 'loaded' | 'failed' | 'unloaded'
 
@@ -110,7 +109,7 @@ export type LandmarkModelInspector = {
   calibrationDraftCount: number
   usesLocalDraft: boolean
   startCalibration: (id: string) => void
-  loadLandmark: (id: string) => void
+  loadLandmark: (id: string, options?: LandmarkLoadOptions) => void
   unloadLandmark: (id: string) => void
   focusLandmark: (id: string) => void
   updateCalibration: (id: string, patch: Partial<LandmarkCalibrationValues>) => void
@@ -138,6 +137,12 @@ export type LandmarkModelInspector = {
   getAllCalibrationPatches: () => LandmarkCalibrationPatch[]
 }
 
+export type LandmarkLoadOptions = {
+  modelUrl?: string
+  fileSizeLabel?: string
+  runtimeLabel?: string
+}
+
 type LandmarkInspectorState = Record<
   string,
   {
@@ -162,9 +167,11 @@ type LandmarkCompanionInspectorState = Record<
 
 type UseLandmarkModelInspectorOptions = {
   active: boolean
+  layerManager?: LayerManager
   useLocalDrafts?: boolean
   map: any
   mapReady: boolean
+  isMapCurrent?: (map: any) => boolean
   overlays: LingshanMapModelOverlay[]
   perfRecorder: Map3DPerfRecorder
   resolveLocation: (overlay: LingshanMapModelOverlay) => LatLngPoint | null
@@ -173,9 +180,11 @@ type UseLandmarkModelInspectorOptions = {
 
 export function useLandmarkModelInspector({
   active,
+  layerManager,
   useLocalDrafts = true,
   map,
   mapReady,
+  isMapCurrent,
   overlays,
   perfRecorder,
   resolveLocation,
@@ -183,13 +192,13 @@ export function useLandmarkModelInspector({
 }: UseLandmarkModelInspectorOptions): LandmarkModelInspector {
   const modelsRef = useRef<Map<string, any>>(new Map())
   const companionModelsRef = useRef<Map<string, any>>(new Map())
+  const activeRef = useRef(active)
+  const loadedModelUrlsRef = useRef<Map<string, string>>(new Map())
   const footprintMaskLayerRef = useRef<any>(null)
   const versionsRef = useRef<Map<string, number>>(new Map())
   const companionVersionsRef = useRef<Map<string, number>>(new Map())
   const calibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
   const companionCalibrationApplyTimersRef = useRef<Map<string, number>>(new Map())
-  const landmarkReadyRetryTimersRef = useRef<Map<string, number>>(new Map())
-  const landmarkReadyRetryCountsRef = useRef<Map<string, number>>(new Map())
   const overlayLookup = useMemo(() => buildOverlayLookup(overlays), [overlays])
   const [state, setState] = useState<LandmarkInspectorState>(() => buildInitialState(overlays))
   const [companionState, setCompanionState] = useState<LandmarkCompanionInspectorState>(() =>
@@ -206,18 +215,41 @@ export function useLandmarkModelInspector({
   >(() => buildInitialCompanionCalibrationEdits(overlays, active && useLocalDrafts ? loadCalibrationDrafts() : {}))
   const [activeCalibrationId, setActiveCalibrationId] = useState<string | undefined>()
   const [selectedVariants, setSelectedVariants] = useState<Record<string, LandmarkModelVariant>>({})
+  activeRef.current = active
+  const canTouchRuntimeMap = () => Boolean(map && (isMapCurrent ? isMapCurrent(map) : true))
+  const invalidatePendingModelLoads = () => {
+    overlays.forEach((overlay) => {
+      const id = getMapModelOverlayInspectorId(overlay)
+      versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
+      overlay.companionModels?.forEach((companion) => {
+        const key = getCompanionKey(id, companion.id)
+        companionVersionsRef.current.set(key, (companionVersionsRef.current.get(key) ?? 0) + 1)
+      })
+    })
+  }
+  const detachRuntimeModel = (layerName: string, model: any) => {
+    if (!model) {
+      return
+    }
+    const manager = layerManager
+    if (manager && manager.getLayer(layerName) === model) {
+      manager.removeLayer(layerName, model)
+      return
+    }
+    clearLandmarkModel(model, canTouchRuntimeMap())
+  }
 
   useEffect(() => {
     if (!active) {
-      clearLandmarkModels(modelsRef.current)
+      invalidatePendingModelLoads()
+      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchRuntimeMap())
       modelsRef.current = new Map()
-      clearLandmarkModels(companionModelsRef.current)
+      loadedModelUrlsRef.current = new Map()
+      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName, canTouchRuntimeMap())
       companionModelsRef.current = new Map()
       clearFootprintMaskLayer(footprintMaskLayerRef)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
       clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
-      clearCalibrationTimers(landmarkReadyRetryTimersRef.current)
-      landmarkReadyRetryCountsRef.current.clear()
       return
     }
 
@@ -226,7 +258,7 @@ export function useLandmarkModelInspector({
     setCalibrationEdits(buildInitialCalibrationEdits(overlays, drafts))
     setCompanionCalibrationEdits(buildInitialCompanionCalibrationEdits(overlays, drafts))
     perfRecorder.setLandmarkTotal(overlays.length)
-  }, [active, overlays, perfRecorder, useLocalDrafts])
+  }, [active, isMapCurrent, layerManager, map, overlays, perfRecorder, useLocalDrafts])
 
   useEffect(() => {
     setState((current) => {
@@ -290,7 +322,7 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     if (!active || !activeCalibrationId) {
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchRuntimeMap())
       return
     }
 
@@ -299,7 +331,7 @@ export function useLandmarkModelInspector({
     const anchor = overlay ? resolveLocation(overlay) : null
 
     if (!overlay || !calibration || !anchor) {
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchRuntimeMap())
       return
     }
 
@@ -308,12 +340,13 @@ export function useLandmarkModelInspector({
       active,
       map,
       mapReady,
+      mapCurrent: canTouchRuntimeMap(),
       overlay,
       anchor,
       calibration,
       layerRef: footprintMaskLayerRef
     })
-  }, [active, activeCalibrationId, calibrationEdits, map, mapReady, overlayLookup, resolveLocation])
+  }, [active, activeCalibrationId, calibrationEdits, isMapCurrent, map, mapReady, overlayLookup, resolveLocation])
 
   useEffect(() => {
     const activeValues = activeCalibrationId ? calibrationEdits[activeCalibrationId] : undefined
@@ -326,17 +359,19 @@ export function useLandmarkModelInspector({
 
   useEffect(() => {
     return () => {
-      clearLandmarkModels(modelsRef.current)
+      activeRef.current = false
+      invalidatePendingModelLoads()
+      const canTouchMap = canTouchRuntimeMap()
+      clearLandmarkModels(modelsRef.current, layerManager, getLandmarkModelLayerName, canTouchMap)
       modelsRef.current = new Map()
-      clearLandmarkModels(companionModelsRef.current)
+      loadedModelUrlsRef.current = new Map()
+      clearLandmarkModels(companionModelsRef.current, layerManager, getCompanionModelLayerName, canTouchMap)
       companionModelsRef.current = new Map()
-      clearFootprintMaskLayer(footprintMaskLayerRef)
+      clearFootprintMaskLayer(footprintMaskLayerRef, canTouchMap)
       clearCalibrationTimers(calibrationApplyTimersRef.current)
       clearCalibrationTimers(companionCalibrationApplyTimersRef.current)
-      clearCalibrationTimers(landmarkReadyRetryTimersRef.current)
-      landmarkReadyRetryCountsRef.current.clear()
     }
-  }, [])
+  }, [isMapCurrent, layerManager, map])
 
   const items = useMemo(
     () =>
@@ -447,10 +482,10 @@ export function useLandmarkModelInspector({
     })
   }
 
-  const loadLandmark = (id: string) => {
+  const loadLandmark = (id: string, options?: LandmarkLoadOptions) => {
     const overlay = overlayLookup.get(id)
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
-    createLandmarkModel(id, { trackLoad: true, calibration })
+    void createLandmarkModel(id, { trackLoad: true, calibration, loadOptions: options })
   }
 
   const setModelVariant = (id: string, variant: LandmarkModelVariant) => {
@@ -464,8 +499,9 @@ export function useLandmarkModelInspector({
     const hadModel = modelsRef.current.has(id)
     const model = modelsRef.current.get(id)
     if (model) {
-      clearLandmarkModel(model)
+      detachRuntimeModel(getLandmarkModelLayerName(id), model)
       modelsRef.current.delete(id)
+      loadedModelUrlsRef.current.delete(id)
     }
 
     versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
@@ -489,8 +525,9 @@ export function useLandmarkModelInspector({
     const model = modelsRef.current.get(id)
 
     if (model) {
-      clearLandmarkModel(model)
+      detachRuntimeModel(getLandmarkModelLayerName(id), model)
       modelsRef.current.delete(id)
+      loadedModelUrlsRef.current.delete(id)
     }
 
     versionsRef.current.set(id, (versionsRef.current.get(id) ?? 0) + 1)
@@ -508,7 +545,7 @@ export function useLandmarkModelInspector({
     const anchor = overlay ? resolveLocation(overlay) : null
     const calibration = calibrationEdits[id] ?? (overlay ? buildDefaultCalibration(overlay) : undefined)
 
-    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !overlay || !anchor || !calibration) {
       return
     }
 
@@ -636,7 +673,7 @@ export function useLandmarkModelInspector({
     const model = companionModelsRef.current.get(key)
 
     if (model) {
-      clearLandmarkModel(model)
+      detachRuntimeModel(getCompanionModelLayerName(key), model)
       companionModelsRef.current.delete(key)
     }
 
@@ -664,7 +701,7 @@ export function useLandmarkModelInspector({
           mergeCompanionCalibration(buildDefaultCompanionCalibration(companion), savedDrafts[parentId]?.companions?.[companionId])
         : undefined
 
-    if (!active || !mapReady || !window.TMap || !map || !overlay || !anchor || !calibration) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !overlay || !anchor || !calibration) {
       return
     }
 
@@ -877,58 +914,30 @@ export function useLandmarkModelInspector({
       .map(([id]) => getCalibrationPatch(id))
       .filter((patch): patch is LandmarkCalibrationPatch => Boolean(patch))
 
-  const createLandmarkModel = (
+  const createLandmarkModel = async (
     id: string,
     options: {
       trackLoad: boolean
       calibration?: LandmarkCalibrationValues
+      loadOptions?: LandmarkLoadOptions
     }
   ) => {
-    if (!active || !mapReady || !window.TMap || !map) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !window.TMap.model?.GLTFModel) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
-        error: '地图尚未就绪'
+        error: '地图或 GLTFModel 尚未就绪'
       }))
       return false
     }
-
-    if (!window.TMap.model?.GLTFModel) {
-      const retryCount = landmarkReadyRetryCountsRef.current.get(id) ?? 0
-
-      if (retryCount < LANDMARK_MODEL_READY_MAX_RETRIES) {
-        if (!landmarkReadyRetryTimersRef.current.has(id)) {
-          landmarkReadyRetryCountsRef.current.set(id, retryCount + 1)
-          const timer = window.setTimeout(() => {
-            landmarkReadyRetryTimersRef.current.delete(id)
-            createLandmarkModel(id, options)
-          }, LANDMARK_MODEL_READY_RETRY_MS)
-          landmarkReadyRetryTimersRef.current.set(id, timer)
-        }
-
-        updateItemState(id, (current) => ({
-          ...current,
-          status: 'loading',
-          error: '等待 GLTFModel 扩展就绪'
-        }))
-        return false
-      }
-
-      updateItemState(id, (current) => ({
-        ...current,
-        status: 'failed',
-        error: 'GLTFModel 扩展加载超时'
-      }))
-      return false
-    }
-
-    clearCalibrationTimer(landmarkReadyRetryTimersRef.current, id)
-    landmarkReadyRetryCountsRef.current.delete(id)
 
     const overlay = overlayLookup.get(id)
     const variantInfo = overlay ? resolveVariantInfo(id, overlay, selectedVariants[id]) : undefined
+    const runtimeModelUrl = options.loadOptions?.modelUrl ?? variantInfo?.modelUrl
+    const runtimeSizeLabel = options.loadOptions?.fileSizeLabel ?? variantInfo?.sizeLabel
+    const runtimeVariantLabel = options.loadOptions?.runtimeLabel ?? variantInfo?.variant
 
-    if (!overlay || !variantInfo?.modelUrl) {
+    if (!overlay || !runtimeModelUrl || !variantInfo) {
       updateItemState(id, (current) => ({
         ...current,
         status: 'failed',
@@ -940,7 +949,11 @@ export function useLandmarkModelInspector({
     const calibration = options.calibration ?? calibrationEdits[id] ?? mergeCalibration(buildDefaultCalibration(overlay), savedDrafts[id])
     const currentState = state[id]
 
-    if (options.trackLoad && (currentState?.status === 'loading' || modelsRef.current.has(id))) {
+    if (options.trackLoad && currentState?.status === 'loading') {
+      return true
+    }
+
+    if (options.trackLoad && modelsRef.current.has(id) && loadedModelUrlsRef.current.get(id) === runtimeModelUrl) {
       return true
     }
 
@@ -957,21 +970,22 @@ export function useLandmarkModelInspector({
         perfRecorder.startLandmarkAsset({
           id,
           name: overlay.name,
-          modelUrl: variantInfo.modelUrl,
+          modelUrl: runtimeModelUrl,
           anchorId: overlay.poiId,
-          fileSizeLabel: variantInfo.sizeLabel,
+          fileSizeLabel: runtimeSizeLabel,
           priority: overlay.priority,
           variant: variantInfo.variant,
-          selectedModelUrl: variantInfo.modelUrl,
-          selectedSizeLabel: variantInfo.sizeLabel
+          selectedModelUrl: runtimeModelUrl,
+          selectedSizeLabel: runtimeSizeLabel ?? runtimeVariantLabel
         })
       }
       perfRecorder.failLandmarkAsset(id, 'POI / anchor 坐标缺失')
       return false
     }
 
-    clearLandmarkModel(modelsRef.current.get(id))
+    detachRuntimeModel(getLandmarkModelLayerName(id), modelsRef.current.get(id))
     modelsRef.current.delete(id)
+    loadedModelUrlsRef.current.delete(id)
 
     const version = (versionsRef.current.get(id) ?? 0) + 1
     versionsRef.current.set(id, version)
@@ -989,27 +1003,51 @@ export function useLandmarkModelInspector({
       perfRecorder.startLandmarkAsset({
         id,
         name: overlay.name,
-        modelUrl: variantInfo.modelUrl,
+        modelUrl: runtimeModelUrl,
         anchorId: overlay.poiId,
-        fileSizeLabel: variantInfo.sizeLabel,
+        fileSizeLabel: runtimeSizeLabel,
         priority: overlay.priority,
         variant: variantInfo.variant,
-        selectedModelUrl: variantInfo.modelUrl,
-        selectedSizeLabel: variantInfo.sizeLabel
+        selectedModelUrl: runtimeModelUrl,
+        selectedSizeLabel: runtimeSizeLabel ?? runtimeVariantLabel
       })
+
+      const health = await inspectGlbModelUrl(runtimeModelUrl)
+      if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
+        return false
+      }
+      if (!health.ok) {
+        const durationMs = Math.round(performance.now() - startedAt)
+        updateItemState(id, (current) => ({
+          ...current,
+          status: 'failed',
+          durationMs,
+          error: health.error
+        }))
+        perfRecorder.failLandmarkAsset(id, health.error)
+        return false
+      }
     }
 
     try {
+      if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
+        return false
+      }
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${id}`,
         map,
-        url: variantInfo.modelUrl,
+        url: runtimeModelUrl,
         position: toTMapPosition(anchor, calibration),
         rotation: toTMapRotation(overlay, calibration),
         scale: calibration.scale
       })
 
       modelsRef.current.set(id, model)
+      loadedModelUrlsRef.current.set(id, runtimeModelUrl)
+      if (layerManager && !layerManager.registerLayer(getLandmarkModelLayerName(id), model, map)) {
+        clearLandmarkModel(model, canTouchRuntimeMap())
+        return false
+      }
       const durationMs = Math.round(performance.now() - startedAt)
       updateItemState(id, (current) => ({
         ...current,
@@ -1024,7 +1062,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (versionsRef.current.get(id) !== version) {
+          if (!activeRef.current || versionsRef.current.get(id) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)
@@ -1064,7 +1102,7 @@ export function useLandmarkModelInspector({
       return false
     }
 
-    if (!active || !mapReady || !window.TMap || !map || !window.TMap.model?.GLTFModel) {
+    if (!active || !mapReady || !window.TMap || !canTouchRuntimeMap() || !window.TMap.model?.GLTFModel) {
       updateCompanionState(key, (current) => ({
         ...current,
         status: 'failed',
@@ -1103,7 +1141,7 @@ export function useLandmarkModelInspector({
       return true
     }
 
-    clearLandmarkModel(companionModelsRef.current.get(key))
+    detachRuntimeModel(getCompanionModelLayerName(key), companionModelsRef.current.get(key))
     companionModelsRef.current.delete(key)
 
     const version = (companionVersionsRef.current.get(key) ?? 0) + 1
@@ -1131,6 +1169,9 @@ export function useLandmarkModelInspector({
 
     if (options.trackLoad) {
       const exists = await modelUrlLooksAvailable(companion.modelUrl)
+      if (!activeRef.current || !canTouchRuntimeMap() || companionVersionsRef.current.get(key) !== version) {
+        return false
+      }
       if (!exists) {
         const errorMessage = `底座模型文件缺失，待放入 ${companion.modelUrl.replace('/models/lingshan/optimized/', '')}`
         updateCompanionState(key, (current) => ({
@@ -1151,9 +1192,37 @@ export function useLandmarkModelInspector({
         })
         return false
       }
+
+      const health = await inspectGlbModelUrl(companion.modelUrl)
+      if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
+        return false
+      }
+      if (!health.ok) {
+        const durationMs = Math.round(performance.now() - startedAt)
+        updateCompanionState(key, (current) => ({
+          ...current,
+          status: 'failed',
+          durationMs,
+          error: health.error
+        }))
+        perfRecorder.recordCompanionModelEvent({
+          type: 'companionModelFailed',
+          parentLandmarkId: parentId,
+          companionId,
+          modelUrl: companion.modelUrl,
+          status: 'failed',
+          durationMs,
+          error: health.error,
+          ...calibration
+        })
+        return false
+      }
     }
 
     try {
+      if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
+        return false
+      }
       const model = new window.TMap.model.GLTFModel({
         id: `map-3d-guide-landmark-inspector-${parentId}-${companionId}`,
         map,
@@ -1164,6 +1233,10 @@ export function useLandmarkModelInspector({
       })
 
       companionModelsRef.current.set(key, model)
+      if (layerManager && !layerManager.registerLayer(getCompanionModelLayerName(key), model, map)) {
+        clearLandmarkModel(model, canTouchRuntimeMap())
+        return false
+      }
       const durationMs = Math.round(performance.now() - startedAt)
       updateCompanionState(key, (current) => ({
         ...current,
@@ -1186,7 +1259,7 @@ export function useLandmarkModelInspector({
 
       if (typeof model.on === 'function') {
         model.on('error', (error: unknown) => {
-          if (companionVersionsRef.current.get(key) !== version) {
+          if (!activeRef.current || companionVersionsRef.current.get(key) !== version || !canTouchRuntimeMap()) {
             return
           }
           const errorMessage = normalizeError(error)
@@ -1268,7 +1341,7 @@ export function useLandmarkModelInspector({
       }
     }
 
-    createLandmarkModel(id, {
+    void createLandmarkModel(id, {
       trackLoad: false,
       calibration
     })
@@ -1365,18 +1438,15 @@ export function useLandmarkModelInspector({
 
 function resolveVariantInfo(id: string, overlay: LingshanMapModelOverlay, selected?: LandmarkModelVariant) {
   const candidates = getLandmarkOptimizedModelCandidates(id)
-  // 正式 runtime 永远以 overlays 配置的 modelUrl 为准;candidates 只服务 debug 面板切换对比。
-  // overlay.modelUrl 不在 candidates 里时合成 formal 候选兜底,
-  // 不能回退 raw:raw 大文件本地缺失时 dev 会拿到 HTML fallback,整个地标静默不渲染。
-  const formalFromList = candidates.find((candidate) => candidate.modelUrl === overlay.modelUrl)
-  const formalCandidate: LandmarkOptimizedModelCandidate = formalFromList ?? {
-    variant: 'formal',
+  const fallbackRaw: LandmarkOptimizedModelCandidate = {
+    variant: 'raw',
     modelUrl: overlay.modelUrl ?? '',
     sizeLabel: overlay.fileSizeLabel ?? 'size ?'
   }
-  const allCandidates = formalFromList ? candidates : [formalCandidate, ...candidates]
-  const variant = selected ?? formalCandidate.variant
-  const selectedCandidate = allCandidates.find((candidate) => candidate.variant === variant) ?? formalCandidate
+  const allCandidates = candidates.length ? candidates : [fallbackRaw]
+  const formalCandidate = allCandidates.find((candidate) => candidate.modelUrl === overlay.modelUrl)
+  const variant = selected ?? formalCandidate?.variant ?? 'raw'
+  const selectedCandidate = allCandidates.find((candidate) => candidate.variant === variant) ?? formalCandidate ?? allCandidates[0] ?? fallbackRaw
 
   return {
     variant: selectedCandidate.variant,
@@ -1653,6 +1723,62 @@ function splitCompanionKey(key: string): [string, string] {
   return [parentId, companionId]
 }
 
+type GlbModelUrlHealth = { ok: true } | { ok: false; error: string }
+
+const glbModelUrlHealthCache = new Map<string, Promise<GlbModelUrlHealth>>()
+
+async function inspectGlbModelUrl(modelUrl: string): Promise<GlbModelUrlHealth> {
+  if (!modelUrl.toLowerCase().endsWith('.glb')) {
+    return { ok: true }
+  }
+
+  const cached = glbModelUrlHealthCache.get(modelUrl)
+  if (cached) {
+    return cached
+  }
+
+  const check = inspectGlbModelUrlUncached(modelUrl)
+  glbModelUrlHealthCache.set(modelUrl, check)
+  return check
+}
+
+async function inspectGlbModelUrlUncached(modelUrl: string): Promise<GlbModelUrlHealth> {
+  try {
+    const response = await fetch(modelUrl, {
+      headers: {
+        Range: 'bytes=0-255'
+      }
+    })
+
+    if (response.status === 404) {
+      return { ok: false, error: `模型文件缺失：${modelUrl}` }
+    }
+    if (!response.ok && response.status !== 206) {
+      return { ok: true }
+    }
+    if (response.status !== 206) {
+      const contentLength = Number(response.headers.get('content-length') ?? 0)
+      if (!contentLength || contentLength > 1024) {
+        return { ok: true }
+      }
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const headerText = new TextDecoder().decode(bytes.slice(0, Math.min(bytes.length, 96)))
+
+    if (headerText.startsWith('version https://git-lfs.github.com/spec/v1')) {
+      return { ok: false, error: `GLB appears to be Git LFS pointer: ${modelUrl}` }
+    }
+    if (!headerText.startsWith('glTF')) {
+      return { ok: false, error: `GLB header invalid: ${modelUrl}` }
+    }
+
+    return { ok: true }
+  } catch {
+    return { ok: true }
+  }
+}
+
 async function modelUrlLooksAvailable(modelUrl: string) {
   try {
     const response = await fetch(modelUrl, { method: 'HEAD' })
@@ -1670,33 +1796,34 @@ function applyFootprintMaskLayer(options: {
   active: boolean
   map: any
   mapReady: boolean
+  mapCurrent: boolean
   overlay: LingshanMapModelOverlay
   anchor: LatLngPoint
   calibration: LandmarkCalibrationValues
   layerRef: MutableRefObject<any>
 }) {
-  const { active, map, mapReady, overlay, anchor, calibration, layerRef } = options
+  const { active, map, mapReady, mapCurrent, overlay, anchor, calibration, layerRef } = options
   const mask = calibration.footprintMask
 
-  if (!active || !mapReady || !map || !window.TMap || !mask?.enabled) {
-    clearFootprintMaskLayer(layerRef)
+  if (!active || !mapReady || !mapCurrent || !map || !window.TMap || !mask?.enabled) {
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   const geometries = buildFootprintMaskGeometries(options.id, anchor, calibration, mask)
 
   if (!geometries.length) {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   if (!overlay.footprintMask || !window.TMap.MultiPolygon || !window.TMap.PolygonStyle) {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     return
   }
 
   try {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
     // TMap.MultiPolygon is a ground footprint. `height` is retained in the draft
     // for a future thin-base implementation, but it does not remove Tencent 3D buildings.
     layerRef.current = new window.TMap.MultiPolygon({
@@ -1712,7 +1839,7 @@ function applyFootprintMaskLayer(options: {
       geometries
     })
   } catch {
-    clearFootprintMaskLayer(layerRef)
+    clearFootprintMaskLayer(layerRef, mapCurrent)
   }
 }
 
@@ -1829,22 +1956,65 @@ function colorWithOpacity(color: string, opacity: number) {
   return color
 }
 
-function clearLandmarkModel(model: any) {
-  model?.setMap?.(null)
-  model?.remove?.()
-  model?.destroy?.()
+function clearLandmarkModel(model: any, canTouchMap = true) {
+  if (!canTouchMap) {
+    return
+  }
+
+  try {
+    model?.setMap?.(null)
+  } catch {
+    // Tencent model cleanup can throw after the map has already been destroyed.
+  }
+
+  try {
+    model?.remove?.()
+  } catch {
+    // Best-effort cleanup.
+  }
+
+  try {
+    model?.destroy?.()
+  } catch {
+    // Best-effort cleanup.
+  }
 }
 
-function clearFootprintMaskLayer(layerRef: MutableRefObject<any>) {
+function clearFootprintMaskLayer(layerRef: MutableRefObject<any>, canTouchMap = true) {
   const layer = layerRef.current
-  layer?.setMap?.(null)
-  layer?.remove?.()
-  layer?.destroy?.()
+  if (canTouchMap) {
+    try {
+      layer?.setMap?.(null)
+      layer?.remove?.()
+      layer?.destroy?.()
+    } catch {
+      // A destroyed Tencent map owns its former footprint layer cleanup.
+    }
+  }
   layerRef.current = null
 }
 
-function clearLandmarkModels(models: Map<string, any>) {
-  models.forEach((model) => clearLandmarkModel(model))
+function clearLandmarkModels(
+  models: Map<string, any>,
+  layerManager?: LayerManager,
+  getLayerName: (id: string) => string = getLandmarkModelLayerName,
+  canTouchMap = true
+) {
+  models.forEach((model, id) => {
+    if (layerManager) {
+      layerManager.removeLayer(getLayerName(id), model)
+    } else {
+      clearLandmarkModel(model, canTouchMap)
+    }
+  })
+}
+
+function getLandmarkModelLayerName(id: string) {
+  return `model_landmark:${id}`
+}
+
+function getCompanionModelLayerName(key: string) {
+  return `model_landmark_companion:${key}`
 }
 
 function clearCalibrationTimer(timers: Map<string, number>, id: string) {

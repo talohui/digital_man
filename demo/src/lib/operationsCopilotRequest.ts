@@ -35,9 +35,15 @@ export function buildOperationsCopilotQueryRequest(input: string | OperationsCop
   }
 }
 
-export function buildOperationsCopilotConfirmRequest(fayAdminSessionToken: string): RequestInit {
+export function buildOperationsCopilotConfirmRequest(
+  fayAdminSessionToken: string,
+  proposalRevision: string,
+): RequestInit {
   return {
     method: 'POST',
-    headers: { 'X-Fay-Admin-Session': fayAdminSessionToken },
+    headers: {
+      'X-Fay-Admin-Session': fayAdminSessionToken,
+      'If-Match': proposalRevision,
+    },
   }
 }

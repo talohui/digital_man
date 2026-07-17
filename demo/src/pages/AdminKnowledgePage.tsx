@@ -3,7 +3,7 @@ import {
   Button,
   Card,
   Col,
-  ConfigProvider,
+  Divider,
   Form,
   Input,
   Modal,
@@ -13,11 +13,11 @@ import {
   Table,
   Tag,
   Typography,
-  Upload,
-  theme
+  Upload
 } from 'antd'
 import {
   CloudUploadOutlined,
+  CheckCircleFilled,
   DatabaseOutlined,
   FileTextOutlined,
   PlusOutlined,
@@ -26,7 +26,6 @@ import {
 } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
   createFaq,
   deleteFaq,
@@ -35,20 +34,22 @@ import {
   updateFaq,
   uploadKbDocument,
   type FaqItem,
-  type KbStats
+  type KbStats,
+  type UploadResult
 } from '../api/kb'
+import { describeUploadOperation, summarizeUploadQuality } from '../lib/kbUploadQuality'
 
 const { Title, Text } = Typography
 
 const palette = {
-  bg: '#0a1626',
-  gold: '#d4af37',
-  text: '#e8eef6',
-  muted: '#8aa0b6',
-  cyan: '#39d0d8',
-  green: '#61d394',
-  red: '#ff7875',
-  border: '#244463'
+  bg: '#f5f1e8',
+  gold: '#a87c34',
+  text: '#263730',
+  muted: '#728078',
+  cyan: '#2f766c',
+  green: '#3f7d5b',
+  red: '#a34a3f',
+  border: '#ddd4c4'
 }
 
 type QualityLevel = 'error' | 'warning' | 'info' | 'success'
@@ -293,6 +294,7 @@ function KnowledgeInner() {
   const [uploadCategory, setUploadCategory] = useState('')
   const [loading, setLoading] = useState(false)
   const [serviceError, setServiceError] = useState<string | null>(null)
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<FaqItem | null>(null)
@@ -306,6 +308,10 @@ function KnowledgeInner() {
     info: qualityReport.issues.filter((issue) => issue.level === 'info').length
   }), [qualityReport.issues])
   const activeIssueFaqs = useMemo(() => getIssueFaqMatches(activeIssue, faqs), [activeIssue, faqs])
+  const uploadSummary = useMemo(
+    () => uploadResult ? summarizeUploadQuality(uploadResult.quality) : null,
+    [uploadResult]
+  )
 
   const refresh = async () => {
     setLoading(true)
@@ -338,7 +344,8 @@ function KnowledgeInner() {
       try {
         const res = await uploadKbDocument(file as File, uploadCategory)
         const catTip = uploadCategory.trim() ? `（分类：${uploadCategory.trim()}）` : ''
-        message.success(`「${res.docName}」已入库${catTip}，新增 ${res.chunkCount} 个切片`)
+        message.success(`「${res.docName}」${describeUploadOperation(res.operation)}${catTip}`)
+        setUploadResult(res)
         setStats(res.stats)
         await refresh()
       } catch (err) {
@@ -457,22 +464,21 @@ function KnowledgeInner() {
   ]
 
   return (
-    <main style={{ minHeight: '100vh', background: `radial-gradient(circle at top left, #143055 0, ${palette.bg} 40%, #050b14 100%)`, color: palette.text, padding: 22 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18 }}>
+    <main className="admin-page admin-ops-knowledge">
+      <header className="admin-ops-page-intro">
         <div>
-          <Text style={{ color: palette.gold, fontWeight: 700 }}>KNOWLEDGE BASE</Text>
-          <Title level={2} style={{ color: palette.text, margin: '4px 0 0', fontSize: 28 }}>灵山知识库管理</Title>
-          <Text style={{ color: palette.muted }}>上传景区资料自动入库 · 在线编辑 FAQ 立即生效</Text>
+          <Text className="admin-ops-page-intro__eyebrow">知识库内容治理</Text>
+          <Title level={2}>灵山知识库管理</Title>
+          <Text className="admin-ops-page-intro__description">上传景区资料自动入库，在线质检并编辑 FAQ，发布后立即进入真实检索链路。</Text>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>刷新</Button>
-          <Link to="/admin"><Button>返回驾驶舱</Button></Link>
         </div>
       </header>
 
       {serviceError ? (
         <Card style={{ marginBottom: 16, borderColor: '#c5505a', background: 'rgba(197,80,90,0.1)' }}>
-          <Text style={{ color: '#ff9aa2' }}>
+          <Text style={{ color: palette.red }}>
             知识库服务未连接：{serviceError}。请在 lingshan-rag 目录运行 <code>python kb_server/app.py</code>（默认 5011 端口）。
           </Text>
         </Card>
@@ -643,6 +649,88 @@ function KnowledgeInner() {
       </Card>
 
       <Modal
+        title="知识库入库验收"
+        open={Boolean(uploadResult)}
+        onCancel={() => setUploadResult(null)}
+        footer={<Button type="primary" onClick={() => setUploadResult(null)}>完成</Button>}
+        width={680}
+        destroyOnClose
+      >
+        {uploadResult && uploadSummary ? (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+              <CheckCircleFilled style={{ color: palette.green, fontSize: 34, marginTop: 2 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Text strong style={{ color: palette.text, fontSize: 18 }}>{uploadResult.docName}</Text>
+                  <Tag color={uploadResult.operation === 'unchanged' ? 'default' : 'green'}>
+                    {describeUploadOperation(uploadResult.operation)}
+                  </Tag>
+                </div>
+                <div style={{ color: palette.green, marginTop: 6, fontWeight: 600 }}>
+                  {uploadSummary.retrievalLabel}
+                </div>
+                <div style={{ color: palette.muted, marginTop: 3, fontSize: 13 }}>
+                  文件已完成解析、切块、向量写入和检索验证，可供数字人下一次问答使用。
+                </div>
+              </div>
+            </div>
+
+            <Divider style={{ margin: 0, borderColor: palette.border }} />
+
+            <Row gutter={[12, 12]}>
+              {[
+                ['有效结构', uploadSummary.structureLabel],
+                ['知识切片', `${uploadResult.quality.chunkCount} 个`],
+                ['检索烟测', uploadSummary.probeLabel],
+                ['资料分类', uploadResult.category || '未分类']
+              ].map(([label, value]) => (
+                <Col xs={24} sm={12} key={label}>
+                  <div style={{ borderLeft: `3px solid ${palette.cyan}`, padding: '4px 0 4px 12' }}>
+                    <div style={{ color: palette.muted, fontSize: 12 }}>{label}</div>
+                    <div style={{ color: palette.text, marginTop: 3, lineHeight: 1.5 }}>{value}</div>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+
+            {uploadResult.quality.topics.length || uploadResult.quality.spots.length ? (
+              <div>
+                <Text style={{ color: palette.muted, fontSize: 12 }}>自动识别</Text>
+                <div style={{ marginTop: 7 }}>
+                  {uploadResult.quality.spots.map((spot) => <Tag color="gold" key={`spot-${spot}`}>{spot}</Tag>)}
+                  {uploadResult.quality.topics.map((topic) => <Tag color="cyan" key={`topic-${topic}`}>{topic}</Tag>)}
+                </div>
+              </div>
+            ) : null}
+
+            {uploadResult.quality.retrieval.probes.length ? (
+              <div>
+                <Text style={{ color: palette.muted, fontSize: 12 }}>检索探针</Text>
+                <div style={{ display: 'grid', gap: 7, marginTop: 8 }}>
+                  {uploadResult.quality.retrieval.probes.map((probe) => (
+                    <div key={probe.query} style={{ display: 'flex', alignItems: 'center', gap: 8, color: palette.text }}>
+                      <CheckCircleFilled style={{ color: probe.matched ? palette.green : palette.muted }} />
+                      <span>{probe.query}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {uploadResult.quality.warnings.length ? (
+              <div style={{ borderLeft: `3px solid ${palette.gold}`, paddingLeft: 12 }}>
+                <Text style={{ color: palette.gold }}>可优化提示</Text>
+                {uploadResult.quality.warnings.map((warning) => (
+                  <div key={warning} style={{ color: palette.muted, marginTop: 4 }}>{warning}</div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
         title={editing ? '编辑 FAQ' : '新增 FAQ'}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
@@ -759,11 +847,9 @@ function KnowledgeInner() {
 
 function AdminKnowledgePage() {
   return (
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: palette.gold } }}>
-      <App>
-        <KnowledgeInner />
-      </App>
-    </ConfigProvider>
+    <App>
+      <KnowledgeInner />
+    </App>
   )
 }
 

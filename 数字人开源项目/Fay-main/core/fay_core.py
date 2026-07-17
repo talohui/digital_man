@@ -1631,6 +1631,9 @@ class FeiFei:
 
 
                         filtered_text = filtered_text.replace('\n', '')
+                        # 管理端会定点更新 config.json 中的 attribute.voice。
+                        # 合成前重读配置，使下一条 TTS 直接使用新音色，无需重启 Fay。
+                        config_util.load_config()
                         mood_voice = self.__get_mood_voice()
                         cache_key = self.__build_tts_cache_key(filtered_text, mood_voice)
                         cache_result = self.__get_tts_cache(cache_key)

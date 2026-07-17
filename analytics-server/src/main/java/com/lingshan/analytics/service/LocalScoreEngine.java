@@ -31,28 +31,47 @@ public class LocalScoreEngine {
     }
 
     public List<ScoredRoute> rank(String userId, List<String> selectedTags, int limit) {
+        return rank(userId, selectedTags, Map.of(), limit);
+    }
+
+    public List<ScoredRoute> rank(String userId, List<String> selectedTags, Map<String, String> preferences, int limit) {
         List<String> tags = normalizeTags(selectedTags);
+        Map<String, String> safePreferences = preferences == null ? Map.of() : preferences;
         List<AnalyticsEvent> events = repository.findByTsAfter(LocalDateTime.now().minusHours(WINDOW_HOURS));
         RouteStats stats = collectStats(events, userId == null ? "" : userId.trim());
         double maxHeat = Math.max(1.0, stats.heat.values().stream().mapToDouble(Double::doubleValue).max().orElse(0.0));
 
         return GuideRouteCatalog.ROUTES.stream()
-                .map(route -> scoreRoute(route, tags, stats, maxHeat))
+                .map(route -> scoreRoute(route, tags, safePreferences, stats, maxHeat))
                 .sorted(Comparator.comparingDouble(ScoredRoute::score).reversed()
                         .thenComparing(route -> GuideRouteCatalog.ROUTES.indexOf(route.route())))
                 .limit(Math.max(1, limit))
                 .toList();
     }
 
-    private ScoredRoute scoreRoute(GuideRouteCatalog.RouteProfile route, List<String> selectedTags, RouteStats stats, double maxHeat) {
+    private ScoredRoute scoreRoute(
+            GuideRouteCatalog.RouteProfile route,
+            List<String> selectedTags,
+            Map<String, String> preferences,
+            RouteStats stats,
+            double maxHeat
+    ) {
         String routeId = route.routeId();
         List<String> matchedTags = route.labels().stream().filter(selectedTags::contains).toList();
         double tagScore = selectedTags.isEmpty() ? 0.0 : 100.0 * matchedTags.size() / Math.max(1, route.labels().size());
+        double preferenceScore = preferenceScore(route, preferences);
         double behaviorScore = Math.min(100.0, stats.userBehavior.getOrDefault(routeId, 0.0));
         double heatScore = stats.heat.isEmpty() ? DEFAULT_HEAT_SCORE : 100.0 * stats.heat.getOrDefault(routeId, 0.0) / maxHeat;
         double satisfactionScore = satisfaction(routeId, stats);
         double negativePenalty = stats.userNegative.getOrDefault(routeId, 0.0);
-        double finalScore = clip(0.45 * tagScore + 0.25 * behaviorScore + 0.15 * heatScore + 0.15 * satisfactionScore - negativePenalty);
+        double finalScore = clip(
+                0.42 * tagScore
+                        + 0.24 * preferenceScore
+                        + 0.19 * behaviorScore
+                        + 0.08 * heatScore
+                        + 0.07 * satisfactionScore
+                        - negativePenalty
+        );
 
         List<String> reasonCodes = new ArrayList<>();
         List<String> reasons = new ArrayList<>();
@@ -63,6 +82,11 @@ public class LocalScoreEngine {
         if (behaviorScore > 0) {
             reasonCodes.add("BEHAVIOR_SIGNAL");
             reasons.add("结合你近期的路线点击或评分反馈，这条路线更值得优先考虑。");
+        }
+        List<String> preferenceReasons = preferenceReasons(route, preferences);
+        if (!preferenceReasons.isEmpty()) {
+            reasonCodes.add("PREFERENCE_CONTEXT");
+            reasons.addAll(preferenceReasons);
         }
         if (heatScore >= 60.0 && stats.heat.containsKey(routeId)) {
             reasonCodes.add("HOT_ROUTE");
@@ -83,12 +107,113 @@ public class LocalScoreEngine {
         Map<String, Object> debug = new LinkedHashMap<>();
         debug.put("engine", ENGINE);
         debug.put("tagScore", round1(tagScore));
+        debug.put("preferenceScore", round1(preferenceScore));
+        debug.put("preferences", preferences);
         debug.put("behaviorScore", round1(behaviorScore));
         debug.put("heatScore", round1(heatScore));
         debug.put("satisfactionScore", round1(satisfactionScore));
         debug.put("negativePenalty", round1(negativePenalty));
 
         return new ScoredRoute(route, round1(finalScore), round4(finalScore / 100.0), reasons.get(0), reasons, matchedTags, reasonCodes, debug);
+    }
+
+    private double preferenceScore(GuideRouteCatalog.RouteProfile route, Map<String, String> preferences) {
+        if (preferences == null || preferences.isEmpty()) {
+            return 0.0;
+        }
+
+        List<Double> scores = new ArrayList<>();
+        String routeId = route.routeId();
+        String walk = routeWalkClass(routeId);
+
+        switch (preferences.getOrDefault("duration", "")) {
+            case "quick" -> scores.add(scoreByRoute(routeId, 30.0, 70.0, 100.0));
+            case "half_day" -> scores.add(scoreByRoute(routeId, 55.0, 85.0, 80.0));
+            case "deep" -> scores.add(scoreByRoute(routeId, 100.0, 70.0, 45.0));
+            default -> { }
+        }
+
+        switch (preferences.getOrDefault("arrival", "")) {
+            case "morning" -> scores.add(scoreByRoute(routeId, 90.0, 75.0, 70.0));
+            case "noon" -> scores.add(scoreByRoute(routeId, 62.0, 80.0, 78.0));
+            case "afternoon" -> scores.add(scoreByRoute(routeId, 45.0, 82.0, 85.0));
+            default -> { }
+        }
+
+        switch (preferences.getOrDefault("companion", "")) {
+            case "solo" -> scores.add(scoreByRoute(routeId, 85.0, 80.0, 55.0));
+            case "friends" -> scores.add(scoreByRoute(routeId, 72.0, 88.0, 68.0));
+            case "family" -> scores.add(scoreByRoute(routeId, 45.0, 65.0, 100.0));
+            case "elder" -> scores.add(scoreByRoute(routeId, 35.0, 85.0, 82.0));
+            default -> { }
+        }
+
+        switch (preferences.getOrDefault("walk", "")) {
+            case "light" -> scores.add("light".equals(walk) ? 100.0 : "normal".equals(walk) ? 72.0 : 25.0);
+            case "normal" -> scores.add("normal".equals(walk) ? 95.0 : "light".equals(walk) ? 80.0 : 70.0);
+            case "deep" -> scores.add("deep".equals(walk) ? 100.0 : "normal".equals(walk) ? 78.0 : 48.0);
+            default -> { }
+        }
+
+        switch (preferences.getOrDefault("show", "")) {
+            case "must" -> scores.add(scoreByRoute(routeId, 92.0, 65.0, 72.0));
+            case "flexible" -> scores.add(70.0);
+            case "skip" -> scores.add(scoreByRoute(routeId, 45.0, 85.0, 82.0));
+            default -> { }
+        }
+
+        if (scores.isEmpty()) {
+            return 0.0;
+        }
+
+        return scores.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+    }
+
+    private List<String> preferenceReasons(GuideRouteCatalog.RouteProfile route, Map<String, String> preferences) {
+        if (preferences == null || preferences.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> reasons = new ArrayList<>();
+        String routeId = route.routeId();
+        if ("quick".equals(preferences.get("duration")) && "family".equals(routeId)) {
+            reasons.add("你选择短时游览，这条路线站点更集中、节奏更轻。");
+        }
+        if ("deep".equals(preferences.get("duration")) && "historical_culture".equals(routeId)) {
+            reasons.add("你选择深度游览，这条路线更适合慢慢理解灵山文化。");
+        }
+        if ("family".equals(preferences.get("companion")) && "family".equals(routeId)) {
+            reasons.add("你选择亲子同行，这条路线步行压力低、互动点更友好。");
+        }
+        if ("elder".equals(preferences.get("companion")) && !"deep".equals(routeWalkClass(routeId))) {
+            reasons.add("你选择带老人同行，优先推荐步行负担更低的路线。");
+        }
+        if ("light".equals(preferences.get("walk")) && "light".equals(routeWalkClass(routeId))) {
+            reasons.add("你选择少走路，这条路线更轻松，适合慢游。");
+        }
+        if ("must".equals(preferences.get("show")) && "historical_culture".equals(routeId)) {
+            reasons.add("你希望观看演出，路线会更靠近文化演艺体验。");
+        }
+
+        return reasons.stream().limit(2).toList();
+    }
+
+    private double scoreByRoute(String routeId, double historical, double nature, double family) {
+        return switch (routeId) {
+            case "historical_culture" -> historical;
+            case "prayer_meditation" -> (nature + historical) / 2.0;
+            case "family" -> family;
+            default -> 0.0;
+        };
+    }
+
+    private String routeWalkClass(String routeId) {
+        return switch (routeId) {
+            case "family" -> "light";
+            case "prayer_meditation" -> "normal";
+            case "historical_culture" -> "deep";
+            default -> "normal";
+        };
     }
 
     private RouteStats collectStats(List<AnalyticsEvent> events, String userId) {

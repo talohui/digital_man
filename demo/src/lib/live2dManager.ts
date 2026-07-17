@@ -117,31 +117,52 @@ export function setMouthFormActive(active: boolean, sceneId = 'main') {
   if (!active) mouthFormTargets.set(sceneId, 0)
 }
 
-export type RobotState = 'normal' | 'speaking' | 'listening' | 'thinking'
+export type RobotState = 'normal' | 'speaking' | 'listening' | 'thinking' | 'happy' | 'comfort'
+
+export function shouldOverrideMouthForm(state: RobotState): boolean {
+  return state === 'speaking'
+}
+
+export function getAudioPlaybackState(state: RobotState): RobotState {
+  return state === 'happy' || state === 'normal' ? 'speaking' : state
+}
 
 // 不同模型 motion group 名称不一致,这里给一个常见映射,匹配不到就忽略
 // 导游语义:thinking=查阅讲解资料 / speaking=讲解 / listening=倾听 / normal=待命
-const MOTION_GROUP_MAP: Record<RobotState, string[]> = {
-  normal: ['Idle', 'idle'],
-  speaking: ['TapBody', 'Tap', 'Speak', 'speaking'],
-  listening: ['Idle', 'idle'],
-  thinking: ['Idle', 'idle']
+const MOTION_PRESET_MAP: Record<RobotState, { groups: string[]; index: number }> = {
+  normal: { groups: ['Idle', 'idle'], index: 0 },
+  speaking: { groups: ['Tap', 'TapBody', 'Speak', 'speaking'], index: 0 },
+  listening: { groups: ['Idle', 'idle'], index: 0 },
+  thinking: { groups: ['Idle', 'idle'], index: 0 },
+  happy: { groups: ['Idle', 'idle'], index: 0 },
+  comfort: { groups: ['Idle', 'idle'], index: 0 }
 }
 
-// 表情映射(haru_greeter 提供 f00~f07):用表情区分导游不同状态,营造"会查资料、会讲解"的临场感。
+export function getPreferredMotionForState(state: RobotState): { group: string; index: number } {
+  const preset = MOTION_PRESET_MAP[state]
+  return { group: preset.groups[0], index: preset.index }
+}
+
+// 表情映射(haru_greeter 提供 f00~f07):用表情区分导游不同状态,营造"会查资料、会讲解、会安抚"的临场感。
 // 表情 ID 不存在时由 pixi-live2d-display 静默忽略,不阻断后续帧。
 const EXPRESSION_MAP: Record<RobotState, string> = {
   normal: 'f00',
-  speaking: 'f01',
-  listening: 'f02',
-  thinking: 'f03'
+  speaking: 'mouth_smile',
+  listening: 'f00',
+  thinking: 'f00',
+  happy: 'mouth_smile',
+  comfort: 'f00'
+}
+
+export function getExpressionIdForState(state: RobotState): string {
+  return EXPRESSION_MAP[state]
 }
 
 export function playExpressionForState(state: RobotState, sceneId = 'main') {
   const modelRef = getRegisteredModel(sceneId)
   if (!modelRef || typeof modelRef.expression !== 'function') return
   try {
-    modelRef.expression(EXPRESSION_MAP[state])
+    modelRef.expression(getExpressionIdForState(state))
   } catch {
     // 表情 ID 不匹配时忽略
   }
@@ -153,10 +174,11 @@ export function playMotionForState(state: RobotState, sceneId = 'main') {
 
   const modelRef = getRegisteredModel(sceneId)
   if (!modelRef || typeof modelRef.motion !== 'function') return
-  const candidates = MOTION_GROUP_MAP[state] ?? []
+  const preset = MOTION_PRESET_MAP[state]
+  const candidates = preset.groups
   for (const group of candidates) {
     try {
-      modelRef.motion(group)
+      modelRef.motion(group, preset.index)
       return
     } catch {
       // 尝试下一个候选

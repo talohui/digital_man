@@ -39,27 +39,29 @@ async function getCtx(): Promise<AudioContext> {
  * 在用户首次手势(点击 / 触摸)时调用,解锁移动端的音频自动播放限制。
  * 重复调用安全。
  */
-export function unlockAudio(): void {
+export async function unlockAudio(): Promise<boolean> {
   try {
     if (!ctx) {
       ctx = createCtx()
     }
     if (ctx.state === 'suspended') {
-      void ctx.resume()
+      await ctx.resume()
     }
+    return ctx.state === 'running'
   } catch {
-    /* ignore */
+    return false
   }
 }
 
 export async function playWithLipsync(
   url: string,
   // open=张开度(0~1,音量驱动),form=嘴形(-1 圆/撮口 ~ +1 展/咧,粗略元音,频谱驱动)
-  onMouth: (open: number, form: number) => void
+  onMouth: (open: number, form: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const audioCtx = await getCtx()
 
-  const buffer = await fetch(url)
+  const buffer = await fetch(url, { signal })
     .then((r) => {
       if (!r.ok) {
         throw new Error(`音频下载失败 ${r.status}: ${url}`)
@@ -130,21 +132,37 @@ export async function playWithLipsync(
     const finish = () => {
       if (settled) return
       settled = true
+      signal?.removeEventListener('abort', stop)
       cancelAnimationFrame(raf)
       if (failsafe) window.clearTimeout(failsafe)
       onMouth(0, 0)
       resolve()
     }
 
+    const stop = () => {
+      try {
+        source.stop()
+      } catch {
+        // 尚未启动或已经结束时无需额外处理。
+      }
+      finish()
+    }
+
     source.onended = finish
+    signal?.addEventListener('abort', stop, { once: true })
 
     try {
+      if (signal?.aborted) {
+        stop()
+        return
+      }
       source.start()
       tick()
       // 兜底:iOS / 微信 / 切后台挂起时 onended 可能永不触发。
       // 按音频时长 + 0.8s 余量强制收尾,确保口型归零、队列不卡死。
       failsafe = window.setTimeout(finish, (buffer.duration + 0.8) * 1000)
     } catch (e) {
+      signal?.removeEventListener('abort', stop)
       cancelAnimationFrame(raf)
       // 启动失败也要归零,否则嘴会停在上一帧的张开值
       onMouth(0, 0)

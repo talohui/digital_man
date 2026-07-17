@@ -39,7 +39,7 @@ Run the command from Step 2. Expected: all emotion tests pass.
 **Files:**
 - Modify: `数字人开源项目/Fay-main/test_lingshan_prestart_fast_path.py`
 - Modify: `数字人开源项目/Fay-main/llm/nlp_cognitive_stream.py`
-- Modify: `数字人开源项目/Fay-main/system.conf`
+- Modify: `数字人开源项目/Fay-main/config.json`
 
 - [ ] **Step 1: Write the failing backend identity test**
 
@@ -57,7 +57,7 @@ Create `_build_lingshan_identity_prompt()` in `nlp_cognitive_stream.py` and appe
 
 - [ ] **Step 4: Align non-sensitive runtime attributes**
 
-Update only the `attribute` values for name, gender, job, position, goal, birth, and additional information in `system.conf`; preserve API keys, endpoints, and unrelated settings byte-for-byte.
+Update only the `attribute` values for name, gender, job, position, goal, birth, and additional information in `config.json`; preserve `system.conf`, API keys, endpoints, and unrelated settings byte-for-byte.
 
 - [ ] **Step 5: Run the focused backend test and verify GREEN**
 

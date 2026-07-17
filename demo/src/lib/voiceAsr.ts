@@ -1,5 +1,6 @@
 import {
   createAsr,
+  getBrowserVoiceHint,
   isSecureContextForMic,
   isSupported as isBrowserSpeechSupported
 } from './browserAsr'
@@ -9,7 +10,9 @@ import type { BrowserAsr } from './browserAsr'
 export type VoiceAsrMode = 'auto' | 'browser' | 'cloud'
 
 const PREFER_CLOUD_KEY = 'voiceAsrPreferCloud'
-const envMode = (import.meta.env.VITE_VOICE_ASR_MODE as VoiceAsrMode | undefined) ?? 'auto'
+// 默认统一使用已经过项目后端验证的云端识别，避免浏览器 Web Speech
+// 在不同系统、浏览器和局域网环境下表现不一致。仍可通过环境变量显式覆盖。
+const envMode = (import.meta.env.VITE_VOICE_ASR_MODE as VoiceAsrMode | undefined) ?? 'cloud'
 
 function is360Browser(): boolean {
   if (typeof navigator === 'undefined') return false
@@ -58,9 +61,24 @@ export function isVoiceAsrAvailable(): boolean {
 
 export function getVoiceAsrModeLabel(): string {
   if (shouldUseCloudAsr()) {
-    return '按住说话（阿里云云端识别，松手上传至 Fay）'
+    return '按住说话，松手自动发送（云端语音识别）'
   }
   return '按住下方麦克风说话，松手自动发送（电脑可在按钮外松手）'
+}
+
+export function getVoiceAsrEnvironmentHint(): string | null {
+  if (shouldUseCloudAsr()) {
+    return '语音由景区云端识别；请按住麦克风说完整一句话，松手后自动发送。'
+  }
+  return getBrowserVoiceHint()
+}
+
+export function normalizeVoiceTranscript(text: string): string {
+  return text
+    .replace(/<\|[^|]+\|>/g, '')
+    .replace(/\s+([，。！？；：,.!?;:])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function createVoiceAsr(opts: {
@@ -68,12 +86,17 @@ export function createVoiceAsr(opts: {
   onInterim?: (text: string) => void
   onError?: (msg: string) => void
 }): BrowserAsr {
+  const normalizedOpts = {
+    ...opts,
+    onFinal: (text: string) => opts.onFinal(normalizeVoiceTranscript(text))
+  }
+
   if (shouldUseCloudAsr()) {
-    return createCloudAsr(opts)
+    return createCloudAsr(normalizedOpts)
   }
 
   const browser = createAsr({
-    onFinal: opts.onFinal,
+    onFinal: normalizedOpts.onFinal,
     onInterim: opts.onInterim,
     onError: (msg) => {
       const isNetwork =

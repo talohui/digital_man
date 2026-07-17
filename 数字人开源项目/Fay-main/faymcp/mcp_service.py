@@ -14,6 +14,8 @@ from typing import Any, Dict, List
 from flask_cors import CORS
 from faymcp.mcp_client import McpClient
 from faymcp import tool_registry, prestart_registry, resource_registry
+from faymcp.emotion_context import build_lingshan_rag_params
+from ai_module import baidu_emotion
 from utils import util
 
 
@@ -1548,6 +1550,12 @@ def call_all_prestart_tools():
                     filled_params = _apply_question_placeholder(params, question)
                 except Exception:
                     filled_params = params or {}
+                filled_params = build_lingshan_rag_params(
+                    tool_name,
+                    filled_params,
+                    question,
+                    baidu_emotion.get_sentiment,
+                )
 
                 # 调用工具
                 try:

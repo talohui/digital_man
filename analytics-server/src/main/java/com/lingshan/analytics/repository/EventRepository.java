@@ -20,4 +20,11 @@ public interface EventRepository extends JpaRepository<AnalyticsEvent, Long> {
     List<AnalyticsEvent> findTop10ByUserIdAndEventOrderByTsDesc(String userId, String event);
 
     List<AnalyticsEvent> findByEventInAndTsAfter(List<String> events, LocalDateTime ts);
+    List<AnalyticsEvent> findByTsBetween(LocalDateTime start, LocalDateTime end);
+
+    List<AnalyticsEvent> findByUserId(String userId);
+
+    long countByUserId(String userId);
+
+    long deleteByUserId(String userId);
 }

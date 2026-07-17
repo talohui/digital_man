@@ -364,7 +364,7 @@ function buildReportHtml(data: ReportData, meta: ReportMeta): string {
     ])
   )}
 
-  <div class="foot">${esc(data.official.summary.disclaimer)}<br/>本报告由灵山胜境 AI 导览运营驾驶舱自动生成。</div>
+  <div class="foot">${esc(data.official.summary.disclaimer)}<br/>本报告由灵山胜境 AI 导览智慧运营中心自动生成。</div>
 </body></html>`
 }
 

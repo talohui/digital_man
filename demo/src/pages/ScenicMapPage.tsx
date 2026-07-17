@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useDemoTicker } from '../hooks/useDemoTicker'
+import {
+  buildAdminDemoFrame,
+  createSeededRandom,
+  getAdminDemoSessionStartedAtMs,
+  toDemoTick,
+} from '../lib/adminDemoTimeline'
 import { loadTMap } from '../lib/loadTMap'
 import {
   createCrowdAgents,
@@ -35,11 +42,10 @@ type DashboardState = {
 }
 
 const CROWD_SIZE = 500
-const TICK_INTERVAL_MS = 1200
 const LIVE_USER_TTL_MS = 20_000
 const HOT_SPOT_RADIUS_DEGREES = 0.0018
 
-const initialAgents = createCrowdAgents(CROWD_SIZE)
+const initialAgents = createCrowdAgents(CROWD_SIZE, createSeededRandom(20260715))
 
 const initialDashboard: DashboardState = {
   onlineCount: CROWD_SIZE,
@@ -77,6 +83,8 @@ function ScenicMapPage() {
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading')
   const [statusMessage, setStatusMessage] = useState('正在加载腾讯地图与热力服务...')
   const [dashboard, setDashboard] = useState<DashboardState>(initialDashboard)
+  const [demoSessionStartedAtMs] = useState(() => getAdminDemoSessionStartedAtMs())
+  const demoTick = useDemoTicker(true)
 
   useEffect(() => {
     let isCancelled = false
@@ -182,25 +190,24 @@ function ScenicMapPage() {
       return
     }
 
-    let tickCount = 0
+    agentsRef.current = tickCrowdAgents(agentsRef.current, createSeededRandom(demoTick))
+    pruneLiveUsers(liveUsersRef.current)
 
-    const updateHeatmap = () => {
-      tickCount += 1
-      agentsRef.current = tickCrowdAgents(agentsRef.current)
-      pruneLiveUsers(liveUsersRef.current)
-
-      const heatData = toTencentHeatData(agentsRef.current, getFreshLiveUsers(liveUsersRef.current))
-      heatDataSetterRef.current?.(heatData)
-      setDashboard(buildDashboard(agentsRef.current, liveUsersRef.current, tickCount))
-    }
-
-    updateHeatmap()
-    const timer = window.setInterval(updateHeatmap, TICK_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [mapStatus])
+    const freshLiveUsers = getFreshLiveUsers(liveUsersRef.current)
+    const heatData = toTencentHeatData(agentsRef.current, freshLiveUsers)
+    const frame = buildAdminDemoFrame(demoTick, {
+      activeWindowMinutes: 5,
+      sessionStartedAtMs: demoSessionStartedAtMs,
+    })
+    heatDataSetterRef.current?.(heatData)
+    setDashboard({
+      onlineCount: CROWD_SIZE + (frame.activeSessions - 43) + freshLiveUsers.length,
+      heatPoints: heatData.length,
+      tickCount: Math.max(0, demoTick - toDemoTick(demoSessionStartedAtMs)),
+      lastUpdatedAt: formatTime(new Date(frame.generatedAtMs)),
+      spotLoads: frame.spotLoads,
+    })
+  }, [demoSessionStartedAtMs, demoTick, mapStatus])
 
   return (
     <main className="heatmap-page">

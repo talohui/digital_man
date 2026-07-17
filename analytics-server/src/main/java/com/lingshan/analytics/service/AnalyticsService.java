@@ -6,6 +6,7 @@ import com.lingshan.analytics.dto.EventRequest;
 import com.lingshan.analytics.entity.AnalyticsEvent;
 import com.lingshan.analytics.repository.EventRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -20,16 +21,27 @@ public class AnalyticsService {
     private final SentimentAnalyzer sentimentAnalyzer;
     private final PersonaEngine personaEngine;
     private final VisitorBehaviorService visitorBehaviorService;
+    private final VisitorPrivacyService visitorPrivacyService;
     private final ObjectMapper mapper = new ObjectMapper();
+
+    @Autowired
+    public AnalyticsService(EventRepository repository,
+                            SentimentAnalyzer sentimentAnalyzer,
+                            PersonaEngine personaEngine,
+                            VisitorBehaviorService visitorBehaviorService,
+                            VisitorPrivacyService visitorPrivacyService) {
+        this.repository = repository;
+        this.sentimentAnalyzer = sentimentAnalyzer;
+        this.personaEngine = personaEngine;
+        this.visitorBehaviorService = visitorBehaviorService;
+        this.visitorPrivacyService = visitorPrivacyService;
+    }
 
     public AnalyticsService(EventRepository repository,
                             SentimentAnalyzer sentimentAnalyzer,
                             PersonaEngine personaEngine,
                             VisitorBehaviorService visitorBehaviorService) {
-        this.repository = repository;
-        this.sentimentAnalyzer = sentimentAnalyzer;
-        this.personaEngine = personaEngine;
-        this.visitorBehaviorService = visitorBehaviorService;
+        this(repository, sentimentAnalyzer, personaEngine, visitorBehaviorService, null);
     }
 
     // ---- 写入事件 ----
@@ -47,6 +59,11 @@ public class AnalyticsService {
         if (props.get("user_id")    instanceof String uid) e.setUserId(uid);
         if (props.get("target_id")  instanceof String tid) e.setTargetId(tid);
         if (props.get("value") instanceof Number rv) e.setRatingValue(rv.doubleValue());
+
+        String uid = e.getUserId();
+        if (visitorPrivacyService != null && !visitorPrivacyService.analyticsEnabled(uid)) {
+            return;
+        }
 
         // user_message：做情感分析
         if ("user_message".equals(req.event())) {
@@ -74,8 +91,8 @@ public class AnalyticsService {
 
         repository.save(e);
 
-        String uid = e.getUserId();
-        if (uid != null && !uid.isBlank()) {
+        if (uid != null && !uid.isBlank()
+                && (visitorPrivacyService == null || visitorPrivacyService.personalizationEnabled(uid))) {
             try {
                 personaEngine.updateFromEvent(uid, req.event(), props);
             } catch (Exception ignored) { /* 画像更新失败不阻断事件落库 */ }

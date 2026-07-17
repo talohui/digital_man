@@ -35,6 +35,43 @@ def test_prompt_describes_when_and_how_to_create_emergency_drafts():
     assert "proposal 必须直接等于其中一个草案对象" in system_prompt
 
 
+def test_prompt_allows_explicit_operator_confirmed_facts_for_draft_only():
+    messages = build_messages(
+        {
+            "question": (
+                "现场管理员已确认游客中心入口发生拥堵，严重程度为警告，"
+                "预计持续30分钟。请起草游客提醒，路线策略设为降低该点位权重。"
+            ),
+            "context": {
+                "dataSources": ["实时客流摘要"],
+                "activeEmergencies": [],
+                "heatmapHot": False,
+            },
+        }
+    )
+
+    system_prompt = messages[0]["content"]
+    latest = json.loads(messages[-1]["content"])
+
+    assert "仅可用于生成待二次确认的应急草案" in system_prompt
+    assert "不能作为 context 数据证据" in system_prompt
+    assert "不得视为已经发布或已被系统数据验证" in system_prompt
+    assert latest["operatorConfirmedStatement"].startswith("现场管理员已确认")
+
+
+def test_generic_draft_request_is_not_marked_as_operator_confirmed():
+    messages = build_messages(
+        {
+            "question": "帮我起草入口拥堵应急提醒",
+            "context": {"dataSources": ["实时客流摘要"]},
+        }
+    )
+
+    latest = json.loads(messages[-1]["content"])
+
+    assert "operatorConfirmedStatement" not in latest
+
+
 def test_build_messages_places_safe_history_before_fresh_context():
     messages = build_messages(
         {
@@ -461,3 +498,70 @@ def test_rule_fallback_categories_do_not_collapse_to_one_placeholder():
     answers = {rule_fallback(item)["answer"] for item in inputs}
 
     assert len(answers) == 4
+
+
+def test_rule_fallback_creates_draft_for_explicit_operator_confirmed_emergency():
+    result = rule_fallback(
+        {
+            "question": (
+                "现场管理员已确认游客中心入口发生拥堵，严重程度为警告，"
+                "预计持续30分钟。请起草游客提醒，路线策略设为降低该点位权重。"
+            ),
+            "context": {
+                "dataSources": ["实时客流摘要"],
+                "activeEmergencies": [],
+                "heatmapHot": False,
+            },
+        }
+    )
+
+    assert result["generationSource"] == "rules"
+    assert "管理员现场确认" in result["sources"]
+    assert result["proposal"]["type"] == "EMERGENCY_DRAFT"
+    assert result["proposal"]["payload"] == {
+        "type": "CROWDING",
+        "title": "游客中心入口拥堵提醒",
+        "message": (
+            "游客中心入口当前客流较集中，请听从现场工作人员引导，"
+            "错峰通行并优先选择其他入口。"
+        ),
+        "severity": "WARNING",
+        "routePolicy": "PENALIZE",
+        "affectedSpotIds": [],
+        "affectedRouteIds": [],
+        "validFrom": "",
+        "validUntil": "",
+    }
+
+
+def test_model_timeout_preserves_explicit_operator_emergency_as_rule_draft():
+    result = generate_operations_copilot(
+        {
+            "question": (
+                "现场管理员已确认游客中心入口发生拥堵，严重程度为警告，"
+                "请起草游客提醒，路线策略设为降低该点位权重。"
+            ),
+            "context": {"dataSources": ["实时客流摘要"]},
+        },
+        config(),
+        post=lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()),
+    )
+
+    assert result["generationSource"] == "rules"
+    assert result["proposal"]["type"] == "EMERGENCY_DRAFT"
+    assert result["proposal"]["payload"]["type"] == "CROWDING"
+    assert "二次密码确认" in result["answer"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "帮我起草入口拥堵提醒",
+        "现场管理员已确认有游客走失，请起草应急信息",
+        "现场管理员已确认有人需要医疗帮助，请起草应急信息",
+    ],
+)
+def test_rule_fallback_does_not_draft_unconfirmed_or_high_risk_emergency(question):
+    result = rule_fallback({"question": question, "context": {}})
+
+    assert result["proposal"] is None

@@ -13,17 +13,20 @@ import { useGuideStore } from '../store/useGuideStore'
 import { useChatStore } from '../store/useChatStore'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { capturePreferenceUpdate, captureRecommendationClick, captureRecommendationExposure, captureRouteClick, captureRouteExpose, captureTagToggle } from '../lib/analytics'
+import { GUIDE_PREFERENCE_GROUPS, GUIDE_TAGS } from '../data/guideData'
 
 
 function HomePage() {
   const navigate = useNavigate()
   const selectedTags = useGuideStore((state) => state.selectedTags)
+  const guidePreferences = useGuideStore((state) => state.guidePreferences)
   const candidateRoutes = useGuideStore((state) => state.candidateRoutes)
   const userProfile = useGuideStore((state) => state.userProfile)
   const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const isLoading = useGuideStore((state) => state.isLoading)
   const lastError = useGuideStore((state) => state.lastError)
   const toggleTag = useGuideStore((state) => state.toggleTag)
+  const setGuidePreference = useGuideStore((state) => state.setGuidePreference)
   const refreshRecommendations = useGuideStore((state) => state.refreshRecommendations)
   const setActiveRouteId = useGuideStore((state) => state.setActiveRouteId)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
@@ -32,6 +35,8 @@ function HomePage() {
   const sentPreferenceKeyRef = useRef('')
 
   const selectedTagsKey = selectedTags.join('|')
+  const guidePreferenceKey = GUIDE_PREFERENCE_GROUPS.map((group) => guidePreferences[group.key]).join('|')
+  const recommendationInputKey = `${selectedTagsKey}::${guidePreferenceKey}`
   const mainRoute = candidateRoutes[0]
   const secondaryRoutes = candidateRoutes.slice(1)
 
@@ -43,16 +48,16 @@ function HomePage() {
   }, [ensureUserId, setActiveScene])
 
   useEffect(() => {
-    if (selectedTagsKey === sentPreferenceKeyRef.current) {
+    if (recommendationInputKey === sentPreferenceKeyRef.current) {
       return
     }
-    sentPreferenceKeyRef.current = selectedTagsKey
-    capturePreferenceUpdate(selectedTags)
-  }, [selectedTags, selectedTagsKey])
+    sentPreferenceKeyRef.current = recommendationInputKey
+    capturePreferenceUpdate(selectedTags, guidePreferences)
+  }, [guidePreferences, recommendationInputKey, selectedTags])
 
   useEffect(() => {
     void refreshRecommendations()
-  }, [refreshRecommendations, selectedTagsKey])
+  }, [refreshRecommendations, recommendationInputKey])
 
   useEffect(() => {
     if (candidateRoutes.length > 0) {
@@ -119,7 +124,7 @@ function HomePage() {
             <div className="guide-home-panel__section">
               <p className="guide-home-panel__label">您的游览期待</p>
               <div>
-                {['亲子游', '文化探秘', '祈福静心', '轻松漫步', '拍照打卡'].map((tag) => (
+                {GUIDE_TAGS.map((tag) => (
                   <span
                     key={tag}
                     className={`tag-chip ${selectedTags.includes(tag) ? 'active' : ''}`}
@@ -127,6 +132,29 @@ function HomePage() {
                   >
                     {tag}
                   </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="guide-home-panel__section guide-home-panel__section--compact">
+              <p className="guide-home-panel__label">时间与同行方式</p>
+              <div className="guide-preference-grid">
+                {GUIDE_PREFERENCE_GROUPS.map((group) => (
+                  <div className="guide-preference-group" key={group.key}>
+                    <span className="guide-preference-group__label">{group.label}</span>
+                    <div className="guide-preference-group__options">
+                      {group.options.map((option) => (
+                        <button
+                          className={`preference-chip ${guidePreferences[group.key] === option.value ? 'active' : ''}`}
+                          key={option.value}
+                          type="button"
+                          onClick={() => setGuidePreference(group.key, option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>

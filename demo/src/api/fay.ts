@@ -96,14 +96,59 @@ export function extractRobotState(
 // Fay /api/send 要求 x-www-form-urlencoded，body 格式: data=<JSON字符串>
 // 参考 Fay 自带前端 gui/static/js/index.js:550:
 //   xhr.send('data=' + encodeURIComponent(JSON.stringify(send_data)))
-export async function sendTextToFay(msg: string, username = 'User') {
+export async function sendTextToFay(msg: string, username = 'User', signal?: AbortSignal) {
   const body = 'data=' + encodeURIComponent(JSON.stringify({ username, msg }))
 
   return fetch(`${FAY_HTTP}/api/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
+    body,
+    signal
   })
+}
+
+export async function stopFayTalking(
+  username = 'User',
+  options: { keepalive?: boolean } = {}
+): Promise<void> {
+  const url = `${FAY_HTTP}/to-stop-talking`
+  const beaconBody = new URLSearchParams({ username })
+
+  if (
+    options.keepalive &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.sendBeacon === 'function' &&
+    navigator.sendBeacon(url, beaconBody)
+  ) {
+    return
+  }
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 1500)
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+      keepalive: options.keepalive,
+      signal: controller.signal
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+/** 绕过 LLM，让 Fay 将经管理员确认的原文直接转 TTS 并通过当前 WS 推送音频/口型。 */
+export async function sendExactSpeechToFay(text: string, username = 'User', signal?: AbortSignal): Promise<void> {
+  const response = await fetch(`${FAY_HTTP}/transparent-pass`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user: username, text, queue: true }),
+    signal
+  })
+  const result = await response.json().catch(() => ({})) as { code?: number }
+  if (!response.ok || result.code !== 200) throw new Error('Fay 原文播报失败')
 }
 
 /**

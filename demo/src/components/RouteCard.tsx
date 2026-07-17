@@ -75,6 +75,8 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
   const persona = route.routePersona ?? ''
   const why = route.whyRecommended ?? route.reason
   const meta = getRouteItineraryMeta(route.id)
+  const stopCount = route.stopIds?.length ?? meta.stopCount
+  const adjustmentReasons = route.adjustmentReasons ?? []
 
   if (!isMain) {
     return (
@@ -93,6 +95,7 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
           <p className="route-card__sub">{route.durationLabel}</p>
         </div>
         <p className="route-card__why route-card__why--ellipsis">{why}</p>
+        {adjustmentReasons.length ? <p className="route-card__adjustment">路线已按现场情况调整</p> : null}
         <span className="route-card__cta-link">进入导览 <ArrowRightOutlined /></span>
       </article>
     )
@@ -112,7 +115,7 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
 
       <div className="route-card__facts">
         <span className="route-card__fact"><ClockCircleOutlined /> {meta.durationLabel}</span>
-        <span className="route-card__fact"><EnvironmentOutlined /> {meta.stopCount} 个站点</span>
+        <span className="route-card__fact"><EnvironmentOutlined /> {stopCount} 个站点</span>
         <span className="route-card__fact route-card__fact--walk">{meta.walkIntensity}</span>
       </div>
 
@@ -125,6 +128,13 @@ function RouteCard({ route, isActive, isMain, onSelect, onSwitchLight }: Props) 
       <blockquote className="route-card__why">
         {why}
       </blockquote>
+
+      {adjustmentReasons.length ? (
+        <aside className="route-card__adjustments" aria-label="路线实时调整说明">
+          <strong>路线已实时调整</strong>
+          {adjustmentReasons.slice(0, 2).map(reason => <span key={reason}>{reason}</span>)}
+        </aside>
+      ) : null}
 
       <p className="route-card__desc">{route.description}</p>
 

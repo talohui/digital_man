@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './styles/global.css'
+import './styles/c-app/cAppTypography.css'
+import './styles/admin-ops.css'
 import { initPostHogIdle } from './lib/analytics'
 
 // PostHog 改为空闲帧懒加载,首屏不再背 ~180kB SDK

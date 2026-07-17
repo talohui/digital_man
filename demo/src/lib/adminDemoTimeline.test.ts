@@ -66,3 +66,16 @@ test('creates a repeatable seeded random sequence', () => {
     [second(), second(), second()],
   )
 })
+
+test('keeps hotspot rankings deterministic and within the heat scale', () => {
+  const first = buildAdminDemoFrame(1_010, options)
+  const repeated = buildAdminDemoFrame(1_010, options)
+  const next = buildAdminDemoFrame(1_011, options)
+
+  assert.deepEqual(first.spotLoads, repeated.spotLoads)
+  assert.ok(first.spotLoads.every((spot) => spot.level >= 0 && spot.level <= 100))
+  assert.ok(next.spotLoads.some((spot) => {
+    const previous = first.spotLoads.find((candidate) => candidate.id === spot.id)
+    return previous?.level !== spot.level
+  }))
+})

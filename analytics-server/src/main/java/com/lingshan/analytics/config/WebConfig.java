@@ -14,7 +14,9 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
                 .allowedOriginPatterns("*")
-                .allowedMethods("GET", "POST", "PUT", "OPTIONS")
+                // 决策待办使用 PATCH 更新状态；缺少该方法时浏览器的预检请求会被拦截，
+                // 前端只能显示“状态更新失败”，请求甚至不会到达 Controller。
+                .allowedMethods("GET", "POST", "PUT", "PATCH", "OPTIONS")
                 .allowedHeaders("*")
                 .maxAge(3600);
     }

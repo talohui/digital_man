@@ -1,0 +1,75 @@
+.entrance-pass-scroll { display: grid; min-width: 0; margin: 0 2px; }
+.entrance-pass-scroll__paper {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  aspect-ratio: 1230 / 820;
+  border: 1px solid rgba(45, 74, 62, .42);
+  background:
+    var(--entrance-pass-scroll-background, none) center / 100% 100% no-repeat,
+    radial-gradient(ellipse at 76% 15%, rgba(45, 74, 62, .14), transparent 27%),
+    radial-gradient(ellipse at 24% 45%, rgba(201, 168, 106, .2), transparent 31%),
+    repeating-linear-gradient(90deg, transparent 0 27px, rgba(45, 74, 62, .035) 28px),
+    linear-gradient(105deg, #e8dcc4, #fbf7eb 13%, #f7f1e3 86%, #e4d5ba);
+  box-shadow: 4px 5px 0 rgba(45, 74, 62, .1);
+}
+.entrance-pass-scroll__paper::before {
+  position: absolute;
+  top: 13%;
+  left: 8%;
+  color: #2d4a3e;
+  content: '灵山胜境 · 入园凭笺';
+  font-family: var(--font-lingshan-display, serif);
+  font-size: clamp(11px, 3.8vw, 16px);
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+.entrance-pass-scroll__paper::after {
+  position: absolute;
+  top: 11%;
+  right: 8%;
+  display: grid;
+  width: clamp(32px, 10vw, 42px);
+  height: clamp(32px, 10vw, 42px);
+  place-items: center;
+  border: 1px solid #c9a86a;
+  border-radius: 50%;
+  color: #f7eedb;
+  background: #2d4a3e;
+  box-shadow: inset 0 0 0 3px rgba(245, 241, 232, .13), 0 0 0 5px rgba(201, 168, 106, .13);
+  content: '入';
+  font-family: var(--font-lingshan-display, serif);
+  font-size: clamp(14px, 4.6vw, 20px);
+}
+.entrance-pass-scroll__details { position: relative; z-index: 1; display: grid; align-self: end; gap: 4px; min-width: 0; padding: 0 7.2% 5.6%; }
+.entrance-pass-scroll__details dl { display: grid; grid-template-columns: 1.25fr .7fr .7fr; margin: 0; padding: 0; border: 0; }
+.entrance-pass-scroll__details dl > div { min-width: 0; padding: 0 5px; }
+.entrance-pass-scroll__details dl > div + div { border-left: 1px solid rgba(45, 74, 62, .19); }
+.entrance-pass-scroll__details dt { margin-bottom: 2px; color: rgba(32, 59, 51, .55); font-size: clamp(6px, 1.9vw, 8px); letter-spacing: .06em; }
+.entrance-pass-scroll__details dd { overflow: hidden; margin: 0; color: #2D4A3E; font-size: clamp(8px, 2.7vw, 11px); font-weight: 800; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.entrance-pass-scroll__verify { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 17px; align-items: baseline; margin-left: 16px; padding: 4px 5px 0; border-top: 1px solid rgba(201, 168, 106, .55); }
+.entrance-pass-scroll__verify > span { color: #806434; font-size: clamp(6px, 1.75vw, 7px); font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
+.entrance-pass-scroll__verify strong { overflow: hidden; color: #2D4A3E; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: clamp(7px, 2.05vw, 9px); letter-spacing: .05em; text-overflow: ellipsis; white-space: nowrap; }
+.entrance-pass-scroll__verify em { display: block; grid-column: 1 / -1; overflow: hidden; color: rgba(32, 59, 51, .62); font-size: clamp(6px, 1.75vw, 7px); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.entrance-pass-scroll__roller { position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; width: 18px; border-right: 1px solid #C9A86A; border-left: 1px solid rgba(245, 241, 232, .62); background: repeating-linear-gradient(0deg, rgba(255, 243, 204, .18) 0 7px, transparent 7px 11px), linear-gradient(90deg, #183127, #476657 50%, #203B33); box-shadow: 2px 0 5px rgba(32, 59, 51, .3); }
+.entrance-pass-scroll__barcode { display: flex; justify-content: center; margin: -2px 6% 0; padding: 9px 12px 8px; border: 1px solid rgba(45, 74, 62, .38); border-top: 1px dashed rgba(45, 74, 62, .58); background: linear-gradient(90deg, #eee4cf, #faf6eb 18%, #f1e7d2); box-shadow: 3px 3px 0 rgba(45, 74, 62, .08); }
+.entrance-pass-scroll__barcode > span { display: flex; width: min(78%, 260px); height: 27px; align-items: stretch; gap: 1px; border-top: 1px solid rgba(45, 74, 62, .72); border-bottom: 1px solid rgba(45, 74, 62, .72); background: #f9f5e9; opacity: .9; }
+.entrance-pass-scroll__barcode i { display: block; min-width: 1px; height: 100%; background: #2D4A3E; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .entrance-pass-scroll:not(.is-opening) .entrance-pass-scroll__paper { clip-path: inset(0 calc(100% - 20px) 0 0); }
+  .entrance-pass-scroll:not(.is-opening) .entrance-pass-scroll__details { opacity: 0; transform: translateX(-10px); }
+  .entrance-pass-scroll:not(.is-opening) .entrance-pass-scroll__barcode { opacity: 0; transform: translateY(-12px); }
+  .entrance-pass-scroll.is-opening .entrance-pass-scroll__paper { animation: entrance-pass-unroll 920ms cubic-bezier(.22, .82, .24, 1) both; }
+  .entrance-pass-scroll.is-opening .entrance-pass-scroll__roller { animation: entrance-pass-roller 920ms cubic-bezier(.22, .82, .24, 1) both; }
+  .entrance-pass-scroll.is-opening .entrance-pass-scroll__details { animation: entrance-pass-details 440ms 380ms ease-out both; }
+  .entrance-pass-scroll.is-opening .entrance-pass-scroll__barcode { animation: entrance-pass-barcode 380ms 780ms cubic-bezier(.2, .8, .2, 1) both; }
+}
+
+@keyframes entrance-pass-unroll { from { clip-path: inset(0 calc(100% - 20px) 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes entrance-pass-roller { 0% { left: 0; } 86% { left: calc(100% - 12px); } 100% { left: calc(100% - 18px); } }
+@keyframes entrance-pass-details { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+@keyframes entrance-pass-barcode { from { opacity: 0; transform: translateY(-12px); } 72% { opacity: 1; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) { .entrance-pass-scroll * { transition: none !important; animation: none !important; } }

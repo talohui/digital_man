@@ -15,6 +15,7 @@ public record OperationsCopilotResponse(
         OperationsCopilotProposalDraft proposal,
         String sessionId,
         String contextUpdatedAt,
+        String proposalRevision,
         String proposalStatus,
         Map<String, Object> executionResult
 ) {
@@ -37,6 +38,7 @@ public record OperationsCopilotResponse(
                 generationSource,
                 null,
                 proposal,
+                null,
                 null,
                 null,
                 proposalStatus,

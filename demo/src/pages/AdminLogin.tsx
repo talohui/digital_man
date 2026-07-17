@@ -19,8 +19,8 @@ export default function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     <div className="admin-login">
       <form className="admin-login__card" onSubmit={submit}>
         <div className="admin-login__logo">灵</div>
-        <h1 className="admin-login__title">灵山胜境 · 运营驾驶舱</h1>
-        <p className="admin-login__sub">AI GUIDE OPERATIONS · 仅限授权人员</p>
+        <h1 className="admin-login__title">灵山胜境 · 智慧运营中心</h1>
+        <p className="admin-login__sub">灵山智慧导览运营中心 · 仅限授权人员</p>
 
         <input
           className="admin-login__input"

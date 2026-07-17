@@ -3,6 +3,8 @@ export const OPERATIONS_COPILOT_SESSION_STORAGE_KEY = 'lingshan_operations_copil
 const MAX_TURN_CHARACTERS = 800
 const MAX_HISTORY_TURNS = 8
 const MAX_HISTORY_CHARACTERS = 4000
+const SENSITIVE_VALUE = /(authorization|api[-_ ]?key|access[-_ ]?(?:token|key(?:id)?)|private[-_ ]?key|password|secret)(\s*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|(?:(?:bearer|basic|apikey|token)\s+)?[^\s,;}]+)/gi
+const BEARER_VALUE = /\b(bearer|basic|apikey|token)\s+[a-z0-9._~+/=-]+/gi
 
 export type OperationsCopilotTurn = {
   role: 'user' | 'assistant'
@@ -48,6 +50,12 @@ function takeCharacters(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join('')
 }
 
+function redactSensitiveValues(value: string): string {
+  return value
+    .replace(SENSITIVE_VALUE, (_match, label: string, delimiter: string) => `${label}${delimiter}[已隐藏]`)
+    .replace(BEARER_VALUE, '[已隐藏]')
+}
+
 export function trimOperationsCopilotHistory(history: readonly unknown[] | null | undefined): OperationsCopilotTurn[] {
   if (!Array.isArray(history)) return []
 
@@ -58,7 +66,7 @@ export function trimOperationsCopilotHistory(history: readonly unknown[] | null 
     const rawContent = Reflect.get(candidate, 'content')
     if ((role !== 'user' && role !== 'assistant') || typeof rawContent !== 'string') return []
 
-    const content = takeCharacters(rawContent.trim(), MAX_TURN_CHARACTERS)
+    const content = takeCharacters(redactSensitiveValues(rawContent.trim()), MAX_TURN_CHARACTERS)
     return content ? [{ role, content }] : []
   })
 

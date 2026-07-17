@@ -20,9 +20,9 @@ public class DashboardService {
 
     private static final List<String> GUIDE_TAGS = List.of("亲子游", "文化探秘", "祈福静心", "轻松漫步", "拍照打卡");
     private static final Map<String, String> ROUTE_NAMES = Map.of(
-            "historical_culture", "历史文化路线",
-            "natural_scenery", "自然风光路线",
-            "family", "亲子轻游路线"
+            "historical_culture", "文化探秘路线",
+            "prayer_meditation", "祈福静心路线",
+            "family", "亲子游路线"
     );
     private static final Map<String, String> TICKET_TYPE_NAMES = Map.of(
             "standard", "标准票",

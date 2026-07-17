@@ -12,9 +12,9 @@ import java.util.*;
 public class RecommendExplainService {
 
     private static final Map<String, String> LIGHT_ALT = Map.of(
-            "historical_culture", "natural_scenery",
-            "natural_scenery",    "family",
-            "family",              "natural_scenery"
+            "historical_culture", "prayer_meditation",
+            "prayer_meditation",  "family",
+            "family",              "prayer_meditation"
     );
 
     private final PersonaEngine personaEngine;

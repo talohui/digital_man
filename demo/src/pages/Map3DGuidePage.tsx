@@ -1,32 +1,65 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 
 import { Map3DPerfPanel } from '../components/map3d/Map3DPerfPanel'
-import { guideRoutes, guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
+import { PoiCoordinateCalibrationPanel } from '../components/map3d/PoiCoordinateCalibrationPanel'
 import {
-  getDefaultMap3DGardenAssets,
-  getLegacyMap3DGardenAssets,
-  getMap3DGardenAssetUrl,
-  getMap3DGardenLicenseId,
-  lingshanMap3DForestPatches,
-  type Map3DGardenAssetKind,
-  type Map3DGardenAssetPriority,
-  type LingshanMap3DForestPatch,
-  type LingshanMap3DGardenAsset
-} from '../data/lingshanMap3DGardenAssets'
-import { lingshanPois, type LingshanPoi } from '../data/lingshanMapData'
-import { normalizeLingshanTreeAssetScale, normalizeLingshanTreeScaleRange } from '../data/lingshanTreeScaleNormalization'
+  ScenicPoiBillboards,
+  type ScenicPoiBillboardItem,
+  type ScenicPoiBillboardMode
+} from '../components/map3d/ScenicPoiBillboards'
+import { guideSpots, scenicCenter, type GuideRoute, type LatLngPoint } from '../data/guideData'
+import {
+  getLingshanPoisForLayer,
+  lingshanPois,
+  type LingshanPoi,
+  type LingshanPoiLayerMode
+} from '../data/lingshanMapData'
+import {
+  getScenicPoiCoordinate,
+  hasMapEnabledScenicPoi
+} from '../data/scenicPoiCatalog'
 import {
   getMapModelOverlayByPoiId,
   getMapModelOverlayInspectorId,
   getVisibleMapModelOverlays,
   type LingshanMapModelOverlay
 } from '../data/lingshanMapModelOverlays'
-import { getLingshanRouteGeometryByGuideRouteId } from '../data/lingshanRouteGeometries'
-import { useGardenAssetOverlays, type GardenLodState, type GardenModelReport } from '../hooks/useGardenAssetOverlays'
-import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
+import { resolveLandmarkLodRuntimeChoice } from '../data/lingshanLandmarkLod'
+import { LINGSHAN_INK_MAP_BOUNDS } from '../data/lingshanInkMapBounds'
+import {
+  getDefaultScenicRouteId,
+  getScenicRouteConfig,
+  getScenicRouteOptions,
+  resolveScenicRouteId,
+  type ScenicRouteConfig
+} from '../data/lingshanScenicRoutes'
 import { useLandmarkModelInspector } from '../hooks/useLandmarkModelInspector'
 import { loadTMap } from '../lib/loadTMap'
+import { goToPoiFromBrowse, goToPoiFromRoute } from '../lib/mapGuideNavigation'
+import {
+  GLBRuntimeOrchestrator,
+  type GLBRuntimeOrchestratorSnapshot
+} from '../lib/map/GLBRuntimeOrchestrator'
+import { GLBMemoryManager } from '../lib/map/GLBMemoryManager'
+import { GLBSpatialController } from '../lib/map/GLBSpatialController'
+import { LayerManager } from '../lib/map/LayerManager'
+import { PoiLayerController, type PoiLayerKind } from '../lib/map/PoiLayerController'
+import { SceneArbiter } from '../lib/map/SceneArbiter'
+import { SceneStateManager, type SceneStateRecord } from '../lib/map/SceneStateManager'
+import { SceneWindowManager } from '../lib/map/SceneWindowManager'
 import {
   BUDDHA_REALM_TOUR_CONFIG,
   flyMap3DCamera,
@@ -34,9 +67,7 @@ import {
   SCENIC_CAMERA_BOUNDS,
   startBuddhaRealmTour,
   startBuddhaRealmTimelineTour,
-  startRoutePreview,
   stopBuddhaRealmTour,
-  stopRoutePreview,
   type Map3DRouteTourFrame,
   type Map3DRouteTourPause,
   type Map3DCameraPreset,
@@ -46,17 +77,106 @@ import {
   type Map3DTourStep,
   type Map3DTourStopReason
 } from '../lib/map3dCamera'
-import { createMap3DPerfRecorder, type Map3DStartupStage } from '../lib/map3dPerf'
-import { buildPlannedRouteFromPath, buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
+import { createMap3DPerfRecorder, type Map3DLandmarkGlBDebugRow, type Map3DStartupStage } from '../lib/map3dPerf'
+import { preloadMap3DLandmarkAssets } from '../lib/map3dPreload'
+import { buildWalkingRoute, type PlannedRoute } from '../lib/routePlanning'
 import { findNearestRoutePoint, findNextStop, formatDistanceMeters, haversineDistanceMeters } from '../lib/routeProgress'
-
-const GardenDebugWizard = lazy(() => import('../components/map3d/GardenDebugWizard'))
+import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
+import { useMapGuideUiStore } from '../store/useMapGuideUiStore'
+import type { MapGuideState, PoiReturnStage, ScenicMapPresentation } from '../types/mapGuide'
 
 type Map3DGuideStatus = 'idle' | 'loading' | 'ready' | 'error'
 type RerouteStatus = 'idle' | 'off_route' | 'planning' | 'ready' | 'failed'
 type GuideCameraMode = Map3DCameraPresetId
 type Map3DGuideVariant = 'default' | 'prototype-a' | 'prototype-b' | 'prototype-c'
+export type MapPresentationTransition =
+  | 'idle'
+  | 'destroying'
+  | 'waiting-container'
+  | 'initializing'
+  | 'ready'
+  | 'failed'
+type CameraTransitionPhase =
+  | 'idle'
+  | 'flattening-3d'
+  | 'switching-view-mode'
+  | 'refreshing-tile-layer'
+  | 'ready'
+  | 'failed'
+
+export type MapPresentationTransitionSnapshot = {
+  presentation: ScenicMapPresentation
+  transition: MapPresentationTransition
+  isPresentationSwitching: boolean
+  presentationSwitchError?: string
+}
+export type { ScenicMapPresentation } from '../types/mapGuide'
 type MapInteractionKind = 'zoom' | 'drag' | 'move'
+type CameraState = {
+  center: LatLngPoint
+  zoom: number
+  pitch: number
+  rotation: number
+}
+type ActualTencentCameraState = {
+  viewMode: '2D' | '3D' | null
+  rawPitch: number | null
+  rawRotation: number | null
+  center: LatLngPoint | null
+  zoom: number | null
+}
+type PresentationApplyResult = {
+  ok: boolean
+  requestedPresentation: ScenicMapPresentation
+  requestedCamera: CameraState
+  actualCamera: ActualTencentCameraState
+  error?: string
+}
+type CustomTileLayerRuntime = {
+  attached: boolean
+  visible: boolean
+  refreshCount: number
+  lastRefreshReason: string
+}
+type TencentPoiModeRuntime = {
+  requested: boolean
+  applied: boolean
+  lastError?: string
+}
+type PoiLayerVisibility = {
+  showGenericCustomPoi: boolean
+  showRouteStopMarkers: boolean
+  showRouteStateMarkers: boolean
+}
+type RouteCameraIntentSource = 'route-overview' | 'route-current'
+type RouteCameraIntentStatus = 'idle' | 'applying' | 'completed' | 'superseded' | 'failed'
+type RouteCameraIntentPhase =
+  | 'idle'
+  | 'applying-full-camera'
+  | 'verifying-camera'
+  | 'correcting-zoom'
+  | 'verifying-final'
+  | 'completed'
+  | 'failed'
+type RouteCameraIntentSnapshot = {
+  generation: number
+  source: RouteCameraIntentSource | null
+  routeId: string | null
+  target: CameraState | null
+  rawTargetZoom: number | null
+  effectiveTargetZoom: number | null
+  configuredMinZoom: number | null
+  configuredMaxZoom: number | null
+  actualZoom: number | null
+  zoomCorrectionApplied: boolean
+  zoomCorrectionMethod: 'zoomTo' | 'setZoom' | null
+  zoomCorrectionGeneration: number | null
+  lastZoomWriter: { source: RouteCameraIntentSource; generation: number; value: number } | null
+  phase: RouteCameraIntentPhase
+  status: RouteCameraIntentStatus
+  lastCompletedGeneration: number
+  lastFailure?: string
+}
 
 const MAP_3D_GUIDE_MIN_BASEMAP_READY_MS = 1050
 const MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS = 3200
@@ -102,6 +222,34 @@ type RenderedInkDecorOverlay = InkDecorOverlay & {
   active: boolean
 }
 
+type InkOverlayCameraMode = 'off' | 'topdown' | 'reduced' | 'disabled3d'
+
+type InkOverlayCameraState = {
+  mode: InkOverlayCameraMode
+  effectiveOpacity: number
+  pitch: number
+  rotation: number
+  reason?: string
+}
+
+type InkOverlaySource = 'ai' | 'base' | 'jimeng'
+type InkTileSource = 'v3'
+type InkTileVariant = 'v3'
+type InkTileTransformConfig = {
+  tileDir: string
+  sourceTransform: string
+  flipX: boolean
+  flipY: boolean
+  rotate: 0 | 90 | 180 | 270
+}
+
+type InkOverlayAdjustments = {
+  offsetX: number
+  offsetY: number
+  scaleX: number
+  scaleY: number
+}
+
 type DecorSmokeReport = {
   markerCount: number
   fallbackCount: number
@@ -109,93 +257,8 @@ type DecorSmokeReport = {
 }
 
 type AssetLoadState = Record<string, 'loaded' | 'error'>
-
-type GardenAssetFilterState = {
-  zoneId: string
-  kind: string
-  priority: string
-  visible: string
-}
-
-type GardenBatchAdjustState = {
-  scaleMultiplier: number
-  heightDelta: number
-  opacityDelta: number
-  latOffset: number
-  lngOffset: number
-}
-
-type GardenEditorZoneKind = 'forest' | 'axis_grove' | 'water_edge' | 'node_green'
-type GardenKeepoutReason = string
-type GardenEditorMode = 'inspect' | 'drawVegetation' | 'drawKeepout' | 'addAsset'
-type GardenAssetSourceMode = 'manual' | 'legacy'
-type TreeCandidateType =
-  | 'fluffy_bodhi_grove'
-  | 'fluffy_round_tree'
-  | 'fluffy_tree_mix'
-  | 'bushy_canopy_tree'
-  | 'dense_shrub_cluster'
-  | 'soft_forest_clump'
-type TreeCandidateClusterMode = 'single' | 'smallCluster' | 'mediumCluster' | 'backgroundGrove'
-type TreeCandidateLabClickMode = 'idle' | 'addCluster' | 'compareSet'
-
-type TreeCandidateLabParams = {
-  count: number
-  radiusMeters: number
-  minDistanceMeters: number
-  scaleMin: number
-  scaleMax: number
-  heightOffset: number
-  randomSeed: number
-}
-
-type TreeCandidateLabState = {
-  selectedCandidateType: TreeCandidateType
-  clusterMode: TreeCandidateClusterMode
-  params: TreeCandidateLabParams
-  testTrees: LingshanMap3DGardenAsset[]
-  defaultGardenHidden: boolean
-  landmarkReferenceLoaded: boolean
-}
-
-type GardenAssetRatios = Partial<Record<Map3DGardenAssetKind, number>>
-
-type GardenEditorVegetationZone = {
-  id: string
-  name: string
-  kind: GardenEditorZoneKind
-  vertices: LatLngPoint[]
-  density: number
-  assetPool: Map3DGardenAssetKind[]
-  assetRatios: GardenAssetRatios
-  minScale: number
-  maxScale: number
-  minHeight: number
-  maxHeight: number
-  opacity: number
-  priority: Map3DGardenAssetPriority
-  visible: boolean
-}
-
-type GardenEditorKeepoutZone = {
-  id: string
-  name: string
-  reason: GardenKeepoutReason
-  vertices: LatLngPoint[]
-  visible: boolean
-}
-
-type GardenEditorState = {
-  zones: GardenEditorVegetationZone[]
-  keepouts: GardenEditorKeepoutZone[]
-  previewAssets: LingshanMap3DGardenAsset[]
-  appliedAssets: LingshanMap3DGardenAsset[]
-}
-
-type GardenDraftPolygon = {
-  mode: 'vegetation' | 'keepout'
-  vertices: LatLngPoint[]
-} | null
+type InkMapBoundCorner = 'northWest' | 'northEast' | 'southEast' | 'southWest'
+type InkMapBoundsDraft = Record<InkMapBoundCorner, LatLngPoint | null>
 
 type TourWaypoint = LatLngPoint & {
   progress: number
@@ -234,251 +297,190 @@ type Map3DGuideVisualVariantConfig = {
   decorStrategy: string
 }
 
-const demoGuideRoute = guideRoutes.find((route) => route.id === 'historical_culture') ?? guideRoutes[0]
-const demoRouteGeometry = getLingshanRouteGeometryByGuideRouteId('historical_culture')
-const demoRoutePath = demoRouteGeometry?.path.length ? demoRouteGeometry.path : getRouteStopLocations(demoGuideRoute)
-const demoPlannedRoute = buildPlannedRouteFromPath(demoRoutePath)
-const initialPosition = getRouteStopLocation(demoGuideRoute.stops[0]?.spotId) ?? demoRoutePath[0] ?? scenicCenter
+const defaultScenicRouteConfig = getScenicRouteConfig(getDefaultScenicRouteId())
+const demoGuideRoute = defaultScenicRouteConfig.guideRoute
+const demoRoutePath = defaultScenicRouteConfig.geometry?.length ? defaultScenicRouteConfig.geometry : getRouteStopLocations(demoGuideRoute)
 const defaultModelOverlay = getMapModelOverlayByPoiId('giant_buddha')
-const progressStep = Math.max(8, Math.round(demoRoutePath.length / 28))
 const offRouteOffset = { lat: 0.00105, lng: 0.00125 }
 const routeCenter = getPathCenter(demoRoutePath) ?? scenicCenter
-const demoRouteCumulativeDistances = buildPathCumulativeDistances(demoRoutePath)
-const demoRouteTotalDistance = demoRouteCumulativeDistances[demoRouteCumulativeDistances.length - 1] ?? 0
-const demoRouteHasSequenceOverlaps = detectRouteSequenceOverlaps(demoRoutePath)
-const axisCruiseTarget =
-  getPathCenter([
-    getRouteStopLocation('south_gate') ?? initialPosition,
-    getRouteStopLocation('shengjing_square') ?? routeCenter,
-    getRouteStopLocation('foqian_square') ?? routeCenter,
-    getRouteStopLocation('giant_buddha') ?? routeCenter
-  ]) ?? routeCenter
 const tencentMapStyleMethodCandidates = ['setMapStyleId', 'setStyle', 'setMapStyle', 'setBaseMap']
 const MAP_3D_GUIDE_STYLE_ID = 'style1'
 const MAP_3D_GUIDE_RENDER_OPTIONS = {
-  enableBloom: false
-  // fogOptions / skyOptions need confirmed Tencent JS API GL field shapes before enabling.
+  enableBloom: true
 } as const
 const MAP_3D_GUIDE_BASE_MAP = {
   type: 'vector',
-  features: ['base', 'building3d', 'label']
+  // Tencent native POIs are a separate vector feature. `all` must include it;
+  // labels alone do not ask the SDK to render the POI icon/feature layer.
+  features: ['base', 'building3d', 'point', 'label']
 } as const
-// 移动端起手视角:总览(overviewEstate, zoom 16.85)会一次性拉取整个景区的 building3d
-// 瓦片,手机外网 + GPU 扛不住,导致建筑出现很慢。移动端改为适度拉近,大幅减少初始可视
-// 瓦片量,建筑更快出现;真·广角总览改由用户点「总览」按钮按需触发。
-const MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM = 18
+const MAP_3D_GUIDE_CORE_BASE_MAP = {
+  type: 'vector',
+  features: ['base', 'building3d']
+} as const
+const MAP_3D_GUIDE_EXPORT_BASE_MAP = {
+  type: 'vector',
+  features: ['base', 'building3d']
+} as const
+const INK_EXPORT_CAMERA_PADDING_PX = 96
+const LINGSHAN_INK_OVERLAY_IMAGE_URLS: Record<InkOverlaySource, string> = {
+  ai: '/map/ink/lingshan-ink-map-gpt-v1.png',
+  base: '/map/ink/lingshan-ink-base-tencent.png',
+  jimeng: '/map/ink/lingshan-ink-map-jimeng-v1.png'
+}
+const LINGSHAN_INK_OVERLAY_DEFAULT_OPACITY = 0.68
+const LINGSHAN_INK_OVERLAY_COMPARE_OPACITY = 0.45
+const LINGSHAN_INK_OVERLAY_TOPDOWN_PITCH_MAX = 8
+const LINGSHAN_INK_OVERLAY_REDUCED_PITCH_MAX = 32
+const LINGSHAN_INK_OVERLAY_REDUCED_MAX_OPACITY = 0.28
+const LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS: InkOverlayAdjustments = {
+  offsetX: 0,
+  offsetY: 0,
+  scaleX: 1,
+  scaleY: 1
+}
+const MAP_LAYER_Z_INDEX = {
+  TENCENT_CUSTOM_LAYER: 100,
+  LOCAL_TILE_FALLBACK: 100,
+  LOCAL_GROUND_FALLBACK: 99,
+  DEBUG_LAYER: 999
+} as const
+const ENABLE_INK_TILES_BY_DEFAULT = true
+const ENABLE_TENCENT_CUSTOM_LAYER = true
+const TENCENT_CUSTOM_LAYER_NAME = '我的自定义图层1'
+const TENCENT_CUSTOM_LAYER_ID = '6a4b665a9818'
+const TENCENT_CUSTOM_LAYER_CONFIG = {
+  minZoom: 15,
+  maxZoom: 20,
+  visible: true,
+  zIndex: MAP_LAYER_Z_INDEX.TENCENT_CUSTOM_LAYER,
+  opacity: 1
+} as const
+const TENCENT_CUSTOM_LAYER_INITIAL_ZOOM = 16
+const MAP_3D_GUIDE_INITIAL_ZOOM = ENABLE_TENCENT_CUSTOM_LAYER ? TENCENT_CUSTOM_LAYER_INITIAL_ZOOM : SCENIC_CAMERA_BOUNDS.defaultZoom
+const INK_2D_INITIAL_ZOOM = 16.35
+const INK_2D_MIN_ZOOM = 15.2
+const INK_2D_MAX_ZOOM = 18.25
+const INK_2D_CAMERA_PRESET: Map3DCameraPreset = {
+  id: 'routeOverview',
+  label: '2D 导览',
+  description: '正俯视水墨导览底图',
+  zoom: 16.9,
+  pitch: 0,
+  rotation: 0,
+  durationMs: 520
+}
+const MAP_PRESENTATION_CLOUD_MIN_MS = 650
+
+// 仅调试备用，默认不用。正式页面使用腾讯地图平台托管自定义图层，不再依赖本地切片或自建瓦片服务。
+const ENABLE_LOCAL_INK_TILE_FALLBACK = false
+const LINGSHAN_INK_TILE_SOURCE_CONFIGS: Record<
+  InkTileSource,
+  {
+    imageUrl: string
+    tileUrlTemplate: string
+    blankUrl: string
+    label: string
+    sourceWidth: number
+    sourceHeight: number
+    sourceImageStandard: boolean
+    sourceImageWarning?: string
+  }
+> = {
+  v3: {
+    imageUrl: '/map/ink/lingshan-ink-map-v3.png',
+    tileUrlTemplate: '/map/ink/tiles/v3/{z}/{x}/{y}.png',
+    blankUrl: '/map/ink/tiles/empty.png',
+    label: 'AI 水墨 v3',
+    sourceWidth: 1254,
+    sourceHeight: 1254,
+    sourceImageStandard: false,
+    sourceImageWarning: 'non-4096 validation source'
+  }
+}
+const LINGSHAN_INK_TILE_VARIANT_CONFIGS: Record<InkTileVariant, InkTileTransformConfig> = {
+  v3: {
+    tileDir: 'v3',
+    sourceTransform: 'flipY',
+    flipX: false,
+    flipY: true,
+    rotate: 0
+  }
+}
+const LINGSHAN_INK_TILE_ZOOM_LEVELS = [15, 16, 17, 18, 19, 20] as const
+const LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM = 20
+const LINGSHAN_INK_TILE_DISPLAY_MAX_ZOOM = 22
+const LINGSHAN_INK_TILE_DEFAULT_OPACITY = 1
+const LINGSHAN_INK_TILE_BOUNDARY_PADDING_RATIO = 0.08
+const LINGSHAN_INK_TILE_NATIVE_REQUEST_TIMEOUT_MS = 1200
+const INK_MAP_CENTER_LIMIT_RATIO = 0.66
+const INK_MAP_VISUAL_BUFFER_RATIO = 0.98
+const INK_MAP_MIN_ZOOM = TENCENT_CUSTOM_LAYER_CONFIG.minZoom
+const INK_MAP_MAX_ZOOM = 18.85
+const INK_MAP_DEBUG_MIN_ZOOM = 15.2
+const INK_MAP_DEBUG_MAX_ZOOM = 21.4
+const inkMapBoundCornerOrder: InkMapBoundCorner[] = ['northWest', 'northEast', 'southEast', 'southWest']
+const inkMapBoundCornerLabels: Record<InkMapBoundCorner, string> = {
+  northWest: 'northwest',
+  northEast: 'northeast',
+  southEast: 'southeast',
+  southWest: 'southwest'
+}
+const inkMapBoundCornerShortLabels: Record<InkMapBoundCorner, string> = {
+  northWest: 'NW',
+  northEast: 'NE',
+  southEast: 'SE',
+  southWest: 'SW'
+}
 const MAP_3D_GUIDE_LOCAL_TMAP_HOST = '127.0.0.1'
 const MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST = 'localhost'
 const MAP_3D_GUIDE_DECOR_STORAGE_KEY = 'lingshan-map-3d-guide-ink-decor-v1'
-const MAP_3D_GUIDE_GARDEN_STORAGE_KEY = 'lingshan-map-3d-guide-garden-assets-v8-manual-trees'
-const MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY = 'lingshan-map-3d-guide-garden-editor-v1'
-const MOBILE_GARDEN_ASSET_LIMIT = 168
-const MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT: Record<Map3DGardenAssetPriority, number> = {
-  high: 0,
-  medium: 1,
-  low: 2
-}
-const TREE_CANDIDATE_LAB_STORAGE_KEY = 'lingshan_tree_candidate_lab_draft_v1'
-const MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX = 'lingshan-map-3d-guide-localhost-transfer:'
-const MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS = [
-  MAP_3D_GUIDE_GARDEN_STORAGE_KEY,
-  MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY,
-  TREE_CANDIDATE_LAB_STORAGE_KEY
-] as const
-const TREE_CANDIDATE_LAB_ZONE_ID = 'tree-candidate-lab'
-const recommendedTreeCandidateTypes: TreeCandidateType[] = ['fluffy_bodhi_grove']
-const legacyTreeCandidateTypes: TreeCandidateType[] = [
-  'fluffy_round_tree',
-  'fluffy_tree_mix',
-  'bushy_canopy_tree',
-  'dense_shrub_cluster',
-  'soft_forest_clump'
+const scenicPoiBillboardConfigs: Array<{
+  id: string
+  description: string
+  tier: ScenicPoiBillboardItem['tier']
+  visualLiftPx: number
+}> = [
+  { id: 'giant_buddha', description: '庄严佛境核心', tier: 'core', visualLiftPx: 90 },
+  { id: 'fan_gong', description: '东方佛教艺术殿堂', tier: 'core', visualLiftPx: 80 },
+  { id: 'wuyin_tancheng', description: '藏式坛城圣境', tier: 'core', visualLiftPx: 76 },
+  { id: 'xiangfu_temple', description: '古刹禅修空间', tier: 'core', visualLiftPx: 72 },
+  { id: 'jiulong_guanyu', description: '佛诞圣景再现', tier: 'core', visualLiftPx: 58 },
+  { id: 'lingshan_wall', description: '入境礼序地标', tier: 'core', visualLiftPx: 58 },
+  { id: 'foshou_square', description: '祈福打卡之地', tier: 'secondary', visualLiftPx: 50 },
+  { id: 'foqian_square', description: '瞻礼大佛前庭', tier: 'secondary', visualLiftPx: 50 },
+  { id: 'puti_avenue', description: '通往佛境主轴', tier: 'secondary', visualLiftPx: 46 },
+  { id: 'shengjing_square', description: '入园开阔序厅', tier: 'secondary', visualLiftPx: 46 },
+  { id: 'sansheng_hall', description: '礼佛静心殿宇', tier: 'secondary', visualLiftPx: 60 },
+  { id: 'baizi_mile', description: '欢喜弥勒景观', tier: 'secondary', visualLiftPx: 52 },
+  { id: 'manfeilong_tower', description: '异域佛塔景观', tier: 'secondary', visualLiftPx: 60 }
 ]
-const treeCandidateTypes: TreeCandidateType[] = [
-  ...recommendedTreeCandidateTypes,
-  ...legacyTreeCandidateTypes
-]
-const treeCandidateLabels: Record<TreeCandidateType, string> = {
-  fluffy_bodhi_grove: '毛茸茸菩提树团',
-  fluffy_round_tree: 'fluffy_round_tree',
-  fluffy_tree_mix: 'fluffy_tree_mix',
-  bushy_canopy_tree: 'bushy_canopy_tree',
-  dense_shrub_cluster: 'dense_shrub_cluster',
-  soft_forest_clump: 'soft_forest_clump'
-}
-const treeCandidateDescriptions: Record<TreeCandidateType, string> = {
-  fluffy_bodhi_grove: '主树团候选；适合背景林、边界林、地标侧后方树群。',
-  fluffy_round_tree: 'Kenney legacy 圆冠矮树候选。',
-  fluffy_tree_mix: 'Kenney legacy 块状圆冠树候选。',
-  bushy_canopy_tree: 'Kenney legacy 深绿橡树冠候选。',
-  dense_shrub_cluster: 'Kenney legacy 大灌木候选。',
-  soft_forest_clump: 'Kenney legacy 深绿树候选。'
-}
-const treeCandidateRecommendedModes: Record<TreeCandidateType, TreeCandidateClusterMode[]> = {
-  fluffy_bodhi_grove: ['smallCluster', 'mediumCluster', 'backgroundGrove'],
-  fluffy_round_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  fluffy_tree_mix: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  bushy_canopy_tree: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  dense_shrub_cluster: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove'],
-  soft_forest_clump: ['single', 'smallCluster', 'mediumCluster', 'backgroundGrove']
-}
-const treeCandidateTypesForCompare = treeCandidateTypes
-const treeCandidateLegacyDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
-  single: {
-    count: 1,
-    radiusMeters: 0,
-    minDistanceMeters: 0,
-    scaleMin: 84,
-    scaleMax: 94,
-    heightOffset: 2.2,
-    randomSeed: 1207
-  },
-  smallCluster: {
-    count: 4,
-    radiusMeters: 10,
-    minDistanceMeters: 3,
-    scaleMin: 78,
-    scaleMax: 98,
-    heightOffset: 2.1,
-    randomSeed: 2401
-  },
-  mediumCluster: {
-    count: 8,
-    radiusMeters: 18,
-    minDistanceMeters: 4,
-    scaleMin: 74,
-    scaleMax: 106,
-    heightOffset: 2,
-    randomSeed: 3613
-  },
-  backgroundGrove: {
-    count: 14,
-    radiusMeters: 36,
-    minDistanceMeters: 6,
-    scaleMin: 66,
-    scaleMax: 116,
-    heightOffset: 1.8,
-    randomSeed: 4817
-  }
-}
-const treeCandidateBodhiGroveDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = {
-  single: {
-    count: 1,
-    radiusMeters: 0,
-    minDistanceMeters: 0,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9201
-  },
-  smallCluster: {
-    count: 3,
-    radiusMeters: 14,
-    minDistanceMeters: 8,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9301
-  },
-  mediumCluster: {
-    count: 5,
-    radiusMeters: 26,
-    minDistanceMeters: 10,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9401
-  },
-  backgroundGrove: {
-    count: 8,
-    radiusMeters: 48,
-    minDistanceMeters: 14,
-    scaleMin: 48,
-    scaleMax: 74.4,
-    heightOffset: 0,
-    randomSeed: 9501
-  }
-}
-const treeCandidateRecommendedDefaults: Record<TreeCandidateType, Record<TreeCandidateClusterMode, TreeCandidateLabParams>> = {
-  fluffy_bodhi_grove: treeCandidateBodhiGroveDefaults,
-  fluffy_round_tree: treeCandidateLegacyDefaults,
-  fluffy_tree_mix: treeCandidateLegacyDefaults,
-  bushy_canopy_tree: treeCandidateLegacyDefaults,
-  dense_shrub_cluster: treeCandidateLegacyDefaults,
-  soft_forest_clump: treeCandidateLegacyDefaults
-}
-const treeCandidateClusterDefaults: Record<TreeCandidateClusterMode, TreeCandidateLabParams> = treeCandidateBodhiGroveDefaults
-const coreLandmarkReferenceIds = [
-  'giant_buddha',
-  'fan_gong',
-  'puti_avenue',
-  'jiulong_guanyu',
-  'lingshan_dazhaobi',
-  'wuyin_tancheng',
-  'foshou_square',
-  'foqian_square',
-  'xiangfu_temple',
-  'sansheng_hall',
-  'baizi_mile',
-  'manlong_flying_tower',
-  'shengjing_square'
-]
-const LANDMARK_RUNTIME_BATCH_DELAY_MS = 520
-const LANDMARK_RUNTIME_LOAD_BATCHES = [
-  ['giant_buddha', 'fan_gong', 'wuyin_tancheng'],
-  ['foshou_square', 'foqian_square', 'xiangfu_temple', 'jiulong_guanyu'],
-  ['sansheng_hall', 'baizi_mile', 'manlong_flying_tower', 'shengjing_square', 'lingshan_dazhaobi', 'puti_avenue']
-] as const
-const treeCandidateClusterLabels: Record<TreeCandidateClusterMode, string> = {
-  single: '单棵',
-  smallCluster: '小树团',
-  mediumCluster: '中树团',
-  backgroundGrove: '背景林团'
-}
-const defaultGardenFilters: GardenAssetFilterState = {
-  zoneId: 'all',
-  kind: 'all',
-  priority: 'all',
-  visible: 'all'
-}
-const defaultGardenBatchAdjust: GardenBatchAdjustState = {
-  scaleMultiplier: 1.08,
-  heightDelta: 0,
-  opacityDelta: 0.05,
-  latOffset: 0,
-  lngOffset: 0
-}
-const gardenAssetKindOptions: Map3DGardenAssetKind[] = [
-  'pine_cluster',
-  'mixed_grove',
-  'bamboo_grove',
-  'forest_edge',
-  'shrub_mass',
-  'rock_cluster',
-  'stone_mass',
-  'fluffy_round_tree',
-  'bushy_canopy_tree',
-  'dense_shrub_cluster',
-  'soft_forest_clump',
-  'fluffy_tree_mix'
-]
-const defaultEditorAssetPool: Map3DGardenAssetKind[] = ['pine_cluster', 'mixed_grove', 'forest_edge', 'shrub_mass', 'rock_cluster']
-const defaultEditorAssetRatios: GardenAssetRatios = {
-  pine_cluster: 40,
-  mixed_grove: 24,
-  forest_edge: 16,
-  shrub_mass: 14,
-  rock_cluster: 6
-}
+const ENABLE_LANDMARK_GLB = true
+const LANDMARK_GLB_LOAD_MODE = 'nearby-and-tour-focus'
+const MAX_ACTIVE_LANDMARK_GLB = 4
+const MAX_OVERVIEW_ACTIVE_LANDMARK_GLB = 8
+const LANDMARK_PRELOAD_RADIUS_M = 650
+const LANDMARK_MOBILE_PRELOAD_RADIUS_M = 900
+const LANDMARK_KEEP_ALIVE_RADIUS_M = 900
+const LANDMARK_RELEASE_RADIUS_M = 1400
+const LANDMARK_OVERVIEW_ZOOM_THRESHOLD = 17.35
+const LANDMARK_OVERVIEW_PRELOAD_RADIUS_M = 2600
+const LANDMARK_OVERVIEW_KEEP_ALIVE_RADIUS_M = 2800
+const LANDMARK_OVERVIEW_RELEASE_RADIUS_M = 3600
+const PROTECT_TOUR_FOCUS_LANDMARKS = true
+const LANDMARK_FORCE_LOW_DETAIL_GLB = true
+const MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS = 34
+const MOBILE_BUDDHA_TOUR_ROUTE_FRAME_MS = 72
+const BUDDHA_TOUR_EARLY_PRELOAD_PROGRESS = 0.06
 const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVariantConfig> = {
   default: {
     id: 'default',
     className: 'map-3d-guide-shell--default',
     kicker: '灵山胜境导览',
     title: '真实 3D 游线',
-    subtitle: `${demoGuideRoute.name} · 金色丝带路线 · 下一站引导`,
+    subtitle: '金色丝带路线 · 下一站引导',
     statusTitle: '导览玉牌',
-    stationPanelTitle: '历史文化核心站点',
+    stationPanelTitle: '当前路线核心站点',
     controlTitle: '导览控制台',
     decorStorageKey: MAP_3D_GUIDE_DECOR_STORAGE_KEY,
     decorStrategy: '标准路线唤醒水墨层'
@@ -488,9 +490,9 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     className: 'map-3d-guide-shell--prototype-a',
     kicker: '视觉原型 A · 少量高质素材',
     title: '青绿佛境精品导览',
-    subtitle: `${demoGuideRoute.name} · 稀疏园林资产 · 路线优先`,
+    subtitle: '核心地标资产 · 路线优先',
     statusTitle: '游线导览牌',
-    stationPanelTitle: '核心文化节点',
+    stationPanelTitle: '当前路线节点',
     controlTitle: '精品导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-a`,
     decorStrategy: '少量 CC0 透明 PNG 与内联水墨符号反复组合，画面克制、路线清晰。'
@@ -500,9 +502,9 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
     className: 'map-3d-guide-shell--prototype-b',
     kicker: '视觉原型 B · 高密度数字沙盘',
     title: '路线唤醒灵山画卷',
-    subtitle: `${demoGuideRoute.name} · 密集园林铺陈 · 节点爆点`,
+    subtitle: '密集园林铺陈 · 节点爆点',
     statusTitle: '沉浸导览牌',
-    stationPanelTitle: '路线唤醒节点',
+    stationPanelTitle: '当前路线节点',
     controlTitle: '沙盘导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-b`,
     decorStrategy: '更多 CC0 园林素材沿线铺陈，当前段和关键节点密度更高。'
@@ -510,11 +512,11 @@ const map3DGuideVisualVariants: Record<Map3DGuideVariant, Map3DGuideVisualVarian
   'prototype-c': {
     id: 'prototype-c',
     className: 'map-3d-guide-shell--prototype-c',
-    kicker: '视觉原型 C · 沉稳 3D 园林资产',
+    kicker: '视觉原型 C · 沉稳 3D 地标资产',
     title: '低模园林路线沙盘',
-    subtitle: `${demoGuideRoute.name} · GLB 园林资产 · 地图坐标锚定`,
+    subtitle: 'GLB 地标资产 · 地图坐标锚定',
     statusTitle: '3D 园林导览牌',
-    stationPanelTitle: '园林化历史文化节点',
+    stationPanelTitle: '园林化路线节点',
     controlTitle: '3D 园林导览控制',
     decorStorageKey: `${MAP_3D_GUIDE_DECOR_STORAGE_KEY}-prototype-c`,
     decorStrategy: '禁用 PNG 贴片，改用航拍参考 vegetation zones 生成高密度 Kenney CC0 低模自然 GLB 林带。'
@@ -541,14 +543,258 @@ const guideCameraPresets: Map3DCameraPreset[] = [
   MAP_3D_GUIDE_CAMERA_PRESETS.closeInspect
 ]
 
-export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DGuideVariant }) {
+export type Map3DGuideMapRuntime = {
+  map: any
+  TMap: any
+  mapInstanceId: number
+}
+
+export type Map3DGuideCameraScope = 'scenic' | 'navigation'
+
+type Map3DGuideExperienceProps = {
+  variant?: Map3DGuideVariant
+  guideState?: MapGuideState
+  presentation?: ScenicMapPresentation
+  onPresentationTransitionChange?: (snapshot: MapPresentationTransitionSnapshot) => void
+  /** Optional extension point for prototype-only map overlays. */
+  onMapRuntimeChange?: (runtime: Map3DGuideMapRuntime | null) => void
+  /** Temporary map presentation override; never mutates the user's POI preference. */
+  navigationPoiOverrideActive?: boolean
+  /** Lets the standalone real-navigation page leave the scenic camera bounds. */
+  cameraScope?: Map3DGuideCameraScope
+  /**
+   * Restores the Tencent runtime only for standalone prototype shells that do
+   * not participate in the C-app map lifecycle. Kept opt-in so the regular
+   * C-app route remains untouched while its map runtime is being refactored.
+   */
+  bootstrapMapRuntime?: boolean
+}
+
+function resolveScenicMapPresentation(
+  explicitPresentation: ScenicMapPresentation | undefined,
+  isMobileViewport: boolean
+): ScenicMapPresentation {
+  if (explicitPresentation) {
+    return explicitPresentation
+  }
+
+  if (typeof window !== 'undefined') {
+    const queryValue = new URLSearchParams(window.location.search).get('presentation')
+    if (queryValue === 'scenic3d' || queryValue === 'ink2d') {
+      return queryValue
+    }
+  }
+
+  return isMobileViewport ? 'ink2d' : 'scenic3d'
+}
+
+function getInk2DCameraPreset(preset: Map3DCameraPreset): Map3DCameraPreset {
+  const zoom = clampNumber(
+    preset.id === 'overviewEstate' || preset.id === 'axisCruise' || preset.id === 'routeOverview'
+      ? INK_2D_INITIAL_ZOOM
+      : Math.min(preset.zoom, 17.45),
+    INK_2D_MIN_ZOOM,
+    INK_2D_MAX_ZOOM
+  )
+
+  return {
+    ...preset,
+    label: preset.id === 'routeOverview' ? INK_2D_CAMERA_PRESET.label : preset.label,
+    description: INK_2D_CAMERA_PRESET.description,
+    zoom,
+    pitch: 0,
+    rotation: 0,
+    durationMs: Math.min(preset.durationMs ?? INK_2D_CAMERA_PRESET.durationMs, INK_2D_CAMERA_PRESET.durationMs)
+  }
+}
+
+function getMapBaseMapConfig(options: { clean: boolean; showNativePoiLabels: boolean }) {
+  if (options.clean) {
+    return MAP_3D_GUIDE_EXPORT_BASE_MAP
+  }
+  return options.showNativePoiLabels ? MAP_3D_GUIDE_BASE_MAP : MAP_3D_GUIDE_CORE_BASE_MAP
+}
+
+function applyTencentBaseMapPoiMode(
+  map: any,
+  options: { clean: boolean; showNativePoiLabels: boolean }
+): { applied: boolean; lastError?: string } {
+  if (!map || typeof map.setBaseMap !== 'function') {
+    return { applied: false, lastError: 'Tencent map setBaseMap is unavailable' }
+  }
+
+  try {
+    map.setBaseMap(getMapBaseMapConfig(options))
+    return { applied: true }
+  } catch (error) {
+    console.warn('[Map3D] Tencent base-map POI label switch unavailable', error)
+    return {
+      applied: false,
+      lastError: error instanceof Error ? error.message : 'Tencent map setBaseMap failed'
+    }
+  }
+}
+
+const TENCENT_NATIVE_CONTROL_SELECTOR = [
+  '.tmap-control',
+  '.tmap-control-container',
+  '.tmap-zoom-control',
+  '.tmap-rotate-control',
+  '.tmap-compass',
+  '.tmap-scale-control',
+  '.TMap-control',
+  '.TMap-zoom',
+  '.TMap-compass',
+  '[class*="tmap" i][class*="zoom" i]',
+  '[class*="tmap" i][class*="compass" i]',
+  '[class*="tmap" i][class*="rotate" i]'
+].join(', ')
+
+function countVisibleTencentNativeMapControls(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(TENCENT_NATIVE_CONTROL_SELECTOR)).filter((element) => {
+    const style = window.getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+  }).length
+}
+
+function resolvePoiLayerVisibility(input: {
+  isRouteGuideView: boolean
+}): PoiLayerVisibility {
+  return {
+    // Core/all selects the custom POI dataset; it must not double as a
+    // visibility switch. Tencent native labels may coexist in all mode.
+    showGenericCustomPoi: true,
+    showRouteStopMarkers: input.isRouteGuideView,
+    showRouteStateMarkers: input.isRouteGuideView
+  }
+}
+
+type MapRuntimeErrorBoundaryProps = {
+  children: ReactNode
+  onError: (error: Error, info: ErrorInfo) => void
+}
+
+type MapRuntimeErrorBoundaryState = { error?: Error }
+
+/** Limits an unexpected Tencent runtime render error to the map canvas area.
+ * Page cards, the assistant and the presentation transition are outside it. */
+class MapRuntimeErrorBoundary extends Component<MapRuntimeErrorBoundaryProps, MapRuntimeErrorBoundaryState> {
+  state: MapRuntimeErrorBoundaryState = {}
+
+  static getDerivedStateFromError(error: Error): MapRuntimeErrorBoundaryState {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    this.props.onError(error, info)
+  }
+
+  render() {
+    if (this.state.error) {
+      return <div className="map-3d-guide-map-runtime-fallback" role="status">地图正在恢复，请稍候…</div>
+    }
+    return this.props.children
+  }
+}
+
+export function Map3DGuideExperience({
+  variant = 'default',
+  guideState,
+  presentation,
+  onPresentationTransitionChange,
+  onMapRuntimeChange,
+  navigationPoiOverrideActive = false,
+  cameraScope = 'scenic',
+  bootstrapMapRuntime = true
+}: Map3DGuideExperienceProps) {
   const navigate = useNavigate()
-  // 移动端:导览面板收进底部抽屉,默认收起,只露把手,保证 3D 地图全屏可见
-  const [dockOpen, setDockOpen] = useState(false)
-  const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
   const isMobileViewport = useIsMobileViewport()
+  const effectiveGuideState = guideState ?? ({ viewMode: 'browse', xiaolingMode: 'browse' } satisfies MapGuideState)
+  const poiVisibilityMode = useMapGuideUiStore((state) => state.poiVisibilityMode)
+  const effectivePoiMode: LingshanPoiLayerMode = navigationPoiOverrideActive ? 'all' : poiVisibilityMode
+  const serviceFacilitiesEnabled = useMapGuideUiStore((state) => state.serviceFacilitiesEnabled)
+  const routeCardExpanded = useMapGuideUiStore((state) => state.routeCardExpanded)
+  const mapFocusMode = useMapGuideUiStore((state) => state.mapFocusMode)
+  const setSelectedPoiId = useMapGuideUiStore((state) => state.setSelectedPoiId)
+  const visualVariant = map3DGuideVisualVariants[variant] ?? map3DGuideVisualVariants.default
+  const requestedScenicMapPresentation = useMemo(
+    () => resolveScenicMapPresentation(presentation, isMobileViewport),
+    [isMobileViewport, presentation]
+  )
+  const [presentationFallback, setPresentationFallback] = useState<ScenicMapPresentation | null>(null)
+  const scenicMapPresentation = presentationFallback ?? requestedScenicMapPresentation
+  const isInk2DPresentation = scenicMapPresentation === 'ink2d'
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
+  const onMapRuntimeChangeRef = useRef(onMapRuntimeChange)
+  const presentationViewportRef = useRef<{ center: LatLngPoint; zoom: number } | null>(null)
+  const camera2DStateRef = useRef<CameraState>({
+    center: scenicCenter,
+    zoom: INK_2D_INITIAL_ZOOM,
+    pitch: 0,
+    rotation: 0
+  })
+  const camera3DStateRef = useRef<CameraState>({
+    center: scenicCenter,
+    zoom: MAP_3D_GUIDE_INITIAL_ZOOM,
+    pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+    rotation: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation
+  })
+  const lastMeaningful3DCameraRef = useRef<CameraState | null>(null)
+  const suppress3DCameraPersistenceRef = useRef(false)
+  const cameraTransitionPhaseRef = useRef<CameraTransitionPhase>('idle')
+  const cameraPersistenceDiagnosticsRef = useRef({
+    lastPersistReason: '',
+    lastRejectedPersistReason: ''
+  })
+  const presentationGenerationRef = useRef(0)
+  const presentationSwitchGenerationRef = useRef(0)
+  const mapAttemptGenerationRef = useRef(0)
+  const mapInstanceGenerationCounterRef = useRef(0)
+  const activeMapInstanceGenerationRef = useRef(0)
+  const mapCreateCountRef = useRef(0)
+  const mapDestroyCountRef = useRef(0)
+  const contextLostCountRef = useRef(0)
+  const hardRecoveryCountRef = useRef(0)
+  const hardRecoveryRequestRef = useRef<(reason: string, error?: unknown) => void>(() => undefined)
+  const [mapRuntimeGeneration, setMapRuntimeGeneration] = useState(0)
+  const [mapContainerGeneration, setMapContainerGeneration] = useState(0)
+  const [mapInstanceId, setMapInstanceId] = useState(0)
+  const [lastMapError, setLastMapError] = useState('')
+  const [genericCustomPoiVisibleCount, setGenericCustomPoiVisibleCount] = useState(0)
+  const [routeStopMarkerCount, setRouteStopMarkerCount] = useState(0)
+  const [routeStateMarkerCount, setRouteStateMarkerCount] = useState(0)
+  const [nativeMapControlVisibleCount, setNativeMapControlVisibleCount] = useState(0)
+  const [tencentPoiMode, setTencentPoiMode] = useState<TencentPoiModeRuntime>({
+    requested: false,
+    applied: false
+  })
+
+  useEffect(() => {
+    onMapRuntimeChangeRef.current = onMapRuntimeChange
+  }, [onMapRuntimeChange])
+  const mapInstanceGenerationsRef = useRef<WeakMap<object, number>>(new WeakMap())
+  const destroyedMapInstancesRef = useRef<WeakSet<object>>(new WeakSet())
+  const activePresentationRef = useRef<ScenicMapPresentation>(scenicMapPresentation)
+  const appliedPresentationRef = useRef<ScenicMapPresentation | null>(null)
+  const initializedPresentationRef = useRef<ScenicMapPresentation | null>(null)
+  const presentationCloudStartedAtRef = useRef(0)
+  const presentationCloudHideTimerRef = useRef<number | null>(null)
+  const isMapInstanceUsable = useCallback((candidate: any) => {
+    return Boolean(
+      candidate &&
+      (typeof candidate === 'object' || typeof candidate === 'function') &&
+      !destroyedMapInstancesRef.current.has(candidate)
+    )
+  }, [])
+  const isMapInstanceCurrent = useCallback((candidate: any) => {
+    if (!isMapInstanceUsable(candidate) || mapRef.current !== candidate) {
+      return false
+    }
+
+    const instanceGeneration = mapInstanceGenerationsRef.current.get(candidate)
+    return Boolean(instanceGeneration && instanceGeneration === activeMapInstanceGenerationRef.current)
+  }, [isMapInstanceUsable])
   const routeLayerRef = useRef<any>(null)
   const tourRouteProgressLayerRef = useRef<any>(null)
   const poiMarkerLayerRef = useRef<any>(null)
@@ -556,15 +802,51 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const rerouteLayerRef = useRef<any>(null)
   const landmarkHighlightLayerRef = useRef<any>(null)
   const decorMarkerLayerRef = useRef<any>(null)
-  const forestPatchLayerRef = useRef<any>(null)
-  const gardenEditorPolygonLayerRef = useRef<any>(null)
-  const gardenEditorVertexLayerRef = useRef<any>(null)
-  const gardenPreviewMarkerLayerRef = useRef<any>(null)
-  const gardenAssetEditMarkerLayerRef = useRef<any>(null)
-  const treeCandidateMarkerLayerRef = useRef<any>(null)
-  const treeCandidateEditMarkerLayerRef = useRef<any>(null)
+  const inkOverlayLayerRef = useRef<HTMLDivElement | null>(null)
+  const inkTileLayerRef = useRef<any>(null)
+  const tencentCustomLayerInitKeyRef = useRef('')
+  const customTileLayerRuntimeRef = useRef<CustomTileLayerRuntime>({
+    attached: false,
+    visible: false,
+    refreshCount: 0,
+    lastRefreshReason: ''
+  })
+  const [customTileLayerRuntime, setCustomTileLayerRuntime] = useState<CustomTileLayerRuntime>(
+    customTileLayerRuntimeRef.current
+  )
+  const inkTileGroundFallbackLayerRef = useRef<any>(null)
+  const inkTileDomFallbackLayerRef = useRef<HTMLDivElement | null>(null)
+  const formalInkBoundsMarkerLayerRef = useRef<any>(null)
+  const formalInkBoundsBoundaryLayerRef = useRef<any>(null)
+  const formalInkBoundsFillLayerRef = useRef<any>(null)
+  const inkBoundsMarkerLayerRef = useRef<any>(null)
+  const inkBoundsBoundaryLayerRef = useRef<any>(null)
   const gltfModelRefs = useRef<Map<string, any>>(new Map())
+  const landmarkLastEvictedAtRef = useRef<Map<string, number>>(new Map())
+  const landmarkLastLoadAttemptAtRef = useRef<Map<string, number>>(new Map())
+  const landmarkLastLoadAllowReasonRef = useRef<Map<string, string>>(new Map())
+  const landmarkLastLoadDenyReasonRef = useRef<Map<string, string>>(new Map())
   const cameraSequenceRef = useRef(0)
+  const routeCameraIntentGenerationRef = useRef(0)
+  const routeCameraProgrammaticMoveRef = useRef(false)
+  const routeCameraIntentRef = useRef<RouteCameraIntentSnapshot>({
+    generation: 0,
+    source: null,
+    routeId: null,
+    target: null,
+    rawTargetZoom: null,
+    effectiveTargetZoom: null,
+    configuredMinZoom: null,
+    configuredMaxZoom: null,
+    actualZoom: null,
+    zoomCorrectionApplied: false,
+    zoomCorrectionMethod: null,
+    zoomCorrectionGeneration: null,
+    lastZoomWriter: null,
+    phase: 'idle',
+    status: 'idle',
+    lastCompletedGeneration: 0
+  })
   const tourPlaybackRef = useRef<Map3DTourPlaybackRef['current']>(null)
   const buddhaTourUiFrameRef = useRef(0)
   const buddhaTourProgressBucketRef = useRef(-1)
@@ -579,7 +861,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const mapFirstIdleRef = useRef(false)
   const mapOverlaysStartedRef = useRef(false)
   const mapRoutePoiShownRef = useRef(false)
-  const mapGardenLoadStartedRef = useRef(false)
   const mapLoadingCurtainShownAtRef = useRef<number | null>(null)
   const mapInteractionRef = useRef<{
     isInteracting: boolean
@@ -590,29 +871,221 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     isInteracting: false,
     lastInteractionAt: 0
   })
-  const currentZoomRef = useRef(SCENIC_CAMERA_BOUNDS.defaultZoom)
-  const gardenLodSignatureRef = useRef('')
+  const currentZoomRef = useRef(isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM)
+  const inkOverlayPerfSignatureRef = useRef('')
+  const inkTilePerfSignatureRef = useRef('')
+  const inkTileNativeRequestCountRef = useRef(0)
+  const inkTileFallbackTimerRef = useRef<number | null>(null)
+  const inkOverlayImageReadyRef = useRef(false)
+  const inkOverlayLayerErrorRef = useRef('')
+  const inkOverlayCameraStateRef = useRef<InkOverlayCameraState>({
+    mode: 'off',
+    effectiveOpacity: 0,
+    pitch: 0,
+    rotation: 0
+  })
   const entryCameraPlayedRef = useRef(false)
   const debugDecor = useMemo(() => isQueryEnabled('debugDecor'), [])
-  const debugGarden = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugGarden'), [visualVariant.id])
   const debugPerf = useMemo(() => visualVariant.id === 'prototype-c' && isQueryEnabled('debugPerf'), [visualVariant.id])
+  const debugPoiCalibration = useMemo(() => isQueryEnabled('debugPoiCalibration'), [])
+  const debugInkBounds = false
+  const exportInkBase = false
+  const isInkCleanMode = debugInkBounds || exportInkBase
+  const noMapBoundsDebugOverride = useMemo(() => debugPerf && isQueryEnabled('noMapBounds'), [debugPerf])
+  const mapBoundsDisabledReason = cameraScope === 'navigation'
+    ? 'navigationScope'
+    : noMapBoundsDebugOverride
+      ? 'debugPerfNoMapBounds'
+      : 'none'
+  const mapBoundsEnabled = (ENABLE_TENCENT_CUSTOM_LAYER || visualVariant.id === 'prototype-c') && !isInkCleanMode && mapBoundsDisabledReason === 'none'
+  const mapMinZoom = isInk2DPresentation ? INK_2D_MIN_ZOOM : getEffectiveInkMapMinZoom(mapBoundsEnabled)
+  const mapMaxZoom = isInk2DPresentation ? INK_2D_MAX_ZOOM : getEffectiveInkMapMaxZoom(mapBoundsEnabled)
+  const showRoadCheck = false
+  const cleanShot = false
+  const shotGuide = false
+  const captureFrame = false
+  const inkUseSquareExportCamera = exportInkBase && (shotGuide || captureFrame || cleanShot)
+  const inkOverlayEnabled = false
+  const inkOverlayCompare = useMemo(() => inkOverlayEnabled && isQueryEnabled('inkCompare'), [inkOverlayEnabled])
+  const inkOverlaySource = useMemo(() => getInkOverlaySourceFromQuery(), [])
+  const inkOverlayImageUrl = LINGSHAN_INK_OVERLAY_IMAGE_URLS[inkOverlaySource]
+  const inkOverlayOpacity = useMemo(() => getInkOverlayOpacityFromQuery(inkOverlayCompare), [inkOverlayCompare])
+  const inkOverlayAdjustments = useMemo(() => getInkOverlayAdjustmentsFromQuery(), [])
+  const inkTileSource = useMemo(() => getInkTileSourceFromQuery(), [])
+  const inkTileVariant = useMemo(() => getInkTileVariantFromQuery(), [])
+  const inkTileSourceConfig = getLingshanInkTileSourceConfig(inkTileSource, inkTileVariant)
+  const noInkTilesOverride = useMemo(() => isQueryEnabled('noInkTiles'), [])
+  const inkTilesEnabled = useMemo(
+    () => ENABLE_INK_TILES_BY_DEFAULT && !noInkTilesOverride && (ENABLE_TENCENT_CUSTOM_LAYER || visualVariant.id === 'prototype-c'),
+    [noInkTilesOverride, visualVariant.id]
+  )
+  const inkTileOpacity = useMemo(() => getInkTileOpacityFromQuery(), [])
+  const [inkTileOpacityEffective, setInkTileOpacityEffective] = useState(() => getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current))
+  const showInkBounds = false
   const shouldRedirectLocalTMapHost = useMemo(() => shouldUseCanonicalLocalhostForTMap(), [])
   const perfRecorder = useMemo(() => createMap3DPerfRecorder(debugPerf), [debugPerf])
-  const landmarkModelOverlays = useMemo(() => {
-    // 地标 GLB 采用高清核心地标 + 轻量远景资产的混合配置;
-    // 树木资产(869 个)仍在移动端关闭,二者互不相干。
-    const overlays = getVisibleMapModelOverlays()
+  const layerManager = useMemo(() => new LayerManager(), [])
+  const updateCustomTileLayerRuntime = useCallback((next: Partial<CustomTileLayerRuntime>) => {
+    const snapshot = { ...customTileLayerRuntimeRef.current, ...next }
+    customTileLayerRuntimeRef.current = snapshot
+    setCustomTileLayerRuntime(snapshot)
+  }, [])
+  const refreshHostedCustomTileLayer = useCallback(
+    async (targetMap: any, reason: string, isCurrent: () => boolean) => {
+      const layer = inkTileLayerRef.current
+      if (!layer || !isCurrent() || layerManager.getLayer('custom_tile') !== layer) {
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: `${reason}:layer-unavailable` })
+        return false
+      }
 
-    if (!debugGarden) {
-      return orderMapModelOverlaysForLoading(overlays)
-    }
+      try {
+        if (typeof layer.setVisible === 'function') {
+          layer.setVisible(false)
+          await waitForMapAnimationFrames(isCurrent)
+          if (!isCurrent()) {
+            return false
+          }
+          layer.setVisible(true)
+          updateCustomTileLayerRuntime({
+            attached: true,
+            visible: true,
+            refreshCount: customTileLayerRuntimeRef.current.refreshCount + 1,
+            lastRefreshReason: `${reason}:visibility-toggle`
+          })
+          return true
+        }
 
-    const coreIds = new Set(coreLandmarkReferenceIds)
-    return orderMapModelOverlaysForLoading(
-      overlays.filter((overlay) => coreIds.has(getMapModelOverlayInspectorId(overlay)))
-    )
-  }, [debugGarden])
+        if (typeof layer.setMap === 'function') {
+          layer.setMap(null)
+          await waitForMapAnimationFrames(isCurrent)
+          if (!isCurrent()) {
+            return false
+          }
+          layer.setMap(targetMap)
+          updateCustomTileLayerRuntime({
+            attached: true,
+            visible: true,
+            refreshCount: customTileLayerRuntimeRef.current.refreshCount + 1,
+            lastRefreshReason: `${reason}:map-reattach`
+          })
+          return true
+        }
+      } catch (error) {
+        if (debugPerf) {
+          console.warn('[Map3D] Tencent custom tile refresh failed', error)
+        }
+      }
+
+      updateCustomTileLayerRuntime({ attached: true, visible: true, lastRefreshReason: `${reason}:unsupported` })
+      return false
+    },
+    [debugPerf, layerManager, updateCustomTileLayerRuntime]
+  )
+  const poiLayerController = useMemo(
+    () => new PoiLayerController(layerManager, isMapInstanceCurrent),
+    [isMapInstanceCurrent, layerManager]
+  )
+  const glbRuntimeOrchestrator = useMemo(() => new GLBRuntimeOrchestrator(), [])
+  const glbSpatialController = useMemo(() => new GLBSpatialController(), [])
+  const glbMemoryManager = useMemo(() => new GLBMemoryManager(), [])
+  const sceneArbiter = useMemo(() => new SceneArbiter(), [])
+  const sceneArbiterRef = useRef(sceneArbiter)
+  const sceneStateManagerRef = useRef<SceneStateManager | null>(null)
+  const sceneWindowManager = useMemo(
+    () =>
+      new SceneWindowManager({
+        setVisible: (modelId, visible) => {
+          const decision = sceneArbiterRef.current.requestAction({
+            type: visible ? 'show' : 'hide',
+            modelId,
+            context: {
+              source: 'window',
+              inWindow: visible,
+              reason: 'scene-window-visibility'
+            }
+          })
+
+          if (decision.allowed) {
+            glbSpatialController.setVisible(modelId, visible)
+          }
+        },
+        markUsed: (modelId) => glbMemoryManager.markUsed(modelId),
+        release: (modelId) => {
+          const decision = sceneArbiterRef.current.requestAction({
+            type: 'dispose',
+            modelId,
+            context: {
+              source: 'window',
+              inWindow: false,
+              reason: 'scene-window-release'
+            }
+          })
+
+          if (!decision.allowed) {
+            return
+          }
+
+          if (sceneStateManagerRef.current?.release(modelId)) {
+            return
+          }
+
+          glbSpatialController.unregister(modelId)
+          glbMemoryManager.unregister(modelId)
+        }
+      }),
+    [glbMemoryManager, glbSpatialController]
+  )
+  const [glbRuntimeSnapshot, setGlbRuntimeSnapshot] = useState<GLBRuntimeOrchestratorSnapshot>(() =>
+    glbRuntimeOrchestrator.getSnapshot()
+  )
+  useEffect(() => {
+    sceneArbiterRef.current = sceneArbiter
+  }, [sceneArbiter])
+  const routeOptions = useMemo(() => getScenicRouteOptions(), [])
+  const [currentRouteId, setCurrentRouteId] = useState(() => resolveScenicRouteId(effectiveGuideState.routeId ?? getInitialScenicRouteIdFromQuery()))
+  const [routeSwitchCount, setRouteSwitchCount] = useState(0)
+  const currentRouteConfig = useMemo(() => getScenicRouteConfig(currentRouteId), [currentRouteId])
+  const currentGuideRoute = currentRouteConfig.guideRoute
+  const currentRouteGeometry = currentRouteConfig.routeGeometry
+  const currentRoutePath = useMemo(
+    () =>
+      currentRouteConfig.geometry?.length
+        ? currentRouteConfig.geometry
+        : getRouteStopLocations(currentGuideRoute),
+    [currentGuideRoute, currentRouteConfig.geometry]
+  )
+  const currentRouteCenter = useMemo(() => getPathCenter(currentRoutePath) ?? scenicCenter, [currentRoutePath])
+  const currentRouteCumulativeDistances = useMemo(() => buildPathCumulativeDistances(currentRoutePath), [currentRoutePath])
+  const currentRouteHasSequenceOverlaps = useMemo(() => detectRouteSequenceOverlaps(currentRoutePath), [currentRoutePath])
+  const currentProgressStep = Math.max(8, Math.round(currentRoutePath.length / 28))
+  const currentInitialPosition = getRouteInitialPosition(currentRouteConfig, currentRoutePath)
+  const currentAxisCruiseTarget =
+    getPathCenter([
+      currentRouteConfig.stops[0]?.location ?? currentInitialPosition,
+      getRouteStopLocation('shengjing_square') ?? currentRouteCenter,
+      getRouteStopLocation('foqian_square') ?? currentRouteCenter,
+      getRouteStopLocation('giant_buddha') ?? currentRouteCenter
+    ]) ?? currentRouteCenter
+  const landmarkModelOverlays = useMemo(
+    () => orderMapModelOverlaysForLoading(getVisibleMapModelOverlays()),
+    []
+  )
   const [mapStatus, setMapStatus] = useState<Map3DGuideStatus>('idle')
+  const [presentationTransition, setPresentationTransition] = useState<MapPresentationTransition>('idle')
+  const [cameraTransitionPhase, setCameraTransitionPhase] = useState<CameraTransitionPhase>('idle')
+  const updateCameraTransitionPhase = useCallback((phase: CameraTransitionPhase) => {
+    cameraTransitionPhaseRef.current = phase
+    setCameraTransitionPhase(phase)
+  }, [])
+  const [presentationSwitchError, setPresentationSwitchError] = useState<string | undefined>()
+  const [routeCameraIntentSnapshot, setRouteCameraIntentSnapshot] = useState<RouteCameraIntentSnapshot>(
+    routeCameraIntentRef.current
+  )
+  const updateRouteCameraIntentSnapshot = useCallback((next: RouteCameraIntentSnapshot) => {
+    routeCameraIntentRef.current = next
+    setRouteCameraIntentSnapshot(next)
+  }, [])
+  const [presentationCloudPhase, setPresentationCloudPhase] = useState<'hidden' | 'covering' | 'opening'>('hidden')
   const [isMapCreated, setIsMapCreated] = useState(false)
   const [isMapIdle, setIsMapIdle] = useState(false)
   const [isMapVisualReady, setIsMapVisualReady] = useState(false)
@@ -625,10 +1098,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     currentZoom: number
   }>({
     isInteracting: false,
-    currentZoom: SCENIC_CAMERA_BOUNDS.defaultZoom
+    currentZoom: isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM
+  })
+  const [mapBoundsSnapshot, setMapBoundsSnapshot] = useState<{
+    center: LatLngPoint
+    zoom: number
+  }>({
+    center: routeCenter,
+    zoom: isInk2DPresentation ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM
   })
   const [pageMessage, setPageMessage] = useState('正在准备真实 3D 地图导览模式...')
-  const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(initialPosition)
+  const [simulatedPosition, setSimulatedPosition] = useState<LatLngPoint>(currentInitialPosition)
   const [routePathIndex, setRoutePathIndex] = useState(0)
   const [selectedStopIndex, setSelectedStopIndex] = useState(0)
   const [rerouteStatus, setRerouteStatus] = useState<RerouteStatus>('idle')
@@ -636,11 +1116,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const [reroutePlan, setReroutePlan] = useState<PlannedRoute | null>(null)
   const [showModelBeta, setShowModelBeta] = useState(false)
   const [modelStatus, setModelStatus] = useState('未开启')
+  const [mobilePanelsCollapsed, setMobilePanelsCollapsed] = useState(() => isMobileViewport)
   const [activeCameraMode, setActiveCameraMode] = useState<GuideCameraMode>('overviewEstate')
   const [tourMode, setTourMode] = useState<Map3DTourMode | 'idle'>('idle')
   const [activeTourStepId, setActiveTourStepId] = useState<string | undefined>()
+  const [tourPreloadStopIds, setTourPreloadStopIds] = useState<string[]>([])
   const [activeLandmarkId, setActiveLandmarkId] = useState<string | undefined>()
-  const [routePreviewProgressIndex, setRoutePreviewProgressIndex] = useState<number | null>(null)
   const [mapStyleSupport, setMapStyleSupport] = useState<MapStyleSupportReport>({
     mapMethods: Object.fromEntries(tencentMapStyleMethodCandidates.map((name) => [name, false])),
     mapRelatedMethods: [],
@@ -656,31 +1137,331 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     assetUrls: []
   })
   const [assetLoadState, setAssetLoadState] = useState<AssetLoadState>({})
-  const [gardenAssets, setGardenAssets] = useState<LingshanMap3DGardenAsset[]>(() => loadStoredGardenAssets(visualVariant.id))
-  const [gardenAssetSourceMode, setGardenAssetSourceMode] = useState<GardenAssetSourceMode>('manual')
-  const [selectedGardenId, setSelectedGardenId] = useState(() => (debugGarden ? '' : loadStoredGardenAssets(visualVariant.id)[0]?.id ?? ''))
-  const [gardenFilters, setGardenFilters] = useState<GardenAssetFilterState>(defaultGardenFilters)
-  const [gardenBatchAdjust, setGardenBatchAdjust] = useState<GardenBatchAdjustState>(defaultGardenBatchAdjust)
-  const [forestPatchesVisible, setForestPatchesVisible] = useState(false)
-  const [gardenEditorMode, setGardenEditorMode] = useState<GardenEditorMode>('inspect')
-  const [gardenEditorState, setGardenEditorState] = useState<GardenEditorState>(() => loadStoredGardenEditorState())
-  const [gardenEditorUsesStoredDraft, setGardenEditorUsesStoredDraft] = useState(() => hasStoredGardenEditorDraft())
-  const [gardenDraftPolygon, setGardenDraftPolygon] = useState<GardenDraftPolygon>(null)
-  const [selectedEditorZoneId, setSelectedEditorZoneId] = useState('')
-  const [selectedKeepoutZoneId, setSelectedKeepoutZoneId] = useState('')
-  const [selectedGardenVertexId, setSelectedGardenVertexId] = useState('')
-  const [gardenAssetEditDraft, setGardenAssetEditDraft] = useState<LingshanMap3DGardenAsset | null>(null)
-  const [editorAddAssetKind, setEditorAddAssetKind] = useState<Map3DGardenAssetKind>('pine_cluster')
-  const [gardenCopyStatus, setGardenCopyStatus] = useState('尚未导出')
-  const [treeCandidateLabState, setTreeCandidateLabState] = useState<TreeCandidateLabState>(() => loadTreeCandidateLabDraft(debugGarden))
-  const [treeCandidateLabClickMode, setTreeCandidateLabClickMode] = useState<TreeCandidateLabClickMode>(() => (debugGarden ? 'addCluster' : 'idle'))
-  const [selectedTreeCandidateId, setSelectedTreeCandidateId] = useState('')
-  const [gardenPatchReport, setGardenPatchReport] = useState({ patchCount: 0, patchFallback: false })
+  const [inkBoundsDraft, setInkBoundsDraft] = useState<InkMapBoundsDraft>(() => createEmptyInkMapBoundsDraft())
+  const [inkBoundsCopyStatus, setInkBoundsCopyStatus] = useState('尚未复制')
+  const [inkExportUiHidden, setInkExportUiHidden] = useState(false)
+  const [inkOverlayLayerReady, setInkOverlayLayerReady] = useState(false)
+  const [inkOverlayLayerError, setInkOverlayLayerError] = useState('')
+  const [inkOverlayCameraSnapshot, setInkOverlayCameraSnapshot] = useState<InkOverlayCameraState>(() => inkOverlayCameraStateRef.current)
+  const [inkTileDomFallbackActive, setInkTileDomFallbackActive] = useState(false)
+  const [inkTileGroundFallbackActive, setInkTileGroundFallbackActive] = useState(false)
+
+  useEffect(() => {
+    setPresentationFallback(null)
+  }, [requestedScenicMapPresentation])
+
+  const isPresentationSwitching =
+    presentationTransition === 'destroying' ||
+    presentationTransition === 'waiting-container' ||
+    presentationTransition === 'initializing'
+
+  useLayoutEffect(() => {
+    if (presentationCloudHideTimerRef.current !== null) {
+      window.clearTimeout(presentationCloudHideTimerRef.current)
+      presentationCloudHideTimerRef.current = null
+    }
+
+    if (isPresentationSwitching && initializedPresentationRef.current !== null) {
+      if (presentationCloudPhase === 'hidden') {
+        presentationCloudStartedAtRef.current = performance.now()
+      }
+      setPresentationCloudPhase('covering')
+      return
+    }
+
+    if (presentationCloudPhase === 'covering' && (presentationTransition === 'ready' || presentationTransition === 'failed')) {
+      const elapsed = performance.now() - presentationCloudStartedAtRef.current
+      const waitMs = Math.max(0, MAP_PRESENTATION_CLOUD_MIN_MS - elapsed)
+      presentationCloudHideTimerRef.current = window.setTimeout(() => {
+        setPresentationCloudPhase('opening')
+        presentationCloudHideTimerRef.current = window.setTimeout(() => {
+          setPresentationCloudPhase('hidden')
+          presentationCloudHideTimerRef.current = null
+        }, 360)
+      }, waitMs)
+    }
+  }, [isPresentationSwitching, presentationCloudPhase, presentationTransition])
+
+  useEffect(() => {
+    return () => {
+      if (presentationCloudHideTimerRef.current !== null) {
+        window.clearTimeout(presentationCloudHideTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    activePresentationRef.current = scenicMapPresentation
+    if (debugPerf) {
+      console.debug('[map-presentation]', {
+        presentation: scenicMapPresentation,
+        transition: presentationTransition,
+        switching: isPresentationSwitching,
+        error: presentationSwitchError
+      })
+    }
+    onPresentationTransitionChange?.({
+      presentation: scenicMapPresentation,
+      transition: presentationTransition,
+      isPresentationSwitching,
+      presentationSwitchError
+    })
+  }, [debugPerf, isPresentationSwitching, onPresentationTransitionChange, presentationSwitchError, presentationTransition, scenicMapPresentation])
+
+  useEffect(() => {
+    const handleRuntimeError = (event: ErrorEvent) => {
+      if (!isStaleTencentLayerError(event.error ?? event.message)) {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation?.()
+      if (debugPerf) {
+        console.warn('[Map3D] ignored stale Tencent layer callback after map destroy', event.error ?? event.message)
+      }
+    }
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (!isStaleTencentLayerError(event.reason)) {
+        return
+      }
+      event.preventDefault()
+      if (debugPerf) {
+        console.warn('[Map3D] ignored stale Tencent layer promise after map destroy', event.reason)
+      }
+    }
+
+    window.addEventListener('error', handleRuntimeError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+    return () => {
+      window.removeEventListener('error', handleRuntimeError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [debugPerf])
+
+  useEffect(() => {
+    hardRecoveryRequestRef.current = (reason, error) => {
+      if (hardRecoveryCountRef.current >= 1) {
+        setLastMapError(`地图硬恢复已执行过一次，忽略重复请求：${reason}`)
+        return
+      }
+
+      const map = mapRef.current
+      const center = map ? readMapCenterForProjection(map) : null
+      const zoom = map ? readMapZoomForProjection(map) : null
+      if (center && zoom !== null) {
+        presentationViewportRef.current = { center, zoom }
+      }
+
+      hardRecoveryCountRef.current += 1
+      contextLostCountRef.current += 1
+      setLastMapError(error instanceof Error ? error.message : `地图硬恢复：${reason}`)
+      setPresentationSwitchError(undefined)
+      setPresentationTransition('destroying')
+      setPresentationCloudPhase('covering')
+      setMapStatus('loading')
+      // The map-init effect owns the actual teardown. A new DOM container is
+      // intentionally created only for this context-loss path.
+      setMapContainerGeneration((value) => value + 1)
+      setMapRuntimeGeneration((value) => value + 1)
+    }
+
+    return () => {
+      hardRecoveryRequestRef.current = () => undefined
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const createDebugSnapshot = () => {
+      const targetMap = mapRef.current
+      const navigationMapDebug = (window as any).__LINGSHAN_NAVIGATION_MAP_DEBUG__ ?? {}
+      const requestedCamera = scenicMapPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
+      const actualCamera = targetMap && isMapInstanceCurrent(targetMap)
+        ? readActualTencentCameraState(targetMap)
+        : emptyActualTencentCameraState()
+      const effectiveCamera = cameraStateFromActual(actualCamera, requestedCamera, scenicMapPresentation)
+      return {
+        mapInstanceId,
+        mapCreateCount: mapCreateCountRef.current,
+        mapDestroyCount: mapDestroyCountRef.current,
+        currentViewMode: actualCamera.viewMode,
+        currentPresentation: scenicMapPresentation,
+        presentation: {
+          requested: requestedScenicMapPresentation,
+          applied: appliedPresentationRef.current,
+          initialized: initializedPresentationRef.current,
+          transitionState: presentationTransition
+        },
+        cameraTransitionPhase,
+        contextLostCount: contextLostCountRef.current,
+        hardRecoveryCount: hardRecoveryCountRef.current,
+        currentPoiLayerMode: effectivePoiMode,
+        poiLayers: {
+          mode: effectivePoiMode,
+          genericCustomPoiVisibleCount,
+          routeStopMarkerCount,
+          routeStateMarkerCount,
+          tencentNativePoiRequested: tencentPoiMode.requested,
+          tencentNativePoiApplied: tencentPoiMode.applied
+        },
+        tencentPoiFeatureEnabled: effectivePoiMode === 'all',
+        navigationPoiOverride: {
+          active: navigationPoiOverrideActive,
+          userSelectedPoiMode: poiVisibilityMode,
+          effectivePoiMode
+        },
+        navigationMap: {
+          selectedHeading: navigationMapDebug.selectedHeading,
+          headingSource: navigationMapDebug.headingSource ?? 'unavailable',
+          renderedHeading: navigationMapDebug.renderedHeading,
+          navigationOverrideActive: navigationPoiOverrideActive,
+          effectivePoiMode,
+          localTestSelectionActive: navigationMapDebug.localTestSelectionActive ?? false,
+          selectedTargetCoordinate: navigationMapDebug.selectedTargetCoordinate
+        },
+        tencentPoiMode,
+        nativeMapControls: {
+          requestedVisible: false,
+          detectedVisibleCount: nativeMapControlVisibleCount
+        },
+        activeGlbCount: sceneArbiter.getSnapshot().activeModelCount,
+        lastMapError,
+        presentationSwitchError,
+        camera: {
+          requestedViewMode: scenicMapPresentation === 'ink2d' ? '2D' : '3D',
+          actualViewMode: actualCamera.viewMode,
+          requestedPitch: requestedCamera.pitch,
+          actualPitch: actualCamera.rawPitch,
+          rawPitch: actualCamera.rawPitch,
+          effectivePitch: effectiveCamera.pitch,
+          requestedRotation: requestedCamera.rotation,
+          actualRotation: actualCamera.rawRotation,
+          rawRotation: actualCamera.rawRotation,
+          effectiveRotation: effectiveCamera.rotation,
+          requestedCenter: requestedCamera.center,
+          actualCenter: actualCamera.center,
+          requestedZoom: requestedCamera.zoom,
+          actualZoom: actualCamera.zoom
+        },
+        savedCameraStates: {
+          lastMeaningful3D: lastMeaningful3DCameraRef.current,
+          camera2D: camera2DStateRef.current,
+          camera3D: camera3DStateRef.current
+        },
+        cameraPersistence: {
+          suppressed: suppress3DCameraPersistenceRef.current,
+          lastPersistReason: cameraPersistenceDiagnosticsRef.current.lastPersistReason,
+          lastRejectedPersistReason: cameraPersistenceDiagnosticsRef.current.lastRejectedPersistReason
+        },
+        routeCameraIntent: {
+          generation: routeCameraIntentRef.current.generation,
+          source: routeCameraIntentRef.current.source,
+          routeId: routeCameraIntentRef.current.routeId,
+          targetCenter: routeCameraIntentRef.current.target?.center ?? null,
+          targetZoom: routeCameraIntentRef.current.target?.zoom ?? null,
+          rawTargetZoom: routeCameraIntentRef.current.rawTargetZoom,
+          effectiveTargetZoom: routeCameraIntentRef.current.effectiveTargetZoom,
+          actualZoom: routeCameraIntentRef.current.actualZoom,
+          configuredMinZoom: routeCameraIntentRef.current.configuredMinZoom,
+          configuredMaxZoom: routeCameraIntentRef.current.configuredMaxZoom,
+          zoomCorrectionApplied: routeCameraIntentRef.current.zoomCorrectionApplied,
+          zoomCorrectionMethod: routeCameraIntentRef.current.zoomCorrectionMethod,
+          zoomCorrectionGeneration: routeCameraIntentRef.current.zoomCorrectionGeneration,
+          lastZoomWriter: routeCameraIntentRef.current.lastZoomWriter,
+          phase: routeCameraIntentRef.current.phase,
+          targetPitch: routeCameraIntentRef.current.target?.pitch ?? null,
+          targetRotation: routeCameraIntentRef.current.target?.rotation ?? null,
+          status: routeCameraIntentRef.current.status,
+          lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+          lastFailure: routeCameraIntentRef.current.lastFailure
+        },
+        routeFocusContext: {
+          mapFocusMode,
+          currentStopIndex: selectedStopIndex,
+          currentStopPoiId: currentRouteConfig.stops[selectedStopIndex]?.spotId,
+          resolvedCurrentCoordinate: getRouteStopLocation(currentRouteConfig.stops[selectedStopIndex]?.spotId)
+        },
+        customTileLayer: customTileLayerRuntimeRef.current
+      }
+    }
+    const debugSnapshot = createDebugSnapshot()
+    window.__LINGSHAN_MAP_DEBUG__ = debugSnapshot
+    window.LINGSHAN_MAP_DEBUG = debugSnapshot
+    window.__GET_LINGSHAN_MAP_SNAPSHOT__ = createDebugSnapshot
+  }, [
+    customTileLayerRuntime,
+    genericCustomPoiVisibleCount,
+    glbRuntimeSnapshot.updatedAt,
+    isMapInstanceCurrent,
+    lastMapError,
+    mapBoundsSnapshot,
+    mapInstanceId,
+    nativeMapControlVisibleCount,
+    navigationPoiOverrideActive,
+    effectivePoiMode,
+    poiVisibilityMode,
+    presentationSwitchError,
+    presentationTransition,
+    cameraTransitionPhase,
+    requestedScenicMapPresentation,
+    routeCameraIntentSnapshot,
+    routeStateMarkerCount,
+    routeStopMarkerCount,
+    sceneArbiter,
+    selectedStopIndex,
+    scenicMapPresentation,
+    tencentPoiMode
+  ])
+
+  useEffect(() => {
+    const container = mapElementRef.current
+    if (mapStatus !== 'ready' || !container || typeof MutationObserver === 'undefined') {
+      setNativeMapControlVisibleCount(0)
+      return
+    }
+
+    let frameId: number | undefined
+    const syncVisibleCount = () => {
+      frameId = undefined
+      const nextCount = countVisibleTencentNativeMapControls(container)
+      setNativeMapControlVisibleCount((current) => (current === nextCount ? current : nextCount))
+    }
+    const scheduleSync = () => {
+      if (frameId !== undefined) {
+        return
+      }
+      frameId = window.requestAnimationFrame(syncVisibleCount)
+    }
+    const observer = new MutationObserver(scheduleSync)
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden']
+    })
+    scheduleSync()
+
+    return () => {
+      observer.disconnect()
+      if (frameId !== undefined) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [mapInstanceId, mapStatus])
+
   const landmarkInspector = useLandmarkModelInspector({
-    active: visualVariant.id === 'prototype-c' || debugPerf || debugGarden,
-    useLocalDrafts: debugPerf || debugGarden,
+    active:
+      (visualVariant.id === 'prototype-c' || debugPerf) &&
+      !isInkCleanMode &&
+      !isInk2DPresentation &&
+      appliedPresentationRef.current === 'scenic3d' &&
+      cameraTransitionPhase === 'ready',
+    layerManager,
+    useLocalDrafts: debugPerf,
     map: mapRef.current,
     mapReady: mapStatus === 'ready',
+    isMapCurrent: isMapInstanceCurrent,
     overlays: landmarkModelOverlays,
     perfRecorder,
     resolveLocation: getModelOverlayLocation,
@@ -690,11 +1471,67 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const landmarkRuntimeLoadGenerationRef = useRef(0)
   const landmarkRuntimeLoadTimersRef = useRef<number[]>([])
 
-  const routeStops = demoGuideRoute.stops
+  const routeStops = currentRouteConfig.stops
+  const isRouteGuideView = effectiveGuideState.viewMode === 'route' && Boolean(effectiveGuideState.routeId)
+  const routeGuideStage = effectiveGuideState.routeStage ?? 'preview'
+  const routeGuideStopIndex = clampRouteStopIndex(effectiveGuideState.stopIndex, routeStops.length)
+  const requestedJoiningStopIndex = effectiveGuideState.joinStopIndex ?? getJoiningStopIndexFromQuery(routeStops.length)
+  const joiningStopIndex =
+    routeGuideStage === 'joining' && requestedJoiningStopIndex !== undefined
+      ? clampRouteStopIndex(requestedJoiningStopIndex, routeStops.length)
+      : undefined
+  const effectiveRouteStopIndex = joiningStopIndex ?? routeGuideStopIndex
+  const shouldRenderRoute = isRouteGuideView
+  const shouldRenderRouteProgress =
+    isRouteGuideView && (routeGuideStage === 'active' || routeGuideStage === 'arrived' || joiningStopIndex !== undefined)
+  const effectiveMapFocusMode = routeGuideStage === 'preview' ? 'overview' : mapFocusMode
+  const poiLayerMode: LingshanPoiLayerMode = effectivePoiMode
   const terminalStopId = routeStops[routeStops.length - 1]?.spotId
+
+  useEffect(() => {
+    if (!isRouteGuideView) {
+      return
+    }
+
+    setSelectedStopIndex(effectiveRouteStopIndex)
+    const position = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
+    if (position) {
+      setSimulatedPosition(position)
+      setRoutePathIndex(findNearestRoutePoint(position, currentRoutePath)?.nearestIndex ?? 0)
+    }
+  }, [currentRoutePath, effectiveRouteStopIndex, isRouteGuideView, routeStops])
+
+  useEffect(() => {
+    if (!isRouteGuideView || mapStatus !== 'ready' || !mapRef.current) {
+      return
+    }
+
+    // presentation 改变的同一 render 内，route focus effect 不能抢占
+    // 2D -> 3D 的已保存相机恢复；恢复完成后由用户/既有焦点逻辑继续接管。
+    if (initializedPresentationRef.current && initializedPresentationRef.current !== scenicMapPresentation) {
+      return
+    }
+
+    if (effectiveMapFocusMode === 'overview') {
+      focusRouteOverview()
+      return
+    }
+
+    focusRouteCurrent(currentRouteConfig.id, effectiveRouteStopIndex)
+  }, [
+    currentRouteConfig.id,
+    currentRoutePath,
+    effectiveRouteStopIndex,
+    isInk2DPresentation,
+    isRouteGuideView,
+    effectiveMapFocusMode,
+    mapStatus,
+    routeStops,
+    scenicMapPresentation
+  ])
   const nearestRoutePoint = useMemo(
-    () => findNearestRoutePoint(simulatedPosition, demoRoutePath),
-    [simulatedPosition]
+    () => findNearestRoutePoint(simulatedPosition, currentRoutePath),
+    [currentRoutePath, simulatedPosition]
   )
   const nextStop = useMemo(
     () =>
@@ -719,29 +1556,112 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const selectedStopId = routeStops[selectedStopIndex]?.spotId
   const activeCameraPreset = MAP_3D_GUIDE_CAMERA_PRESETS[activeCameraMode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
   const isTourPlaying = tourMode !== 'idle'
+  const protectedLandmarkIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    if (!PROTECT_TOUR_FOCUS_LANDMARKS || tourMode !== 'buddhaRealmTour') {
+      return ids
+    }
+
+    const protectedRouteIds = [
+      activeTourStepId,
+      ...tourPreloadStopIds,
+      selectedStopId,
+      nextStop.nextStopId ?? undefined
+    ].filter((id): id is string => Boolean(id))
+
+    protectedRouteIds.forEach((routeId) => {
+      const landmarkId = resolveLandmarkInspectorIdFromRouteId(routeId, landmarkModelOverlays)
+      if (landmarkId) {
+        ids.add(landmarkId)
+      }
+    })
+
+    if (ids.size > MAX_ACTIVE_LANDMARK_GLB) {
+      return new Set(Array.from(ids).slice(0, MAX_ACTIVE_LANDMARK_GLB))
+    }
+
+    return ids
+  }, [activeTourStepId, landmarkModelOverlays, nextStop.nextStopId, selectedStopId, tourMode, tourPreloadStopIds])
+  const protectedSceneModelIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    protectedLandmarkIds.forEach((id) => {
+      ids.add(getLandmarkSceneModelId(id))
+      const overlay = landmarkModelOverlays.find((item) => getMapModelOverlayInspectorId(item) === id)
+      overlay?.companionModels?.forEach((companion) => {
+        if (companion.enabled) {
+          ids.add(getCompanionSceneModelId(id, companion.id))
+        }
+      })
+    })
+
+    return ids
+  }, [landmarkModelOverlays, protectedLandmarkIds])
+  const protectedSceneModelIdsRef = useRef(protectedSceneModelIds)
+  useEffect(() => {
+    protectedSceneModelIdsRef.current = protectedSceneModelIds
+  }, [protectedSceneModelIds])
   const mapVisualReadyForOverlays = mapStatus === 'ready' && isMapVisualReady
-  const canUseMapInteractions = mapVisualReadyForOverlays && !mapReadyTimedOut
-  const shouldLoadGardenAssets = visualVariant.id === 'prototype-c' && mapVisualReadyForOverlays
-  const gardenLodState = useMemo(
-    () =>
-      getGardenLodState({
-        currentZoom: mapInteractionSnapshot.currentZoom,
-        debugGarden,
-        isInteracting: mapInteractionSnapshot.isInteracting
-      }),
-    [debugGarden, mapInteractionSnapshot.currentZoom, mapInteractionSnapshot.isInteracting]
-  )
+  const canUseMapInteractions = mapVisualReadyForOverlays && !mapReadyTimedOut && !isInkCleanMode
+  const isScenic3DModelsReady =
+    !isInk2DPresentation && appliedPresentationRef.current === 'scenic3d' && cameraTransitionPhase === 'ready'
+  const shouldRunGlbRuntime = visualVariant.id === 'prototype-c' && !isInkCleanMode && isScenic3DModelsReady
 
   useEffect(() => {
     landmarkInspectorRef.current = landmarkInspector
   }, [landmarkInspector])
 
   useEffect(() => {
+    return () => glbRuntimeOrchestrator.destroy()
+  }, [glbRuntimeOrchestrator])
+
+  useEffect(() => {
+    return glbRuntimeOrchestrator.subscribe((snapshot) => {
+      setGlbRuntimeSnapshot(snapshot)
+      perfRecorder.recordMapVisualEvent({
+        type: 'glbRuntimeOrchestratorStateChanged',
+        glbRuntimeEnabled: snapshot.enabled,
+        glbRuntimePhase: snapshot.phase,
+        glbRuntimeProfile: snapshot.profile,
+        glbRuntimeLandmarkGate: snapshot.landmarkGate,
+        glbRuntimeLandmarkDelayMs: snapshot.landmarkDelayMs,
+        glbRuntimePendingTimerCount: snapshot.pendingTimerCount,
+        reason: snapshot.reason
+      })
+    })
+  }, [glbRuntimeOrchestrator, perfRecorder])
+
+  useEffect(() => {
+    glbRuntimeOrchestrator.update({
+      enabled: shouldRunGlbRuntime,
+      mapReady: mapStatus === 'ready',
+      visualReady: mapVisualReadyForOverlays,
+      inkCleanMode: isInkCleanMode,
+      mobile: isMobileViewport,
+      interactionLiteMode: mapInteractionSnapshot.isInteracting
+    })
+  }, [
+    glbRuntimeOrchestrator,
+    isInkCleanMode,
+    isMobileViewport,
+    mapInteractionSnapshot.isInteracting,
+    mapStatus,
+    mapVisualReadyForOverlays,
+    shouldRunGlbRuntime
+  ])
+
+  useEffect(() => {
     landmarkRuntimeLoadTimersRef.current.forEach((timer) => window.clearTimeout(timer))
     landmarkRuntimeLoadTimersRef.current = []
     landmarkRuntimeLoadGenerationRef.current += 1
 
-    if (visualVariant.id !== 'prototype-c' || debugGarden) {
+    if (!ENABLE_LANDMARK_GLB || visualVariant.id !== 'prototype-c' || isInkCleanMode || !isScenic3DModelsReady) {
+      if (isInk2DPresentation) {
+        setModelStatus('移动端 2D 地图模式：核心地标 GLB 暂不加载')
+      } else if (!isInkCleanMode) {
+        setModelStatus('正式 3D 地标等待相机恢复')
+      }
       return
     }
 
@@ -750,52 +1670,396 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    const generation = landmarkRuntimeLoadGenerationRef.current
-    setModelStatus('正在分批加载正式 3D 地标')
-    perfRecorder.recordMapVisualEvent({
-      type: 'landmarkRuntimeLoadStarted',
-      landmarkRuntimeBatchCount: LANDMARK_RUNTIME_LOAD_BATCHES.length
+    if (!glbRuntimeSnapshot.landmarkGate) {
+      setModelStatus('正式 3D 地标等待运行时调度')
+      return
+    }
+
+    const inspector = landmarkInspectorRef.current
+    const mapCenter = mapBoundsSnapshot.center ?? currentRouteCenter
+    const landmarkOverviewMode = mapInteractionSnapshot.currentZoom <= LANDMARK_OVERVIEW_ZOOM_THRESHOLD
+    const activeBudgetBase = landmarkOverviewMode ? MAX_OVERVIEW_ACTIVE_LANDMARK_GLB : MAX_ACTIVE_LANDMARK_GLB
+    const preloadRadius = landmarkOverviewMode
+      ? LANDMARK_OVERVIEW_PRELOAD_RADIUS_M
+      : isMobileViewport
+        ? LANDMARK_MOBILE_PRELOAD_RADIUS_M
+        : LANDMARK_PRELOAD_RADIUS_M
+    const keepAliveRadius = landmarkOverviewMode ? LANDMARK_OVERVIEW_KEEP_ALIVE_RADIUS_M : LANDMARK_KEEP_ALIVE_RADIUS_M
+    const releaseRadius = landmarkOverviewMode ? LANDMARK_OVERVIEW_RELEASE_RADIUS_M : LANDMARK_RELEASE_RADIUS_M
+    const candidates = landmarkModelOverlays
+      .map((overlay) => {
+        const id = getMapModelOverlayInspectorId(overlay)
+        const location = getModelOverlayLocation(overlay)
+
+        return {
+          id,
+          overlay,
+          location,
+          distance: location ? haversineDistanceMeters(mapCenter, location) : Number.POSITIVE_INFINITY
+        }
+      })
+      .filter((item) => item.location)
+      .sort((a, b) => a.distance - b.distance)
+    const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+    const lodChoiceById = new Map(
+      candidates
+        .map((candidate) => {
+          return [
+            candidate.id,
+            resolveLandmarkLodRuntimeChoice(candidate.overlay, candidate.distance, {
+              forceFar: LANDMARK_FORCE_LOW_DETAIL_GLB
+            })
+          ] as const
+        })
+        .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof resolveLandmarkLodRuntimeChoice>>] =>
+          Boolean(entry[1])
+        )
+    )
+    const desiredLandmarkIds = new Set<string>(protectedLandmarkIds)
+    const primaryDesiredLandmarkIds = new Set<string>(protectedLandmarkIds)
+
+    for (const candidate of candidates) {
+      if (desiredLandmarkIds.size >= activeBudgetBase) {
+        break
+      }
+
+      if (candidate.distance <= preloadRadius) {
+        desiredLandmarkIds.add(candidate.id)
+        primaryDesiredLandmarkIds.add(candidate.id)
+      }
+    }
+
+    const nearestCandidate = candidates[0]
+    if (
+      !landmarkOverviewMode &&
+      nearestCandidate &&
+      desiredLandmarkIds.size < activeBudgetBase &&
+      nearestCandidate.distance <= keepAliveRadius
+    ) {
+      desiredLandmarkIds.add(nearestCandidate.id)
+      primaryDesiredLandmarkIds.add(nearestCandidate.id)
+    }
+
+    const inspectorItemsById = new Map(inspector.items.map((item) => [item.id, item]))
+    const activeItems = inspector.items.filter((item) => item.status === 'loaded' || item.status === 'loading')
+    const activeItemIds = new Set(activeItems.map((item) => item.id))
+    const activeBudgetMax = Math.max(activeBudgetBase, protectedLandmarkIds.size)
+
+    for (const item of activeItems
+      .filter((item) => !protectedLandmarkIds.has(item.id) && !desiredLandmarkIds.has(item.id))
+      .sort((a, b) => (candidateById.get(a.id)?.distance ?? Number.POSITIVE_INFINITY) - (candidateById.get(b.id)?.distance ?? Number.POSITIVE_INFINITY))) {
+      if (desiredLandmarkIds.size >= activeBudgetMax) {
+        break
+      }
+
+      const distance = candidateById.get(item.id)?.distance ?? Number.POSITIVE_INFINITY
+      if (distance <= keepAliveRadius) {
+        desiredLandmarkIds.add(item.id)
+      }
+    }
+
+    const releaseIds = new Set<string>()
+    const releaseReasons = new Map<string, string>()
+    const markRelease = (id: string, reason: string) => {
+      if (protectedLandmarkIds.has(id)) {
+        return
+      }
+      releaseIds.add(id)
+      releaseReasons.set(id, reason)
+      desiredLandmarkIds.delete(id)
+    }
+
+    activeItems.forEach((item) => {
+      const distance = candidateById.get(item.id)?.distance ?? Number.POSITIVE_INFINITY
+      if (distance > releaseRadius) {
+        markRelease(item.id, 'release-radius')
+        return
+      }
+
+      if (!desiredLandmarkIds.has(item.id) && distance > keepAliveRadius) {
+        markRelease(item.id, 'outside-keep-alive-window')
+      }
     })
 
-    LANDMARK_RUNTIME_LOAD_BATCHES.forEach((batch, batchIndex) => {
-      const timer = window.setTimeout(() => {
-        if (generation !== landmarkRuntimeLoadGenerationRef.current) {
+    const desiredInactiveIds = () => Array.from(desiredLandmarkIds).filter((id) => !activeItemIds.has(id))
+    const activeCountAfterPlannedRelease = () => activeItems.filter((item) => !releaseIds.has(item.id)).length
+    const evictableActiveItems = () =>
+      activeItems
+        .filter((item) => !releaseIds.has(item.id) && !protectedLandmarkIds.has(item.id) && !primaryDesiredLandmarkIds.has(item.id))
+        .sort((a, b) => (candidateById.get(b.id)?.distance ?? 0) - (candidateById.get(a.id)?.distance ?? 0))
+
+    while (activeCountAfterPlannedRelease() + desiredInactiveIds().length > activeBudgetMax) {
+      const [evictable] = evictableActiveItems()
+      if (!evictable) {
+        break
+      }
+      markRelease(evictable.id, 'active-window-replace')
+    }
+
+    const unregisterSceneModelRecord = (modelId: string) => {
+      sceneArbiter.releaseLoad(modelId)
+      glbSpatialController.unregister(modelId)
+      glbMemoryManager.unregister(modelId)
+      sceneWindowManager.unregister(modelId)
+      sceneStateManagerRef.current?.unregister(modelId)
+      sceneArbiter.unregisterModel(modelId)
+      layerManager.removeLayer(modelId)
+    }
+
+    const releaseLandmarkRuntime = (item: (typeof inspector.items)[number]) => {
+      item.companions.forEach((companion) => {
+        const companionModelId = getCompanionSceneModelId(item.id, companion.id)
+        if (companion.status === 'loaded' || companion.status === 'loading') {
+          inspector.unloadCompanionModel(item.id, companion.id)
+        }
+        unregisterSceneModelRecord(companionModelId)
+      })
+
+      const modelId = getLandmarkSceneModelId(item.id)
+      if (item.status === 'loaded' || item.status === 'loading') {
+        inspector.unloadLandmark(item.id)
+      }
+      unregisterSceneModelRecord(modelId)
+      landmarkLastEvictedAtRef.current.set(item.id, Date.now())
+    }
+
+    const decisions = new Map<string, { allowed: boolean; reason?: string }>()
+    const loadedNow: string[] = []
+    const releasedNow: string[] = []
+    const getLandmarkLoadOptions = (id: string) => {
+      const lodChoice = lodChoiceById.get(id)
+      return lodChoice
+        ? {
+            modelUrl: lodChoice.modelUrl,
+            fileSizeLabel: lodChoice.sizeLabel,
+            runtimeLabel: `${lodChoice.tier}:${lodChoice.source}`
+          }
+        : undefined
+    }
+
+    activeItems.forEach((item) => {
+      if (!releaseIds.has(item.id)) {
+        return
+      }
+
+      const modelId = getLandmarkSceneModelId(item.id)
+      const releaseReason = releaseReasons.get(item.id) ?? 'landmark-window-release'
+      const distance = candidateById.get(item.id)?.distance ?? Number.POSITIVE_INFINITY
+      const decision = sceneArbiter.requestAction({
+        type: 'dispose',
+        modelId,
+        context: {
+          source: 'window',
+          kind: 'landmark',
+          protected: false,
+          windowManaged: true,
+          inWindow: false,
+          estimatedMemoryMB: 36,
+          sceneState: 'disposed',
+          memoryState: 'disposed',
+          reason: releaseReason
+        }
+      })
+      decisions.set(item.id, { allowed: decision.allowed, reason: decision.allowed ? undefined : decision.reason })
+
+      if (!decision.allowed) {
+        return
+      }
+
+      releaseLandmarkRuntime(item)
+      releasedNow.push(item.id)
+      releaseReasons.set(item.id, `${releaseReason}${Number.isFinite(distance) ? `:${Math.round(distance)}m` : ''}`)
+    })
+
+    desiredLandmarkIds.forEach((id) => {
+      const item = inspectorItemsById.get(id)
+
+      if (!item) {
+        return
+      }
+
+      const modelId = getLandmarkSceneModelId(id)
+      const protectedModel = protectedLandmarkIds.has(id)
+
+      if (item.status === 'loaded') {
+        const decision = sceneArbiter.requestAction({
+          type: 'show',
+          modelId,
+          context: {
+            source: 'window',
+            kind: 'landmark',
+            protected: protectedModel,
+            windowManaged: true,
+            inWindow: true,
+            visible: true,
+            sceneState: 'visible',
+            memoryState: 'active',
+            estimatedMemoryMB: 36,
+            reason: protectedModel ? 'tour-focus-landmark-visible' : 'nearby-landmark-visible'
+          }
+        })
+        decisions.set(id, { allowed: decision.allowed, reason: decision.allowed ? undefined : decision.reason })
+        if (decision.allowed) {
+          inspector.loadLandmark(id, getLandmarkLoadOptions(id))
+          sceneStateManagerRef.current?.rehydrate(modelId)
+          glbSpatialController.setVisible(modelId, true)
+        }
+      } else if (item.status !== 'loading') {
+        landmarkLastLoadAttemptAtRef.current.set(id, Date.now())
+        const decision = sceneArbiter.requestAction({
+          type: 'load',
+          modelId,
+          context: {
+            source: 'window',
+            kind: 'landmark',
+            protected: protectedModel,
+            windowManaged: true,
+            inWindow: true,
+            estimatedMemoryMB: 36,
+            reason: protectedModel
+              ? 'tour-focus-landmark-load'
+              : releasedNow.length
+                ? 'load-allowed-after-evict'
+                : 'nearby-landmark-load'
+          }
+        })
+        decisions.set(id, { allowed: decision.allowed, reason: decision.allowed ? undefined : decision.reason })
+        if (decision.allowed) {
+          const lodChoice = lodChoiceById.get(id)
+          inspector.loadLandmark(id, getLandmarkLoadOptions(id))
+          sceneArbiter.releaseLoad(modelId)
+          loadedNow.push(id)
+          landmarkLastLoadAllowReasonRef.current.set(
+            id,
+            `${decision.reason}${lodChoice ? `:${lodChoice.tier}` : ''}`
+          )
+          landmarkLastLoadDenyReasonRef.current.delete(id)
+        } else {
+          landmarkLastLoadDenyReasonRef.current.set(id, decision.reason)
+        }
+      }
+
+      item.companions.forEach((companion) => {
+        if (!companion.enabled) {
           return
         }
 
-        const inspector = landmarkInspectorRef.current
-        perfRecorder.recordMapVisualEvent({
-          type: 'landmarkRuntimeLoadBatch',
-          landmarkRuntimeBatchIndex: batchIndex,
-          landmarkRuntimeBatchCount: LANDMARK_RUNTIME_LOAD_BATCHES.length,
-          landmarkRuntimeIds: [...batch]
-        })
-        batch.forEach((id) => {
-          const item = inspector.items.find((inspectorItem) => inspectorItem.id === id)
+        const companionModelId = getCompanionSceneModelId(id, companion.id)
+        const protectedCompanion = protectedSceneModelIds.has(companionModelId)
 
-          if (!item) {
-            return
-          }
-
-          if (item.status !== 'loaded' && item.status !== 'loading') {
-            inspector.loadLandmark(id)
-          }
-
-          item.companions.forEach((companion) => {
-            if (!companion.enabled || companion.status === 'loaded' || companion.status === 'loading') {
-              return
+        if (companion.status === 'loaded') {
+          const decision = sceneArbiter.requestAction({
+            type: 'show',
+            modelId: companionModelId,
+            context: {
+              source: 'window',
+              kind: 'companion',
+              protected: protectedCompanion,
+              windowManaged: true,
+              inWindow: true,
+              visible: true,
+              sceneState: 'visible',
+              memoryState: 'active',
+              estimatedMemoryMB: 2,
+              reason: protectedCompanion ? 'tour-focus-companion-visible' : 'nearby-companion-visible'
             }
-
-            inspector.loadCompanionModel(id, companion.id)
           })
+          if (decision.allowed) {
+            sceneStateManagerRef.current?.rehydrate(companionModelId)
+            glbSpatialController.setVisible(companionModelId, true)
+          }
+          return
+        }
+
+        if (companion.status === 'loading') {
+          return
+        }
+
+        const decision = sceneArbiter.requestAction({
+          type: 'load',
+          modelId: companionModelId,
+          context: {
+            source: 'window',
+            kind: 'companion',
+            protected: protectedCompanion,
+            windowManaged: true,
+            inWindow: true,
+            estimatedMemoryMB: 2,
+            reason: protectedCompanion ? 'tour-focus-companion-load' : 'nearby-companion-load'
+          }
         })
 
-        if (batchIndex === LANDMARK_RUNTIME_LOAD_BATCHES.length - 1) {
-          setModelStatus('正式 3D 地标已进入分批加载')
+        if (decision.allowed) {
+          inspector.loadCompanionModel(id, companion.id)
+          sceneArbiter.releaseLoad(companionModelId)
         }
-      }, batchIndex * LANDMARK_RUNTIME_BATCH_DELAY_MS)
+      })
+    })
 
-      landmarkRuntimeLoadTimersRef.current.push(timer)
+    const activeSlotIds = Array.from(
+      new Set([
+        ...Array.from(protectedLandmarkIds),
+        ...Array.from(desiredLandmarkIds),
+        ...activeItems.filter((item) => !releaseIds.has(item.id) && desiredLandmarkIds.has(item.id)).map((item) => item.id)
+      ])
+    ).slice(0, activeBudgetMax)
+    const activeBudgetUsed = activeItems.filter((item) => !releaseIds.has(item.id)).length + loadedNow.filter((id) => !activeItemIds.has(id)).length
+    const debugRows: Map3DLandmarkGlBDebugRow[] = landmarkModelOverlays.map((overlay) => {
+      const id = getMapModelOverlayInspectorId(overlay)
+      const item = inspectorItemsById.get(id)
+      const distance = candidateById.get(id)?.distance
+      const protectedModel = protectedLandmarkIds.has(id)
+      const desired = desiredLandmarkIds.has(id)
+      const lodChoice = lodChoiceById.get(id)
+      const shouldRelease =
+        !protectedModel &&
+        (releaseIds.has(id) || (distance !== undefined && distance > releaseRadius))
+      const decision = decisions.get(id)
+      const actualState =
+        releaseIds.has(id) && decision?.allowed
+          ? 'released'
+          : item?.status === 'loaded'
+          ? desired || protectedModel
+            ? 'visible'
+            : 'hidden'
+          : item?.status === 'failed'
+            ? 'error'
+            : item?.status ?? 'unloaded'
+
+      return {
+        id,
+        displayName: overlay.name,
+        glbUrl: lodChoice?.modelUrl ?? overlay.modelUrl,
+        desiredState: shouldRelease ? 'should-release' : desired ? 'should-load' : 'should-hide',
+        actualState,
+        arbiterDecision: decision ? (decision.allowed ? 'allow' : 'deny') : 'none',
+        denyReason: decision?.allowed === false ? decision.reason : undefined,
+        distanceToMapCenter: distance !== undefined && Number.isFinite(distance) ? Math.round(distance) : undefined,
+        isTourFocus: protectedModel,
+        isProtected: protectedModel,
+        activeSlotIndex: activeSlotIds.indexOf(id) >= 0 ? activeSlotIds.indexOf(id) : undefined,
+        activeBudgetUsed,
+        activeBudgetMax,
+        evictable: Boolean(item && (item.status === 'loaded' || item.status === 'loading') && !protectedModel && !desired),
+        evictReason: releaseReasons.get(id),
+        lastEvictedAt: landmarkLastEvictedAtRef.current.get(id),
+        lastLoadAttemptAt: landmarkLastLoadAttemptAtRef.current.get(id),
+        lastLoadAllowReason: landmarkLastLoadAllowReasonRef.current.get(id),
+        lastLoadDenyReason: landmarkLastLoadDenyReasonRef.current.get(id),
+        lastError: item?.error
+      }
+    })
+
+    setModelStatus(
+      `正式 3D 地标滚动窗口 · ${landmarkOverviewMode ? 'overview' : 'nearby'} · active ${activeBudgetUsed}/${activeBudgetMax}`
+    )
+    perfRecorder.recordMapVisualEvent({
+      type: 'landmarkRuntimeLoadBatch',
+      landmarkRuntimeBatchIndex: 0,
+      landmarkRuntimeBatchCount: 1,
+      landmarkRuntimeIds: loadedNow.length || releasedNow.length ? [...loadedNow, ...releasedNow.map((id) => `release:${id}`)] : Array.from(desiredLandmarkIds),
+      landmarkGlbDebugRows: debugRows,
+      reason: `${LANDMARK_GLB_LOAD_MODE}; ${landmarkOverviewMode ? 'overview-low-lod' : 'nearby-low-lod'}; protected=${Array.from(protectedLandmarkIds).join(',') || '-'}`
     })
 
     return () => {
@@ -803,14 +2067,33 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       landmarkRuntimeLoadTimersRef.current.forEach((timer) => window.clearTimeout(timer))
       landmarkRuntimeLoadTimersRef.current = []
     }
-  }, [debugGarden, mapVisualReadyForOverlays, perfRecorder, visualVariant.id])
+  }, [
+    glbMemoryManager,
+    glbRuntimeSnapshot.landmarkGate,
+    glbRuntimeSnapshot.phase,
+    glbSpatialController,
+    isInk2DPresentation,
+    isInkCleanMode,
+    isScenic3DModelsReady,
+    landmarkInspector.items,
+    landmarkModelOverlays,
+    layerManager,
+    mapBoundsSnapshot.center,
+    mapInteractionSnapshot.currentZoom,
+    mapVisualReadyForOverlays,
+    isMobileViewport,
+    perfRecorder,
+    protectedLandmarkIds,
+    protectedSceneModelIds,
+    sceneArbiter,
+    sceneWindowManager,
+    visualVariant.id
+  ])
 
   const tourStateLabel =
     tourMode === 'buddhaRealmTour'
-      ? `佛境巡游中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
-      : tourMode === 'routePreview'
-        ? `路线预演中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
-        : '待命'
+      ? `沉浸导览中${activeTourStepId ? ` · ${getPoiDisplay(activeTourStepId)?.name ?? activeTourStepId}` : ''}`
+      : '待命'
   const visibleCameraPresets = debugPerf
     ? guideCameraPresets
     : guideCameraPresets.filter((preset) => preset.id !== 'closeInspect')
@@ -818,6 +2101,148 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     ? Math.max(0, Math.min(100, Math.round(nearestRoutePoint.progressRatio * 100)))
     : 0
   const routeProgressRatio = routeProgressPercent / 100
+  const nextInkBoundsCorner = getNextInkMapBoundsCorner(inkBoundsDraft)
+  const inkBoundsComplete = inkMapBoundCornerOrder.every((corner) => Boolean(inkBoundsDraft[corner]))
+  const inkExportUiSuppressed = inkExportUiHidden || cleanShot
+  const configuredInkBoundsDraft = useMemo(() => getConfiguredInkBoundsDraft(), [])
+  const showFormalInkBounds = ((isInkCleanMode && !cleanShot) || showInkBounds) && !inkExportUiHidden
+  // Persistent cloud, mountain, haze and canvas mist layers were removed from
+  // the production map. Only the short presentation transition remains.
+  const edgeMistState = {
+    level: 'normal' as const,
+    reason: 'persistent-atmosphere-removed',
+    strength: 0,
+    nearInkBoundary: false,
+    distanceToInkBoundary: 0
+  }
+  const clearMaskState = {
+    mode: 'disabled' as const,
+    size: 'wide' as const,
+    center: 'none',
+    shape: 'round' as const
+  }
+  const scenicPoiBillboards = useMemo<ScenicPoiBillboardItem[]>(
+    () => {
+      const billboardConfigs = new Map(scenicPoiBillboardConfigs.map((config) => [config.id, config]))
+
+      routeStops.forEach((stop) => {
+        if (billboardConfigs.has(stop.spotId)) {
+          return
+        }
+
+        billboardConfigs.set(stop.spotId, {
+          id: stop.spotId,
+          description: currentRouteConfig.theme ?? '路线站点',
+          tier: 'secondary',
+          visualLiftPx: 44
+        })
+      })
+
+      return Array.from(billboardConfigs.values())
+        .map((config) => {
+          const poi = lingshanPois.find((item) => item.id === config.id)
+
+          if (!poi) {
+            return null
+          }
+
+          return {
+            id: poi.id,
+            name: poi.name,
+            description: config.description,
+            tier: config.tier,
+            position: getBestPoiLocation(poi),
+            visualLiftPx: config.visualLiftPx
+          }
+        })
+        .filter((item): item is ScenicPoiBillboardItem => Boolean(item))
+    },
+    [currentRouteConfig.theme, routeStops]
+  )
+  const tourPoiSuppressionEnabled = tourMode === 'buddhaRealmTour'
+  const poiBillboardActiveId = normalizePoiBillboardActiveId(
+    activeLandmarkId ?? activeTourStepId ?? (tourPoiSuppressionEnabled ? selectedStopId ?? nextStop.nextStopId : undefined) ?? undefined
+  )
+  const normalizedNextPoiBillboardId = nextStop.nextStopId ? normalizePoiBillboardActiveId(nextStop.nextStopId) : undefined
+  const poiBillboardNextId =
+    tourPoiSuppressionEnabled && normalizedNextPoiBillboardId && normalizedNextPoiBillboardId !== poiBillboardActiveId
+      ? normalizedNextPoiBillboardId
+      : undefined
+  const poiBillboardMode = getPoiBillboardMode({
+    currentZoom: mapInteractionSnapshot.currentZoom ?? activeCameraPreset.zoom,
+    focus: Boolean(activeLandmarkId) || activeCameraMode === 'landmarkFocus',
+    tourMode
+  })
+  const activePoiBillboardCount = [poiBillboardActiveId, poiBillboardNextId].filter(Boolean).length
+  const mutedPoiBillboardCount = tourPoiSuppressionEnabled
+    ? Math.max(0, scenicPoiBillboards.length - activePoiBillboardCount)
+    : 0
+  const activePoiLiftPx = scenicPoiBillboards.find((item) => item.id === poiBillboardActiveId)?.visualLiftPx ?? 0
+
+  useEffect(() => {
+    perfRecorder.recordMapVisualEvent({
+      type: poiBillboardActiveId ? 'billboardHighlightEvent' : 'poiBillboardStateChanged',
+      atmosphereMode: 'normal',
+      atmosphereVisible: false,
+      poiBillboardCount: scenicPoiBillboards.length,
+      poiBillboardMode,
+      activePoiBillboardId: poiBillboardActiveId ?? null,
+      horizonMaskEnabled: false,
+      horizonMaskIntensity: 0,
+      activePoiCount: activePoiBillboardCount,
+      mutedPoiCount: mutedPoiBillboardCount,
+      waterHintsEnabled: false,
+      waterHintsCount: 0,
+      tourPoiSuppressionEnabled,
+      dynamicMistEnabled: false,
+      dynamicMistCanvasActive: false,
+      dynamicMistQuality: 'off',
+      dynamicMistDegraded: false,
+      dynamicMistRecoveryState: 'disabled',
+      skyOptionsAnimated: false,
+      enableDynamicMistDebugOverride: false,
+      coreClearMaskEnabled: false,
+      poiLiftMode: 'raised',
+      activePoiLiftPx,
+      currentZoom: roundNumber(mapBoundsSnapshot.zoom, 2),
+      mapBoundsEnabled,
+      mapBoundsDisabledReason,
+      mapCenterLimitBounds: formatInkMapBoundsForPerf(getScaledInkMapBounds(INK_MAP_CENTER_LIMIT_RATIO)),
+      mapVisualBufferBounds: formatInkMapBoundsForPerf(getScaledInkMapBounds(INK_MAP_VISUAL_BUFFER_RATIO)),
+      currentMapCenter: formatLatLngForPerf(mapBoundsSnapshot.center),
+      mapMinZoom,
+      mapMaxZoom,
+      zoomLimited: isZoomNearLimit(mapBoundsSnapshot.zoom, mapMinZoom, mapMaxZoom),
+      edgeMistLevel: edgeMistState.level,
+      edgeMistReason: edgeMistState.reason,
+      edgeMistStrength: edgeMistState.strength,
+      nearInkBoundary: edgeMistState.nearInkBoundary,
+      distanceToInkBoundary: edgeMistState.distanceToInkBoundary,
+      clearMaskMode: clearMaskState.mode,
+      clearMaskSize: clearMaskState.size,
+      clearMaskCenter: clearMaskState.center,
+      clearMaskShape: clearMaskState.shape,
+      cameraPresetTightened: true,
+      noMapBoundsDebugOverride
+    })
+  }, [
+    activePoiBillboardCount,
+    activePoiLiftPx,
+    mapBoundsDisabledReason,
+    mapBoundsEnabled,
+    mapBoundsSnapshot.center,
+    mapBoundsSnapshot.zoom,
+    mapMaxZoom,
+    mapMinZoom,
+    mutedPoiBillboardCount,
+    noMapBoundsDebugOverride,
+    perfRecorder,
+    poiBillboardActiveId,
+    poiBillboardMode,
+    scenicPoiBillboards.length,
+    tourPoiSuppressionEnabled
+  ])
+
   const distanceToRoute = nearestRoutePoint?.distanceMeters ?? 0
   const deviationLabel =
     rerouteStatus === 'ready'
@@ -840,13 +2265,31 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   const distanceToNextStopText = nextStop.distanceToNextStopMeters
     ? formatDistanceMeters(nextStop.distanceToNextStopMeters)
     : '待估算'
-  const prototypeLabel =
-    visualVariant.id === 'prototype-a'
-      ? 'Prototype A 已启用'
-      : visualVariant.id === 'prototype-b'
-        ? 'Prototype B 已启用'
-        : // prototype-c 已作为正式实景地图变体上线,不再显示开发角标
-        ''
+  useEffect(() => {
+    perfRecorder.setRouteState({
+      currentRouteId: currentRouteConfig.id,
+      currentRouteName: currentRouteConfig.name,
+      routeStopCount: routeStops.length,
+      currentStopId: selectedStopId,
+      nextStopId: nextStop.nextStopId ?? undefined,
+      routeGeometryPointCount: currentRouteGeometry?.pointCount ?? currentRoutePath.length,
+      tourStatus: tourMode === 'buddhaRealmTour' ? 'playing' : 'idle',
+      routeSwitchCount,
+      routeGeometryMode: currentRouteConfig.routeGeometryMode,
+      guideDataRouteSource: currentRouteConfig.guideDataRouteSource,
+      unmappedGuideStopCount: currentRouteConfig.unmappedGuideStopCount
+    })
+  }, [
+    currentRouteConfig,
+    currentRouteGeometry?.pointCount,
+    currentRoutePath.length,
+    nextStop.nextStopId,
+    perfRecorder,
+    routeStops.length,
+    routeSwitchCount,
+    selectedStopId,
+    tourMode
+  ])
   const prototypeName =
     visualVariant.id === 'prototype-a' ? 'A' : visualVariant.id === 'prototype-b' ? 'B' : visualVariant.id === 'prototype-c' ? 'C' : '默认'
   const configuredAssetUrls = useMemo(
@@ -855,250 +2298,434 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   )
   const loadedAssetCount = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'loaded').length
   const failedAssetUrls = configuredAssetUrls.filter((assetUrl) => assetLoadState[assetUrl] === 'error')
-  const selectedGardenAsset = selectedGardenId ? gardenAssets.find((asset) => asset.id === selectedGardenId) : undefined
-  const selectedGardenAssetDraft = selectedGardenAsset && gardenAssetEditDraft?.id === selectedGardenId ? gardenAssetEditDraft : selectedGardenAsset
-  const selectedTreeCandidateAsset = selectedTreeCandidateId
-    ? treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    : undefined
-  const selectedEditorZone = selectedEditorZoneId ? gardenEditorState.zones.find((zone) => zone.id === selectedEditorZoneId) : undefined
-  const selectedKeepoutZone = selectedKeepoutZoneId ? gardenEditorState.keepouts.find((zone) => zone.id === selectedKeepoutZoneId) : undefined
-  const filteredGardenAssets = useMemo(
-    () => gardenAssets.filter((asset) => matchesGardenFilters(asset, gardenFilters)),
-    [gardenAssets, gardenFilters]
+  const spatialLandmarkOverlayLookup = useMemo(() => {
+    const lookup = new Map<string, LingshanMapModelOverlay>()
+    landmarkModelOverlays.forEach((overlay) => {
+      lookup.set(`model_landmark:${getMapModelOverlayInspectorId(overlay)}`, overlay)
+    })
+    return lookup
+  }, [landmarkModelOverlays])
+  const sceneStateReleaseModelRef = useRef<(modelId: string, record: SceneStateRecord) => void>(() => undefined)
+  const sceneStateLoadModelRef = useRef<
+    (modelId: string, record: SceneStateRecord) => Promise<boolean | void> | boolean | void
+  >(() => false)
+  const sceneStateReleaseModel = useCallback(
+    (modelId: string, _record: SceneStateRecord) => {
+      if (modelId.startsWith('model_landmark_companion:')) {
+        const companionKey = modelId.slice('model_landmark_companion:'.length)
+        const [parentId, companionId] = companionKey.split('::')
+
+        if (parentId && companionId) {
+          landmarkInspectorRef.current.unloadCompanionModel(parentId, companionId)
+          return
+        }
+      }
+
+      if (modelId.startsWith('model_landmark:')) {
+        const landmarkId = modelId.slice('model_landmark:'.length)
+
+        if (landmarkId) {
+          landmarkInspectorRef.current.unloadLandmark(landmarkId)
+          return
+        }
+      }
+
+      glbSpatialController.unregister(modelId)
+      glbMemoryManager.unregister(modelId)
+      layerManager.removeLayer(modelId)
+    },
+    [glbMemoryManager, glbSpatialController, layerManager]
   )
-  const defaultGardenHidden = debugGarden ? treeCandidateLabState.defaultGardenHidden : false
-  const testTreeAssets = debugGarden ? treeCandidateLabState.testTrees : []
-  const overlayGardenAssets = useMemo(
-    () => (debugGarden ? [...(defaultGardenHidden ? [] : gardenAssets), ...testTreeAssets] : gardenAssets),
-    [debugGarden, defaultGardenHidden, gardenAssets, testTreeAssets]
+  const sceneStateLoadModel = useCallback(
+    (modelId: string, _record: SceneStateRecord) => {
+      if (modelId.startsWith('model_landmark_companion:')) {
+        const companionKey = modelId.slice('model_landmark_companion:'.length)
+        const [parentId, companionId] = companionKey.split('::')
+
+        if (parentId && companionId) {
+          landmarkInspectorRef.current.loadCompanionModel(parentId, companionId)
+          return true
+        }
+      }
+
+      if (modelId.startsWith('model_landmark:')) {
+        const landmarkId = modelId.slice('model_landmark:'.length)
+
+        if (landmarkId) {
+          landmarkInspectorRef.current.loadLandmark(landmarkId)
+          return true
+        }
+      }
+
+      return false
+    },
+    []
   )
-  const runtimeGardenOverlayAssets = useMemo(
+  const sceneStateManager = useMemo(
     () =>
-      // 移动端先彻底关闭园林树木资产，只保留腾讯原生 3D 建筑，验证基础底图是否卡顿。
-      // 桌面保持满密度；如需移动端少量树木，改回 selectMobileGardenOverlayAssets(overlayGardenAssets)。
-      isMobileViewport && visualVariant.id === 'prototype-c' ? [] : overlayGardenAssets,
-    [isMobileViewport, overlayGardenAssets, visualVariant.id]
+      new SceneStateManager({
+        setVisible: (modelId, visible) => {
+          const decision = sceneArbiterRef.current.requestAction({
+            type: visible ? 'show' : 'hide',
+            modelId,
+            context: {
+              source: 'state',
+              protected: protectedSceneModelIdsRef.current.has(modelId),
+              sceneState: visible ? 'visible' : 'hidden',
+              reason: 'scene-state-visibility'
+            }
+          })
+
+          if (decision.allowed) {
+            glbSpatialController.setVisible(modelId, visible)
+          }
+        },
+        release: (modelId, record) => {
+          const decision = sceneArbiterRef.current.requestAction({
+            type: 'dispose',
+            modelId,
+            context: {
+              source: 'state',
+              kind: record.kind,
+              protected: protectedSceneModelIdsRef.current.has(modelId),
+              sceneState: 'disposed',
+              memoryState: 'disposed',
+              reason: 'scene-state-release'
+            }
+          })
+
+          if (decision.allowed) {
+            sceneStateReleaseModelRef.current(modelId, record)
+          }
+        },
+        load: (modelId, record) => {
+          const decision = sceneArbiterRef.current.requestAction({
+            type: 'rehydrate',
+            modelId,
+            context: {
+              source: 'state',
+              kind: record.kind,
+              protected: protectedSceneModelIdsRef.current.has(modelId),
+              sceneState: record.state,
+              estimatedMemoryMB: record.kind === 'landmark' ? 36 : record.kind === 'companion' ? 2 : 8,
+              reason: 'scene-state-rehydrate'
+            }
+          })
+
+          if (!decision.allowed) {
+            return false
+          }
+
+          const result = sceneStateLoadModelRef.current(modelId, record)
+          Promise.resolve(result).finally(() => {
+            sceneArbiterRef.current.releaseLoad(modelId)
+          })
+          return result
+        }
+      }),
+    [glbSpatialController]
   )
-  const liveDefaultGardenOverlayCount = defaultGardenHidden ? 0 : gardenAssets.filter((asset) => asset.visible).length
-  const liveTestTreeOverlayCount = testTreeAssets.filter((asset) => asset.visible).length
-  const {
-    report: gardenOverlayReport,
-    loading: gardenAssetLoading,
-    progressText: gardenAssetProgressText
-  } = useGardenAssetOverlays({
-    active: visualVariant.id === 'prototype-c',
-    assets: runtimeGardenOverlayAssets,
-    debugPerf,
-    debugGarden,
-    gardenLodState,
-    map: mapRef.current,
-    mapReady: mapStatus === 'ready',
-    perfRecorder,
-    rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route',
-    routeProgressRatio,
-    shouldLoadGardenAssets
-  })
-  const gardenModelReport: GardenModelReport = {
-    ...gardenOverlayReport,
-    patchCount: gardenPatchReport.patchCount,
-    patchFallback: gardenPatchReport.patchFallback
-  }
+  useEffect(() => {
+    sceneStateReleaseModelRef.current = sceneStateReleaseModel
+  }, [sceneStateReleaseModel])
+  useEffect(() => {
+    sceneStateLoadModelRef.current = sceneStateLoadModel
+  }, [sceneStateLoadModel])
+  useEffect(() => {
+    sceneStateManagerRef.current = sceneStateManager
+
+    return () => {
+      if (sceneStateManagerRef.current === sceneStateManager) {
+        sceneStateManagerRef.current = null
+      }
+    }
+  }, [sceneStateManager])
+  useEffect(() => {
+    glbSpatialController.configure({
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
+      mobile: isMobileViewport,
+      intervalMs: 200,
+      protectedModelIds: protectedSceneModelIds
+    })
+  }, [glbSpatialController, isInk2DPresentation, isInkCleanMode, isMobileViewport, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
-    const signature = `${gardenLodState.visibleTier}:${gardenLodState.opacity}:${gardenLodState.isInteracting}:${gardenLodState.currentZoom ?? 'unknown'}`
-
-    if (gardenLodSignatureRef.current === signature) {
-      return
-    }
-
-    gardenLodSignatureRef.current = signature
-    perfRecorder.recordMapVisualEvent({
-      type: 'gardenLodChanged',
-      currentZoom: gardenLodState.currentZoom,
-      gardenLodTier: gardenLodState.visibleTier,
-      gardenOpacity: gardenLodState.opacity,
-      liveGardenOverlayCount: gardenOverlayReport.createdCount,
-      reason: gardenLodState.isInteracting ? 'interaction-lite' : 'zoom-lod'
+    glbMemoryManager.configure({
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
+      maxActiveModels: 80,
+      ttlMs: 60000,
+      sweepIntervalMs: 5000,
+      protectedModelIds: protectedSceneModelIds
     })
-  }, [gardenLodState, gardenOverlayReport.createdCount, perfRecorder])
+  }, [glbMemoryManager, isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, visualVariant.id])
 
   useEffect(() => {
-    if (!shouldLoadGardenAssets || mapGardenLoadStartedRef.current) {
-      return
-    }
+    sceneArbiter.configure({
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation,
+      maxActiveGLB: 80,
+      memoryPressureThresholdMB: 360,
+      debounceMs: 300
+    })
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, sceneArbiter, visualVariant.id])
 
-    mapGardenLoadStartedRef.current = true
-    setStartupStage('gardenLoading')
-    perfRecorder.recordMapVisualEvent({
-      type: 'startupStageChanged',
-      startupStage: 'gardenLoading',
-      reason: 'garden-after-map-ready'
+  useEffect(() => {
+    return sceneArbiter.subscribe((snapshot) => {
+      perfRecorder.recordMapVisualEvent({
+        type: 'sceneArbiterStateChanged',
+        arbiterDecisionCount: snapshot.decisionCount,
+        arbiterDeniedCount: snapshot.deniedCount,
+        arbiterLoadThrottleCount: snapshot.loadThrottleCount,
+        arbiterConflictResolveCount: snapshot.conflictResolveCount,
+        arbiterActiveLoadCount: snapshot.activeLoadCount,
+        arbiterActiveModelCount: snapshot.activeModelCount,
+        arbiterMemoryPressureEstimateMB: snapshot.memoryPressureEstimateMB
+      })
     })
-    perfRecorder.recordMapVisualEvent({
-      type: 'gardenLoadStartedAfterMapReady',
-      reason: 'visual-ready'
+  }, [perfRecorder, sceneArbiter])
+
+  useEffect(() => {
+    return () => sceneArbiter.destroy()
+  }, [sceneArbiter])
+
+  useEffect(() => {
+    return glbMemoryManager.subscribe((snapshot) => {
+      perfRecorder.recordMapVisualEvent({
+        type: 'glbMemoryManagerStateChanged',
+        glbActiveCount: snapshot.activeCount,
+        glbCachedCount: snapshot.cachedCount,
+        glbDisposedCount: snapshot.disposedCount,
+        glbSoftDetachedCount: snapshot.softDetachedCount,
+        glbMemoryEstimateMB: snapshot.memoryEstimateMB,
+        glbMemoryMaxActive: snapshot.maxActiveModels,
+        glbMemoryTtlMs: snapshot.ttlMs
+      })
     })
-  }, [perfRecorder, shouldLoadGardenAssets])
+  }, [glbMemoryManager, perfRecorder])
+
+  useEffect(() => {
+    sceneWindowManager.configure({
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && tourMode === 'buddhaRealmTour',
+      activeWindowMeters: 300,
+      forwardWindowMeters: 800,
+      behindProgressWindow: 0.035,
+      updateIntervalMs: 1000,
+      protectedModelIds: protectedSceneModelIds
+    })
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneWindowManager, tourMode, visualVariant.id])
+
+  useEffect(() => {
+    sceneStateManager.configure({
+      enabled: visualVariant.id === 'prototype-c' && mapStatus === 'ready' && !isInkCleanMode && !isInk2DPresentation && tourMode === 'buddhaRealmTour',
+      activeWindowMeters: 300,
+      forwardWindowMeters: 800,
+      behindProgressWindow: 0.035,
+      rehydrateDebounceMs: 300,
+      protectedModelIds: protectedSceneModelIds
+    })
+  }, [isInk2DPresentation, isInkCleanMode, mapStatus, protectedSceneModelIds, sceneStateManager, tourMode, visualVariant.id])
+
+  useEffect(() => {
+    return sceneWindowManager.subscribe((snapshot) => {
+      perfRecorder.recordMapVisualEvent({
+        type: 'sceneWindowManagerStateChanged',
+        windowActiveCount: snapshot.activeCount,
+        windowVisibleCount: snapshot.visibleCount,
+        windowDisposedCount: snapshot.disposedCount,
+        windowBehindCount: snapshot.behindCount,
+        windowCachedCount: snapshot.cachedCount,
+        sceneMemoryPressureEstimate: snapshot.memoryPressureEstimate
+      })
+    })
+  }, [perfRecorder, sceneWindowManager])
+
+  useEffect(() => {
+    return sceneStateManager.subscribe((snapshot) => {
+      perfRecorder.recordMapVisualEvent({
+        type: 'sceneStateManagerStateChanged',
+        sceneStateLoaded: snapshot.loadedCount,
+        sceneStateVisible: snapshot.visibleCount,
+        sceneStateDisposed: snapshot.disposedCount,
+        sceneStateRehydrated: snapshot.rehydratedCount,
+        sceneStateCached: snapshot.cachedCount,
+        sceneStateHidden: snapshot.hiddenCount,
+        sceneStateActiveLoads: snapshot.activeLoadCount,
+        sceneCacheHitRate: snapshot.cacheHitRate
+      })
+    })
+  }, [perfRecorder, sceneStateManager])
+
+  useEffect(() => {
+    return () => sceneStateManager.destroy()
+  }, [sceneStateManager])
+
+  useEffect(() => {
+    return layerManager.subscribe((snapshot) => {
+      const activeSpatialModels = new Set<string>()
+
+      snapshot.forEach((layer) => {
+        const model = layerManager.getLayer(layer.name)
+
+        if (!model) {
+          return
+        }
+
+        if (layer.name.startsWith('model_landmark_companion:')) {
+          const isProtectedModel = protectedSceneModelIds.has(layer.name)
+          const companionKey = layer.name.slice('model_landmark_companion:'.length)
+          const [parentId, companionId] = companionKey.split('::')
+          const parentOverlay = spatialLandmarkOverlayLookup.get(`model_landmark:${parentId}`)
+          const companion = parentOverlay?.companionModels?.find((item) => item.id === companionId)
+          const parentLocation = parentOverlay ? getModelOverlayLocation(parentOverlay) : null
+
+          if (!parentLocation) {
+            return
+          }
+
+          activeSpatialModels.add(layer.name)
+          glbSpatialController.register(layer.name, model, parentLocation, {
+            kind: 'companion'
+          })
+          glbMemoryManager.register(layer.name, model, {
+            kind: 'companion',
+            estimatedMemoryMB: 2
+          })
+          sceneWindowManager.register(layer.name, model, parentLocation, {
+            kind: 'companion',
+            estimatedMemoryMB: 2,
+            routeProgress: getSceneWindowRouteProgress(parentLocation, currentRoutePath, currentRouteCumulativeDistances)
+          })
+          sceneStateManager.register(layer.name, {
+            glbUrl: companion?.modelUrl,
+            position: parentLocation,
+            model,
+            kind: 'companion',
+            routeProgress: getSceneWindowRouteProgress(parentLocation, currentRoutePath, currentRouteCumulativeDistances)
+          })
+          sceneArbiter.registerModel({
+            modelId: layer.name,
+            kind: 'companion',
+            estimatedMemoryMB: 2
+          })
+          sceneArbiter.requestAction({
+            type: 'show',
+            modelId: layer.name,
+            context: {
+              source: 'runtime',
+              kind: 'companion',
+              protected: isProtectedModel,
+              visible: true,
+              inWindow: true,
+              sceneState: 'visible',
+              memoryState: 'active',
+              estimatedMemoryMB: 2,
+              reason: 'layer-manager-register'
+            }
+          })
+          sceneArbiter.releaseLoad(layer.name)
+          return
+        }
+
+        if (layer.name.startsWith('model_landmark:')) {
+          const isProtectedModel = protectedSceneModelIds.has(layer.name)
+          const overlay = spatialLandmarkOverlayLookup.get(layer.name)
+          const location = overlay ? getModelOverlayLocation(overlay) : null
+
+          if (!overlay || !location) {
+            return
+          }
+
+          activeSpatialModels.add(layer.name)
+          glbSpatialController.register(layer.name, model, location, {
+            kind: 'landmark'
+          })
+          glbMemoryManager.register(layer.name, model, {
+            kind: 'landmark',
+            estimatedMemoryMB: 36
+          })
+          sceneWindowManager.register(layer.name, model, location, {
+            kind: 'landmark',
+            estimatedMemoryMB: 36,
+            routeProgress: getSceneWindowRouteProgress(location, currentRoutePath, currentRouteCumulativeDistances)
+          })
+          sceneStateManager.register(layer.name, {
+            glbUrl: overlay.modelUrl,
+            position: location,
+            model,
+            kind: 'landmark',
+            routeProgress: getSceneWindowRouteProgress(location, currentRoutePath, currentRouteCumulativeDistances)
+          })
+          sceneArbiter.registerModel({
+            modelId: layer.name,
+            kind: 'landmark',
+            estimatedMemoryMB: 36
+          })
+          sceneArbiter.requestAction({
+            type: 'show',
+            modelId: layer.name,
+            context: {
+              source: 'runtime',
+              kind: 'landmark',
+              protected: isProtectedModel,
+              visible: true,
+              inWindow: true,
+              sceneState: 'visible',
+              memoryState: 'active',
+              estimatedMemoryMB: 36,
+              reason: 'layer-manager-register'
+            }
+          })
+          sceneArbiter.releaseLoad(layer.name)
+        }
+      })
+
+      glbSpatialController.syncRegisteredModelIds(activeSpatialModels)
+      glbMemoryManager.syncRegisteredModelIds(activeSpatialModels)
+      sceneWindowManager.syncRegisteredModelIds(activeSpatialModels)
+      sceneArbiter.syncRegisteredModelIds(activeSpatialModels)
+    })
+  }, [
+    currentRouteCumulativeDistances,
+    currentRoutePath,
+    glbMemoryManager,
+    glbSpatialController,
+    layerManager,
+    protectedSceneModelIds,
+    sceneArbiter,
+    sceneStateManager,
+    sceneWindowManager,
+    spatialLandmarkOverlayLookup,
+    perfRecorder
+  ])
+
+  useEffect(() => {
+    return layerManager.subscribe((snapshot) => {
+      perfRecorder.recordMapVisualEvent({
+        type: 'layerManagerStateChanged',
+        layerManagerCount: snapshot.length,
+        layerManagerActiveLayers: snapshot.filter((layer) => layer.visible).map((layer) => layer.name),
+        layerManagerSnapshot: snapshot.map((layer) => `${layer.name}:${layer.visible ? 'visible' : 'hidden'}:${layer.order}`).join(', ')
+      })
+    })
+  }, [layerManager, perfRecorder])
 
   useEffect(() => {
     if (!mapVisualReadyForOverlays || startupStage === 'ready') {
       return
     }
 
-    if (visualVariant.id === 'prototype-c') {
-      if (gardenModelReport.visibleCount === 0 || (gardenAssetLoading && !gardenModelReport.unavailable)) {
-        return
-      }
-    }
-
     setStartupStage('ready')
     perfRecorder.recordMapVisualEvent({
       type: 'startupStageChanged',
       startupStage: 'ready',
-      reason: visualVariant.id === 'prototype-c' ? 'garden-batches-ready' : 'overlays-ready'
+      reason: 'overlays-ready'
     })
-  }, [gardenAssetLoading, gardenModelReport.unavailable, gardenModelReport.visibleCount, mapVisualReadyForOverlays, perfRecorder, startupStage, visualVariant.id])
-
-  const focusMapOnVertices = (vertices: LatLngPoint[]) => {
-    const center = getPathCenter(vertices)
-
-    if (!center || !vertices.length) {
-      return
-    }
-
-    const bounds = getPolygonBounds(vertices)
-    const diagonalMeters = haversineDistanceMeters(
-      { lat: bounds.minLat, lng: bounds.minLng },
-      { lat: bounds.maxLat, lng: bounds.maxLng }
-    )
-    const zoom = diagonalMeters > 520 ? 17.25 : diagonalMeters > 260 ? 18 : 18.7
-
-    moveMapCamera(center, {
-      id: 'routeOverview',
-      label: '编辑视角',
-      description: '聚焦当前编辑区域',
-      zoom,
-      pitch: 42,
-      rotation: activeCameraPreset.rotation,
-      durationMs: 700
-    })
-  }
-
-  const selectEditorZone = (zoneId: string) => {
-    const zone = gardenEditorState.zones.find((item) => item.id === zoneId)
-    setSelectedEditorZoneId(zoneId)
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setSelectedGardenVertexId('')
-
-    if (zone) {
-      focusMapOnVertices(zone.vertices)
-    }
-  }
-
-  const selectKeepoutZone = (zoneId: string) => {
-    const zone = gardenEditorState.keepouts.find((item) => item.id === zoneId)
-    setSelectedKeepoutZoneId(zoneId)
-    setSelectedEditorZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setSelectedGardenVertexId('')
-
-    if (zone) {
-      focusMapOnVertices(zone.vertices)
-    }
-  }
-
-  const selectGardenAssetForEditing = (assetId: string) => {
-    const asset = gardenAssets.find((item) => item.id === assetId)
-    setSelectedGardenId(assetId)
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenAssetEditDraft(asset ? cloneGardenAsset(asset) : null)
-
-    if (asset) {
-      moveMapCamera(asset.location, {
-        id: 'closeInspect',
-        label: '资产编辑',
-        description: '聚焦当前资产点',
-        zoom: 19.2,
-        pitch: 54,
-        rotation: activeCameraPreset.rotation,
-        durationMs: 720
-      })
-    }
-  }
-
-  const updateGardenAssetEditDraft = (patch: Partial<LingshanMap3DGardenAsset>) => {
-    setGardenAssetEditDraft((current) => {
-      if (!current) {
-        return current
-      }
-
-      return {
-        ...current,
-        ...patch,
-        location: patch.location ?? current.location
-      }
-    })
-  }
-
-  const persistGardenDraft = (nextEditorState: GardenEditorState, nextAssets: LingshanMap3DGardenAsset[]) => {
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(nextEditorState))
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(nextAssets))
-    setGardenEditorUsesStoredDraft(true)
-  }
-
-  const completeDraftGardenPolygon = (extraPoint?: LatLngPoint | null) => {
-    setGardenDraftPolygon((current) => {
-      if (!current) {
-        setGardenCopyStatus('当前没有正在绘制的多边形')
-        return current
-      }
-
-      const vertices = extraPoint && !isSameLatLngPoint(current.vertices[current.vertices.length - 1], extraPoint)
-        ? [...current.vertices, extraPoint]
-        : current.vertices
-
-      if (vertices.length < 3) {
-        setGardenCopyStatus('至少需要 3 个顶点才能完成多边形')
-        return current
-      }
-
-      if (current.mode === 'vegetation') {
-        const zone = createEditorVegetationZone(vertices, gardenEditorState.zones.length)
-        setGardenEditorState((state) => ({
-          ...state,
-          zones: [...state.zones, zone]
-        }))
-        setSelectedEditorZoneId(zone.id)
-        setSelectedKeepoutZoneId('')
-        setGardenCopyStatus(`已创建 vegetation zone：${zone.name}`)
-      } else {
-        const keepout = createEditorKeepoutZone(vertices, gardenEditorState.keepouts.length)
-        setGardenEditorState((state) => ({
-          ...state,
-          keepouts: [...state.keepouts, keepout]
-        }))
-        setSelectedKeepoutZoneId(keepout.id)
-        setSelectedEditorZoneId('')
-        setGardenCopyStatus(`已创建 keepout zone：${keepout.name}`)
-      }
-
-      setGardenEditorMode('inspect')
-      setSelectedGardenVertexId('')
-      return null
-    })
-  }
+  }, [mapVisualReadyForOverlays, perfRecorder, startupStage, visualVariant.id])
 
   useEffect(() => {
     if (!shouldRedirectLocalTMapHost) {
       return
     }
 
-    stashLocalhostTransferDrafts()
     setStartupStage('loadingSdk')
     setPageMessage('正在切换到 localhost 以加载腾讯底图...')
     perfRecorder.recordMapVisualEvent({
@@ -1114,20 +2741,25 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [perfRecorder, shouldRedirectLocalTMapHost])
 
   useEffect(() => {
-    if (shouldRedirectLocalTMapHost) {
+    if (!bootstrapMapRuntime || shouldRedirectLocalTMapHost) {
       return
     }
 
+    const generation = ++presentationGenerationRef.current
+    const initialPresentation = activePresentationRef.current
+    const abortController = new AbortController()
     let cancelled = false
-    let visualReadyTimer: number | null = null
-    let visualReadyFallbackTimer: number | null = null
-    let visualTimeoutTimer: number | null = null
-    let curtainHideTimer: number | null = null
-    let visualReadyRafIds: number[] = []
+    let createdMap: any = null
+    let readyTimer: number | null = null
+    let readyFallbackTimer: number | null = null
+    let slowTimer: number | null = null
+    let curtainTimer: number | null = null
+    let readyRafIds: number[] = []
     let visualReadyScheduled = false
     let mapCreatedAt = 0
-    const mapVisualEventCleanups: Array<() => void> = []
-    const mapInteractionEventCleanups: Array<() => void> = []
+    const mapEventCleanups: Array<() => void> = []
+    const interactionCleanups: Array<() => void> = []
+    const isCurrentGeneration = () => !cancelled && generation === presentationGenerationRef.current
 
     const recordStartupStage = (stage: Map3DStartupStage, reason: string) => {
       setStartupStage(stage)
@@ -1138,88 +2770,148 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       })
     }
 
-    const recordCurtainHidden = () => {
-      const shownAt = mapLoadingCurtainShownAtRef.current
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      perfRecorder.recordMapVisualEvent({
-        type: 'loadingCurtainHidden',
-        curtainDurationMs: shownAt !== null ? Math.round(now - shownAt) : undefined
+    const clearTimersAndListeners = () => {
+      if (readyTimer !== null) window.clearTimeout(readyTimer)
+      if (readyFallbackTimer !== null) window.clearTimeout(readyFallbackTimer)
+      if (slowTimer !== null) window.clearTimeout(slowTimer)
+      if (curtainTimer !== null) window.clearTimeout(curtainTimer)
+      readyTimer = null
+      readyFallbackTimer = null
+      slowTimer = null
+      curtainTimer = null
+      readyRafIds.forEach((id) => window.cancelAnimationFrame(id))
+      readyRafIds = []
+      mapEventCleanups.splice(0).forEach((cleanup) => cleanup())
+      interactionCleanups.splice(0).forEach((cleanup) => cleanup())
+    }
+
+    const clearOverlayRefs = () => {
+      routeLayerRef.current = null
+      tourRouteProgressLayerRef.current = null
+      poiMarkerLayerRef.current = null
+      userMarkerLayerRef.current = null
+      rerouteLayerRef.current = null
+      landmarkHighlightLayerRef.current = null
+      decorMarkerLayerRef.current = null
+      formalInkBoundsMarkerLayerRef.current = null
+      formalInkBoundsBoundaryLayerRef.current = null
+      formalInkBoundsFillLayerRef.current = null
+      inkBoundsMarkerLayerRef.current = null
+      inkBoundsBoundaryLayerRef.current = null
+      inkTileLayerRef.current = null
+      inkTileGroundFallbackLayerRef.current = null
+      tencentCustomLayerInitKeyRef.current = ''
+      updateCustomTileLayerRuntime({
+        attached: false,
+        visible: false,
+        lastRefreshReason: 'standalone-map-destroyed'
       })
     }
 
-    const markMapVisualReady = (reason: string) => {
-      if (cancelled || mapVisualReadyRef.current) {
+    const disposeMap = () => {
+      const map = createdMap
+      clearTimersAndListeners()
+      if (!map || !isMapInstanceUsable(map)) {
+        createdMap = null
+        return
+      }
+
+      if (mapRef.current === map) {
+        onMapRuntimeChangeRef.current?.(null)
+        mapRef.current = null
+      }
+      gltfModelRefs.current = new Map()
+      sceneWindowManager.destroy()
+      glbMemoryManager.destroy()
+      glbSpatialController.destroy()
+      poiLayerController.destroy()
+      layerManager.destroy()
+      clearOverlayRefs()
+      destroyedMapInstancesRef.current.add(map)
+      mapInstanceGenerationsRef.current.delete(map)
+      activeMapInstanceGenerationRef.current = 0
+
+      try {
+        map.destroy?.()
+        mapDestroyCountRef.current += 1
+      } catch (error) {
+        if (debugPerf) {
+          console.warn('[map-validation] map destroy ignored', error)
+        }
+      }
+      createdMap = null
+    }
+
+    const markVisualReady = (reason: string) => {
+      if (!isCurrentGeneration() || !createdMap || !isMapInstanceCurrent(createdMap) || mapVisualReadyRef.current) {
         return
       }
 
       mapVisualReadyRef.current = true
-      if (visualTimeoutTimer !== null) {
-        window.clearTimeout(visualTimeoutTimer)
-        visualTimeoutTimer = null
+      if (slowTimer !== null) {
+        window.clearTimeout(slowTimer)
+        slowTimer = null
       }
-      if (visualReadyFallbackTimer !== null) {
-        window.clearTimeout(visualReadyFallbackTimer)
-        visualReadyFallbackTimer = null
-      }
+      setIsMapIdle(true)
       setIsMapVisualReady(true)
       setMapReadyTimedOut(false)
+      initializedPresentationRef.current = initialPresentation
+      appliedPresentationRef.current = initialPresentation
+      setPresentationTransition('ready')
+      updateCameraTransitionPhase('ready')
+      setPresentationSwitchError(undefined)
       recordStartupStage('baseMapReady', reason)
-      setPageMessage('真实 3D 地图导览模式已就绪')
-      perfRecorder.recordMapVisualEvent({
-        type: 'mapVisualReady',
-        reason
-      })
-      curtainHideTimer = window.setTimeout(() => {
-        if (cancelled) {
-          return
-        }
+      setPageMessage('腾讯地图与真实定位验证已就绪')
+      perfRecorder.recordMapVisualEvent({ type: 'mapVisualReady', reason })
+
+      curtainTimer = window.setTimeout(() => {
+        if (!isCurrentGeneration()) return
         setLoadingCurtainVisible(false)
-        recordCurtainHidden()
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        perfRecorder.recordMapVisualEvent({
+          type: 'loadingCurtainHidden',
+          curtainDurationMs: mapLoadingCurtainShownAtRef.current === null
+            ? undefined
+            : Math.round(now - mapLoadingCurtainShownAtRef.current)
+        })
       }, MAP_3D_GUIDE_CURTAIN_FADE_MS)
     }
 
-    const scheduleMapVisualReady = (reason: string) => {
-      if (cancelled || mapVisualReadyRef.current || visualReadyScheduled) {
+    const scheduleVisualReady = (reason: string) => {
+      if (
+        !isCurrentGeneration() ||
+        !createdMap ||
+        !isMapInstanceCurrent(createdMap) ||
+        mapVisualReadyRef.current ||
+        visualReadyScheduled
+      ) {
         return
-      }
-
-      perfRecorder.recordMapVisualEvent({
-        type: 'baseMapEventReceived',
-        reason
-      })
-
-      if (!mapFirstIdleRef.current) {
-        mapFirstIdleRef.current = true
-        setIsMapIdle(true)
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapFirstIdle',
-          reason
-        })
       }
 
       visualReadyScheduled = true
+      if (!mapFirstIdleRef.current) {
+        mapFirstIdleRef.current = true
+        setIsMapIdle(true)
+        perfRecorder.recordMapVisualEvent({ type: 'mapFirstIdle', reason })
+      }
+      perfRecorder.recordMapVisualEvent({ type: 'baseMapEventReceived', reason })
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const remainingDelay = Math.max(0, MAP_3D_GUIDE_MIN_BASEMAP_READY_MS - (now - mapCreatedAt))
-
-      visualReadyTimer = window.setTimeout(() => {
-        visualReadyRafIds = [
-          window.requestAnimationFrame(() => {
-            const secondRafId = window.requestAnimationFrame(() => {
-              markMapVisualReady(reason)
-            })
-            visualReadyRafIds = [...visualReadyRafIds, secondRafId]
-          })
-        ]
+      readyTimer = window.setTimeout(() => {
+        readyRafIds = [window.requestAnimationFrame(() => {
+          const secondRaf = window.requestAnimationFrame(() => markVisualReady(reason))
+          readyRafIds.push(secondRaf)
+        })]
       }, remainingDelay)
     }
 
-    async function initMap() {
-      if (!mapElementRef.current) {
-        return
-      }
+    async function initStandaloneMap() {
+      const mapElement = mapElementRef.current
+      if (!mapElement || !isCurrentGeneration()) return
 
       setMapStatus('loading')
-      recordStartupStage('loadingSdk', 'init')
+      setPresentationTransition('waiting-container')
+      updateCameraTransitionPhase('idle')
       setIsMapCreated(false)
       setIsMapIdle(false)
       setIsMapVisualReady(false)
@@ -1229,209 +2921,337 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       mapFirstIdleRef.current = false
       mapOverlaysStartedRef.current = false
       mapRoutePoiShownRef.current = false
-      mapGardenLoadStartedRef.current = false
+      entryCameraPlayedRef.current = false
       mapLoadingCurtainShownAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
       setPageMessage('正在加载腾讯地图真实底座...')
+      recordStartupStage('loadingSdk', 'standalone-validation-init')
       perfRecorder.markStageStart('mapInit')
-      perfRecorder.recordMapVisualEvent({
-        type: 'loadingCurtainShown'
-      })
-      perfRecorder.recordMapVisualEvent({
-        type: 'tmapScriptLoadStarted',
-        reason: 'loadTMap'
-      })
+      perfRecorder.recordMapVisualEvent({ type: 'loadingCurtainShown' })
+      perfRecorder.recordMapVisualEvent({ type: 'tmapScriptLoadStarted', reason: 'standalone-validation' })
 
-      visualTimeoutTimer = window.setTimeout(() => {
-        if (cancelled || mapVisualReadyRef.current) {
-          return
-        }
+      const containerReady = await waitForMapContainerLayout(mapElement, isCurrentGeneration, abortController.signal)
+      if (!containerReady || !isCurrentGeneration()) {
+        throw new Error('地图容器尚未完成布局')
+      }
 
+      setPresentationTransition('initializing')
+      slowTimer = window.setTimeout(() => {
+        if (!isCurrentGeneration() || mapVisualReadyRef.current) return
         setMapReadyTimedOut(true)
-        setPageMessage('地图底图加载较慢，正在继续展开佛境沙盘')
-        recordStartupStage('slow', 'visual-ready-timeout')
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapReadyTimedOut',
-          reason: 'visual-ready-timeout'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapSlow',
-          reason: 'visual-ready-timeout'
-        })
+        setPageMessage('地图底图加载较慢，正在继续连接腾讯地图')
+        recordStartupStage('slow', 'standalone-visual-ready-timeout')
       }, MAP_3D_GUIDE_SLOW_READY_MS)
 
-      try {
-        // 移动端导览图不使用热力图/3D 模型(树木已关),核心 SDK 就绪即建图,
-        // 不再被 visualization 热力扩展库的加载阻塞,显著缩短首屏白屏。
-        // 桌面保持等待扩展库就绪,确保园林树木所需的 model.GLTFModel 可用。
-        const TMap = await loadTMap({ waitFor: isMobileViewport ? 'core' : 'heat' })
-        perfRecorder.recordMapVisualEvent({
-          type: 'tmapScriptLoaded',
-          reason: 'loadTMap'
-        })
-        recordStartupStage('creatingMap', 'tmap-loaded')
+      const TMap = await loadTMap()
+      if (!isCurrentGeneration() || !mapElementRef.current) return
+      perfRecorder.recordMapVisualEvent({ type: 'tmapScriptLoaded', reason: 'standalone-validation' })
+      recordStartupStage('creatingMap', 'standalone-tmap-loaded')
 
-        if (cancelled || !mapElementRef.current) {
-          return
-        }
+      const preservedViewport = presentationViewportRef.current
+      const initialViewMode = initialPresentation === 'ink2d' ? '2D' : '3D'
+      mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const map = new TMap.Map(mapElementRef.current, {
+        center: new TMap.LatLng(
+          preservedViewport?.center.lat ?? scenicCenter.lat,
+          preservedViewport?.center.lng ?? scenicCenter.lng
+        ),
+        zoom: preservedViewport?.zoom ?? (initialPresentation === 'ink2d' ? INK_2D_INITIAL_ZOOM : MAP_3D_GUIDE_INITIAL_ZOOM),
+        minZoom: INK_2D_MIN_ZOOM,
+        maxZoom: INK_MAP_MAX_ZOOM,
+        viewMode: initialViewMode,
+        pitch: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
+        rotation: initialViewMode === '2D' ? 0 : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
+        mapStyleId: MAP_3D_GUIDE_STYLE_ID,
+        showControl: false,
+        baseMap: getMapBaseMapConfig({ clean: false, showNativePoiLabels: poiLayerMode === 'all' }),
+        renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
+      })
 
-        mapCreatedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-        const map = new TMap.Map(mapElementRef.current, {
-          center: new TMap.LatLng(routeCenter.lat, routeCenter.lng),
-          zoom: isMobileViewport ? MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM : SCENIC_CAMERA_BOUNDS.defaultZoom,
-          minZoom: SCENIC_CAMERA_BOUNDS.minZoom,
-          maxZoom: SCENIC_CAMERA_BOUNDS.maxZoom,
-          pitch: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch,
-          rotation: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.rotation,
-          mapStyleId: MAP_3D_GUIDE_STYLE_ID,
-          baseMap: MAP_3D_GUIDE_BASE_MAP,
-          renderOptions: MAP_3D_GUIDE_RENDER_OPTIONS
-        })
-        mapRef.current = map
-        // prototype-c 会为数百个 GLTFModel 各绑定一个 zoom_changed 监听,
-        // 超过 EventEmitter 默认上限触发"内存泄漏"误报并产生重复告警开销;
-        // 按已知模型规模上调上限(SDK 已暴露 setMaxListeners),消除噪音。
-        try {
-          ;(map as { setMaxListeners?: (n: number) => void }).setMaxListeners?.(4000)
-        } catch {
-          /* 旧版 SDK 未暴露该方法则忽略 */
-        }
-        setIsMapCreated(true)
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapCreated'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'initialCameraApplied',
-          reason: 'constructor-camera'
-        })
-        recordStartupStage('waitingBaseMap', 'map-created')
-        setMapStyleSupport(inspectMapStyleSupport(map, TMap))
-        setMapStatus('ready')
-        setPageMessage('正在展开佛境沙盘底图...')
-        perfRecorder.markStageEnd('mapInit')
-
-        const visualReadyEventNames = ['idle', 'tilesloaded', 'rendercomplete']
-        visualReadyEventNames.forEach((eventName) => {
-          const handler = () => scheduleMapVisualReady(eventName)
-          map.on?.(eventName, handler)
-          mapVisualEventCleanups.push(() => map.off?.(eventName, handler))
-        })
-        visualReadyFallbackTimer = window.setTimeout(() => {
-          scheduleMapVisualReady('fallback-localhost-ready-delay')
-        }, MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS)
-
-        const mapElement = mapElementRef.current
-
-        if (mapElement) {
-          const handleWheel = () => startMapInteractionLiteMode('zoom')
-          const handlePointerDown = () => startMapInteractionLiteMode('drag')
-          const handleTouchStart = () => startMapInteractionLiteMode('move')
-          const handlePointerUp = () => scheduleMapInteractionLiteExit('drag', 'pointerup')
-          const handleTouchEnd = () => scheduleMapInteractionLiteExit('move', 'touchend')
-
-          mapElement.addEventListener('wheel', handleWheel, { passive: true })
-          mapElement.addEventListener('pointerdown', handlePointerDown, { passive: true })
-          mapElement.addEventListener('touchstart', handleTouchStart, { passive: true })
-          window.addEventListener('pointerup', handlePointerUp)
-          window.addEventListener('touchend', handleTouchEnd)
-          mapInteractionEventCleanups.push(() => {
-            mapElement.removeEventListener('wheel', handleWheel)
-            mapElement.removeEventListener('pointerdown', handlePointerDown)
-            mapElement.removeEventListener('touchstart', handleTouchStart)
-            window.removeEventListener('pointerup', handlePointerUp)
-            window.removeEventListener('touchend', handleTouchEnd)
-          })
-        }
-
-        const interactionEndEventNames = ['zoomend', 'dragend', 'moveend', 'idle']
-        interactionEndEventNames.forEach((eventName) => {
-          const handler = () => {
-            updateCurrentMapZoomSnapshot()
-            scheduleMapInteractionLiteExit(eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move', eventName)
-            clampScenicCameraBounds(eventName)
-          }
-          map.on?.(eventName, handler)
-          mapInteractionEventCleanups.push(() => map.off?.(eventName, handler))
-        })
-      } catch (error) {
-        perfRecorder.markStageEnd('mapInit')
-        setMapStatus('error')
-        if (visualTimeoutTimer !== null) {
-          window.clearTimeout(visualTimeoutTimer)
-          visualTimeoutTimer = null
-        }
-        setMapReadyTimedOut(true)
-        setIsMapVisualReady(false)
-        setLoadingCurtainVisible(true)
-        recordStartupStage('failed', 'map-load-error')
-        setPageMessage(error instanceof Error ? error.message : '腾讯地图加载失败')
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapReadyTimedOut',
-          reason: 'map-load-error'
-        })
-        perfRecorder.recordMapVisualEvent({
-          type: 'mapFailed',
-          reason: 'map-load-error'
-        })
+      if (!isCurrentGeneration()) {
+        try { map?.destroy?.() } catch { /* stale constructor result */ }
+        return
       }
+
+      createdMap = map
+      const mapInstanceGeneration = ++mapInstanceGenerationCounterRef.current
+      mapInstanceGenerationsRef.current.set(map, mapInstanceGeneration)
+      activeMapInstanceGenerationRef.current = mapInstanceGeneration
+      mapRef.current = map
+      onMapRuntimeChangeRef.current?.({ map, TMap, mapInstanceId: mapInstanceGeneration })
+      layerManager.init(map)
+      poiLayerController.init(map)
+      glbSpatialController.init(map)
+      glbMemoryManager.init(map)
+      sceneWindowManager.init()
+      mapCreateCountRef.current += 1
+      setMapInstanceId(mapInstanceGeneration)
+      setIsMapCreated(true)
+      setMapStyleSupport(inspectMapStyleSupport(map, TMap))
+      setMapStatus('ready')
+      setPageMessage('正在等待腾讯底图首帧...')
+      recordStartupStage('waitingBaseMap', 'standalone-map-created')
+      perfRecorder.markStageEnd('mapInit')
+      perfRecorder.recordMapVisualEvent({ type: 'mapCreated' })
+
+      ;['idle', 'tilesloaded', 'rendercomplete'].forEach((eventName) => {
+        const handler = () => scheduleVisualReady(eventName)
+        map.on?.(eventName, handler)
+        mapEventCleanups.push(() => map.off?.(eventName, handler))
+      })
+      readyFallbackTimer = window.setTimeout(
+        () => scheduleVisualReady('standalone-ready-fallback'),
+        MAP_3D_GUIDE_FALLBACK_BASEMAP_READY_MS
+      )
+
+      const interactionEndEvents = ['zoomend', 'dragend', 'moveend', 'idle']
+      interactionEndEvents.forEach((eventName) => {
+        const handler = () => {
+          if (!isCurrentGeneration() || !isMapInstanceCurrent(map)) return
+          updateCurrentMapZoomSnapshot()
+          scheduleMapInteractionLiteExit(
+            eventName === 'zoomend' ? 'zoom' : eventName === 'dragend' ? 'drag' : 'move',
+            eventName
+          )
+        }
+        map.on?.(eventName, handler)
+        interactionCleanups.push(() => map.off?.(eventName, handler))
+      })
     }
 
-    void initMap()
+    void initStandaloneMap().catch((error) => {
+      if (!isCurrentGeneration()) return
+      const message = error instanceof Error ? error.message : '腾讯地图加载失败'
+      perfRecorder.markStageEnd('mapInit')
+      setLastMapError(message)
+      setMapStatus('error')
+      setMapReadyTimedOut(true)
+      setIsMapVisualReady(false)
+      setLoadingCurtainVisible(true)
+      setPresentationSwitchError(message)
+      setPresentationTransition('failed')
+      updateCameraTransitionPhase('failed')
+      setPageMessage(message)
+      recordStartupStage('failed', 'standalone-map-load-error')
+      perfRecorder.recordMapVisualEvent({ type: 'mapFailed', reason: 'standalone-map-load-error' })
+    })
 
     return () => {
       cancelled = true
-      if (visualReadyTimer !== null) {
-        window.clearTimeout(visualReadyTimer)
-      }
-      if (visualReadyFallbackTimer !== null) {
-        window.clearTimeout(visualReadyFallbackTimer)
-      }
-      if (visualTimeoutTimer !== null) {
-        window.clearTimeout(visualTimeoutTimer)
-      }
-      if (curtainHideTimer !== null) {
-        window.clearTimeout(curtainHideTimer)
-      }
-      visualReadyRafIds.forEach((id) => window.cancelAnimationFrame(id))
-      mapVisualEventCleanups.forEach((cleanup) => cleanup())
-      mapInteractionEventCleanups.forEach((cleanup) => cleanup())
+      abortController.abort()
+      presentationGenerationRef.current += 1
+      mapAttemptGenerationRef.current += 1
       if (mapInteractionRef.current.exitTimerId !== undefined) {
         window.clearTimeout(mapInteractionRef.current.exitTimerId)
         mapInteractionRef.current.exitTimerId = undefined
       }
-      routeLayerRef.current?.setMap?.(null)
-      tourRouteProgressLayerRef.current?.setMap?.(null)
-      poiMarkerLayerRef.current?.setMap?.(null)
-      userMarkerLayerRef.current?.setMap?.(null)
-      rerouteLayerRef.current?.setMap?.(null)
-      landmarkHighlightLayerRef.current?.setMap?.(null)
-      decorMarkerLayerRef.current?.setMap?.(null)
-      forestPatchLayerRef.current?.setMap?.(null)
-      gardenEditorPolygonLayerRef.current?.setMap?.(null)
-      gardenEditorVertexLayerRef.current?.setMap?.(null)
-      gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-      clearGltfModels(gltfModelRefs.current)
-      gltfModelRefs.current = new Map()
-      stopBuddhaRealmTour(tourPlaybackRef, 'unmount')
-      stopRoutePreview(tourPlaybackRef, 'unmount')
-      mapRef.current?.destroy?.()
-      mapRef.current = null
+      disposeMap()
     }
-  }, [perfRecorder, shouldRedirectLocalTMapHost])
+  }, [
+    bootstrapMapRuntime,
+    debugPerf,
+    glbMemoryManager,
+    glbSpatialController,
+    isMapInstanceCurrent,
+    isMapInstanceUsable,
+    layerManager,
+    mapRuntimeGeneration,
+    perfRecorder,
+    poiLayerController,
+    sceneWindowManager,
+    shouldRedirectLocalTMapHost,
+    updateCameraTransitionPhase,
+    updateCustomTileLayerRuntime
+  ])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || entryCameraPlayedRef.current || debugGarden) {
+    const targetMap = mapRef.current
+    const targetGeneration = targetMap ? mapInstanceGenerationsRef.current.get(targetMap) : undefined
+    const previousPresentation = initializedPresentationRef.current
+    if (
+      !targetMap ||
+      !targetGeneration ||
+      !isMapInstanceCurrent(targetMap) ||
+      mapStatus !== 'ready' ||
+      previousPresentation === null ||
+      previousPresentation === scenicMapPresentation
+    ) {
+      return
+    }
+
+    const transitionGeneration = ++presentationSwitchGenerationRef.current
+    const abortController = new AbortController()
+    let cancelled = false
+    const isCurrentTransition = () =>
+      !cancelled &&
+      transitionGeneration === presentationSwitchGenerationRef.current &&
+      isMapInstanceCurrent(targetMap) &&
+      mapInstanceGenerationsRef.current.get(targetMap) === targetGeneration
+
+    const apply = async () => {
+      setPresentationTransition('waiting-container')
+      setPresentationSwitchError(undefined)
+      const container = mapElementRef.current
+      if (!container || !(await waitForMapContainerLayout(container, isCurrentTransition, abortController.signal)) || !isCurrentTransition()) {
+        return
+      }
+
+      setPresentationTransition('initializing')
+      try {
+        const switchingFrom3DTo2D = previousPresentation === 'scenic3d' && scenicMapPresentation === 'ink2d'
+        suppress3DCameraPersistenceRef.current = true
+        if (switchingFrom3DTo2D) {
+          const real3DCamera = readActualTencentCameraState(targetMap)
+          if (real3DCamera.viewMode === '3D') {
+            const savedCamera = cameraStateFromActual(real3DCamera, camera3DStateRef.current, 'scenic3d')
+            camera3DStateRef.current = savedCamera
+            lastMeaningful3DCameraRef.current = savedCamera
+            cameraPersistenceDiagnosticsRef.current.lastPersistReason = 'before-flattening-3d-to-2d'
+          } else {
+            cameraPersistenceDiagnosticsRef.current.lastRejectedPersistReason =
+              `before-flattening: view-mode-${real3DCamera.viewMode ?? 'unknown'}`
+          }
+        }
+        const currentCamera = readMapCameraState(targetMap, scenicCenter)
+        if (previousPresentation === 'ink2d') {
+          camera2DStateRef.current = currentCamera
+        }
+        const targetCamera: CameraState = scenicMapPresentation === 'ink2d'
+          ? {
+              center: currentCamera.center,
+              zoom: currentCamera.zoom,
+              pitch: 0,
+              rotation: 0
+            }
+          : lastMeaningful3DCameraRef.current ?? camera3DStateRef.current
+        const presentationResult = await applyPresentationToExistingMap({
+          map: targetMap,
+          TMap: window.TMap,
+          presentation: scenicMapPresentation,
+          requestedCamera: targetCamera,
+          isCurrent: isCurrentTransition,
+          onPhase: updateCameraTransitionPhase
+        })
+        if (!presentationResult.ok) {
+          throw new Error(presentationResult.error ?? '腾讯地图视图模式验证失败')
+        }
+        if (scenicMapPresentation === 'ink2d') {
+          updateCameraTransitionPhase('refreshing-tile-layer')
+          await refreshHostedCustomTileLayer(targetMap, 'presentation-verified-2d', isCurrentTransition)
+        }
+        if (!isCurrentTransition()) {
+          return
+        }
+        const verifiedCamera = cameraStateFromActual(presentationResult.actualCamera, targetCamera, scenicMapPresentation)
+        if (scenicMapPresentation === 'ink2d') {
+          camera2DStateRef.current = verifiedCamera
+        } else {
+          camera3DStateRef.current = verifiedCamera
+          lastMeaningful3DCameraRef.current = verifiedCamera
+          cameraPersistenceDiagnosticsRef.current.lastPersistReason = 'verified-3d-restore'
+        }
+        initializedPresentationRef.current = scenicMapPresentation
+        appliedPresentationRef.current = scenicMapPresentation
+        setPresentationTransition('ready')
+        updateCameraTransitionPhase('ready')
+        suppress3DCameraPersistenceRef.current = false
+        perfRecorder.recordMapVisualEvent({
+          type: 'scenicMapPresentationChanged',
+          scenicMapPresentation,
+          reason: 'single-map-runtime-switch'
+        })
+      } catch (error) {
+        if (!isCurrentTransition()) {
+          return
+        }
+        const message = error instanceof Error ? error.message : '地图视角切换失败'
+        setLastMapError(message)
+        setPresentationSwitchError(message)
+        setPresentationTransition('failed')
+        updateCameraTransitionPhase('failed')
+        const restoredPresentation = previousPresentation
+        const restoreCamera = previousPresentation === 'ink2d' ? camera2DStateRef.current : camera3DStateRef.current
+        const restoreResult = await applyPresentationToExistingMap({
+          map: targetMap,
+          TMap: window.TMap,
+          presentation: restoredPresentation,
+          requestedCamera: restoreCamera,
+          isCurrent: isCurrentTransition,
+          onPhase: () => undefined
+        })
+        if (restoreResult.ok && isCurrentTransition()) {
+          initializedPresentationRef.current = restoredPresentation
+          appliedPresentationRef.current = restoredPresentation
+          const verifiedRestoreCamera = cameraStateFromActual(restoreResult.actualCamera, restoreCamera, restoredPresentation)
+          if (restoredPresentation === 'ink2d') {
+            camera2DStateRef.current = verifiedRestoreCamera
+          } else {
+            camera3DStateRef.current = verifiedRestoreCamera
+            lastMeaningful3DCameraRef.current = verifiedRestoreCamera
+            cameraPersistenceDiagnosticsRef.current.lastPersistReason = 'verified-3d-failure-restore'
+          }
+          setPresentationFallback(restoredPresentation)
+          replaceMapPresentationInUrl(navigate, restoredPresentation)
+        }
+        suppress3DCameraPersistenceRef.current = false
+      }
+    }
+
+    void apply()
+    return () => {
+      cancelled = true
+      abortController.abort()
+      presentationSwitchGenerationRef.current += 1
+      suppress3DCameraPersistenceRef.current = false
+    }
+  }, [
+    isMapInstanceCurrent,
+    mapStatus,
+    navigate,
+    perfRecorder,
+    refreshHostedCustomTileLayer,
+    scenicMapPresentation,
+    updateCameraTransitionPhase
+  ])
+
+  useEffect(() => {
+    if (mapStatus !== 'ready' || entryCameraPlayedRef.current || isInkCleanMode || cameraScope === 'navigation') {
       return
     }
 
     entryCameraPlayedRef.current = true
+    if (isRouteGuideView) {
+      // Route state owns its camera through mapFocusMode. Do not overwrite a
+      // route-fit camera with the generic estate entry preset.
+      return
+    }
+
+    const entryTarget = scenicCenter
+
+    if (isInk2DPresentation) {
+      setActiveCameraMode('routeOverview')
+      moveMapCamera(entryTarget, INK_2D_CAMERA_PRESET)
+      return
+    }
+
     setActiveCameraMode('overviewEstate')
-    // 移动端入场停在近景(同 building3d 瓦片更少),不拉到 16.85 全景广角;
-    // 用户随时可点「总览」拉到真广角。桌面维持原总览入场。
-    const entryPreset = isMobileViewport
-      ? { ...MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate, zoom: MAP_3D_GUIDE_MOBILE_INITIAL_ZOOM }
-      : MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
-    moveMapCamera(routeCenter, entryPreset)
-  }, [debugGarden, mapStatus])
+    moveMapCamera(entryTarget, MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate)
+  }, [cameraScope, isInk2DPresentation, isInkCleanMode, isRouteGuideView, mapStatus])
+
+  useEffect(() => {
+    if (!isInkCleanMode || mapStatus !== 'ready' || !mapRef.current || !window.TMap) {
+      return
+    }
+
+    stopActiveTour('interrupted')
+    const inkExportCamera = getConfiguredInkBoundsCamera(mapElementRef.current, { squareViewport: inkUseSquareExportCamera })
+    applyInkCleanMapCamera(
+      mapRef.current,
+      window.TMap,
+      inkExportCamera?.center ?? routeCenter,
+      inkExportCamera?.zoom ?? SCENIC_CAMERA_BOUNDS.defaultZoom
+    )
+    setActiveCameraMode('overviewEstate')
+  }, [inkUseSquareExportCamera, isInkCleanMode, mapStatus])
 
   useEffect(() => {
     if (!mapVisualReadyForOverlays || mapOverlaysStartedRef.current) {
@@ -1452,22 +3272,1237 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [mapVisualReadyForOverlays, perfRecorder])
 
   useEffect(() => {
-    if (mapStatus !== 'ready' || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (mapStatus !== 'ready' || !targetMap || !isMapInstanceCurrent(targetMap)) {
+      return
+    }
+
+    const showNativePoiLabels = poiLayerMode === 'all'
+    const poiModeResult = applyTencentBaseMapPoiMode(targetMap, {
+      clean: isInkCleanMode,
+      showNativePoiLabels
+    })
+    setTencentPoiMode({
+      requested: showNativePoiLabels,
+      applied: showNativePoiLabels && poiModeResult.applied,
+      lastError: poiModeResult.lastError
+    })
+
+    if (isRouteGuideView || poiLayerMode !== 'all') {
+      return
+    }
+
+    const handleNativePoiClick = (event: any) => {
+      if (!isMapInstanceCurrent(targetMap)) {
+        return
+      }
+      const nativePoi = event?.poi ?? event?.poiInfo ?? event?.detail?.poi ?? event?.detail?.poiInfo
+      if (!nativePoi) {
+        return
+      }
+      // All-POI mode deliberately belongs to the Tencent base map. Unknown
+      // and known native labels share the same lightweight, non-navigating
+      // response until their public detail content is complete.
+      setPageMessage('该景点详情正在完善')
+    }
+
+    targetMap.on?.('click', handleNativePoiClick)
+    return () => {
+      if (isMapInstanceUsable(targetMap)) {
+        targetMap.off?.('click', handleNativePoiClick)
+      }
+    }
+  }, [isInkCleanMode, isMapInstanceCurrent, isMapInstanceUsable, isRouteGuideView, mapStatus, poiLayerMode])
+
+  useEffect(() => {
+    const targetMap = mapRef.current
+    if (mapStatus !== 'ready' || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
     const handleManualMapClick = () => {
+      if (debugInkBounds) {
+        return
+      }
+
       if (tourPlaybackRef.current) {
         stopActiveTour('interrupted')
       }
     }
 
-    mapRef.current.on?.('click', handleManualMapClick)
+    targetMap.on?.('click', handleManualMapClick)
 
     return () => {
-      mapRef.current?.off?.('click', handleManualMapClick)
+      if (isMapInstanceUsable(targetMap)) {
+        targetMap.off?.('click', handleManualMapClick)
+      }
     }
-  }, [mapStatus])
+  }, [debugInkBounds, isMapInstanceCurrent, isMapInstanceUsable, mapStatus])
+
+  useEffect(() => {
+    formalInkBoundsMarkerLayerRef.current?.setMap?.(null)
+    formalInkBoundsBoundaryLayerRef.current?.setMap?.(null)
+    formalInkBoundsFillLayerRef.current?.setMap?.(null)
+    formalInkBoundsMarkerLayerRef.current = null
+    formalInkBoundsBoundaryLayerRef.current = null
+    formalInkBoundsFillLayerRef.current = null
+
+    if (!showFormalInkBounds || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    const formalBounds = getConfiguredInkBoundsDraft()
+    const cornerPath = inkMapBoundCornerOrder.map((corner) => formalBounds[corner]).filter((point): point is LatLngPoint => Boolean(point))
+    const boundaryPath = getInkBoundsBoundaryPath(formalBounds)
+
+    if (cornerPath.length >= 4 && window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
+      formalInkBoundsFillLayerRef.current = new window.TMap.MultiPolygon({
+        map: mapRef.current,
+        styles: {
+          formalInkBoundsFill: new window.TMap.PolygonStyle({
+            color: 'rgba(201, 168, 106, 0.10)',
+            borderColor: 'rgba(31, 59, 49, 0.42)',
+            borderWidth: 2,
+            showBorder: true,
+            borderDashArray: [10, 8]
+          })
+        },
+        geometries: [
+          {
+            id: 'formal-ink-map-bounds-fill',
+            styleId: 'formalInkBoundsFill',
+            paths: cornerPath.map(toTMapLatLng),
+            rank: 82,
+            properties: {
+              title: '水墨底图正式覆盖范围 / 4096×4096'
+            }
+          }
+        ]
+      })
+    }
+
+    if (boundaryPath.length >= 2 && window.TMap.MultiPolyline && window.TMap.PolylineStyle) {
+      formalInkBoundsBoundaryLayerRef.current = new window.TMap.MultiPolyline({
+        map: mapRef.current,
+        styles: {
+          formalInkBounds: new window.TMap.PolylineStyle({
+            color: 'rgba(201, 168, 106, 0.92)',
+            width: 4,
+            borderWidth: 2,
+            borderColor: 'rgba(31, 59, 49, 0.55)',
+            lineCap: 'round',
+            borderDashArray: [10, 8]
+          })
+        },
+        geometries: [
+          {
+            id: 'formal-ink-map-bounds-outline',
+            styleId: 'formalInkBounds',
+            paths: boundaryPath.map(toTMapLatLng),
+            rank: 86,
+            properties: {
+              title: '水墨底图正式覆盖范围 / 4096×4096'
+            }
+          }
+        ]
+      })
+    }
+
+    formalInkBoundsMarkerLayerRef.current = new window.TMap.MultiMarker({
+      map: mapRef.current,
+      styles: Object.fromEntries(
+        inkMapBoundCornerOrder.map((corner) => [
+          corner,
+          new window.TMap.MarkerStyle({
+            width: 42,
+            height: 34,
+            anchor: { x: 21, y: 17 },
+            src: createSvgDataUrl(formalInkBoundsCornerSvg(inkMapBoundCornerShortLabels[corner]))
+          })
+        ])
+      ),
+      geometries: inkMapBoundCornerOrder.map((corner) => ({
+        id: `formal-ink-bound-${corner}`,
+        styleId: corner,
+        position: toTMapLatLng(formalBounds[corner] as LatLngPoint),
+        rank: 92,
+        properties: {
+          title: inkMapBoundCornerLabels[corner]
+        }
+      }))
+    })
+
+    return () => {
+      formalInkBoundsMarkerLayerRef.current?.setMap?.(null)
+      formalInkBoundsBoundaryLayerRef.current?.setMap?.(null)
+      formalInkBoundsFillLayerRef.current?.setMap?.(null)
+      formalInkBoundsMarkerLayerRef.current = null
+      formalInkBoundsBoundaryLayerRef.current = null
+      formalInkBoundsFillLayerRef.current = null
+    }
+  }, [mapVisualReadyForOverlays, showFormalInkBounds])
+
+  useEffect(() => {
+    const recordInkOverlayEvent = (event: {
+      inkOverlayEnabled: boolean
+      inkOverlayLayerReady: boolean
+      inkOverlayLayerMode: 'native' | 'dom' | 'none'
+      inkOverlayLayerError?: string
+      inkOverlayCameraMode: InkOverlayCameraMode
+      inkOverlayEffectiveOpacity: number
+      inkOverlaySuppressedReason?: string
+    }) => {
+      const payload = {
+        type: 'inkOverlayStateChanged' as const,
+        inkOverlaySource,
+        inkOverlayImageUrl,
+        inkOverlayOpacity,
+        inkOverlayOffsetX: inkOverlayAdjustments.offsetX,
+        inkOverlayOffsetY: inkOverlayAdjustments.offsetY,
+        inkOverlayScaleX: inkOverlayAdjustments.scaleX,
+        inkOverlayScaleY: inkOverlayAdjustments.scaleY,
+        inkOverlayCompare,
+        inkOverlayBounds: formatConfiguredInkBoundsForPerf(),
+        ...event
+      }
+      const signature = JSON.stringify(payload)
+
+      if (signature === inkOverlayPerfSignatureRef.current) {
+        return
+      }
+
+      inkOverlayPerfSignatureRef.current = signature
+      perfRecorder.recordMapVisualEvent(payload)
+    }
+
+    if (!inkOverlayEnabled) {
+      inkOverlayImageReadyRef.current = false
+      inkOverlayLayerErrorRef.current = ''
+      const offCameraState: InkOverlayCameraState = {
+        mode: 'off',
+        effectiveOpacity: 0,
+        pitch: 0,
+        rotation: 0
+      }
+      updateInkOverlayCameraSnapshot(offCameraState, inkOverlayCameraStateRef, setInkOverlayCameraSnapshot)
+      setInkOverlayLayerReady(false)
+      setInkOverlayLayerError('')
+      recordInkOverlayEvent({
+        inkOverlayEnabled: false,
+        inkOverlayLayerReady: false,
+        inkOverlayLayerMode: 'none',
+        inkOverlayCameraMode: offCameraState.mode,
+        inkOverlayEffectiveOpacity: offCameraState.effectiveOpacity
+      })
+      return
+    }
+
+    if (!mapVisualReadyForOverlays || !mapRef.current || !window.TMap || !mapElementRef.current) {
+      return
+    }
+
+    let rafId = 0
+    const scheduleUpdate = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      rafId = window.requestAnimationFrame(() => {
+        const cameraState = getInkOverlayCameraState(mapRef.current, inkOverlayOpacity)
+        updateInkOverlayCameraSnapshot(cameraState, inkOverlayCameraStateRef, setInkOverlayCameraSnapshot)
+
+        if (inkOverlayLayerRef.current) {
+          inkOverlayLayerRef.current.dataset.cameraMode = cameraState.mode
+          inkOverlayLayerRef.current.style.opacity = String(cameraState.effectiveOpacity)
+        }
+
+        if (cameraState.mode === 'disabled3d') {
+          if (inkOverlayLayerRef.current) {
+            inkOverlayLayerRef.current.style.display = 'none'
+          }
+          recordInkOverlayEvent({
+            inkOverlayEnabled: true,
+            inkOverlayLayerReady: inkOverlayImageReadyRef.current,
+            inkOverlayLayerMode: 'dom',
+            inkOverlayLayerError: inkOverlayLayerErrorRef.current || undefined,
+            inkOverlayCameraMode: cameraState.mode,
+            inkOverlayEffectiveOpacity: cameraState.effectiveOpacity,
+            inkOverlaySuppressedReason: cameraState.reason
+          })
+          return
+        }
+
+        const result = positionInkOverlayDomLayer({
+          layer: inkOverlayLayerRef.current,
+          map: mapRef.current,
+          TMap: window.TMap,
+          mapElement: mapElementRef.current,
+          adjustments: inkOverlayAdjustments
+        })
+
+        if (!result.ok) {
+          setInkOverlayLayerError(result.error)
+          inkOverlayLayerErrorRef.current = result.error
+          recordInkOverlayEvent({
+            inkOverlayEnabled: true,
+            inkOverlayLayerReady: false,
+            inkOverlayLayerError: result.error,
+            inkOverlayLayerMode: result.mode,
+            inkOverlayCameraMode: cameraState.mode,
+            inkOverlayEffectiveOpacity: cameraState.effectiveOpacity,
+            inkOverlaySuppressedReason: cameraState.reason
+          })
+          return
+        }
+
+        if (inkOverlayLayerRef.current) {
+          inkOverlayLayerRef.current.style.opacity = String(cameraState.effectiveOpacity)
+        }
+
+        recordInkOverlayEvent({
+          inkOverlayEnabled: true,
+          inkOverlayLayerReady: inkOverlayImageReadyRef.current,
+          inkOverlayLayerError: inkOverlayLayerErrorRef.current || undefined,
+          inkOverlayLayerMode: result.mode,
+          inkOverlayCameraMode: cameraState.mode,
+          inkOverlayEffectiveOpacity: cameraState.effectiveOpacity,
+          inkOverlaySuppressedReason: cameraState.reason
+        })
+      })
+    }
+
+    scheduleUpdate()
+
+    const mapEvents = ['idle', 'move', 'moving', 'zoom', 'zoom_changed', 'rotate', 'pitch', 'bounds_changed', 'resize']
+    mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, scheduleUpdate))
+    window.addEventListener('resize', scheduleUpdate)
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      mapEvents.forEach((eventName) => mapRef.current?.off?.(eventName, scheduleUpdate))
+      window.removeEventListener('resize', scheduleUpdate)
+    }
+  }, [inkOverlayAdjustments, inkOverlayCompare, inkOverlayEnabled, inkOverlayImageUrl, inkOverlayOpacity, inkOverlaySource, mapVisualReadyForOverlays, perfRecorder])
+
+  useEffect(() => {
+    // 官方托管图层只跟地图 ready / 启用状态绑定，不跟本地瓦片 opacity/source 绑定，避免普通重渲染重复 createCustomLayer。
+    const targetMap = mapRef.current
+    const targetMapGeneration = targetMap ? mapInstanceGenerationsRef.current.get(targetMap) : undefined
+    let ownedLayer: any = null
+    const isTargetMapCurrent = () =>
+      Boolean(
+        targetMap &&
+        targetMapGeneration &&
+        isMapInstanceCurrent(targetMap) &&
+        mapInstanceGenerationsRef.current.get(targetMap) === targetMapGeneration
+      )
+    const recordInkTileEvent = (event: {
+      inkTilesEnabled: boolean
+      inkTileLayerReady: boolean
+      inkTileLayerError?: string
+      mapBoundaryEnabled?: boolean
+    }) => {
+      const zoomFade = getInkTileZoomFade(currentZoomRef.current)
+      const useHostedTencentLayer = ENABLE_TENCENT_CUSTOM_LAYER
+      const currentEffectiveOpacity = useHostedTencentLayer
+        ? TENCENT_CUSTOM_LAYER_CONFIG.opacity
+        : getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current)
+      const currentOpacityBase = useHostedTencentLayer ? TENCENT_CUSTOM_LAYER_CONFIG.opacity : inkTileOpacity
+      const currentZoomFade = useHostedTencentLayer ? 1 : zoomFade
+      const usingFallbackZoom = Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM
+      const payload = {
+        type: 'inkTileLayerStateChanged' as const,
+        inkTileDefaultEnabled: ENABLE_INK_TILES_BY_DEFAULT,
+        noInkTilesOverride,
+        inkTileOpacity: currentEffectiveOpacity,
+        inkTileOpacityBase: currentOpacityBase,
+        inkTileOpacityEffective: currentEffectiveOpacity,
+        inkTileZoomFade: currentZoomFade,
+        inkTileUrlTemplate: useHostedTencentLayer ? `tencent-custom-layer:${TENCENT_CUSTOM_LAYER_ID}` : inkTileSourceConfig.tileUrlTemplate,
+        inkTileEmptyUrl: useHostedTencentLayer ? undefined : inkTileSourceConfig.blankUrl,
+        inkTileZoomLevels: useHostedTencentLayer
+          ? [TENCENT_CUSTOM_LAYER_CONFIG.minZoom, TENCENT_CUSTOM_LAYER_CONFIG.maxZoom]
+          : [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+        inkTileMaxNativeZoom: useHostedTencentLayer ? TENCENT_CUSTOM_LAYER_CONFIG.maxZoom : LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileUsingFallbackZoom: useHostedTencentLayer ? false : usingFallbackZoom,
+        inkTileFallbackFromZ: !useHostedTencentLayer && usingFallbackZoom ? Math.floor(currentZoomRef.current) : undefined,
+        inkTileFallbackToZ: useHostedTencentLayer ? undefined : LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileBounds: formatConfiguredInkBoundsForPerf(),
+        inkTileMode: event.inkTilesEnabled ? (useHostedTencentLayer ? ('tencent-custom-layer' as const) : ('web-mercator-local' as const)) : ('none' as const),
+        inkTileSource,
+        inkTileXRangeByZoom: useHostedTencentLayer ? undefined : formatLingshanInkTileXRangeByZoom(),
+        inkTileYRangeByZoom: useHostedTencentLayer ? undefined : formatLingshanInkTileYRangeByZoom(),
+        sourceImageWidth: useHostedTencentLayer ? undefined : inkTileSourceConfig.sourceWidth,
+        sourceImageHeight: useHostedTencentLayer ? undefined : inkTileSourceConfig.sourceHeight,
+        sourceImageStandard: useHostedTencentLayer ? undefined : inkTileSourceConfig.sourceImageStandard,
+        sourceImageWarning: useHostedTencentLayer ? undefined : inkTileSourceConfig.sourceImageWarning,
+        ...event
+      }
+      const signature = JSON.stringify(payload)
+
+      if (signature === inkTilePerfSignatureRef.current) {
+        return
+      }
+
+      inkTilePerfSignatureRef.current = signature
+      perfRecorder.recordMapVisualEvent(payload)
+    }
+
+    const cleanupLayer = () => {
+      if (inkTileFallbackTimerRef.current !== null) {
+        window.clearTimeout(inkTileFallbackTimerRef.current)
+        inkTileFallbackTimerRef.current = null
+      }
+      const layer = ownedLayer ?? (isTargetMapCurrent() ? inkTileLayerRef.current : null)
+
+      if (!layer) {
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'layer-cleanup' })
+        return
+      }
+
+      if (!targetMap || !isMapInstanceUsable(targetMap)) {
+        if (inkTileLayerRef.current === layer) {
+          inkTileLayerRef.current = null
+          tencentCustomLayerInitKeyRef.current = ''
+        }
+        updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'stale-layer-cleanup' })
+        ownedLayer = null
+        return
+      }
+
+      const managedName = layerManager.getLayer('custom_tile') === layer
+        ? 'custom_tile'
+        : layerManager.getLayer('custom_tile_fallback') === layer
+          ? 'custom_tile_fallback'
+          : undefined
+
+      if (managedName) {
+        layerManager.removeLayer(managedName, layer)
+      } else {
+        try {
+          layer.setMap?.(null)
+        } catch {
+          // Some Tencent layer versions only expose map.removeLayer/destroy.
+        }
+
+        try {
+          targetMap.removeLayer?.(layer)
+        } catch {
+          // Optional cleanup path.
+        }
+
+        try {
+          layer.destroy?.()
+        } catch {
+          // Optional cleanup path.
+        }
+      }
+
+      if (inkTileLayerRef.current === layer) {
+        inkTileLayerRef.current = null
+        tencentCustomLayerInitKeyRef.current = ''
+      }
+      updateCustomTileLayerRuntime({ attached: false, visible: false, lastRefreshReason: 'layer-cleanup' })
+      ownedLayer = null
+    }
+
+    cleanupLayer()
+    inkTileNativeRequestCountRef.current = 0
+
+    if (!inkTilesEnabled) {
+      setInkTileDomFallbackActive(false)
+      recordInkTileEvent({
+        inkTilesEnabled: false,
+        inkTileLayerReady: false,
+        mapBoundaryEnabled: false
+      })
+      return
+    }
+
+    if (!mapVisualReadyForOverlays || !targetMap || !isTargetMapCurrent() || !window.TMap) {
+      setInkTileDomFallbackActive(false)
+      recordInkTileEvent({
+        inkTilesEnabled: true,
+        inkTileLayerReady: false,
+        mapBoundaryEnabled: false
+      })
+      return
+    }
+
+    const ImageTileLayer = window.TMap?.ImageTileLayer
+    const createCustomLayer = ImageTileLayer?.createCustomLayer
+
+    if (ENABLE_TENCENT_CUSTOM_LAYER) {
+      let disposed = false
+      const removeDetachedLayer = (layer: any) => {
+        if (!layer) {
+          return
+        }
+
+        // Once Tencent Map has been destroyed its layer APIs can dereference
+        // an internal null layer registry (`getLayer`). The map destroy already
+        // owns that cleanup, so stale promise results are simply abandoned.
+        if (!targetMap || !isMapInstanceUsable(targetMap)) {
+          return
+        }
+
+        try {
+          layer.setMap?.(null)
+        } catch {
+          // Optional cleanup path.
+        }
+
+        try {
+          targetMap?.removeLayer?.(layer)
+        } catch {
+          // Optional cleanup path.
+        }
+
+        try {
+          layer.destroy?.()
+        } catch {
+          // Optional cleanup path.
+        }
+      }
+      const cleanupHostedLayer = () => {
+        disposed = true
+        cleanupLayer()
+      }
+
+      const customLayerInitKey = `${TENCENT_CUSTOM_LAYER_ID}:${TENCENT_CUSTOM_LAYER_CONFIG.minZoom}:${TENCENT_CUSTOM_LAYER_CONFIG.maxZoom}`
+
+      if (typeof createCustomLayer !== 'function') {
+        const message = 'TMap.ImageTileLayer.createCustomLayer 不可用，无法加载腾讯托管自定义图层'
+        console.error('[Map3D] 腾讯官方自定义图层加载失败:', TENCENT_CUSTOM_LAYER_ID, {
+          reason: 'createCustomLayer 不可用',
+          layerName: TENCENT_CUSTOM_LAYER_NAME,
+          ImageTileLayer
+        })
+        setInkTileDomFallbackActive(false)
+        recordInkTileEvent({
+          inkTilesEnabled: true,
+          inkTileLayerReady: false,
+          inkTileLayerError: message,
+          mapBoundaryEnabled: true
+        })
+        return cleanupHostedLayer
+      }
+
+      try {
+        setInkTileDomFallbackActive(false)
+        console.log('[Map3D] 开始加载腾讯官方自定义图层:', TENCENT_CUSTOM_LAYER_ID, {
+          layerName: TENCENT_CUSTOM_LAYER_NAME,
+          config: TENCENT_CUSTOM_LAYER_CONFIG
+        })
+
+        const attachHostedLayer = (layer: any) => {
+          if (disposed || !isTargetMapCurrent()) {
+            removeDetachedLayer(layer)
+            return
+          }
+
+          if (!layer) {
+            console.error('[Map3D] 腾讯官方自定义图层加载失败:', TENCENT_CUSTOM_LAYER_ID, {
+              reason: 'createCustomLayer 返回空对象',
+              layerName: TENCENT_CUSTOM_LAYER_NAME
+            })
+            recordInkTileEvent({
+              inkTilesEnabled: true,
+              inkTileLayerReady: false,
+              inkTileLayerError: '腾讯托管自定义图层创建返回空对象',
+              mapBoundaryEnabled: true
+            })
+            return
+          }
+
+          ownedLayer = layer
+          inkTileLayerRef.current = layer
+          tencentCustomLayerInitKeyRef.current = customLayerInitKey
+          layerManager.registerLayer('custom_tile', layer, targetMap)
+          updateCustomTileLayerRuntime({ attached: true, visible: true, lastRefreshReason: 'custom-layer-attached' })
+
+          try {
+            layer.setOpacity?.(TENCENT_CUSTOM_LAYER_CONFIG.opacity)
+          } catch {
+            // Constructor opacity covers the common path.
+          }
+
+          console.log('[Map3D] 腾讯官方自定义图层加载成功:', TENCENT_CUSTOM_LAYER_ID, {
+            layerName: TENCENT_CUSTOM_LAYER_NAME,
+            initKey: tencentCustomLayerInitKeyRef.current,
+            layer
+          })
+          recordInkTileEvent({
+            inkTilesEnabled: true,
+            inkTileLayerReady: true,
+            mapBoundaryEnabled: true
+          })
+        }
+
+        const maybeLayer = createCustomLayer.call(ImageTileLayer, {
+          layerId: TENCENT_CUSTOM_LAYER_ID,
+          map: targetMap,
+          ...TENCENT_CUSTOM_LAYER_CONFIG
+        })
+
+        if (maybeLayer && typeof maybeLayer.then === 'function') {
+          maybeLayer.then(attachHostedLayer).catch((error: unknown) => {
+            if (disposed || !isTargetMapCurrent()) {
+              return
+            }
+
+            const message = error instanceof Error ? error.message : '腾讯托管自定义图层创建失败'
+            console.error('[Map3D] 腾讯官方自定义图层加载失败:', TENCENT_CUSTOM_LAYER_ID, {
+              layerName: TENCENT_CUSTOM_LAYER_NAME,
+              error
+            })
+            recordInkTileEvent({
+              inkTilesEnabled: true,
+              inkTileLayerReady: false,
+              inkTileLayerError: message,
+              mapBoundaryEnabled: true
+            })
+          })
+        } else {
+          attachHostedLayer(maybeLayer)
+        }
+      } catch (error) {
+        cleanupLayer()
+        const message = error instanceof Error ? error.message : '腾讯托管自定义图层创建失败'
+        console.error('[Map3D] 腾讯官方自定义图层加载失败:', TENCENT_CUSTOM_LAYER_ID, {
+          reason: 'createCustomLayer 抛出异常',
+          layerName: TENCENT_CUSTOM_LAYER_NAME,
+          error
+        })
+        recordInkTileEvent({
+          inkTilesEnabled: true,
+          inkTileLayerReady: false,
+          inkTileLayerError: message,
+          mapBoundaryEnabled: true
+        })
+      }
+
+      return cleanupHostedLayer
+    }
+
+    if (!ENABLE_LOCAL_INK_TILE_FALLBACK) {
+      setInkTileDomFallbackActive(false)
+      recordInkTileEvent({
+        inkTilesEnabled: true,
+        inkTileLayerReady: false,
+        inkTileLayerError: '本地自建水墨瓦片 fallback 已关闭',
+        mapBoundaryEnabled: false
+      })
+      return cleanupLayer
+    }
+
+    // 仅调试备用，默认不用。只有手动关闭 ENABLE_TENCENT_CUSTOM_LAYER 并开启 ENABLE_LOCAL_INK_TILE_FALLBACK 时才会走本地 getTileUrl。
+    if (typeof ImageTileLayer !== 'function') {
+      const allowSingleImageFallback = shouldAllowInkTileSingleImageFallback(targetMap)
+      setInkTileDomFallbackActive(allowSingleImageFallback)
+      recordInkTileEvent({
+        inkTilesEnabled: true,
+        inkTileLayerReady: false,
+        inkTileLayerError: allowSingleImageFallback
+          ? 'TMap.ImageTileLayer 不可用，已启用俯视整图 fallback'
+          : 'TMap.ImageTileLayer 不可用；当前为 3D 倾斜视角，已禁用整图 fallback',
+        mapBoundaryEnabled: false
+      })
+      return
+    }
+
+    try {
+      setInkTileDomFallbackActive(false)
+      const layer = new ImageTileLayer({
+        map: targetMap,
+        minZoom: LINGSHAN_INK_TILE_ZOOM_LEVELS[0],
+        maxZoom: Math.max(LINGSHAN_INK_TILE_DISPLAY_MAX_ZOOM, SCENIC_CAMERA_BOUNDS.maxZoom),
+        maxDataZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        tileSize: 256,
+        opacity: getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current),
+        visible: true,
+        zIndex: MAP_LAYER_Z_INDEX.LOCAL_TILE_FALLBACK,
+        isMainThreadLoaded: true,
+        getTileUrl: (...args: unknown[]) => {
+          inkTileNativeRequestCountRef.current += 1
+          return getLingshanInkTileUrlFromArgs(args, inkTileSourceConfig)
+        },
+        tileUrl: (...args: unknown[]) => {
+          inkTileNativeRequestCountRef.current += 1
+          return getLingshanInkTileUrlFromArgs(args, inkTileSourceConfig)
+        }
+      })
+
+      ownedLayer = layer
+      inkTileLayerRef.current = layer
+      layerManager.registerLayer('custom_tile_fallback', layer, targetMap)
+
+      try {
+        layer.setOpacity?.(getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current))
+      } catch {
+        // Optional opacity API; constructor opacity covers the common path.
+      }
+
+      try {
+        if (typeof layer.setMap === 'function') {
+          layer.setMap(targetMap)
+        } else {
+          targetMap?.addLayer?.(layer)
+        }
+      } catch {
+        targetMap?.addLayer?.(layer)
+      }
+
+      recordInkTileEvent({
+        inkTilesEnabled: true,
+        inkTileLayerReady: true,
+        mapBoundaryEnabled: true
+      })
+
+      inkTileFallbackTimerRef.current = window.setTimeout(() => {
+        inkTileFallbackTimerRef.current = null
+        if (!inkTilesEnabled || inkTileNativeRequestCountRef.current > 0) {
+          return
+        }
+
+        if (!isTargetMapCurrent()) {
+          return
+        }
+        const allowSingleImageFallback = shouldAllowInkTileSingleImageFallback(targetMap)
+        setInkTileDomFallbackActive(allowSingleImageFallback)
+        recordInkTileEvent({
+          inkTilesEnabled: true,
+          inkTileLayerReady: true,
+          inkTileLayerError: allowSingleImageFallback
+            ? '未观察到 TMap tile 请求，已启用俯视整图 fallback'
+            : '未观察到 TMap tile 请求；当前为 3D 倾斜视角，已禁用整图 fallback',
+          mapBoundaryEnabled: true
+        })
+      }, LINGSHAN_INK_TILE_NATIVE_REQUEST_TIMEOUT_MS)
+    } catch (error) {
+      cleanupLayer()
+      setInkTileDomFallbackActive(shouldAllowInkTileSingleImageFallback(targetMap))
+      recordInkTileEvent({
+        inkTilesEnabled: true,
+        inkTileLayerReady: false,
+        inkTileLayerError: error instanceof Error ? error.message : '本地水墨瓦片图层创建失败',
+        mapBoundaryEnabled: false
+      })
+    }
+
+    return cleanupLayer
+  }, [inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, layerManager, mapVisualReadyForOverlays, noInkTilesOverride, perfRecorder, updateCustomTileLayerRuntime])
+
+  useEffect(() => {
+    if (!inkTilesEnabled) {
+      setInkTileOpacityEffective(getInkTileEffectiveOpacity(inkTileOpacity, currentZoomRef.current))
+      return
+    }
+
+    const targetMap = mapRef.current
+    if (!targetMap || !isMapInstanceCurrent(targetMap)) {
+      return
+    }
+
+    let rafId = 0
+    const updateOpacity = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+
+      rafId = window.requestAnimationFrame(() => {
+        if (!isMapInstanceCurrent(targetMap)) {
+          return
+        }
+        const zoom = readMapZoomForProjection(targetMap) ?? currentZoomRef.current
+        const nextOpacity = ENABLE_TENCENT_CUSTOM_LAYER ? TENCENT_CUSTOM_LAYER_CONFIG.opacity : getInkTileEffectiveOpacity(inkTileOpacity, zoom)
+        setInkTileOpacityEffective((current) => (Math.abs(current - nextOpacity) < 0.001 ? current : nextOpacity))
+
+        try {
+          inkTileLayerRef.current?.setOpacity?.(nextOpacity)
+        } catch {
+          // Constructor opacity and DOM fallback still cover rendering.
+        }
+
+        try {
+          inkTileGroundFallbackLayerRef.current?.setOpacity?.(nextOpacity)
+        } catch {
+          // Optional API.
+        }
+
+        if (inkTileDomFallbackLayerRef.current) {
+          inkTileDomFallbackLayerRef.current.style.opacity = String(nextOpacity)
+        }
+      })
+    }
+
+    updateOpacity()
+
+    const mapEvents = ['idle', 'zoom', 'zoom_changed', 'zoomend']
+    mapEvents.forEach((eventName) => targetMap.on?.(eventName, updateOpacity))
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      if (isMapInstanceUsable(targetMap)) {
+        mapEvents.forEach((eventName) => targetMap.off?.(eventName, updateOpacity))
+      }
+    }
+  }, [inkTileOpacity, inkTilesEnabled, isMapInstanceCurrent, isMapInstanceUsable, mapVisualReadyForOverlays])
+
+  useEffect(() => {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !targetMap || !isMapInstanceCurrent(targetMap)) {
+      return
+    }
+
+    let rafId = 0
+    const updateSnapshot = (reason = 'map-camera-event') => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+
+      rafId = window.requestAnimationFrame(() => {
+        if (!isMapInstanceCurrent(targetMap)) {
+          return
+        }
+        const actualCamera = readActualTencentCameraState(targetMap)
+        const center = actualCamera.center ?? routeCenter
+        const zoom = actualCamera.zoom ?? currentZoomRef.current
+        const cameraState: CameraState = {
+          center,
+          zoom,
+          pitch: actualCamera.rawPitch ?? readMapPitch(targetMap),
+          rotation: actualCamera.rawRotation ?? readMapRotation(targetMap)
+        }
+        // Keep independent camera snapshots while the long-lived TMap
+        // instance moves. Switching presentation restores orientation from
+        // these refs without rebuilding the map or its overlays.
+        if (initializedPresentationRef.current === 'ink2d') {
+          camera2DStateRef.current = { ...cameraState, pitch: 0, rotation: 0 }
+        } else if (
+          initializedPresentationRef.current === 'scenic3d' &&
+          appliedPresentationRef.current === 'scenic3d' &&
+          actualCamera.viewMode === '3D' &&
+          cameraTransitionPhaseRef.current === 'ready' &&
+          !suppress3DCameraPersistenceRef.current &&
+          !routeCameraProgrammaticMoveRef.current
+        ) {
+          camera3DStateRef.current = cameraState
+          lastMeaningful3DCameraRef.current = cameraState
+          cameraPersistenceDiagnosticsRef.current.lastPersistReason = reason
+        } else if (initializedPresentationRef.current === 'scenic3d') {
+          cameraPersistenceDiagnosticsRef.current.lastRejectedPersistReason = suppress3DCameraPersistenceRef.current
+            ? `${reason}:suppressed`
+            : routeCameraProgrammaticMoveRef.current
+              ? `${reason}:route-camera-intent`
+            : actualCamera.viewMode !== '3D'
+              ? `${reason}:view-mode-${actualCamera.viewMode ?? 'unknown'}`
+              : cameraTransitionPhaseRef.current !== 'ready'
+                ? `${reason}:phase-${cameraTransitionPhaseRef.current}`
+                : `${reason}:presentation-not-applied`
+        }
+
+        setMapBoundsSnapshot((current) =>
+          Math.abs(current.center.lat - center.lat) < 0.000001 &&
+          Math.abs(current.center.lng - center.lng) < 0.000001 &&
+          Math.abs(current.zoom - zoom) < 0.01
+            ? current
+            : {
+                center,
+                zoom
+              }
+        )
+      })
+    }
+
+    const mapEvents = ['idle', 'dragend', 'moveend', 'zoomend', 'bounds_changed', 'center_changed']
+    const eventHandlers = mapEvents.map((eventName) => {
+      const handler = () => updateSnapshot(eventName)
+      targetMap.on?.(eventName, handler)
+      return { eventName, handler }
+    })
+    updateSnapshot('initial-snapshot')
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      if (isMapInstanceUsable(targetMap)) {
+        eventHandlers.forEach(({ eventName, handler }) => targetMap.off?.(eventName, handler))
+      }
+    }
+  }, [isMapInstanceCurrent, isMapInstanceUsable, mapVisualReadyForOverlays])
+
+  useEffect(() => {
+    const targetMap = mapRef.current
+    if (!mapBoundsEnabled || !mapVisualReadyForOverlays || !targetMap || !isMapInstanceCurrent(targetMap)) {
+      return
+    }
+
+    let rafId = 0
+    const scheduleCorrection = (reason: string) => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+
+      rafId = window.requestAnimationFrame(() => {
+        if (isMapInstanceCurrent(targetMap)) {
+          clampScenicCameraBounds(reason)
+        }
+      })
+    }
+
+    const handlers = ['idle', 'dragend', 'moveend', 'zoomend'].map((eventName) => {
+      const handler = () => scheduleCorrection(eventName)
+      targetMap.on?.(eventName, handler)
+      return { eventName, handler }
+    })
+    scheduleCorrection('map-bounds-ready')
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      if (isMapInstanceUsable(targetMap)) {
+        handlers.forEach(({ eventName, handler }) => targetMap.off?.(eventName, handler))
+      }
+    }
+  }, [isMapInstanceCurrent, isMapInstanceUsable, mapBoundsEnabled, mapVisualReadyForOverlays])
+
+  useEffect(() => {
+    if (!inkTilesEnabled || !inkTileDomFallbackActive || !mapVisualReadyForOverlays || !mapRef.current) {
+      return
+    }
+
+    let rafId = 0
+    const disableTiltedFallback = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+
+      rafId = window.requestAnimationFrame(() => {
+        if (shouldAllowInkTileSingleImageFallback(mapRef.current)) {
+          return
+        }
+
+        setInkTileDomFallbackActive(false)
+        perfRecorder.recordMapVisualEvent({
+          type: 'inkTileLayerStateChanged',
+          inkTilesEnabled: true,
+          inkTileOpacity: inkTileOpacityEffective,
+          inkTileOpacityBase: inkTileOpacity,
+          inkTileOpacityEffective,
+          inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+          inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+          inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+          inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+          inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+          inkTileFallbackFromZ:
+            Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+          inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+          inkTileBounds: formatConfiguredInkBoundsForPerf(),
+          inkTileMode: 'web-mercator-local',
+          inkTileLayerReady: Boolean(inkTileLayerRef.current),
+          inkTileLayerError: '3D 倾斜视角已自动关闭整图 fallback',
+          mapBoundaryEnabled: true
+        })
+      })
+    }
+
+    const mapEvents = ['idle', 'moveend', 'zoomend', 'rotate', 'pitch', 'bounds_changed']
+    mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, disableTiltedFallback))
+    disableTiltedFallback()
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      mapEvents.forEach((eventName) => mapRef.current?.off?.(eventName, disableTiltedFallback))
+    }
+  }, [inkTileDomFallbackActive, inkTileOpacity, inkTileOpacityEffective, inkTileSourceConfig.tileUrlTemplate, inkTilesEnabled, mapVisualReadyForOverlays, perfRecorder])
+
+  useEffect(() => {
+    const cleanupGroundFallback = () => {
+      const layer = inkTileGroundFallbackLayerRef.current
+
+      if (!layer) {
+        return
+      }
+
+      try {
+        layer.setMap?.(null)
+      } catch {
+        // Optional cleanup path.
+      }
+
+      try {
+        layer.destroy?.()
+      } catch {
+        // Optional cleanup path.
+      }
+
+      inkTileGroundFallbackLayerRef.current = null
+    }
+
+    cleanupGroundFallback()
+    setInkTileGroundFallbackActive(false)
+
+    if (!inkTilesEnabled || !inkTileDomFallbackActive || !mapVisualReadyForOverlays || !mapRef.current || !window.TMap) {
+      return
+    }
+
+    const ImageGroundLayer = window.TMap.ImageGroundLayer
+    const LatLngBounds = window.TMap.LatLngBounds
+
+    if (typeof ImageGroundLayer !== 'function' || typeof LatLngBounds !== 'function') {
+      return cleanupGroundFallback
+    }
+
+    const extent = getConfiguredInkBoundsExtent()
+
+    try {
+      const bounds = new LatLngBounds(new window.TMap.LatLng(extent.south, extent.west), new window.TMap.LatLng(extent.north, extent.east))
+      const layer = new ImageGroundLayer({
+        map: mapRef.current,
+        bounds,
+        src: inkTileSourceConfig.imageUrl,
+        minZoom: SCENIC_CAMERA_BOUNDS.minZoom,
+        maxZoom: SCENIC_CAMERA_BOUNDS.maxZoom,
+        visible: true,
+        zIndex: MAP_LAYER_Z_INDEX.LOCAL_GROUND_FALLBACK,
+        opacity: inkTileOpacityEffective
+      })
+
+      inkTileGroundFallbackLayerRef.current = layer
+      setInkTileGroundFallbackActive(true)
+
+      try {
+        layer.setMap?.(mapRef.current)
+      } catch {
+        // Constructor map option covers the common path.
+      }
+
+      perfRecorder.recordMapVisualEvent({
+        type: 'inkTileLayerStateChanged',
+        inkTilesEnabled: true,
+        inkTileOpacity: inkTileOpacityEffective,
+        inkTileOpacityBase: inkTileOpacity,
+        inkTileOpacityEffective,
+        inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+        inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+        inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+        inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileFallbackFromZ:
+          Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+        inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileBounds: formatConfiguredInkBoundsForPerf(),
+        inkTileMode: 'web-mercator-local',
+        inkTileLayerReady: true,
+        inkTileLayerError: 'ImageGroundLayer fallback 显示中',
+        mapBoundaryEnabled: true
+      })
+    } catch (error) {
+      cleanupGroundFallback()
+      setInkTileGroundFallbackActive(false)
+      perfRecorder.recordMapVisualEvent({
+        type: 'inkTileLayerStateChanged',
+        inkTilesEnabled: true,
+        inkTileOpacity: inkTileOpacityEffective,
+        inkTileOpacityBase: inkTileOpacity,
+        inkTileOpacityEffective,
+        inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+        inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+        inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+        inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileFallbackFromZ:
+          Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+        inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+        inkTileBounds: formatConfiguredInkBoundsForPerf(),
+        inkTileMode: 'web-mercator-local',
+        inkTileLayerReady: false,
+        inkTileLayerError: error instanceof Error ? error.message : 'ImageGroundLayer fallback 创建失败',
+        mapBoundaryEnabled: true
+      })
+    }
+
+    return cleanupGroundFallback
+  }, [inkTileDomFallbackActive, inkTileOpacity, inkTileOpacityEffective, inkTileSourceConfig.imageUrl, inkTileSourceConfig.tileUrlTemplate, inkTilesEnabled, mapVisualReadyForOverlays, perfRecorder])
+
+  useEffect(() => {
+    if (
+      !inkTilesEnabled ||
+      !inkTileDomFallbackActive ||
+      inkTileGroundFallbackActive ||
+      !mapVisualReadyForOverlays ||
+      !mapRef.current ||
+      !window.TMap ||
+      !mapElementRef.current
+    ) {
+      return
+    }
+
+    let rafId = 0
+    const scheduleUpdate = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+
+      rafId = window.requestAnimationFrame(() => {
+        const result = positionInkOverlayDomLayer({
+          layer: inkTileDomFallbackLayerRef.current,
+          map: mapRef.current,
+          TMap: window.TMap,
+          mapElement: mapElementRef.current,
+          adjustments: LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS
+        })
+
+        if (inkTileDomFallbackLayerRef.current) {
+          inkTileDomFallbackLayerRef.current.style.opacity = String(inkTileOpacityEffective)
+        }
+
+        if (!result.ok) {
+          perfRecorder.recordMapVisualEvent({
+            type: 'inkTileLayerStateChanged',
+            inkTilesEnabled: true,
+            inkTileOpacity: inkTileOpacityEffective,
+            inkTileOpacityBase: inkTileOpacity,
+            inkTileOpacityEffective,
+            inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+            inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+            inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+            inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+            inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+            inkTileFallbackFromZ:
+              Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+            inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+            inkTileBounds: formatConfiguredInkBoundsForPerf(),
+            inkTileMode: 'web-mercator-local',
+            inkTileLayerReady: false,
+            inkTileLayerError: result.error,
+            mapBoundaryEnabled: true
+          })
+        }
+      })
+    }
+
+    scheduleUpdate()
+
+    const mapEvents = ['idle', 'move', 'moving', 'zoom', 'zoom_changed', 'rotate', 'pitch', 'bounds_changed', 'resize']
+    mapEvents.forEach((eventName) => mapRef.current?.on?.(eventName, scheduleUpdate))
+    window.addEventListener('resize', scheduleUpdate)
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      mapEvents.forEach((eventName) => mapRef.current?.off?.(eventName, scheduleUpdate))
+      window.removeEventListener('resize', scheduleUpdate)
+    }
+  }, [inkTileDomFallbackActive, inkTileGroundFallbackActive, inkTileOpacity, inkTileOpacityEffective, inkTileSourceConfig.tileUrlTemplate, inkTilesEnabled, mapVisualReadyForOverlays, perfRecorder])
+
+  useEffect(() => {
+    if (!debugInkBounds || !mapVisualReadyForOverlays || !mapRef.current) {
+      return
+    }
+
+    const handleInkBoundsClick = (event: any) => {
+      event?.preventDefault?.()
+      event?.stopPropagation?.()
+      const point = extractMapEventLatLng(event)
+
+      if (!point) {
+        return
+      }
+
+      setInkBoundsDraft((current) => {
+        const targetCorner = getNextInkMapBoundsCorner(current) ?? 'southWest'
+
+        return {
+          ...current,
+          [targetCorner]: point
+        }
+      })
+      setInkBoundsCopyStatus('已记录角点，继续点击下一角')
+    }
+
+    mapRef.current.on?.('click', handleInkBoundsClick)
+
+    return () => {
+      mapRef.current?.off?.('click', handleInkBoundsClick)
+    }
+  }, [debugInkBounds, mapVisualReadyForOverlays])
+
+  useEffect(() => {
+    inkBoundsMarkerLayerRef.current?.setMap?.(null)
+    inkBoundsBoundaryLayerRef.current?.setMap?.(null)
+    inkBoundsMarkerLayerRef.current = null
+    inkBoundsBoundaryLayerRef.current = null
+
+    if (!debugInkBounds || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    const capturedCorners = inkMapBoundCornerOrder.filter((corner) => Boolean(inkBoundsDraft[corner]))
+
+    if (capturedCorners.length) {
+      inkBoundsMarkerLayerRef.current = new window.TMap.MultiMarker({
+        map: mapRef.current,
+        styles: {
+          inkCorner: new window.TMap.MarkerStyle({
+            width: 34,
+            height: 34,
+            anchor: { x: 17, y: 17 },
+            src: createSvgDataUrl(inkBoundsCornerSvg())
+          })
+        },
+        geometries: capturedCorners.map((corner) => ({
+          id: `ink-bound-${corner}`,
+          styleId: 'inkCorner',
+          position: toTMapLatLng(inkBoundsDraft[corner] as LatLngPoint),
+          rank: 92,
+          properties: {
+            title: inkMapBoundCornerLabels[corner]
+          }
+        }))
+      })
+    }
+
+    const boundaryPath = getInkBoundsBoundaryPath(inkBoundsDraft)
+
+    if (boundaryPath.length >= 2 && window.TMap.MultiPolyline && window.TMap.PolylineStyle) {
+      inkBoundsBoundaryLayerRef.current = new window.TMap.MultiPolyline({
+        map: mapRef.current,
+        styles: {
+          inkBounds: new window.TMap.PolylineStyle({
+            color: 'rgba(47, 143, 122, 0.86)',
+            width: 4,
+            borderWidth: 2,
+            borderColor: 'rgba(245, 241, 232, 0.92)',
+            lineCap: 'round'
+          })
+        },
+        geometries: [
+          {
+            id: 'ink-map-bounds-outline',
+            styleId: 'inkBounds',
+            paths: boundaryPath.map(toTMapLatLng)
+          }
+        ]
+      })
+    }
+
+    return () => {
+      inkBoundsMarkerLayerRef.current?.setMap?.(null)
+      inkBoundsBoundaryLayerRef.current?.setMap?.(null)
+      inkBoundsMarkerLayerRef.current = null
+      inkBoundsBoundaryLayerRef.current = null
+    }
+  }, [debugInkBounds, inkBoundsDraft, mapVisualReadyForOverlays])
 
   useEffect(() => {
     if (!debugDecor) {
@@ -1476,148 +4511,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     window.localStorage.setItem(visualVariant.decorStorageKey, JSON.stringify(decorOverlays))
   }, [debugDecor, decorOverlays, visualVariant.decorStorageKey])
-
-  useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
-      return
-    }
-
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
-  }, [debugGarden, gardenAssets, gardenEditorUsesStoredDraft, visualVariant.id])
-
-  useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !gardenEditorUsesStoredDraft) {
-      return
-    }
-
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
-  }, [debugGarden, gardenEditorState, gardenEditorUsesStoredDraft, visualVariant.id])
-
-  useEffect(() => {
-    if (!debugGarden || typeof window === 'undefined') {
-      return
-    }
-
-    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
-  }, [debugGarden, treeCandidateLabState])
-
-  useEffect(() => {
-    if (!debugGarden || !mapVisualReadyForOverlays || treeCandidateLabState.landmarkReferenceLoaded) {
-      return
-    }
-
-    loadCoreLandmarkReferences()
-  }, [debugGarden, mapVisualReadyForOverlays, treeCandidateLabState.landmarkReferenceLoaded])
-
-  useEffect(() => {
-    if (!debugGarden) {
-      return
-    }
-
-    perfRecorder.recordMapVisualEvent({
-      type: 'treeCandidateLabEnabled',
-      defaultGardenHidden: treeCandidateLabState.defaultGardenHidden,
-      landmarkReferenceLoaded: treeCandidateLabState.landmarkReferenceLoaded,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveDefaultGardenOverlayCount,
-      liveTestTreeOverlayCount,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-  }, [
-    debugGarden,
-    gardenAssets.length,
-    liveDefaultGardenOverlayCount,
-    liveTestTreeOverlayCount,
-    perfRecorder,
-    treeCandidateLabState.clusterMode,
-    treeCandidateLabState.defaultGardenHidden,
-    treeCandidateLabState.landmarkReferenceLoaded,
-    treeCandidateLabState.selectedCandidateType,
-    treeCandidateLabState.testTrees.length
-  ])
-
-  useEffect(() => {
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !mapRef.current) {
-      return
-    }
-
-    const handleMapClick = (event: any) => {
-      const point = extractMapEventLatLng(event)
-
-      if (!point) {
-        return
-      }
-
-      if (gardenEditorMode === 'drawVegetation') {
-        setGardenDraftPolygon((current) => ({
-          mode: 'vegetation',
-          vertices: [...(current?.mode === 'vegetation' ? current.vertices : []), point]
-        }))
-        setGardenCopyStatus('已添加 vegetation zone 顶点')
-        return
-      }
-
-      if (gardenEditorMode === 'drawKeepout') {
-        setGardenDraftPolygon((current) => ({
-          mode: 'keepout',
-          vertices: [...(current?.mode === 'keepout' ? current.vertices : []), point]
-        }))
-        setGardenCopyStatus('已添加 keepout zone 顶点')
-        return
-      }
-
-      if (gardenEditorMode === 'addAsset') {
-        const asset = createSingleEditorAsset(point, editorAddAssetKind, gardenEditorState.previewAssets.length)
-        setGardenEditorState((current) => ({
-          ...current,
-          previewAssets: [...current.previewAssets, asset]
-        }))
-        setSelectedGardenId('')
-        setGardenCopyStatus(`已添加单个资产：${asset.name}`)
-        return
-      }
-
-      if (treeCandidateLabClickMode === 'addCluster') {
-        addTreeCandidateCluster(point)
-        return
-      }
-
-      if (treeCandidateLabClickMode === 'compareSet') {
-        addTreeCandidateCompareSet(point)
-      }
-    }
-
-    const handleMapDoubleClick = (event: any) => {
-      if (gardenEditorMode !== 'drawVegetation' && gardenEditorMode !== 'drawKeepout') {
-        return
-      }
-
-      event?.preventDefault?.()
-      completeDraftGardenPolygon(extractMapEventLatLng(event))
-    }
-
-    mapRef.current.on?.('click', handleMapClick)
-    mapRef.current.on?.('dblclick', handleMapDoubleClick)
-
-    return () => {
-      mapRef.current?.off?.('click', handleMapClick)
-      mapRef.current?.off?.('dblclick', handleMapDoubleClick)
-    }
-  }, [
-    addTreeCandidateCluster,
-    addTreeCandidateCompareSet,
-    completeDraftGardenPolygon,
-    debugGarden,
-    editorAddAssetKind,
-    gardenEditorMode,
-    gardenEditorState.previewAssets.length,
-    mapVisualReadyForOverlays,
-    treeCandidateLabClickMode,
-    visualVariant.id
-  ])
 
   useEffect(() => {
     if (visualVariant.id === 'default' || typeof window === 'undefined') {
@@ -1643,89 +4536,127 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }, [assetLoadState, decorOverlays, visualVariant.id])
 
   useEffect(() => {
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    if (isInkCleanMode || !shouldRenderRoute) {
+      layerManager.removeLayer('route', routeLayerRef.current)
+      routeLayerRef.current = null
+      return
+    }
+
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
     perfRecorder.markStageStart('routeDraw')
-    routeLayerRef.current?.setMap?.(null)
-    routeLayerRef.current = new window.TMap.MultiPolyline({
-      map: mapRef.current,
+    layerManager.removeLayer('route', routeLayerRef.current)
+    // Route layers must stay above optional ink map tile layers.
+    const routeLayer = new window.TMap.MultiPolyline({
+      map: targetMap,
       styles: {
-        routeShadow: new window.TMap.PolylineStyle({
-          color: 'rgba(74, 54, 18, 0.18)',
-          width: 30,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routeAura: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 226, 132, 0.30)',
-          width: 23,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routeGlow: new window.TMap.PolylineStyle({
-          color: 'rgba(236, 176, 56, 0.66)',
+        previewOuter: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 247, 218, 0.90)',
           width: 15,
           borderWidth: 0,
           lineCap: 'round'
         }),
-        mainRoute: new window.TMap.PolylineStyle({
-          color: '#f1bd3e',
-          width: 9,
-          borderWidth: 4,
-          borderColor: 'rgba(255, 250, 226, 0.96)',
-          lineCap: 'round'
-        }),
-        routeCore: new window.TMap.PolylineStyle({
-          color: 'rgba(110, 68, 7, 0.82)',
-          width: 2,
+        previewBorder: new window.TMap.PolylineStyle({
+          color: '#9C6A12',
+          width: 10,
           borderWidth: 0,
           lineCap: 'round'
         }),
-        completedRoute: new window.TMap.PolylineStyle({
-          color: 'rgba(49, 90, 74, 0.42)',
+        previewInner: new window.TMap.PolylineStyle({
+          color: '#F0B82E',
+          width: 6,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        completedOuter: new window.TMap.PolylineStyle({
+          color: '#E6E1D7',
+          width: 12,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        completedInner: new window.TMap.PolylineStyle({
+          color: '#9E9A91',
           width: 7,
-          borderWidth: 2,
-          borderColor: 'rgba(244, 241, 224, 0.74)',
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        remainingOuter: new window.TMap.PolylineStyle({
+          color: 'rgba(255, 247, 218, 0.90)',
+          width: 14,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        remainingBorder: new window.TMap.PolylineStyle({
+          color: '#9C6A12',
+          width: 9,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        remainingInner: new window.TMap.PolylineStyle({
+          color: '#E5A91B',
+          width: 5,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        beforeJoinOuter: new window.TMap.PolylineStyle({
+          color: '#F0EDE6',
+          width: 11,
+          borderWidth: 0,
+          lineCap: 'round'
+        }),
+        beforeJoinInner: new window.TMap.PolylineStyle({
+          color: '#C8C1B4',
+          width: 6,
+          borderWidth: 0,
           lineCap: 'round'
         }),
         activeRouteHalo: new window.TMap.PolylineStyle({
-          color: 'rgba(255, 220, 105, 0.58)',
-          width: 22,
+          color: 'rgba(255, 247, 218, 0.78)',
+          width: 18,
           borderWidth: 0,
           lineCap: 'round'
         }),
         activeRoute: new window.TMap.PolylineStyle({
-          color: '#ffe38c',
-          width: 11,
-          borderWidth: 5,
-          borderColor: 'rgba(121, 79, 12, 0.40)',
-          lineCap: 'round'
-        }),
-        routePreviewHalo: new window.TMap.PolylineStyle({
-          color: 'rgba(214, 180, 106, 0.32)',
-          width: 28,
-          borderWidth: 0,
-          lineCap: 'round'
-        }),
-        routePreview: new window.TMap.PolylineStyle({
-          color: '#E6DDC7',
-          width: 12,
-          borderWidth: 4,
-          borderColor: 'rgba(143, 175, 155, 0.38)',
+          color: '#E5A91B',
+          width: 8,
+          borderWidth: 3,
+          borderColor: '#9C6A12',
           lineCap: 'round'
         })
       },
       geometries: buildGuideRouteGeometries()
     })
+    routeLayerRef.current = routeLayer
+    layerManager.registerLayer('route', routeLayer, targetMap)
     perfRecorder.markStageEnd('routeDraw')
 
     return () => {
-      routeLayerRef.current?.setMap?.(null)
-      routeLayerRef.current = null
+      layerManager.removeLayer('route', routeLayer)
+      if (routeLayerRef.current === routeLayer) {
+        routeLayerRef.current = null
+      }
     }
-  }, [mapVisualReadyForOverlays, nextStop.nextStopId, perfRecorder, routePathIndex, routePreviewProgressIndex, selectedStopId, tourMode])
+  }, [
+    currentRouteId,
+    currentRoutePath,
+    isInkCleanMode,
+    isMapInstanceCurrent,
+    layerManager,
+    mapVisualReadyForOverlays,
+    nextStop.nextStopId,
+    perfRecorder,
+    routePathIndex,
+    routeStops,
+    selectedStopId,
+    effectiveRouteStopIndex,
+    joiningStopIndex,
+    shouldRenderRoute,
+    shouldRenderRouteProgress,
+    tourMode
+  ])
 
   function getActiveRoutePath(currentStopId?: string | null, nextStopId?: string | null) {
     const currentLocation = getRouteStopLocation(currentStopId)
@@ -1735,11 +4666,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return []
     }
 
-    const startIndex = findNearestRoutePoint(currentLocation, demoRoutePath)?.nearestIndex ?? 0
-    const endIndex = findNearestRoutePoint(nextLocation, demoRoutePath)?.nearestIndex ?? startIndex
+    const startIndex = findNearestRoutePoint(currentLocation, currentRoutePath)?.nearestIndex ?? 0
+    const endIndex = findNearestRoutePoint(nextLocation, currentRoutePath)?.nearestIndex ?? startIndex
     const fromIndex = Math.min(startIndex, endIndex)
     const toIndex = Math.max(startIndex, endIndex)
-    const segment = demoRoutePath.slice(fromIndex, toIndex + 1)
+    const segment = currentRoutePath.slice(fromIndex, toIndex + 1)
 
     if (segment.length > 1) {
       return segment
@@ -1749,78 +4680,79 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   function buildGuideRouteGeometries() {
-    const completedPath = demoRoutePath.slice(0, Math.min(demoRoutePath.length, routePathIndex + 1))
+    const routeGeometryIdPrefix = `${currentRouteId}-route`
+
+    if (!shouldRenderRouteProgress) {
+      return [
+        {
+          id: `${routeGeometryIdPrefix}-preview-outer`,
+          styleId: 'previewOuter',
+          paths: currentRoutePath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-preview-border`,
+          styleId: 'previewBorder',
+          paths: currentRoutePath.map(toTMapLatLng)
+        },
+        {
+          id: `${routeGeometryIdPrefix}-preview-inner`,
+          styleId: 'previewInner',
+          paths: currentRoutePath.map(toTMapLatLng)
+        }
+      ]
+    }
+
+    const progressLocation = getRouteStopLocation(routeStops[effectiveRouteStopIndex]?.spotId)
+    const progressIndex = progressLocation
+      ? findNearestRoutePoint(progressLocation, currentRoutePath)?.nearestIndex ?? routePathIndex
+      : routePathIndex
+    const completedPath = currentRoutePath.slice(0, Math.min(currentRoutePath.length, progressIndex + 1))
+    const remainingPath = currentRoutePath.slice(Math.max(0, progressIndex))
     const activePath = getActiveRoutePath(selectedStopId, nextStop.nextStopId)
-    const showStandardProgress = tourMode !== 'buddhaRealmTour'
+    const showActiveSegment = tourMode !== 'buddhaRealmTour'
+    const completedOuterStyle = joiningStopIndex !== undefined ? 'beforeJoinOuter' : 'completedOuter'
+    const completedInnerStyle = joiningStopIndex !== undefined ? 'beforeJoinInner' : 'completedInner'
     const geometries = [
         {
-          id: 'historical-culture-route-shadow',
-          styleId: 'routeShadow',
-          paths: demoRoutePath.map(toTMapLatLng)
+          id: `${routeGeometryIdPrefix}-remaining-outer`,
+          styleId: 'remainingOuter',
+          paths: remainingPath.map(toTMapLatLng)
         },
         {
-          id: 'historical-culture-route-aura',
-          styleId: 'routeAura',
-          paths: demoRoutePath.map(toTMapLatLng)
+          id: `${routeGeometryIdPrefix}-remaining-border`,
+          styleId: 'remainingBorder',
+          paths: remainingPath.map(toTMapLatLng)
         },
         {
-          id: 'historical-culture-route-glow',
-          styleId: 'routeGlow',
-          paths: demoRoutePath.map(toTMapLatLng)
+          id: `${routeGeometryIdPrefix}-remaining-inner`,
+          styleId: 'remainingInner',
+          paths: remainingPath.map(toTMapLatLng)
         },
         {
-          id: 'historical-culture-main-route',
-          styleId: 'mainRoute',
-          paths: demoRoutePath.map(toTMapLatLng)
+          id: `${routeGeometryIdPrefix}-completed-outer`,
+          styleId: completedOuterStyle,
+          paths: completedPath.map(toTMapLatLng)
         },
         {
-          id: 'historical-culture-route-core',
-          styleId: 'routeCore',
-          paths: demoRoutePath.map(toTMapLatLng)
+          id: `${routeGeometryIdPrefix}-completed-inner`,
+          styleId: completedInnerStyle,
+          paths: completedPath.map(toTMapLatLng)
         }
       ]
 
-    if (showStandardProgress && completedPath.length > 1) {
-      geometries.push({
-        id: 'historical-culture-completed-route',
-        styleId: 'completedRoute',
-        paths: completedPath.map(toTMapLatLng)
-      })
-    }
-
-    if (showStandardProgress && activePath.length > 1) {
+    if (showActiveSegment && activePath.length > 1) {
       geometries.push(
         {
-          id: 'historical-culture-active-route-halo',
+          id: `${routeGeometryIdPrefix}-active-halo`,
           styleId: 'activeRouteHalo',
           paths: activePath.map(toTMapLatLng)
         },
         {
-          id: 'historical-culture-active-route',
+          id: `${routeGeometryIdPrefix}-active`,
           styleId: 'activeRoute',
           paths: activePath.map(toTMapLatLng)
         }
       )
-    }
-
-    if (tourMode === 'routePreview' && routePreviewProgressIndex !== null) {
-      const boundedPreviewIndex = Math.max(1, Math.min(demoRoutePath.length - 1, routePreviewProgressIndex))
-      const previewPath = demoRoutePath.slice(0, boundedPreviewIndex + 1)
-
-      if (previewPath.length > 1) {
-        geometries.push(
-          {
-            id: 'historical-culture-route-preview-halo',
-            styleId: 'routePreviewHalo',
-            paths: previewPath.map(toTMapLatLng)
-          },
-          {
-            id: 'historical-culture-route-preview',
-            styleId: 'routePreview',
-            paths: previewPath.map(toTMapLatLng)
-          }
-        )
-      }
     }
 
     return geometries
@@ -1835,7 +4767,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
     updateTourRouteProgressOverlay(0, { force: true, recordUpdate: false })
 
-    const split = splitRouteByProgress(demoRoutePath, 0, demoRouteCumulativeDistances)
+    const split = splitRouteByProgress(currentRoutePath, 0, currentRouteCumulativeDistances)
     perfRecorder.recordTourEvent({
       type: 'routeProgressStarted',
       mode: 'buddhaRealmTour',
@@ -1845,7 +4777,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       currentLat: split.currentPoint.lat,
       currentLng: split.currentPoint.lng,
       source: 'tourProgress',
-      routeHasOverlaps: demoRouteHasSequenceOverlaps
+      routeHasOverlaps: currentRouteHasSequenceOverlaps
     })
   }
 
@@ -1862,13 +4794,32 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
 
-    if (!options.force && now - buddhaTourRouteProgressRef.current.lastRenderedAt < 34) {
+    const routeProgressFrameMs = isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34
+
+    const split = isMobileViewport
+      ? splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
+      : undefined
+
+    if (isMobileViewport && split) {
+      updateSimulatedUserMarkerPosition(split.currentPoint)
+      buddhaTourRouteProgressRef.current.latestProgress = progress
+    }
+
+    if (!options.force && now - buddhaTourRouteProgressRef.current.lastRenderedAt < routeProgressFrameMs) {
       buddhaTourRouteProgressRef.current.latestProgress = progress
       return
     }
 
-    const split = splitRouteByProgress(demoRoutePath, progress, demoRouteCumulativeDistances)
-    renderTourRouteProgressOverlay(split)
+    const renderedSplit = split ?? splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
+    updateSimulatedUserMarkerPosition(renderedSplit.currentPoint)
+
+    if (isMobileViewport) {
+      tourRouteProgressLayerRef.current?.setMap?.(null)
+      tourRouteProgressLayerRef.current = null
+    } else {
+      renderTourRouteProgressOverlay(renderedSplit)
+    }
+
     buddhaTourRouteProgressRef.current.lastRenderedAt = now
     buddhaTourRouteProgressRef.current.latestProgress = progress
 
@@ -1884,12 +4835,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         type: 'routeProgressUpdate',
         mode: 'buddhaRealmTour',
         progress,
-        traveledPointCount: split.traveledPath.length,
-        remainingPointCount: split.remainingPath.length,
-        currentLat: split.currentPoint.lat,
-        currentLng: split.currentPoint.lng,
+        traveledPointCount: renderedSplit.traveledPath.length,
+        remainingPointCount: renderedSplit.remainingPath.length,
+        currentLat: renderedSplit.currentPoint.lat,
+        currentLng: renderedSplit.currentPoint.lng,
         source: 'tourProgress',
-        routeHasOverlaps: demoRouteHasSequenceOverlaps
+        routeHasOverlaps: currentRouteHasSequenceOverlaps
       })
     }
   }
@@ -1904,7 +4855,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     const isCompleted = reason === 'completed'
     const progress = isCompleted ? 1 : routeProgressState.latestProgress
-    const split = splitRouteByProgress(demoRoutePath, progress, demoRouteCumulativeDistances)
+    const split = splitRouteByProgress(currentRoutePath, progress, currentRouteCumulativeDistances)
 
     perfRecorder.recordTourEvent({
       type: isCompleted ? 'routeProgressCompleted' : 'routeProgressStopped',
@@ -1915,7 +4866,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       currentLat: split.currentPoint.lat,
       currentLng: split.currentPoint.lng,
       source: 'tourProgress',
-      routeHasOverlaps: demoRouteHasSequenceOverlaps,
+      routeHasOverlaps: currentRouteHasSequenceOverlaps,
       reason
     })
 
@@ -1939,7 +4890,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       type: 'routeProgressOverlayReset',
       mode: 'buddhaRealmTour',
       source: 'tourProgress',
-      routeHasOverlaps: demoRouteHasSequenceOverlaps
+      routeHasOverlaps: currentRouteHasSequenceOverlaps
     })
   }
 
@@ -1970,6 +4921,31 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       styles: buildTourRouteProgressStyles(),
       geometries
     })
+  }
+
+  function updateSimulatedUserMarkerPosition(position: LatLngPoint) {
+    const layer = userMarkerLayerRef.current
+
+    if (!layer || !window.TMap) {
+      return
+    }
+
+    const geometries = [
+      {
+        id: 'simulated-user',
+        styleId: 'user',
+        position: toTMapLatLng(position)
+      }
+    ]
+
+    if (typeof layer.setGeometries === 'function') {
+      layer.setGeometries(geometries)
+      return
+    }
+
+    if (typeof layer.updateGeometries === 'function') {
+      layer.updateGeometries(geometries)
+    }
   }
 
   function buildTourRouteProgressGeometries(split: SplitRouteByProgressResult) {
@@ -2040,7 +5016,19 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   useEffect(() => {
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    if (isInkCleanMode) {
+      decorMarkerLayerRef.current?.setMap?.(null)
+      decorMarkerLayerRef.current = null
+      setDecorSmokeReport({
+        markerCount: 0,
+        fallbackCount: 0,
+        assetUrls: []
+      })
+      return
+    }
+
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
@@ -2109,501 +5097,208 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       decorMarkerLayerRef.current?.setMap?.(null)
       decorMarkerLayerRef.current = null
     }
-  }, [assetLoadState, debugDecor, decorOverlays, mapVisualReadyForOverlays, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
+  }, [assetLoadState, debugDecor, decorOverlays, isInkCleanMode, mapVisualReadyForOverlays, reroutePlan, rerouteStatus, routePathIndex, visualVariant.id])
 
   useEffect(() => {
-    forestPatchLayerRef.current?.setMap?.(null)
-    forestPatchLayerRef.current = null
-
-    if (visualVariant.id !== 'prototype-c' || isMobileViewport || !debugGarden || !forestPatchesVisible) {
-      setGardenPatchReport({
-        patchCount: 0,
-        patchFallback: false
-      })
+    if (isInkCleanMode) {
+      poiLayerController.clear()
+      poiMarkerLayerRef.current = null
+      setGenericCustomPoiVisibleCount(0)
+      setRouteStopMarkerCount(0)
+      setRouteStateMarkerCount(0)
       return
     }
 
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
-      return
-    }
-
-    const visiblePatches = lingshanMap3DForestPatches.filter((patch) => patch.visible)
-
-    try {
-      if (window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
-        forestPatchLayerRef.current = new window.TMap.MultiPolygon({
-          map: mapRef.current,
-          styles: Object.fromEntries(
-            visiblePatches.map((patch) => [
-              patch.id,
-              new window.TMap.PolygonStyle({
-                color: colorWithOpacity(patch.color, getForestPatchOpacity(patch, {
-                  debugGarden,
-                  routeProgressRatio,
-                  rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
-                })),
-                showBorder: false
-              })
-            ])
-          ),
-          geometries: visiblePatches.map((patch) => ({
-            id: patch.id,
-            styleId: patch.id,
-            paths: buildForestPatchPath(patch),
-            rank: 1
-          }))
-        })
-        setGardenPatchReport({
-          patchCount: visiblePatches.length,
-          patchFallback: false
-        })
-        return () => {
-          forestPatchLayerRef.current?.setMap?.(null)
-          forestPatchLayerRef.current = null
-        }
-      }
-
-      forestPatchLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          visiblePatches.map((patch) => {
-            const opacity = getForestPatchOpacity(patch, {
-              debugGarden,
-              routeProgressRatio,
-              rerouteActive: rerouteStatus === 'planning' || rerouteStatus === 'ready' || rerouteStatus === 'off_route'
-            })
-            const width = Math.max(80, Math.round(patch.radiusX * 1.15))
-            const height = Math.max(50, Math.round(patch.radiusY * 1.15))
-            return [
-              patch.id,
-              new window.TMap.MarkerStyle({
-                width,
-                height,
-                anchor: { x: width / 2, y: height / 2 },
-                src: createSvgDataUrl(forestPatchSvg({
-                  color: patch.color,
-                  opacity,
-                  rotation: patch.rotation,
-                  width,
-                  height
-                }))
-              })
-            ]
-          })
-        ),
-        geometries: visiblePatches.map((patch) => ({
-          id: patch.id,
-          styleId: patch.id,
-          position: toTMapLatLng(patch.center),
-          rank: patch.priority === 'high' ? 3 : patch.priority === 'medium' ? 2 : 1,
-          properties: {
-            title: patch.name
-          }
-        }))
-      })
-      setGardenPatchReport({
-        patchCount: visiblePatches.length,
-        patchFallback: true
-      })
-    } catch {
-      setGardenPatchReport({
-        patchCount: 0,
-        patchFallback: true
-      })
-    }
-
-    return () => {
-      forestPatchLayerRef.current?.setMap?.(null)
-      forestPatchLayerRef.current = null
-    }
-  }, [debugGarden, forestPatchesVisible, isMobileViewport, mapVisualReadyForOverlays, rerouteStatus, routeProgressRatio, visualVariant.id])
-
-  useEffect(() => {
-    gardenEditorPolygonLayerRef.current?.setMap?.(null)
-    gardenEditorVertexLayerRef.current?.setMap?.(null)
-    gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-    gardenEditorPolygonLayerRef.current = null
-    gardenEditorVertexLayerRef.current = null
-    gardenPreviewMarkerLayerRef.current = null
-
-    if (!debugGarden || visualVariant.id !== 'prototype-c' || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
-      return
-    }
-
-    const polygonItems = buildGardenEditorPolygonItems(
-      gardenEditorState,
-      gardenDraftPolygon,
-      selectedEditorZoneId,
-      selectedKeepoutZoneId
-    )
-
-    if (polygonItems.length && window.TMap.MultiPolygon && window.TMap.PolygonStyle) {
-      gardenEditorPolygonLayerRef.current = new window.TMap.MultiPolygon({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          polygonItems.map((item) => [
-            item.id,
-            new window.TMap.PolygonStyle({
-              color: item.fill,
-              borderColor: item.border,
-              borderWidth: 2,
-              showBorder: true,
-              ...(item.dashed ? { borderDashArray: [8, 6] } : {})
-            })
-          ])
-        ),
-        geometries: polygonItems.map((item) => ({
-          id: item.id,
-          styleId: item.id,
-          paths: item.vertices.map(toTMapLatLng),
-          rank: item.type === 'keepout' ? 29 : 28,
-          properties: {
-            title: item.name
-          }
-        }))
-      })
-    }
-
-    const vertices = buildGardenEditorVertexItems(
-      gardenEditorState,
-      gardenDraftPolygon,
-      selectedEditorZoneId,
-      selectedKeepoutZoneId
-    )
-    if (vertices.length) {
-      gardenEditorVertexLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        enableDragging: true,
-        styles: {
-          vegetationVertex: new window.TMap.MarkerStyle({
-            width: 20,
-            height: 20,
-            anchor: { x: 10, y: 10 },
-            src: createSvgDataUrl(editorVertexSvg('#2f7a4d', '#f9f0cf'))
-          }),
-          keepoutVertex: new window.TMap.MarkerStyle({
-            width: 20,
-            height: 20,
-            anchor: { x: 10, y: 10 },
-            src: createSvgDataUrl(editorVertexSvg('#b45309', '#fff7ed'))
-          }),
-          draftVertex: new window.TMap.MarkerStyle({
-            width: 22,
-            height: 22,
-            anchor: { x: 11, y: 11 },
-            src: createSvgDataUrl(editorVertexSvg('#2563eb', '#eff6ff'))
-          })
-        },
-        geometries: vertices.map((vertex) => ({
-          id: vertex.id,
-          styleId: vertex.styleId,
-          position: toTMapLatLng(vertex.position),
-          draggable: true,
-          rank: 40,
-          properties: {
-            title: vertex.id
-          }
-        }))
-      })
-
-      const handleVertexDragEnd = (event: any) => {
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        const point = extractMapEventLatLng(event)
-        if (!id || !point) {
-          return
-        }
-        updateGardenEditorVertex(String(id), point)
-      }
-      gardenEditorVertexLayerRef.current.on?.('dragend', handleVertexDragEnd)
-      gardenEditorVertexLayerRef.current.on?.('click', (event: any) => {
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        if (id) {
-          setSelectedGardenVertexId(String(id))
-        }
-      })
-    }
-
-    const previewAssets = gardenEditorState.previewAssets.filter((asset) => asset.visible)
-    if (previewAssets.length) {
-      gardenPreviewMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: Object.fromEntries(
-          gardenAssetKindOptions.map((kind) => [
-            kind,
-            new window.TMap.MarkerStyle({
-              width: kind.includes('rock') || kind.includes('stone') ? 24 : 28,
-              height: kind.includes('rock') || kind.includes('stone') ? 24 : 28,
-              anchor: {
-                x: kind.includes('rock') || kind.includes('stone') ? 12 : 14,
-                y: kind.includes('rock') || kind.includes('stone') ? 12 : 14
-              },
-              src: createSvgDataUrl(gardenPreviewPointSvg(kind))
-            })
-          ])
-        ),
-        geometries: previewAssets.map((asset) => ({
-          id: `preview-${asset.id}`,
-          styleId: asset.kind,
-          position: toTMapLatLng(asset.location),
-          rank: 34,
-          properties: {
-            title: asset.name
-          }
-        }))
-      })
-    }
-
-    return () => {
-      gardenEditorPolygonLayerRef.current?.setMap?.(null)
-      gardenEditorVertexLayerRef.current?.setMap?.(null)
-      gardenPreviewMarkerLayerRef.current?.setMap?.(null)
-      gardenEditorPolygonLayerRef.current = null
-      gardenEditorVertexLayerRef.current = null
-      gardenPreviewMarkerLayerRef.current = null
-    }
-  }, [debugGarden, gardenDraftPolygon, gardenEditorState, mapVisualReadyForOverlays, selectedEditorZoneId, selectedKeepoutZoneId, visualVariant.id])
-
-  useEffect(() => {
-    gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
-    gardenAssetEditMarkerLayerRef.current = null
-
-    if (
-      !debugGarden ||
-      visualVariant.id !== 'prototype-c' ||
-      !mapVisualReadyForOverlays ||
-      !window.TMap ||
-      !mapRef.current ||
-      !selectedGardenAssetDraft
-    ) {
-      return
-    }
-
-    gardenAssetEditMarkerLayerRef.current = new window.TMap.MultiMarker({
-      map: mapRef.current,
-      enableDragging: true,
-      styles: {
-        assetEditVertex: new window.TMap.MarkerStyle({
-          width: 26,
-          height: 26,
-          anchor: { x: 13, y: 13 },
-          src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
-        })
-      },
-      geometries: [
-        {
-          id: `asset:${selectedGardenAssetDraft.id}`,
-          styleId: 'assetEditVertex',
-          position: toTMapLatLng(selectedGardenAssetDraft.location),
-          draggable: true,
-          rank: 45,
-          properties: {
-            title: selectedGardenAssetDraft.name
-          }
-        }
-      ]
-    })
-
-    const handleAssetDragEnd = (event: any) => {
-      const point = extractMapEventLatLng(event)
-
-      if (!point) {
-        return
-      }
-
-      updateGardenAssetEditDraft({
-        location: {
-          lat: roundNumber(point.lat, 6),
-          lng: roundNumber(point.lng, 6)
-        }
-      })
-      setGardenCopyStatus('已移动资产编辑点，点击“保存当前资产修改”后写入本地草稿')
-    }
-
-    gardenAssetEditMarkerLayerRef.current.on?.('dragend', handleAssetDragEnd)
-
-    return () => {
-      gardenAssetEditMarkerLayerRef.current?.setMap?.(null)
-      gardenAssetEditMarkerLayerRef.current = null
-    }
-  }, [debugGarden, mapVisualReadyForOverlays, selectedGardenAssetDraft, visualVariant.id])
-
-  useEffect(() => {
-    treeCandidateMarkerLayerRef.current?.setMap?.(null)
-    treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
-    treeCandidateMarkerLayerRef.current = null
-    treeCandidateEditMarkerLayerRef.current = null
-
-    if (
-      !debugGarden ||
-      visualVariant.id !== 'prototype-c' ||
-      !mapVisualReadyForOverlays ||
-      !window.TMap ||
-      !mapRef.current ||
-      !treeCandidateLabState.testTrees.length
-    ) {
-      return
-    }
-
-    const visibleTestTrees = treeCandidateLabState.testTrees.filter((asset) => asset.visible)
-
-    if (visibleTestTrees.length) {
-      treeCandidateMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        styles: {
-          testTree: new window.TMap.MarkerStyle({
-            width: 22,
-            height: 22,
-            anchor: { x: 11, y: 11 },
-            src: createSvgDataUrl(editorVertexSvg('#6f8e73', '#fff7d6'))
-          }),
-          selectedTestTree: new window.TMap.MarkerStyle({
-            width: 26,
-            height: 26,
-            anchor: { x: 13, y: 13 },
-            src: createSvgDataUrl(editorVertexSvg('#d6b46a', '#fff7d6'))
-          })
-        },
-        geometries: visibleTestTrees.map((asset) => ({
-          id: asset.id,
-          styleId: asset.id === selectedTreeCandidateId ? 'selectedTestTree' : 'testTree',
-          position: toTMapLatLng(asset.location),
-          rank: asset.id === selectedTreeCandidateId ? 48 : 42,
-          properties: {
-            title: asset.name
-          }
-        }))
-      })
-
-      treeCandidateMarkerLayerRef.current.on?.('click', (event: any) => {
-        event?.stopPropagation?.()
-        event?.preventDefault?.()
-        const id = event?.geometry?.id ?? event?.geometry?.properties?.title ?? event?.id
-        if (id) {
-          setSelectedTreeCandidateId(String(id))
-          setGardenCopyStatus('已选中测试树，可在基础摆树面板调参数或拖动紫色点')
-        }
-      })
-    }
-
-    if (selectedTreeCandidateAsset) {
-      treeCandidateEditMarkerLayerRef.current = new window.TMap.MultiMarker({
-        map: mapRef.current,
-        enableDragging: true,
-        styles: {
-          testTreeEdit: new window.TMap.MarkerStyle({
-            width: 30,
-            height: 30,
-            anchor: { x: 15, y: 15 },
-            src: createSvgDataUrl(editorVertexSvg('#7c3aed', '#f5f3ff'))
-          })
-        },
-        geometries: [
-          {
-            id: `tree-candidate:${selectedTreeCandidateAsset.id}`,
-            styleId: 'testTreeEdit',
-            position: toTMapLatLng(selectedTreeCandidateAsset.location),
-            draggable: true,
-            rank: 50,
-            properties: {
-              title: selectedTreeCandidateAsset.name
-            }
-          }
-        ]
-      })
-
-      const handleTestTreeDragEnd = (event: any) => {
-        const point = extractMapEventLatLng(event)
-
-        if (!point) {
-          return
-        }
-
-        updateSelectedTreeCandidateAsset({
-          location: {
-            lat: roundNumber(point.lat, 6),
-            lng: roundNumber(point.lng, 6)
-          }
-        })
-        setGardenCopyStatus('已移动选中测试树')
-      }
-
-      treeCandidateEditMarkerLayerRef.current.on?.('dragend', handleTestTreeDragEnd)
-    }
-
-    return () => {
-      treeCandidateMarkerLayerRef.current?.setMap?.(null)
-      treeCandidateEditMarkerLayerRef.current?.setMap?.(null)
-      treeCandidateMarkerLayerRef.current = null
-      treeCandidateEditMarkerLayerRef.current = null
-    }
-  }, [
-    debugGarden,
-    mapVisualReadyForOverlays,
-    selectedTreeCandidateAsset,
-    selectedTreeCandidateId,
-    treeCandidateLabState.testTrees,
-    visualVariant.id
-  ])
-
-  useEffect(() => {
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+    const targetMap = mapRef.current
+    if (!mapVisualReadyForOverlays || !window.TMap || !targetMap || !isMapInstanceCurrent(targetMap)) {
       return
     }
 
     perfRecorder.markStageStart('poiInit')
-    const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
-    const currentStopId = routeStops[selectedStopIndex]?.spotId
+    const currentStopId = routeStops[effectiveRouteStopIndex]?.spotId
     const nextStopId = nextStop.nextStopId
-    const markerStyles = routeStops.reduce<Record<string, any>>((styles, stop, index) => {
-      const state =
-        stop.spotId === terminalStopId
-          ? 'terminal'
-          : stop.spotId === currentStopId
-            ? 'current'
-            : stop.spotId === nextStopId
-              ? 'next'
-              : 'route'
-      const styleId = `poi-${index}-${state}`
-      const size = state === 'current' ? 44 : state === 'next' ? 40 : state === 'terminal' ? 42 : 34
-
-      styles[styleId] = new window.TMap.MarkerStyle({
-        width: size,
-        height: size + 8,
-        anchor: { x: size / 2, y: size + 6 },
-        src: createSvgDataUrl(routePoiMarkerSvg(state, index + 1))
-      })
-
-      return styles
-    }, {})
-    const poiGeometries = lingshanPois
-      .filter((poi) => routeStopIds.has(poi.id))
-      .map((poi) => {
-        const stopIndex = routeStops.findIndex((stop) => stop.spotId === poi.id)
-        const state =
-          poi.id === terminalStopId
-            ? 'terminal'
-            : poi.id === currentStopId
-              ? 'current'
-              : poi.id === nextStopId
-                ? 'next'
-                : 'route'
-
-        return {
-          id: poi.id,
-          styleId: `poi-${stopIndex}-${state}`,
-          position: toTMapLatLng(getBestPoiLocation(poi)),
-          properties: {
-            title: `${stopIndex + 1}. ${poi.name}`
-          }
-        }
-      })
-
-    poiMarkerLayerRef.current?.setMap?.(null)
-    poiMarkerLayerRef.current = new window.TMap.MultiMarker({
-      map: mapRef.current,
-      styles: markerStyles,
-      geometries: poiGeometries
+    const routeStopIds = new Set(routeStops.map((stop) => stop.spotId))
+    const layerVisibility = resolvePoiLayerVisibility({
+      isRouteGuideView
     })
+    // Expanded active/arrived cards intentionally narrow the marker field;
+    // collapsed cards restore every numbered station without moving the map.
+    const routeProgressMode = shouldRenderRouteProgress && routeCardExpanded
+    const routeContextPois = routeProgressMode
+      ? getRouteProgressPois(currentStopId, nextStopId ?? undefined, 3)
+      : []
+    const layerPois = Array.from(
+      new Map(
+        [
+          ...getLingshanPoisForLayer(poiLayerMode),
+          ...(serviceFacilitiesEnabled ? getLingshanPoisForLayer('services') : [])
+        ].map((poi) => [poi.id, poi])
+      ).values()
+    )
+    const genericPois = !isRouteGuideView
+      ? layerPois
+      : navigationPoiOverrideActive
+        ? layerPois.filter((poi) => !routeStopIds.has(poi.id))
+        : routeContextPois.filter((poi) => !routeStopIds.has(poi.id))
+
+    const genericStyles: Record<string, any> = {}
+    const genericGeometries = layerVisibility.showGenericCustomPoi
+      ? genericPois.map((poi) => {
+          const styleId = isRouteGuideView ? `context-${poi.id}` : `browse-${poi.id}`
+          const isContextPoi = isRouteGuideView
+          genericStyles[styleId] = new window.TMap.MarkerStyle({
+            width: isContextPoi ? 92 : 96,
+            height: isContextPoi ? 38 : 42,
+            anchor: isContextPoi ? { x: 46, y: 34 } : { x: 48, y: 37 },
+            src: createSvgDataUrl(
+              browsePoiMarkerSvg(poi.name, !isContextPoi && poi.assetBindingPriority === 'core_3d', isContextPoi)
+            )
+          })
+          return {
+            id: poi.id,
+            styleId,
+            position: toTMapLatLng(getBestPoiLocation(poi)),
+            rank: 50,
+            properties: { title: poi.name }
+          }
+        })
+      : []
+
+    const routeStopStyles: Record<string, any> = {}
+    const routeStopGeometries = layerVisibility.showRouteStopMarkers
+      ? routeStops.flatMap((stop, index) => {
+          const location = getRouteStopLocation(stop.spotId)
+          if (!location) {
+            return []
+          }
+          const display = getPoiDisplay(stop.spotId)
+          const styleId = `route-stop-${index}`
+          const size = stop.spotId === terminalStopId ? 42 : 34
+          routeStopStyles[styleId] = new window.TMap.MarkerStyle({
+            width: size,
+            height: size + 8,
+            anchor: { x: size / 2, y: size + 6 },
+            src: createSvgDataUrl(routePoiMarkerSvg(stop.spotId === terminalStopId ? 'terminal' : 'route', index + 1))
+          })
+          return [{
+            id: stop.spotId,
+            styleId,
+            position: toTMapLatLng(location),
+            rank: 70,
+            properties: { title: `${index + 1}. ${display?.name ?? stop.spotId}` }
+          }]
+        })
+      : []
+
+    const routeStateStyles: Record<string, any> = {}
+    const routeStateMarkers = [
+      { poiId: currentStopId, state: 'current' as const },
+      { poiId: nextStopId, state: 'next' as const }
+    ].filter((item, index, items) => Boolean(item.poiId) && items.findIndex((candidate) => candidate.poiId === item.poiId) === index)
+    const routeStateGeometries = layerVisibility.showRouteStateMarkers
+      ? routeStateMarkers.flatMap(({ poiId, state }) => {
+          if (!poiId) {
+            return []
+          }
+          const stopIndex = routeStops.findIndex((stop) => stop.spotId === poiId)
+          const location = getRouteStopLocation(poiId)
+          if (stopIndex < 0 || !location) {
+            return []
+          }
+          const size = state === 'current' ? 44 : 40
+          const styleId = `route-state-${state}-${stopIndex}`
+          routeStateStyles[styleId] = new window.TMap.MarkerStyle({
+            width: size,
+            height: size + 8,
+            anchor: { x: size / 2, y: size + 6 },
+            src: createSvgDataUrl(routePoiMarkerSvg(state, stopIndex + 1))
+          })
+          return [{
+            id: poiId,
+            styleId,
+            position: toTMapLatLng(location),
+            rank: 90,
+            properties: { title: `${stopIndex + 1}. ${getPoiDisplay(poiId)?.name ?? poiId}` }
+          }]
+        })
+      : []
+
+    const handlePoiMarkerClick = (event: any) => {
+      const poiId = event?.geometry?.id ?? event?.geometryId ?? event?.id
+      if (typeof poiId !== 'string' || !hasMapEnabledScenicPoi(poiId)) {
+        return
+      }
+
+      setSelectedPoiId(poiId)
+      if (!isRouteGuideView) {
+        goToPoiFromBrowse(navigate, poiId, scenicMapPresentation)
+        return
+      }
+
+      const stopIndex = routeStops.findIndex((stop) => stop.spotId === poiId)
+      goToPoiFromRoute(navigate, poiId, {
+        routeId: currentRouteId,
+        poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+        returnStage: getPoiReturnStage(routeGuideStage),
+        returnStopIndex: effectiveRouteStopIndex,
+        presentation: scenicMapPresentation
+      })
+    }
+    const updatePoiLayer = (
+      kind: PoiLayerKind,
+      key: Record<string, unknown>,
+      styles: Record<string, any>,
+      geometries: any[]
+    ) => {
+      if (!geometries.length) {
+        poiLayerController.clear(kind)
+        return null
+      }
+      return poiLayerController.update({
+        kind,
+        key: JSON.stringify(key),
+        build: (map) => ({
+          layer: new window.TMap.MultiMarker({ map, styles, geometries }),
+          onClick: handlePoiMarkerClick
+        })
+      })
+    }
+
+    const genericPoiLayer = updatePoiLayer(
+      'generic',
+      {
+        mode: poiLayerMode,
+        presentation: scenicMapPresentation,
+        route: isRouteGuideView,
+        navigationOverrideActive: navigationPoiOverrideActive,
+        services: serviceFacilitiesEnabled,
+        poiIds: genericGeometries.map((item) => item.id)
+      },
+      genericStyles,
+      genericGeometries
+    )
+    const routeStopLayer = updatePoiLayer(
+      'routeStops',
+      { routeId: currentRouteId, poiIds: routeStopGeometries.map((item) => item.id) },
+      routeStopStyles,
+      routeStopGeometries
+    )
+    const routeStateLayer = updatePoiLayer(
+      'routeState',
+      {
+        routeId: currentRouteId,
+        currentStopId,
+        nextStopId,
+        stage: routeGuideStage,
+        poiIds: routeStateGeometries.map((item) => item.id)
+      },
+      routeStateStyles,
+      routeStateGeometries
+    )
+    poiMarkerLayerRef.current = genericPoiLayer
+    setGenericCustomPoiVisibleCount(genericPoiLayer ? genericGeometries.length : 0)
+    setRouteStopMarkerCount(routeStopLayer ? routeStopGeometries.length : 0)
+    setRouteStateMarkerCount(routeStateLayer ? routeStateGeometries.length : 0)
     perfRecorder.markStageEnd('poiInit')
     if (!mapRoutePoiShownRef.current) {
       mapRoutePoiShownRef.current = true
@@ -2612,15 +5307,56 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         reason: 'visual-ready'
       })
     }
-
-    return () => {
-      poiMarkerLayerRef.current?.setMap?.(null)
-      poiMarkerLayerRef.current = null
-    }
-  }, [mapVisualReadyForOverlays, nextStop.nextStopId, perfRecorder, routeStops, selectedStopIndex, terminalStopId])
+  }, [
+    currentRouteId,
+    effectiveRouteStopIndex,
+    isInkCleanMode,
+    isMapInstanceCurrent,
+    isRouteGuideView,
+    mapVisualReadyForOverlays,
+    navigate,
+    navigationPoiOverrideActive,
+    nextStop.nextStopId,
+    perfRecorder,
+    poiLayerController,
+    poiLayerMode,
+    routeCardExpanded,
+    routeGuideStage,
+    routeStops,
+    scenicMapPresentation,
+    setSelectedPoiId,
+    serviceFacilitiesEnabled,
+    shouldRenderRouteProgress,
+    terminalStopId,
+    poiVisibilityMode
+  ])
 
   useEffect(() => {
+    if (isInkCleanMode) {
+      userMarkerLayerRef.current?.setMap?.(null)
+      userMarkerLayerRef.current = null
+      return
+    }
+
     if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
+      return
+    }
+
+    const geometries = [
+      {
+        id: 'simulated-user',
+        styleId: 'user',
+        position: toTMapLatLng(simulatedPosition)
+      }
+    ]
+
+    if (userMarkerLayerRef.current && typeof userMarkerLayerRef.current.setGeometries === 'function') {
+      userMarkerLayerRef.current.setGeometries(geometries)
+      return
+    }
+
+    if (userMarkerLayerRef.current && typeof userMarkerLayerRef.current.updateGeometries === 'function') {
+      userMarkerLayerRef.current.updateGeometries(geometries)
       return
     }
 
@@ -2635,26 +5371,20 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           src: createSvgDataUrl(userLocationSvg())
         })
       },
-      geometries: [
-        {
-          id: 'simulated-user',
-          styleId: 'user',
-          position: toTMapLatLng(simulatedPosition)
-        }
-      ]
+      geometries
     })
 
     return () => {
       userMarkerLayerRef.current?.setMap?.(null)
       userMarkerLayerRef.current = null
     }
-  }, [mapVisualReadyForOverlays, simulatedPosition])
+  }, [isInkCleanMode, mapVisualReadyForOverlays, simulatedPosition])
 
   useEffect(() => {
     landmarkHighlightLayerRef.current?.setMap?.(null)
     landmarkHighlightLayerRef.current = null
 
-    if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current || !activeLandmarkId) {
+    if (isInkCleanMode || !mapVisualReadyForOverlays || !window.TMap || !mapRef.current || !activeLandmarkId) {
       return
     }
 
@@ -2694,9 +5424,15 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       landmarkHighlightLayerRef.current?.setMap?.(null)
       landmarkHighlightLayerRef.current = null
     }
-  }, [activeLandmarkId, mapVisualReadyForOverlays])
+  }, [activeLandmarkId, isInkCleanMode, mapVisualReadyForOverlays])
 
   useEffect(() => {
+    if (isInkCleanMode) {
+      rerouteLayerRef.current?.setMap?.(null)
+      rerouteLayerRef.current = null
+      return
+    }
+
     if (!mapVisualReadyForOverlays || !window.TMap || !mapRef.current) {
       return
     }
@@ -2754,10 +5490,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       rerouteLayerRef.current?.setMap?.(null)
       rerouteLayerRef.current = null
     }
-  }, [mapVisualReadyForOverlays, reroutePlan])
+  }, [isInkCleanMode, mapVisualReadyForOverlays, reroutePlan])
 
   useEffect(() => {
-    clearGltfModels(gltfModelRefs.current)
+    layerManager.removeLayer('model_default_giant_buddha_beta', gltfModelRefs.current.get(defaultModelOverlay?.poiId ?? ''))
     gltfModelRefs.current = new Map()
 
     if (visualVariant.id === 'prototype-c') {
@@ -2803,6 +5539,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         rotation: defaultModelOverlay.rotation,
         scale: defaultModelOverlay.scale
       })
+      if (!layerManager.registerLayer('model_default_giant_buddha_beta', model, mapRef.current)) {
+        clearGltfModel(model)
+        setModelStatus('地图实例已切换，已取消旧模型加载')
+        return
+      }
       gltfModelRefs.current.set(defaultModelOverlay.poiId, model)
       setModelStatus('正在加载灵山大佛 GLB Beta')
 
@@ -2817,10 +5558,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
 
     return () => {
-      clearGltfModels(gltfModelRefs.current)
+      layerManager.removeLayer('model_default_giant_buddha_beta', gltfModelRefs.current.get(defaultModelOverlay.poiId))
       gltfModelRefs.current = new Map()
     }
-  }, [debugPerf, mapVisualReadyForOverlays, showModelBeta, visualVariant.id])
+  }, [debugPerf, layerManager, mapVisualReadyForOverlays, showModelBeta, visualVariant.id])
 
   const moveToStop = (nextIndex: number) => {
     stopActiveTour('manual')
@@ -2834,17 +5575,29 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
     setSelectedStopIndex(boundedIndex)
     setSimulatedPosition(location)
-    setRoutePathIndex(findNearestRoutePoint(location, demoRoutePath)?.nearestIndex ?? 0)
+    setRoutePathIndex(findNearestRoutePoint(location, currentRoutePath)?.nearestIndex ?? 0)
     setRerouteStatus('idle')
     setReroutePlan(null)
     setRerouteMessage('已回到主题路线')
     focusLandmarkCamera(stop.spotId, location)
   }
 
+  const moveToNextImmersiveStop = () => {
+    const nextIndex = Math.min(routeStops.length - 1, selectedStopIndex + 1)
+    const preloadStops = routeStops.slice(selectedStopIndex, Math.min(routeStops.length, selectedStopIndex + 3))
+    const preloadLandmarkIds = preloadStops
+      .map((stop) => resolveLandmarkInspectorIdFromRouteId(stop.spotId, landmarkModelOverlays))
+      .filter((id): id is string => Boolean(id))
+
+    preloadMap3DLandmarkAssets(preloadLandmarkIds)
+    setTourPreloadStopIds(preloadStops.map((stop) => stop.spotId))
+    moveToStop(nextIndex)
+  }
+
   const simulateForward = () => {
     stopActiveTour('manual')
-    const nextIndex = Math.min(demoRoutePath.length - 1, routePathIndex + progressStep)
-    const nextPosition = demoRoutePath[nextIndex]
+    const nextIndex = Math.min(currentRoutePath.length - 1, routePathIndex + currentProgressStep)
+    const nextPosition = currentRoutePath[nextIndex]
     const inferredStopIndex = getNearestStopIndex(nextPosition, routeStops)
 
     setRoutePathIndex(nextIndex)
@@ -2858,7 +5611,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
 
   const returnToRoute = () => {
     stopActiveTour('manual')
-    const nearest = nearestRoutePoint?.nearestPoint ?? demoRoutePath[routePathIndex] ?? initialPosition
+    const nearest = nearestRoutePoint?.nearestPoint ?? currentRoutePath[routePathIndex] ?? currentInitialPosition
     const nearestIndex = nearestRoutePoint?.nearestIndex ?? routePathIndex
 
     setRoutePathIndex(nearestIndex)
@@ -2869,6 +5622,45 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setRerouteMessage('已回到主路线')
     focusMap(nearest, 18, routeStops[getNearestStopIndex(nearest, routeStops)]?.spotId)
   }
+
+  const switchScenicRoute = (routeId: string) => {
+    if (routeId === currentRouteId) {
+      return
+    }
+
+    const nextRouteConfig = getScenicRouteConfig(routeId)
+    const nextRoutePath = nextRouteConfig.geometry?.length
+      ? nextRouteConfig.geometry
+      : getRouteStopLocations(nextRouteConfig.guideRoute)
+    const nextInitialPosition = getRouteInitialPosition(nextRouteConfig, nextRoutePath)
+
+    stopActiveTour('replaced')
+    resetTourRouteProgressOverlay(false)
+    clearActiveLandmarkHighlight()
+    setCurrentRouteId(nextRouteConfig.id)
+    setRouteSwitchCount((count) => count + 1)
+    setSelectedStopIndex(0)
+    setSimulatedPosition(nextInitialPosition)
+    setRoutePathIndex(findNearestRoutePoint(nextInitialPosition, nextRoutePath)?.nearestIndex ?? 0)
+    setRerouteStatus('idle')
+    setReroutePlan(null)
+    setRerouteMessage(`已切换至${nextRouteConfig.name}`)
+    setActiveCameraMode('routeOverview')
+    setActiveTourStepId(undefined)
+    setPageMessage(`${nextRouteConfig.name}已就绪`)
+    focusRouteOverview(nextRoutePath, nextInitialPosition, nextRouteConfig.id)
+  }
+
+  useEffect(() => {
+    if (effectiveGuideState.viewMode !== 'route' || !effectiveGuideState.routeId) {
+      return
+    }
+
+    const nextRouteId = resolveScenicRouteId(effectiveGuideState.routeId)
+    if (nextRouteId !== currentRouteId) {
+      switchScenicRoute(nextRouteId)
+    }
+  }, [currentRouteId, effectiveGuideState.routeId, effectiveGuideState.viewMode])
 
   const simulateDeviation = async () => {
     stopActiveTour('manual')
@@ -2908,17 +5700,28 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
   }
 
+  function getRouteOverviewPreset(routePath: LatLngPoint[]) {
+    return buildRouteOverviewCameraPreset(routePath, mapElementRef.current, {
+      minZoom: mapMinZoom,
+      maxZoom: mapMaxZoom,
+      presentation: scenicMapPresentation
+    })
+  }
+
   const applyGuideCamera = (mode: GuideCameraMode) => {
     stopActiveTour('manual')
-    const preset = MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
+    if (mode === 'routeOverview') {
+      focusRouteOverview()
+      return
+    }
+    const preset =
+      MAP_3D_GUIDE_CAMERA_PRESETS[mode] ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate
     const target =
       mode === 'overviewEstate'
-        ? routeCenter
+        ? currentRouteCenter
         : mode === 'axisCruise'
-          ? axisCruiseTarget
-          : mode === 'routeOverview'
-            ? routeCenter
-            : mode === 'closeInspect'
+          ? currentAxisCruiseTarget
+          : mode === 'closeInspect'
               ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
               : mode === 'landmarkFocus'
                 ? getRouteStopLocation(selectedStopId) ?? getRouteStopLocation(nextStop.nextStopId) ?? simulatedPosition
@@ -2933,6 +5736,287 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       targetPoiId,
       twoStage: mode === 'landmarkFocus' || mode === 'closeInspect'
     })
+  }
+
+  function applyRouteCameraIntent(
+    source: RouteCameraIntentSource,
+    routeId: string,
+    target: LatLngPoint,
+    preset: Map3DCameraPreset
+  ) {
+    const map = mapRef.current
+    if (!map || !window.TMap) {
+      return
+    }
+
+    const generation = ++routeCameraIntentGenerationRef.current
+    const previousIntent = routeCameraIntentRef.current
+    const zoomConstraints = getRouteCameraZoomConstraints(map)
+    const rawTargetZoom = preset.zoom
+    const effectiveTargetZoom =
+      source === 'route-overview'
+        ? clampNumber(rawTargetZoom, zoomConstraints.minZoom, zoomConstraints.maxZoom)
+        : rawTargetZoom
+    const targetCamera: CameraState = {
+      center: target,
+      zoom: effectiveTargetZoom,
+      pitch: preset.pitch,
+      rotation: preset.rotation
+    }
+    const intent: RouteCameraIntentSnapshot = {
+      generation,
+      source,
+      routeId,
+      target: targetCamera,
+      rawTargetZoom,
+      effectiveTargetZoom,
+      configuredMinZoom: zoomConstraints.minZoom,
+      configuredMaxZoom: zoomConstraints.maxZoom,
+      actualZoom: null,
+      zoomCorrectionApplied: false,
+      zoomCorrectionMethod: null,
+      zoomCorrectionGeneration: null,
+      lastZoomWriter: null,
+      phase: 'applying-full-camera',
+      status: 'applying',
+      lastCompletedGeneration: previousIntent.lastCompletedGeneration
+    }
+    let intentSnapshot: RouteCameraIntentSnapshot = intent
+    updateRouteCameraIntentSnapshot(intentSnapshot)
+    routeCameraProgrammaticMoveRef.current = true
+    // Cancels any delayed second-stage callback left by an earlier generic
+    // landmark/overview camera command before this route intent takes over.
+    cameraSequenceRef.current += 1
+    stopActiveTour('manual')
+
+    try {
+      map.stop?.()
+    } catch {
+      // Tencent GL does not expose stop() in every WebView build; generation
+      // checks below remain the authoritative cancellation mechanism.
+    }
+
+    const isCurrentIntent = () =>
+      routeCameraIntentGenerationRef.current === generation && isMapInstanceCurrent(map)
+    const complete = async () => {
+      try {
+        const cameraTarget = {
+          center: new window.TMap.LatLng(target.lat, target.lng),
+          zoom: effectiveTargetZoom,
+          pitch: preset.pitch,
+          rotation: preset.rotation
+        }
+        if (typeof map.easeTo === 'function') {
+          map.easeTo(cameraTarget, { duration: preset.durationMs })
+        } else {
+          map.setCenter?.(cameraTarget.center)
+          map.setZoom?.(cameraTarget.zoom)
+          map.setPitch?.(cameraTarget.pitch)
+          map.setRotation?.(cameraTarget.rotation)
+        }
+        intentSnapshot = {
+          ...intentSnapshot,
+          phase: 'verifying-camera',
+          lastZoomWriter: {
+            source,
+            generation,
+            value: effectiveTargetZoom
+          }
+        }
+        updateRouteCameraIntentSnapshot(intentSnapshot)
+
+        let result = await waitForRouteCameraIntentTarget({
+          map,
+          target: targetCamera,
+          requireOrientation: scenicMapPresentation === 'scenic3d',
+          requireZoom: source !== 'route-overview',
+          isCurrent: isCurrentIntent,
+          timeoutMs: Math.max(1600, preset.durationMs + 900)
+        })
+        if (!isCurrentIntent()) {
+          return
+        }
+        if (!result.matched) {
+          routeCameraProgrammaticMoveRef.current = false
+          updateRouteCameraIntentSnapshot({
+            ...intentSnapshot,
+            phase: 'failed',
+            status: 'failed',
+            actualZoom: result.camera.zoom,
+            lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+            lastFailure: `相机未到达目标：${describeRouteCameraMismatch(result.camera, targetCamera)}`
+          })
+          return
+        }
+
+        if (
+          source === 'route-overview' &&
+          (result.camera.zoom === null || Math.abs(result.camera.zoom - effectiveTargetZoom) > 0.1)
+        ) {
+          if (!isCurrentIntent()) {
+            return
+          }
+          let correctionMethod: 'zoomTo' | 'setZoom' = 'setZoom'
+          try {
+            // A completed easeTo can retain the previous close-up zoom in QQ
+            // WebView. Stop it before this intent owns the explicit zoom fix.
+            map.stop?.()
+            if (typeof map.zoomTo === 'function') {
+              map.zoomTo(effectiveTargetZoom, { duration: 200 })
+              correctionMethod = 'zoomTo'
+            } else {
+              map.setZoom?.(effectiveTargetZoom)
+            }
+          } catch {
+            correctionMethod = 'setZoom'
+            map.setZoom?.(effectiveTargetZoom)
+          }
+          intentSnapshot = {
+            ...intentSnapshot,
+            phase: 'correcting-zoom',
+            actualZoom: result.camera.zoom,
+            zoomCorrectionApplied: true,
+            zoomCorrectionMethod: correctionMethod,
+            zoomCorrectionGeneration: generation,
+            lastZoomWriter: {
+              source,
+              generation,
+              value: effectiveTargetZoom
+            }
+          }
+          updateRouteCameraIntentSnapshot(intentSnapshot)
+          intentSnapshot = { ...intentSnapshot, phase: 'verifying-final' }
+          updateRouteCameraIntentSnapshot(intentSnapshot)
+          if (correctionMethod === 'zoomTo') {
+            result = await waitForRouteCameraIntentTarget({
+              map,
+              target: targetCamera,
+              requireOrientation: scenicMapPresentation === 'scenic3d',
+              requireZoom: true,
+              isCurrent: isCurrentIntent,
+              timeoutMs: 420
+            })
+            if (!isCurrentIntent()) {
+              return
+            }
+            if (!result.matched) {
+              // Some QQ WebView builds accept zoomTo without applying it. A
+              // single direct setZoom is the terminal fallback for this intent.
+              map.setZoom?.(effectiveTargetZoom)
+              correctionMethod = 'setZoom'
+              intentSnapshot = {
+                ...intentSnapshot,
+                actualZoom: result.camera.zoom,
+                zoomCorrectionMethod: correctionMethod,
+                lastZoomWriter: {
+                  source,
+                  generation,
+                  value: effectiveTargetZoom
+                }
+              }
+              updateRouteCameraIntentSnapshot(intentSnapshot)
+            }
+          }
+          if (!result.matched || correctionMethod === 'setZoom') {
+            result = await waitForRouteCameraIntentTarget({
+              map,
+              target: targetCamera,
+              requireOrientation: scenicMapPresentation === 'scenic3d',
+              requireZoom: true,
+              isCurrent: isCurrentIntent,
+              timeoutMs: 900
+            })
+          }
+          if (!isCurrentIntent()) {
+            return
+          }
+          if (!result.matched) {
+            routeCameraProgrammaticMoveRef.current = false
+            updateRouteCameraIntentSnapshot({
+              ...intentSnapshot,
+              phase: 'failed',
+              status: 'failed',
+              actualZoom: result.camera.zoom,
+              lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+              lastFailure: `缩放修正后未到达目标：${describeRouteCameraMismatch(result.camera, targetCamera)}`
+            })
+            return
+          }
+        }
+
+        routeCameraProgrammaticMoveRef.current = false
+        const actualCamera = cameraStateFromActual(result.camera, targetCamera, scenicMapPresentation)
+        if (scenicMapPresentation === 'scenic3d' && result.camera.viewMode === '3D') {
+          camera3DStateRef.current = actualCamera
+          lastMeaningful3DCameraRef.current = actualCamera
+          cameraPersistenceDiagnosticsRef.current.lastPersistReason = `route-camera-intent:${source}:${generation}`
+        } else if (scenicMapPresentation === 'ink2d') {
+          camera2DStateRef.current = actualCamera
+        }
+        currentZoomRef.current = actualCamera.zoom
+        setMapInteractionSnapshot((current) => ({ ...current, currentZoom: actualCamera.zoom }))
+        setMapBoundsSnapshot({ center: actualCamera.center, zoom: actualCamera.zoom })
+        updateRouteCameraIntentSnapshot({
+          ...intentSnapshot,
+          phase: 'completed',
+          status: 'completed',
+          actualZoom: result.camera.zoom,
+          lastCompletedGeneration: generation
+        })
+        perfRecorder.recordCameraEvent({
+          cameraPreset: preset.id,
+          targetPoiId: source === 'route-current' ? currentRouteConfig.stops[effectiveRouteStopIndex]?.spotId : undefined,
+          durationMs: preset.durationMs,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString()
+        })
+      } catch (error) {
+        if (!isCurrentIntent()) {
+          return
+        }
+        routeCameraProgrammaticMoveRef.current = false
+        updateRouteCameraIntentSnapshot({
+          ...intentSnapshot,
+          phase: 'failed',
+          status: 'failed',
+          lastCompletedGeneration: routeCameraIntentRef.current.lastCompletedGeneration,
+          lastFailure: error instanceof Error ? error.message : '路线相机命令失败'
+        })
+      }
+    }
+
+    void complete()
+  }
+
+  const focusRouteOverview = (
+    path = currentRoutePath,
+    fallback = currentInitialPosition,
+    routeId = currentRouteConfig.id
+  ) => {
+    const routePath = path.length >= 2 ? path : getRouteStopLocations(currentGuideRoute)
+    setActiveCameraMode('routeOverview')
+    applyRouteCameraIntent(
+      'route-overview',
+      routeId,
+      getRouteOverviewTarget(routePath) ?? fallback,
+      getRouteOverviewPreset(routePath)
+    )
+  }
+
+  const focusRouteCurrent = (routeId = currentRouteConfig.id, stopIndex = effectiveRouteStopIndex) => {
+    const route = getScenicRouteConfig(routeId)
+    const stop = route.stops[clampRouteStopIndex(stopIndex, route.stops.length)]
+    const target = stop?.location ?? getRouteStopLocation(stop?.spotId)
+    if (!target) {
+      return
+    }
+    setActiveCameraMode('landmarkFocus')
+    applyRouteCameraIntent(
+      'route-current',
+      route.id,
+      target,
+      isInk2DPresentation ? getInk2DCameraPreset(MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus) : MAP_3D_GUIDE_CAMERA_PRESETS.landmarkFocus
+    )
   }
 
   const focusMap = (position: LatLngPoint, zoom?: number, targetPoiId?: string) => {
@@ -2967,15 +6051,17 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
+    const effectivePreset = isInk2DPresentation ? getInk2DCameraPreset(preset) : preset
+
     flyMap3DCamera({
       map,
       TMap: window.TMap,
       target: position,
-      preset,
+      preset: effectivePreset,
       sequenceRef: cameraSequenceRef,
       targetPoiId: options.targetPoiId,
       targetLandmarkId: options.targetLandmarkId,
-      twoStage: options.twoStage,
+      twoStage: isInk2DPresentation ? false : options.twoStage,
       onComplete: (event) => perfRecorder.recordCameraEvent(event)
     })
   }
@@ -2991,12 +6077,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   function stopActiveTour(reason: Map3DTourStopReason = 'manual') {
     const hadPlayback = Boolean(tourPlaybackRef.current)
     stopBuddhaRealmTour(tourPlaybackRef, reason)
-    stopRoutePreview(tourPlaybackRef, reason)
 
     if (hadPlayback) {
       setTourMode('idle')
       setActiveTourStepId(undefined)
-      setRoutePreviewProgressIndex(null)
       clearActiveLandmarkHighlight()
     }
   }
@@ -3024,7 +6108,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       if (buddhaTourRouteProgressRef.current.isActive) {
         resetTourRouteProgressOverlay(true)
       }
-      setRoutePreviewProgressIndex(null)
       clearActiveLandmarkHighlight()
       perfRecorder.recordMapVisualEvent({
         type: 'mapInteractionStarted',
@@ -3121,7 +6204,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   function clampScenicCameraBounds(reason: string) {
     const map = mapRef.current
 
-    if (!map || !window.TMap) {
+    if (!map || !window.TMap || !mapBoundsEnabled || tourMode === 'buddhaRealmTour' || routeCameraProgrammaticMoveRef.current) {
       return
     }
 
@@ -3129,9 +6212,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const currentCenter = readCurrentMapCenter()
     const clampedZoom =
       requestedZoom !== undefined
-        ? clampNumber(requestedZoom, SCENIC_CAMERA_BOUNDS.minZoom, SCENIC_CAMERA_BOUNDS.maxZoom)
+        ? clampNumber(requestedZoom, mapMinZoom, mapMaxZoom)
         : undefined
-    const clampedCenter = currentCenter ? clampScenicCenter(currentCenter) : undefined
+    const clampedCenter = currentCenter ? clampPointToBounds(currentCenter, getScaledInkMapBounds(INK_MAP_CENTER_LIMIT_RATIO)) : undefined
     const zoomChanged = requestedZoom !== undefined && clampedZoom !== undefined && Math.abs(requestedZoom - clampedZoom) > 0.01
     const centerChanged = currentCenter && clampedCenter && haversineDistanceMeters(currentCenter, clampedCenter) > 2
 
@@ -3150,12 +6233,46 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       }))
     }
 
+    if (nextCenter) {
+      setMapBoundsSnapshot({
+        center: nextCenter,
+        zoom: nextZoom ?? requestedZoom ?? currentZoomRef.current
+      })
+    }
+
+    const correctionLabel =
+      centerChanged && zoomChanged
+        ? `${reason}: center+zoom`
+        : centerChanged
+          ? `${reason}: center`
+          : `${reason}: zoom`
+
     perfRecorder.recordMapVisualEvent({
       type: 'zoomClamped',
       currentZoom: nextZoom,
       requestedZoom,
       clampedZoom: nextZoom,
-      reason
+      reason,
+      mapBoundsEnabled,
+      mapBoundsDisabledReason,
+      mapCenterLimitBounds: formatInkMapBoundsForPerf(getScaledInkMapBounds(INK_MAP_CENTER_LIMIT_RATIO)),
+      mapVisualBufferBounds: formatInkMapBoundsForPerf(getScaledInkMapBounds(INK_MAP_VISUAL_BUFFER_RATIO)),
+      currentMapCenter: nextCenter ? formatLatLngForPerf(nextCenter) : undefined,
+      mapMinZoom,
+      mapMaxZoom,
+      zoomLimited: zoomChanged,
+      edgeMistLevel: edgeMistState.level,
+      edgeMistReason: edgeMistState.reason,
+      edgeMistStrength: edgeMistState.strength,
+      nearInkBoundary: edgeMistState.nearInkBoundary,
+      distanceToInkBoundary: edgeMistState.distanceToInkBoundary,
+      clearMaskMode: clearMaskState.mode,
+      clearMaskSize: clearMaskState.size,
+      clearMaskCenter: clearMaskState.center,
+      clearMaskShape: clearMaskState.shape,
+      cameraPresetTightened: true,
+      lastBoundsCorrection: correctionLabel,
+      noMapBoundsDebugOverride
     })
 
     if (typeof map.easeTo === 'function' && nextCenter) {
@@ -3192,7 +6309,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }) {
     const isCompleted = reason === 'completed'
     perfRecorder.recordTourEvent({
-      type: mode === 'routePreview' ? 'routePreviewStopped' : isCompleted ? 'tourCompleted' : 'tourStopped',
+      type: isCompleted ? 'tourCompleted' : 'tourStopped',
       mode,
       reason,
       activeLandmarkId
@@ -3202,13 +6319,8 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     }
     setTourMode('idle')
     setActiveTourStepId(undefined)
-    setRoutePreviewProgressIndex(null)
+    setTourPreloadStopIds([])
     clearActiveLandmarkHighlight()
-
-    if (mode === 'routePreview' && isCompleted) {
-      setActiveCameraMode('routeOverview')
-      moveMapCamera(routeCenter, MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview)
-    }
   }
 
   function handleBuddhaRealmTimelineFrame(frame: Map3DRouteTourFrame, elapsedMs: number) {
@@ -3230,6 +6342,42 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       setTourMode('buddhaRealmTour')
       setActiveCameraMode(activeId ? 'landmarkFocus' : 'guideFollow')
       setActiveTourStepId(activeId)
+      const frameRouteIndex = clampNumber(
+        frame.routeProgressIndex ?? Math.round(frame.progress * Math.max(0, currentRoutePath.length - 1)),
+        0,
+        Math.max(0, currentRoutePath.length - 1)
+      )
+      const routePoint = currentRoutePath[frameRouteIndex] ?? currentRoutePath[0]
+
+      if (routePoint) {
+        const preloadStopCount = frame.progress < BUDDHA_TOUR_EARLY_PRELOAD_PROGRESS ? 2 : 3
+        const nextPreloadStopIds = getTourPreloadStopIdsByProgress({
+          progress: frame.progress,
+          routeStops,
+          routePath: currentRoutePath,
+          cumulative: currentRouteCumulativeDistances,
+          count: preloadStopCount
+        })
+        const nextPreloadLandmarkIds = nextPreloadStopIds
+          .map((id) => resolveLandmarkInspectorIdFromRouteId(id, landmarkModelOverlays))
+          .filter((id): id is string => Boolean(id))
+
+        preloadMap3DLandmarkAssets(nextPreloadLandmarkIds)
+
+        setTourPreloadStopIds((current) =>
+          areStringArraysEqual(current, nextPreloadStopIds) ? current : nextPreloadStopIds
+        )
+
+        const nextStopIndex = getNearestStopIndex(routePoint, routeStops)
+
+        if (isMobileViewport) {
+          updateSimulatedUserMarkerPosition(routePoint)
+        } else {
+          setRoutePathIndex(frameRouteIndex)
+          setSimulatedPosition(routePoint)
+          setSelectedStopIndex(nextStopIndex)
+        }
+      }
 
       if (activeId) {
         setActiveLandmarkHighlight(activeId)
@@ -3240,6 +6388,20 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       buddhaTourUiFrameRef.current = now
     }
     updateTourRouteProgressOverlay(frame.progress)
+    sceneWindowManager.update({
+      cameraPosition: {
+        lat: frame.lat,
+        lng: frame.lng
+      },
+      progress: frame.progress
+    })
+    sceneStateManager.update({
+      cameraPosition: {
+        lat: frame.lat,
+        lng: frame.lng
+      },
+      progress: frame.progress
+    })
 
     const progressBucket = Math.floor(frame.progress * 10)
 
@@ -3259,6 +6421,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         smoothingEnabled: frame.smoothingEnabled,
         lookAheadProgress: frame.lookAheadProgress,
         lateralOffsetMeters: frame.lateralOffsetMeters,
+        tourCameraTightenMode: frame.tourCameraTightenMode,
+        tourCameraTightenStrength: frame.tourCameraTightenStrength,
+        tourProfile: isMobileViewport ? 'mobile-stable' : 'desktop-cinematic',
+        tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+        tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+        tourCameraSmoothed: true,
+        tourBoundsClampPaused: true,
         averageFrameMs: frameStats.averageFrameMs ? roundNumber(frameStats.averageFrameMs, 1) : undefined,
         estimatedFps: frameStats.averageFrameMs ? roundNumber(1000 / frameStats.averageFrameMs, 1) : undefined
       })
@@ -3266,6 +6435,11 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
   }
 
   function startBuddhaRealmTourPlayback() {
+    if (isInk2DPresentation) {
+      moveToNextImmersiveStop()
+      return
+    }
+
     if (tourMode === 'buddhaRealmTour') {
       stopActiveTour('userStop')
       return
@@ -3275,18 +6449,32 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    const timelineTour = buildBuddhaRealmTimelineTourConfig()
+    const timelineTour = buildBuddhaRealmTimelineTourConfig(currentRoutePath, routeStops)
     stopActiveTour('replaced')
     resetTourRouteProgressOverlay(false)
+    const initialPreloadStopIds = getTourPreloadStopIdsByProgress({
+      progress: 0,
+      routeStops,
+      routePath: currentRoutePath,
+      cumulative: currentRouteCumulativeDistances,
+      count: 2
+    })
+    const initialPreloadLandmarkIds = initialPreloadStopIds
+      .map((id) => resolveLandmarkInspectorIdFromRouteId(id, landmarkModelOverlays))
+      .filter((id): id is string => Boolean(id))
+
+    preloadMap3DLandmarkAssets(initialPreloadLandmarkIds)
     setTourMode('buddhaRealmTour')
     setActiveTourStepId(undefined)
-    setRoutePreviewProgressIndex(null)
+    setTourPreloadStopIds(initialPreloadStopIds)
     clearActiveLandmarkHighlight()
     buddhaTourUiFrameRef.current = 0
     buddhaTourProgressBucketRef.current = -1
     buddhaTourFrameStatsRef.current = { lastAt: 0, averageFrameMs: 0 }
 
     if (timelineTour) {
+      const tourProfile = isMobileViewport ? 'mobile-stable' : 'desktop-cinematic'
+
       startBuddhaRealmTimelineTour({
         map: mapRef.current,
         TMap: window.TMap,
@@ -3294,8 +6482,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         playbackRef: tourPlaybackRef,
         durationMs: timelineTour.durationMs,
         pauses: timelineTour.pauses,
+        minFrameMs: isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs,
         getSpeedMultiplier: (progress) => getBuddhaRealmTimelineSpeed(progress, timelineTour.pauses),
-        getFrame: createBuddhaRealmTimelineFrameSampler(timelineTour),
+        getFrame: createBuddhaRealmTimelineFrameSampler(timelineTour, tourProfile),
         onStarted: ({ durationMs, pauseCount }) => {
           startTourRouteProgressOverlay()
           setActiveCameraMode('guideFollow')
@@ -3306,7 +6495,12 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             durationMs,
             smoothingEnabled: true,
             lookAheadProgress: BUDDHA_REALM_TOUR_CONFIG.lookAheadProgress.cruise,
-            lateralOffsetMeters: BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise
+            lateralOffsetMeters: BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.cruise,
+            tourProfile,
+            tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+            tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+            tourCameraSmoothed: true,
+            tourBoundsClampPaused: true
           })
         },
         onFrame: ({ frame, elapsedMs }) => handleBuddhaRealmTimelineFrame(frame, elapsedMs),
@@ -3331,6 +6525,13 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             smoothingEnabled: frame.smoothingEnabled,
             lookAheadProgress: frame.lookAheadProgress,
             lateralOffsetMeters: frame.lateralOffsetMeters,
+            tourCameraTightenMode: frame.tourCameraTightenMode,
+            tourCameraTightenStrength: frame.tourCameraTightenStrength,
+            tourProfile: isMobileViewport ? 'mobile-stable' : 'desktop-cinematic',
+            tourCameraUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : BUDDHA_REALM_TOUR_CONFIG.minFrameMs), 1),
+            tourMarkerUpdateFps: roundNumber(1000 / (isMobileViewport ? MOBILE_BUDDHA_TOUR_CAMERA_FRAME_MS : 34), 1),
+            tourCameraSmoothed: true,
+            tourBoundsClampPaused: true,
             averageFrameMs: buddhaTourFrameStatsRef.current.averageFrameMs
               ? roundNumber(buddhaTourFrameStatsRef.current.averageFrameMs, 1)
               : undefined,
@@ -3344,7 +6545,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       return
     }
 
-    const steps = buildBuddhaRealmPoiFallbackSteps()
+    const steps = buildBuddhaRealmPoiFallbackSteps(routeStops, currentRouteCenter)
 
     startBuddhaRealmTour({
       map: mapRef.current,
@@ -3361,10 +6562,22 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
       },
       onStep: ({ step, stepIndex, stepCount, preset }) => {
         const activeId = step.activeLandmarkId ?? step.nearbyLandmarkId ?? step.targetLandmarkId
+        const stepRouteIndex = step.routeProgressIndex ?? Math.round((step.progress ?? 0) * (currentRoutePath.length - 1))
+        const stepStopIndex = getNearestStopIndex(step.target, routeStops)
         setTourMode('buddhaRealmTour')
         setActiveTourStepId(activeId)
         setActiveCameraMode(preset.id)
-        setRoutePreviewProgressIndex(step.routeProgressIndex ?? Math.round((step.progress ?? 0) * (demoRoutePath.length - 1)))
+        setRoutePathIndex(stepRouteIndex)
+        setSelectedStopIndex(stepStopIndex)
+        setSimulatedPosition(currentRoutePath[stepRouteIndex] ?? step.target)
+        sceneWindowManager.update({
+          cameraPosition: step.target,
+          progress: step.progress
+        })
+        sceneStateManager.update({
+          cameraPosition: step.target,
+          progress: step.progress
+        })
         if (activeId) {
           setActiveLandmarkHighlight(activeId)
         } else {
@@ -3383,63 +6596,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           targetLat: step.target.lat,
           targetLng: step.target.lng,
           bearing: step.bearing,
-          cameraPreset: preset.id,
-          targetPoiId: step.targetPoiId,
-          targetLandmarkId: step.targetLandmarkId,
-          durationMs: preset.durationMs
-        })
-      },
-      onCameraComplete: (event) => perfRecorder.recordCameraEvent(event),
-      onStopped: handleTourStopped
-    })
-  }
-
-  function startRoutePreviewPlayback() {
-    if (tourMode === 'routePreview') {
-      stopActiveTour('manual')
-      return
-    }
-
-    if (!canUseMapInteractions || !mapRef.current || !window.TMap) {
-      return
-    }
-
-    const steps = buildRoutePreviewSteps(routeStops, selectedStopIndex)
-    stopActiveTour('replaced')
-    resetTourRouteProgressOverlay(false)
-    setTourMode('routePreview')
-    setActiveTourStepId(undefined)
-    setRoutePreviewProgressIndex(0)
-    clearActiveLandmarkHighlight()
-
-    startRoutePreview({
-      map: mapRef.current,
-      TMap: window.TMap,
-      steps,
-      sequenceRef: cameraSequenceRef,
-      playbackRef: tourPlaybackRef,
-      onStarted: ({ stepCount }) => {
-        perfRecorder.recordTourEvent({
-          type: 'routePreviewStarted',
-          mode: 'routePreview',
-          stepCount
-        })
-      },
-      onStep: ({ step, stepIndex, stepCount, preset }) => {
-        const activeId = step.activeLandmarkId ?? step.targetLandmarkId ?? step.targetPoiId ?? step.id
-        setTourMode('routePreview')
-        setActiveTourStepId(activeId)
-        setActiveCameraMode(preset.id)
-        setActiveLandmarkHighlight(activeId)
-        setRoutePreviewProgressIndex(step.routeProgressIndex ?? demoRoutePath.length - 1)
-        perfRecorder.recordTourEvent({
-          type: 'routePreviewStep',
-          mode: 'routePreview',
-          stepId: step.id,
-          stepLabel: step.label,
-          stepIndex,
-          stepCount,
-          activeLandmarkId: activeId,
           cameraPreset: preset.id,
           targetPoiId: step.targetPoiId,
           targetLandmarkId: step.targetLandmarkId,
@@ -3489,7 +6645,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     const summary = [
       `debugDecor=${debugDecor ? '1' : '0'}`,
       `decorCount=${decorOverlays.length}`,
-      `routePathIndex=${routePathIndex}/${Math.max(0, demoRoutePath.length - 1)}`,
+      `routePathIndex=${routePathIndex}/${Math.max(0, currentRoutePath.length - 1)}`,
       `selectedDecor=${selectedDecor?.id ?? 'none'}`,
       `visibleDecor=${buildVisibleDecorGeometries(decorOverlays, {
         routePathIndex,
@@ -3503,802 +6659,319 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
     setDecorCopyStatus(ok ? '已复制调试摘要' : '复制失败，请查看浏览器权限')
   }
 
-  const updateSelectedGardenAsset = (patch: Partial<LingshanMap3DGardenAsset>) => {
-    if (!selectedGardenAsset) {
-      return
-    }
-
-    setGardenAssets((items) =>
-      items.map((asset) =>
-        asset.id === selectedGardenAsset.id
-          ? {
-              ...asset,
-              ...patch,
-              location: patch.location ?? asset.location
-            }
-          : asset
-      )
-    )
+  const copyInkBoundsConfig = async () => {
+    const ok = await copyText(buildInkBoundsExportSnippet(inkBoundsDraft))
+    setInkBoundsCopyStatus(ok ? '已复制四角经纬度配置' : '复制失败，请查看浏览器权限')
   }
 
-  const saveGardenAssetEditDraft = () => {
-    if (!selectedGardenAssetDraft) {
-      setGardenCopyStatus('请先选择一个资产点')
-      return
-    }
-
-    const nextAssets = gardenAssets.map((asset) =>
-      asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-    )
-    const nextEditorState = {
-      ...gardenEditorState,
-      previewAssets: gardenEditorState.previewAssets.map((asset) =>
-        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-      ),
-      appliedAssets: gardenEditorState.appliedAssets.map((asset) =>
-        asset.id === selectedGardenAssetDraft.id ? cloneGardenAsset(selectedGardenAssetDraft) : asset
-      )
-    }
-
-    setGardenAssets(nextAssets)
-    setGardenEditorState(nextEditorState)
-    setGardenAssetEditDraft(cloneGardenAsset(selectedGardenAssetDraft))
-    persistGardenDraft(nextEditorState, nextAssets)
-    setGardenCopyStatus(`已保存当前资产修改：${selectedGardenAssetDraft.name}`)
+  const clearInkBoundsDraft = () => {
+    setInkBoundsDraft(createEmptyInkMapBoundsDraft())
+    setInkBoundsCopyStatus('已清空，请从 northwest 重新点击')
   }
 
-  const deleteSelectedGardenAsset = () => {
-    if (!selectedGardenAsset) {
-      setGardenCopyStatus('请先选择一个资产点')
-      return
-    }
-
-    if (!window.confirm(`确认删除资产点“${selectedGardenAsset.name}”？此操作会写入本地草稿。`)) {
-      return
-    }
-
-    const nextAssets = gardenAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
-    const nextEditorState = {
-      ...gardenEditorState,
-      previewAssets: gardenEditorState.previewAssets.filter((asset) => asset.id !== selectedGardenAsset.id),
-      appliedAssets: gardenEditorState.appliedAssets.filter((asset) => asset.id !== selectedGardenAsset.id)
-    }
-
-    setGardenAssets(nextAssets)
-    setGardenEditorState(nextEditorState)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    persistGardenDraft(nextEditorState, nextAssets)
-    setGardenCopyStatus(`已删除资产点：${selectedGardenAsset.name}`)
+  const prepareInkBaseScreenshot = () => {
+    setInkExportUiHidden(true)
   }
 
-  function loadCoreLandmarkReferences() {
-    coreLandmarkReferenceIds.forEach((id) => {
-      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
+  const mobilePanelToggleLabel = mobilePanelsCollapsed ? '展开' : '收起'
+  const mobilePanelSummary = `${currentStop?.name ?? '路线中段'} → ${nextStopPoi?.name ?? '路线终点'}`
+  const handleMobileGuideSummaryKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      setMobilePanelsCollapsed((collapsed) => !collapsed)
+    }
+  }
 
-      if (item) {
-        if (item.status !== 'loaded' && item.status !== 'loading') {
-          landmarkInspector.loadLandmark(id)
-        }
+  useEffect(() => {
+    if (!inkExportUiHidden) {
+      return
+    }
 
-        item.companions.forEach((companion) => {
-          if (!companion.enabled || companion.status === 'loaded' || companion.status === 'loading') {
-            return
-          }
-
-          landmarkInspector.loadCompanionModel(id, companion.id)
-        })
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setInkExportUiHidden(false)
       }
-    })
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      landmarkReferenceLoaded: true
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'landmarkReferenceLoaded',
-      landmarkReferenceLoaded: true,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已加载核心地标参照层')
-  }
-
-  function unloadCoreLandmarkReferences() {
-    coreLandmarkReferenceIds.forEach((id) => {
-      const item = landmarkInspector.items.find((inspectorItem) => inspectorItem.id === id)
-
-      item?.companions.forEach((companion) => landmarkInspector.unloadCompanionModel(id, companion.id))
-      landmarkInspector.unloadLandmark(id)
-    })
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      landmarkReferenceLoaded: false
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'landmarkReferenceLoaded',
-      landmarkReferenceLoaded: false,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已卸载核心地标参照层')
-  }
-
-  function updateTreeCandidateLab(patch: Partial<TreeCandidateLabState>) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      ...patch,
-      params:
-        patch.selectedCandidateType || patch.clusterMode
-          ? {
-              ...getTreeCandidateRecommendedParams(
-                patch.selectedCandidateType ?? current.selectedCandidateType,
-                patch.clusterMode ?? current.clusterMode
-              ),
-              randomSeed: current.params.randomSeed
-            }
-          : current.params
-    }))
-  }
-
-  function updateTreeCandidateLabParams(patch: Partial<TreeCandidateLabParams>) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      params: {
-        ...current.params,
-        ...patch
-      }
-    }))
-  }
-
-  function setTreeCandidateClusterMode(mode: TreeCandidateClusterMode) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      clusterMode: mode,
-      params: {
-        ...getTreeCandidateRecommendedParams(current.selectedCandidateType, mode),
-        randomSeed: current.params.randomSeed
-      }
-    }))
-  }
-
-  function setDefaultGardenHidden(hidden: boolean) {
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      defaultGardenHidden: hidden
-    }))
-    perfRecorder.recordMapVisualEvent({
-      type: 'defaultGardenHidden',
-      defaultGardenHidden: hidden,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: hidden ? 'blank-lab' : 'default-garden-visible',
-      liveDefaultGardenOverlayCount: hidden ? 0 : gardenAssets.filter((asset) => asset.visible).length,
-      liveTestTreeOverlayCount,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(hidden ? `已隐藏默认 ${gardenAssets.length} 个树群，进入空白园林试验场` : '已显示默认树群作为参照')
-  }
-
-  function setGardenAssetSource(mode: GardenAssetSourceMode) {
-    const nextAssets = mode === 'legacy' ? getLegacyMap3DGardenAssets() : getDefaultMap3DGardenAssets()
-    setGardenAssetSourceMode(mode)
-    setGardenAssets(nextAssets)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenFilters(defaultGardenFilters)
-    perfRecorder.recordMapVisualEvent({
-      type: 'gardenAssetSourceChanged',
-      defaultGardenAssetCount: nextAssets.length,
-      liveDefaultGardenOverlayCount: treeCandidateLabState.defaultGardenHidden ? 0 : nextAssets.filter((asset) => asset.visible).length,
-      testTreeCount: treeCandidateLabState.testTrees.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible'
-    })
-    setGardenCopyStatus(mode === 'legacy' ? `已切换查看 legacy 旧树群 ${nextAssets.length} assets` : `已切换回新手动树群 ${nextAssets.length} assets`)
-  }
-
-  function startAddTreeCandidateCluster() {
-    setTreeCandidateLabClickMode('addCluster')
-    setGardenEditorMode('inspect')
-    setGardenDraftPolygon(null)
-    setGardenCopyStatus(`点击地图添加 ${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
-  }
-
-  function startCompareTreeCandidates() {
-    setTreeCandidateLabClickMode('compareSet')
-    setGardenEditorMode('inspect')
-    setGardenDraftPolygon(null)
-    setGardenCopyStatus(`点击地图生成 ${treeCandidateTypesForCompare.length} 种候选对比：${treeCandidateClusterLabels[treeCandidateLabState.clusterMode]}`)
-  }
-
-  function addTreeCandidateCluster(center: LatLngPoint) {
-    const clusterId = `tree-lab-${treeCandidateLabState.selectedCandidateType}-${Date.now()}`
-    const assets = buildTreeCandidateClusterAssets({
-      center,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterId,
-      clusterIndex: treeCandidateLabState.testTrees.length,
-      clusterMode: treeCandidateLabState.clusterMode,
-      params: treeCandidateLabState.params
-    })
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: [...current.testTrees, ...assets],
-      params: {
-        ...current.params,
-        randomSeed: current.params.randomSeed + 17
-      }
-    }))
-    setTreeCandidateLabClickMode('addCluster')
-    setSelectedTreeCandidateId(assets[0]?.id ?? '')
-    perfRecorder.recordMapVisualEvent({
-      type: 'manualTreeAdded',
-      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      clusterGeneratedCount: assets.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已添加 ${assets.length} 棵测试树：${treeCandidateLabels[treeCandidateLabState.selectedCandidateType]}`)
-  }
-
-  function addTreeCandidateCompareSet(center: LatLngPoint) {
-    const spacing = getTreeCandidateCompareSpacing(treeCandidateLabState.clusterMode)
-    const startOffset = -((treeCandidateTypesForCompare.length - 1) * spacing) / 2
-    const assets = treeCandidateTypesForCompare.flatMap((candidateType, index) => {
-      const clusterCenter = offsetLatLngMeters(center, startOffset + index * spacing, 0)
-      const params = getTreeCandidateRecommendedParams(candidateType, treeCandidateLabState.clusterMode)
-      return buildTreeCandidateClusterAssets({
-        center: clusterCenter,
-        candidateType,
-        clusterId: `tree-lab-compare-${candidateType}-${Date.now()}-${index}`,
-        clusterIndex: treeCandidateLabState.testTrees.length + index * 100,
-        clusterMode: treeCandidateLabState.clusterMode,
-        params: {
-          ...params,
-          randomSeed: treeCandidateLabState.params.randomSeed + index * 101
-        }
-      })
-    })
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: [...current.testTrees, ...assets],
-      params: {
-        ...current.params,
-        randomSeed: current.params.randomSeed + 53
-      }
-    }))
-    setTreeCandidateLabClickMode('addCluster')
-    perfRecorder.recordMapVisualEvent({
-      type: 'treeCandidateCompareSetGenerated',
-      testTreeCount: treeCandidateLabState.testTrees.length + assets.length,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      clusterGeneratedCount: assets.length,
-      compareSetGenerated: true,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: treeCandidateLabState.testTrees.length + assets.length,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已生成 ${treeCandidateTypesForCompare.length} 种候选对比，共 ${assets.length} 棵测试树`)
-  }
-
-  function updateSelectedTreeCandidateAsset(patch: Partial<LingshanMap3DGardenAsset>) {
-    if (!selectedTreeCandidateId) {
-      return
     }
 
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.map((asset) =>
-        asset.id === selectedTreeCandidateId
-          ? {
-              ...asset,
-              ...patch,
-              location: patch.location ? { ...patch.location } : asset.location
-            }
-          : asset
-      )
-    }))
-  }
+    window.addEventListener('keydown', handleKeyDown)
 
-  function clearTreeCandidateTestTrees() {
-    if (treeCandidateLabState.testTrees.length && !window.confirm('确认清空全部测试树？')) {
-      return
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
     }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: []
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeCleared',
-      testTreeCount: 0,
-      candidateType: treeCandidateLabState.selectedCandidateType,
-      clusterMode: treeCandidateLabState.clusterMode,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: 0,
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已清空测试树')
-  }
-
-  function deleteSelectedTreeCandidate() {
-    if (!selectedTreeCandidateId) {
-      setGardenCopyStatus('请先选择一个测试树')
-      return
-    }
-
-    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    if (!selectedAsset || !window.confirm(`确认删除测试树“${selectedAsset.name}”？`)) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.filter((asset) => asset.id !== selectedTreeCandidateId)
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeDeleted',
-      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
-      candidateType: selectedAsset.kind,
-      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
-      clusterGeneratedCount: 1,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - 1),
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus('已删除选中测试树')
-  }
-
-  function deleteSelectedTreeCandidateCluster() {
-    if (!selectedTreeCandidateId) {
-      setGardenCopyStatus('请先选择一个测试树')
-      return
-    }
-
-    const selectedAsset = treeCandidateLabState.testTrees.find((asset) => asset.id === selectedTreeCandidateId)
-    const clusterId = parseTreeCandidateNote(selectedAsset?.note).clusterId
-
-    if (!selectedAsset || !clusterId) {
-      deleteSelectedTreeCandidate()
-      return
-    }
-
-    const clusterAssets = treeCandidateLabState.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId === clusterId)
-
-    if (!window.confirm(`确认删除测试树团“${clusterId}”？共 ${clusterAssets.length} 棵。`)) {
-      return
-    }
-
-    setTreeCandidateLabState((current) => ({
-      ...current,
-      testTrees: current.testTrees.filter((asset) => parseTreeCandidateNote(asset.note).clusterId !== clusterId)
-    }))
-    setSelectedTreeCandidateId('')
-    perfRecorder.recordMapVisualEvent({
-      type: 'testTreeDeleted',
-      testTreeCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
-      candidateType: selectedAsset.kind,
-      clusterMode: parseTreeCandidateNote(selectedAsset.note).clusterMode,
-      clusterGeneratedCount: clusterAssets.length,
-      gardenReferenceMode: treeCandidateLabState.defaultGardenHidden ? 'blank-lab' : 'default-garden-visible',
-      liveTestTreeOverlayCount: Math.max(0, treeCandidateLabState.testTrees.length - clusterAssets.length),
-      defaultGardenAssetCount: gardenAssets.length
-    })
-    setGardenCopyStatus(`已删除测试树团：${clusterAssets.length} 棵`)
-  }
-
-  async function copyTreeCandidateAssets() {
-    const exported = treeCandidateLabState.testTrees.map((asset) => ({
-      id: asset.id,
-      type: 'gardenAsset',
-      assetUrl: asset.assetUrl,
-      modelUrl: asset.assetUrl,
-      lng: asset.location.lng,
-      lat: asset.location.lat,
-      scale: asset.scale,
-      height: asset.height,
-      rotationY: asset.yaw,
-      source: 'treeCandidateLab',
-      clusterId: parseTreeCandidateNote(asset.note).clusterId,
-      clusterMode: parseTreeCandidateNote(asset.note).clusterMode,
-      candidateType: asset.kind
-    }))
-    const ok = await copyText(JSON.stringify(exported, null, 2))
-    setGardenCopyStatus(ok ? `已复制 ${exported.length} 个测试树 assets` : '复制失败，请查看浏览器权限')
-  }
-
-  function saveTreeCandidateDraft() {
-    window.localStorage.setItem(TREE_CANDIDATE_LAB_STORAGE_KEY, JSON.stringify(treeCandidateLabState))
-    setGardenCopyStatus('已保存 Tree Candidate Lab 草稿')
-  }
-
-  function clearTreeCandidateDraft() {
-    if (!window.confirm('确认清空 Tree Candidate Lab 草稿和测试树？')) {
-      return
-    }
-
-    window.localStorage.removeItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
-    setTreeCandidateLabState(buildDefaultTreeCandidateLabState())
-    setTreeCandidateLabClickMode('addCluster')
-    setSelectedTreeCandidateId('')
-    setGardenCopyStatus('已清空 Tree Candidate Lab 草稿')
-  }
-
-  const deleteSelectedEditorZone = () => {
-    if (!selectedEditorZone) {
-      setGardenCopyStatus('请先选择一个 vegetation zone')
-      return
-    }
-
-    if (!window.confirm(`确认删除放树区“${selectedEditorZone.name}”？`)) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      zones: current.zones.filter((zone) => zone.id !== selectedEditorZone.id)
-    }))
-    setSelectedEditorZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenCopyStatus(`已删除 vegetation zone：${selectedEditorZone.name}`)
-  }
-
-  const deleteSelectedKeepoutZone = () => {
-    if (!selectedKeepoutZone) {
-      setGardenCopyStatus('请先选择一个 keepout zone')
-      return
-    }
-
-    if (!window.confirm(`确认删除禁放区“${selectedKeepoutZone.name}”？`)) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.filter((zone) => zone.id !== selectedKeepoutZone.id)
-    }))
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenVertexId('')
-    setGardenCopyStatus(`已删除 keepout zone：${selectedKeepoutZone.name}`)
-  }
-
-  const updateGardenFilter = (patch: Partial<GardenAssetFilterState>) => {
-    setGardenFilters((current) => ({ ...current, ...patch }))
-  }
-
-  const updateGardenBatchAdjust = (patch: Partial<GardenBatchAdjustState>) => {
-    setGardenBatchAdjust((current) => ({ ...current, ...patch }))
-  }
-
-  const updateFilteredGardenAssets = (mapper: (asset: LingshanMap3DGardenAsset) => LingshanMap3DGardenAsset) => {
-    const filteredIds = new Set(filteredGardenAssets.map((asset) => asset.id))
-    if (!filteredIds.size) {
-      setGardenCopyStatus('当前筛选没有资产可调整')
-      return
-    }
-
-    setGardenAssets((items) => items.map((asset) => (filteredIds.has(asset.id) ? mapper(asset) : asset)))
-  }
-
-  const selectFirstFilteredGardenAsset = () => {
-    if (!filteredGardenAssets[0]) {
-      setGardenCopyStatus('当前筛选没有资产')
-      return
-    }
-
-    selectGardenAssetForEditing(filteredGardenAssets[0].id)
-    setGardenCopyStatus(`已选中筛选结果首项：${filteredGardenAssets[0].name}`)
-  }
-
-  const applyFilteredGardenVisibility = (visible: boolean) => {
-    updateFilteredGardenAssets((asset) => ({ ...asset, visible }))
-    setGardenCopyStatus(visible ? '已显示当前筛选资产' : '已隐藏当前筛选资产')
-  }
-
-  const applyFilteredGardenScale = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      scale: clampNumber(Math.round(asset.scale * gardenBatchAdjust.scaleMultiplier), 1, 2400)
-    }))
-    setGardenCopyStatus(`已按 ${gardenBatchAdjust.scaleMultiplier} 倍缩放当前筛选资产`)
-  }
-
-  const applyFilteredGardenHeight = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      height: roundNumber(asset.height + gardenBatchAdjust.heightDelta, 2)
-    }))
-    setGardenCopyStatus(`已调整当前筛选资产 height：${gardenBatchAdjust.heightDelta}`)
-  }
-
-  const applyFilteredGardenOpacity = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      opacity: clampNumber(roundNumber(asset.opacity + gardenBatchAdjust.opacityDelta, 2), 0, 1)
-    }))
-    setGardenCopyStatus(`已调整当前筛选资产 opacity：${gardenBatchAdjust.opacityDelta}`)
-  }
-
-  const applyFilteredGardenOffset = () => {
-    updateFilteredGardenAssets((asset) => ({
-      ...asset,
-      location: {
-        lat: roundNumber(asset.location.lat + gardenBatchAdjust.latOffset, 6),
-        lng: roundNumber(asset.location.lng + gardenBatchAdjust.lngOffset, 6)
-      }
-    }))
-    setGardenCopyStatus(`已平移当前筛选资产：lat ${gardenBatchAdjust.latOffset}, lng ${gardenBatchAdjust.lngOffset}`)
-  }
-
-  const beginVegetationZoneDrawing = () => {
-    setGardenEditorMode('drawVegetation')
-    setGardenDraftPolygon({ mode: 'vegetation', vertices: [] })
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus('开始绘制 vegetation zone：点击地图添加顶点')
-  }
-
-  const beginKeepoutZoneDrawing = () => {
-    setGardenEditorMode('drawKeepout')
-    setGardenDraftPolygon({ mode: 'keepout', vertices: [] })
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus('开始绘制 keepout zone：点击地图添加顶点')
-  }
-
-  const finishDraftGardenPolygon = () => {
-    completeDraftGardenPolygon()
-  }
-
-  const cancelDraftGardenPolygon = () => {
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setGardenCopyStatus('已取消当前绘制')
-  }
-
-  const updateSelectedEditorZone = (patch: Partial<GardenEditorVegetationZone>) => {
-    if (!selectedEditorZone) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      zones: current.zones.map((zone) => (zone.id === selectedEditorZone.id ? { ...zone, ...patch } : zone))
-    }))
-  }
-
-  const updateSelectedKeepoutZone = (patch: Partial<GardenEditorKeepoutZone>) => {
-    if (!selectedKeepoutZone) {
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.map((zone) => (zone.id === selectedKeepoutZone.id ? { ...zone, ...patch } : zone))
-    }))
-  }
-
-  const updateGardenEditorVertex = (vertexId: string, point: LatLngPoint) => {
-    const match = vertexId.match(/^(zone|keepout|draft):(.+):(\d+)$/)
-
-    if (!match) {
-      return
-    }
-
-    const [, scope, id, indexValue] = match
-    const vertexIndex = Number(indexValue)
-
-    if (!Number.isFinite(vertexIndex)) {
-      return
-    }
-
-    if (scope === 'draft') {
-      setGardenDraftPolygon((current) => {
-        if (!current || current.mode !== id) {
-          return current
-        }
-
-        return {
-          ...current,
-          vertices: current.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-        }
-      })
-      setSelectedGardenVertexId(vertexId)
-      setGardenCopyStatus('已拖拽当前草稿顶点')
-      return
-    }
-
-    if (scope === 'zone') {
-      setGardenEditorState((current) => ({
-        ...current,
-        zones: current.zones.map((zone) =>
-          zone.id === id
-            ? {
-                ...zone,
-                vertices: zone.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-              }
-            : zone
-        )
-      }))
-      setSelectedEditorZoneId(id)
-      setSelectedGardenVertexId(vertexId)
-      setGardenCopyStatus('已拖拽 vegetation zone 顶点')
-      return
-    }
-
-    setGardenEditorState((current) => ({
-      ...current,
-      keepouts: current.keepouts.map((zone) =>
-        zone.id === id
-          ? {
-              ...zone,
-              vertices: zone.vertices.map((vertex, index) => (index === vertexIndex ? point : vertex))
-            }
-          : zone
-      )
-    }))
-    setSelectedKeepoutZoneId(id)
-    setSelectedGardenVertexId(vertexId)
-    setGardenCopyStatus('已拖拽 keepout zone 顶点')
-  }
-
-  const generateGardenPreviewAssets = () => {
-    const previewAssets = generateGardenAssetsFromEditor(gardenEditorState.zones, gardenEditorState.keepouts)
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets
-    }))
-    setGardenCopyStatus(`已生成 ${previewAssets.length} 个半透明预览点`)
-  }
-
-  const applyGardenPreviewAsGlb = () => {
-    if (!gardenEditorState.previewAssets.length) {
-      setGardenCopyStatus('请先在第 3 步生成预览点')
-      return
-    }
-
-    const generatedAssets = gardenEditorState.previewAssets.map(cloneGardenAsset)
-
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets: generatedAssets,
-      appliedAssets: generatedAssets
-    }))
-    setGardenAssets(generatedAssets)
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    setGardenCopyStatus(`已应用 ${generatedAssets.length} 个 GLB 树群资产`)
-  }
-
-  const clearGardenPreviewAssets = () => {
-    setGardenEditorState((current) => ({
-      ...current,
-      previewAssets: []
-    }))
-    setGardenCopyStatus('已清空预览点')
-  }
-
-  const resetGardenEditorState = () => {
-    const editorState = buildDefaultGardenEditorState()
-    const defaultAssets = getDefaultMap3DGardenAssets()
-    setGardenEditorState(editorState)
-    setGardenAssets(defaultAssets)
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    clearGardenEditorLocalStorage()
-    setGardenEditorUsesStoredDraft(false)
-    setGardenCopyStatus('已重置为默认航拍参考布局，并清空本地草稿')
-  }
-
-  const clearGardenLocalDraft = () => {
-    const editorState = buildDefaultGardenEditorState()
-    const defaultAssets = getDefaultMap3DGardenAssets()
-    setGardenEditorState(editorState)
-    setGardenAssets(defaultAssets)
-    setGardenDraftPolygon(null)
-    setGardenEditorMode('inspect')
-    setSelectedEditorZoneId('')
-    setSelectedKeepoutZoneId('')
-    setSelectedGardenId('')
-    setGardenAssetEditDraft(null)
-    clearGardenEditorLocalStorage()
-    setGardenEditorUsesStoredDraft(false)
-    setGardenCopyStatus('已清空 debugGarden 本地草稿，恢复默认航拍参考布局')
-  }
-
-  const saveGardenEditorStateToLocalStorage = () => {
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY, JSON.stringify(gardenEditorState))
-    window.localStorage.setItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY, JSON.stringify(gardenAssets))
-    setGardenEditorUsesStoredDraft(true)
-    setGardenCopyStatus('已保存 zones、keepouts、preview 和当前 GLB 树群到 localStorage')
-  }
-
-  const copyEditorAssetsConfig = async () => {
-    const snippet = `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyEditorZonesConfig = async () => {
-    const snippet = `export const gardenEditorVegetationZones = ${JSON.stringify(gardenEditorState.zones, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 vegetation zones TS 配置' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyEditorKeepoutsConfig = async () => {
-    const snippet = `export const gardenEditorKeepoutZones = ${JSON.stringify(gardenEditorState.keepouts, null, 2)} as const\n`
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制 keepout zones TS 配置' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyCompleteGardenSourceSnippet = async () => {
-    const snippet = [
-      `export const lingshanMap3DEditorVegetationZones = ${JSON.stringify(gardenEditorState.zones, null, 2)} as const`,
-      `export const lingshanMap3DEditorKeepoutZones = ${JSON.stringify(gardenEditorState.keepouts, null, 2)} as const`,
-      `export const lingshanMap3DGardenGenerationParams = ${JSON.stringify(buildGardenGenerationParamsSnapshot(gardenEditorState), null, 2)} as const`,
-      `export const lingshanMap3DGardenAssets = ${JSON.stringify(gardenAssets, null, 2)} as const`
-    ].join('\n\n')
-    const ok = await copyText(snippet)
-    setGardenCopyStatus(ok ? '已复制，可发给 Codex 固化' : '复制失败，请查看浏览器权限')
-  }
-
-  const copyGardenSummary = async () => {
-    const summary = [
-      `debugGarden=${debugGarden ? '1' : '0'}`,
-      `variant=${visualVariant.id}`,
-      `gardenAssetCount=${gardenAssets.length}`,
-      `forestPatchCount=${gardenModelReport.patchCount}/${lingshanMap3DForestPatches.length}`,
-      `forestPatchFallback=${gardenModelReport.patchFallback ? 'true' : 'false'}`,
-      `forestPatchesVisible=${forestPatchesVisible ? 'true' : 'false'}`,
-      `visibleAssets=${gardenModelReport.visibleCount}`,
-      `createdModels=${gardenModelReport.createdCount}`,
-      `selectedGarden=${selectedGardenAsset?.id ?? 'none'}`,
-      `selectedScale=${selectedGardenAsset?.scale ?? 'none'}`,
-      `selectedHeight=${selectedGardenAsset?.height ?? 'none'}`,
-      `selectedYaw=${selectedGardenAsset?.yaw ?? 'none'}`,
-      `GLTFModelUnavailable=${gardenModelReport.unavailable ? 'true' : 'false'}`
-    ].join('\n')
-    const ok = await copyText(summary)
-    setGardenCopyStatus(ok ? '已复制 3D 园林调试摘要' : '复制失败，请查看浏览器权限')
-  }
+  }, [inkExportUiHidden])
 
   return (
     <main
-      className={`map-3d-guide-shell ${visualVariant.className} ${debugGarden ? 'map-3d-guide-shell--debug-garden' : ''} ${
+      className={`map-3d-guide-shell ${visualVariant.className} ${''} ${
         debugPerf ? 'map-3d-guide-shell--debug-perf' : ''
-      } ${isMapVisualReady ? 'is-map-visual-ready' : 'is-map-visual-loading'} ${
+      } ${debugInkBounds ? 'map-3d-guide-shell--debug-ink-bounds' : ''} ${
+        exportInkBase ? 'map-3d-guide-shell--export-ink-base' : ''
+      } ${shotGuide ? 'map-3d-guide-shell--ink-shot-guide' : ''} ${
+        captureFrame || cleanShot ? 'map-3d-guide-shell--ink-capture-frame' : ''
+      } ${captureFrame ? 'map-3d-guide-shell--ink-capture-frame-guide' : ''} ${
+        cleanShot ? 'map-3d-guide-shell--clean-shot' : ''
+      } ${isInkCleanMode ? 'map-3d-guide-shell--ink-clean-mode' : ''} ${
+        inkExportUiSuppressed ? 'is-ink-export-ui-hidden' : ''
+      } ${
+        isMapVisualReady ? 'is-map-visual-ready' : 'is-map-visual-loading'
+      } ${
         loadingCurtainVisible ? 'is-loading-curtain-visible' : ''
-      } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''} ${dockOpen ? 'is-dock-open' : ''}`}
+      } ${mapReadyTimedOut ? 'is-map-ready-timeout' : ''} ${
+        mobilePanelsCollapsed ? 'map-3d-guide-shell--mobile-panels-collapsed' : ''
+      } ${isInk2DPresentation ? 'map-3d-guide-shell--ink2d' : 'map-3d-guide-shell--scenic3d'}`}
+      data-map-presentation={scenicMapPresentation}
+      data-presentation-transition={presentationTransition}
+      data-presentation-switching={isPresentationSwitching ? 'true' : 'false'}
+      data-presentation-switch-error={presentationSwitchError ?? ''}
+      data-presentation-cloud={presentationCloudPhase}
+      data-map-view-mode={effectiveGuideState.viewMode}
+      data-map-camera-scope={cameraScope}
+      data-route-id={effectiveGuideState.routeId}
+      data-route-stage={effectiveGuideState.routeStage}
+      data-route-stop-index={effectiveGuideState.stopIndex}
+      data-xiaoling-mode={effectiveGuideState.xiaolingMode}
     >
-      <div ref={mapElementRef} className="map-3d-guide-map" />
-      <div className="map-3d-guide-skin" aria-hidden="true" />
-      <div className="map-3d-guide-mist" aria-hidden="true" />
-      <div className="map-3d-guide-paperedge" aria-hidden="true" />
-      {/* 移动端进入全屏地图后 MobileShell 底部导航不在,补一个返回首页入口避免被困在地图页 */}
-      <button
-        type="button"
-        className="map-3d-guide-home-btn"
-        onClick={() => navigate('/')}
-        aria-label="返回首页"
+      <MapRuntimeErrorBoundary
+        key={`map-runtime-${mapContainerGeneration}`}
+        onError={(error, info) => {
+          console.error('[Map3D] map runtime render error', error, info)
+          setLastMapError(error.message)
+          hardRecoveryRequestRef.current('map-runtime-error-boundary', error)
+        }}
       >
-        ‹ 首页
-      </button>
+        <div key={`tmap-container-${mapContainerGeneration}`} ref={mapElementRef} className="map-3d-guide-map" />
+      </MapRuntimeErrorBoundary>
+      {inkTilesEnabled && inkTileDomFallbackActive && !inkTileGroundFallbackActive ? (
+        <div
+          ref={inkTileDomFallbackLayerRef}
+          className="map-3d-guide-ink-overlay map-3d-guide-ink-tile-fallback"
+          style={{ opacity: inkTileOpacityEffective }}
+          aria-hidden="true"
+        >
+          <img
+            src={inkTileSourceConfig.imageUrl}
+            alt=""
+            draggable={false}
+            onLoad={() => {
+              perfRecorder.recordMapVisualEvent({
+                type: 'inkTileLayerStateChanged',
+                inkTilesEnabled: true,
+                inkTileOpacity: inkTileOpacityEffective,
+                inkTileOpacityBase: inkTileOpacity,
+                inkTileOpacityEffective,
+                inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+                inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+                inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+                inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileFallbackFromZ:
+                  Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+                inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileBounds: formatConfiguredInkBoundsForPerf(),
+                inkTileMode: 'web-mercator-local',
+                inkTileLayerReady: true,
+                inkTileLayerError: 'DOM fallback 显示中',
+                mapBoundaryEnabled: true
+              })
+            }}
+            onError={() => {
+              perfRecorder.recordMapVisualEvent({
+                type: 'inkTileLayerStateChanged',
+                inkTilesEnabled: true,
+                inkTileOpacity: inkTileOpacityEffective,
+                inkTileOpacityBase: inkTileOpacity,
+                inkTileOpacityEffective,
+                inkTileZoomFade: getInkTileZoomFade(currentZoomRef.current),
+                inkTileUrlTemplate: inkTileSourceConfig.tileUrlTemplate,
+                inkTileZoomLevels: [...LINGSHAN_INK_TILE_ZOOM_LEVELS],
+                inkTileMaxNativeZoom: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileUsingFallbackZoom: Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileFallbackFromZ:
+                  Math.floor(currentZoomRef.current) > LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM ? Math.floor(currentZoomRef.current) : undefined,
+                inkTileFallbackToZ: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM,
+                inkTileBounds: formatConfiguredInkBoundsForPerf(),
+                inkTileMode: 'web-mercator-local',
+                inkTileLayerReady: false,
+                inkTileLayerError: `DOM fallback 图片未找到：${inkTileSourceConfig.imageUrl}`,
+                mapBoundaryEnabled: true
+              })
+            }}
+          />
+        </div>
+      ) : null}
+      {inkOverlayEnabled ? (
+        <div
+          ref={inkOverlayLayerRef}
+          className="map-3d-guide-ink-overlay"
+          data-camera-mode={inkOverlayCameraSnapshot.mode}
+          style={{ opacity: inkOverlayCameraSnapshot.effectiveOpacity }}
+          aria-hidden="true"
+        >
+          <img
+            src={inkOverlayImageUrl}
+            alt=""
+            draggable={false}
+            onLoad={() => {
+              inkOverlayImageReadyRef.current = true
+              inkOverlayLayerErrorRef.current = ''
+              setInkOverlayLayerReady(true)
+              setInkOverlayLayerError('')
+              perfRecorder.recordMapVisualEvent({
+                type: 'inkOverlayStateChanged',
+                inkOverlayEnabled: true,
+                inkOverlaySource,
+                inkOverlayImageUrl,
+                inkOverlayOpacity,
+                inkOverlayOffsetX: inkOverlayAdjustments.offsetX,
+                inkOverlayOffsetY: inkOverlayAdjustments.offsetY,
+                inkOverlayScaleX: inkOverlayAdjustments.scaleX,
+                inkOverlayScaleY: inkOverlayAdjustments.scaleY,
+                inkOverlayCompare,
+                inkOverlayBounds: formatConfiguredInkBoundsForPerf(),
+                inkOverlayLayerReady: true,
+                inkOverlayLayerMode: 'dom',
+                inkOverlayCameraMode: inkOverlayCameraStateRef.current.mode,
+                inkOverlayEffectiveOpacity: inkOverlayCameraStateRef.current.effectiveOpacity,
+                inkOverlaySuppressedReason: inkOverlayCameraStateRef.current.reason
+              })
+            }}
+            onError={() => {
+              const error = `图片未找到：${inkOverlayImageUrl}`
+              inkOverlayImageReadyRef.current = false
+              inkOverlayLayerErrorRef.current = error
+              setInkOverlayLayerReady(false)
+              setInkOverlayLayerError(error)
+              perfRecorder.recordMapVisualEvent({
+                type: 'inkOverlayStateChanged',
+                inkOverlayEnabled: true,
+                inkOverlaySource,
+                inkOverlayImageUrl,
+                inkOverlayOpacity,
+                inkOverlayOffsetX: inkOverlayAdjustments.offsetX,
+                inkOverlayOffsetY: inkOverlayAdjustments.offsetY,
+                inkOverlayScaleX: inkOverlayAdjustments.scaleX,
+                inkOverlayScaleY: inkOverlayAdjustments.scaleY,
+                inkOverlayCompare,
+                inkOverlayBounds: formatConfiguredInkBoundsForPerf(),
+                inkOverlayLayerReady: false,
+                inkOverlayLayerError: error,
+                inkOverlayLayerMode: 'dom',
+                inkOverlayCameraMode: inkOverlayCameraStateRef.current.mode,
+                inkOverlayEffectiveOpacity: inkOverlayCameraStateRef.current.effectiveOpacity,
+                inkOverlaySuppressedReason: inkOverlayCameraStateRef.current.reason
+              })
+            }}
+          />
+        </div>
+      ) : null}
+      {inkOverlayEnabled ? (
+        <div className="map-3d-guide-ink-overlay-note" aria-live="polite">
+          <strong>水墨单图验证</strong>
+          <span>{getInkOverlayCameraModeLabel(inkOverlayCameraSnapshot.mode)}</span>
+          <small>
+            {getInkOverlaySourceLabel(inkOverlaySource)}
+            {inkOverlayCompare ? ' · 半透明对照' : ''} · offset {inkOverlayAdjustments.offsetX}/{inkOverlayAdjustments.offsetY} · scale{' '}
+            {inkOverlayAdjustments.scaleX}/{inkOverlayAdjustments.scaleY}
+          </small>
+          <small>DOM overlay 仅用于正北俯视校验；3D 视角会自动降级或隐藏。</small>
+        </div>
+      ) : null}
+      {presentationCloudPhase !== 'hidden' && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className={`map-presentation-cloud map-presentation-cloud--${presentationCloudPhase}`}
+              role="status"
+              aria-live="polite"
+              aria-label="地图视角切换中"
+            >
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--left" />
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--center" />
+              <span className="map-presentation-cloud__bank map-presentation-cloud__bank--right" />
+              <span className="map-presentation-cloud__label">正在切换地图视角</span>
+            </div>,
+            document.body
+          )
+        : null}
+      <ScenicPoiBillboards
+        map={mapRef.current}
+        mapReady={
+          visualVariant.id === 'prototype-c' &&
+          mapVisualReadyForOverlays &&
+          !isInkCleanMode &&
+          !isInk2DPresentation &&
+          (isRouteGuideView || poiLayerMode === 'core')
+        }
+        items={scenicPoiBillboards}
+        mode={poiBillboardMode}
+        activeId={poiBillboardActiveId}
+        nextId={poiBillboardNextId}
+        suppressInactive={tourPoiSuppressionEnabled}
+        layerManager={layerManager}
+        onSelectPoi={(id) => {
+          const stopIndex = routeStops.findIndex((stop) => stop.spotId === id)
+          const poi = lingshanPois.find((item) => item.id === id)
+
+          if (hasMapEnabledScenicPoi(id)) {
+            setSelectedPoiId(id)
+            stopActiveTour('manual')
+            if (poi) {
+              setActiveLandmarkId(id)
+              focusLandmarkCamera(id, getBestPoiLocation(poi), false)
+            }
+            if (effectiveGuideState.viewMode === 'route' && effectiveGuideState.routeId) {
+              goToPoiFromRoute(navigate, id, {
+                routeId: effectiveGuideState.routeId,
+                poiStopIndex: stopIndex >= 0 ? stopIndex : effectiveRouteStopIndex,
+                returnStage: getPoiReturnStage(routeGuideStage),
+                returnStopIndex: effectiveRouteStopIndex,
+                presentation: scenicMapPresentation
+              })
+            } else {
+              goToPoiFromBrowse(navigate, id, scenicMapPresentation)
+            }
+            return
+          }
+
+          if (stopIndex >= 0) {
+            moveToStop(stopIndex)
+            return
+          }
+
+          if (poi) {
+            stopActiveTour('manual')
+            setActiveLandmarkId(id)
+            focusLandmarkCamera(id, getBestPoiLocation(poi), false)
+          }
+        }}
+      />
+      <PoiCoordinateCalibrationPanel
+        enabled={debugPoiCalibration}
+        map={mapRef.current}
+        mapReady={mapVisualReadyForOverlays}
+        isCurrentMap={isMapInstanceCurrent}
+      />
+      {exportInkBase && showRoadCheck && !inkExportUiSuppressed ? (
+        <div className="map-3d-guide-ink-road-check" aria-hidden="true">
+          道路校验占位层 · 后续根据导出底图人工/半自动提取
+        </div>
+      ) : null}
+      {exportInkBase && shotGuide && !inkExportUiSuppressed ? (
+        <div className="map-3d-guide-shot-guide-frame" aria-hidden="true">
+          <strong>截图范围：4096×4096 水墨底图</strong>
+          <span>确认范围后，请切换 cleanShot 截取同一地图区域</span>
+        </div>
+      ) : null}
+      {exportInkBase && shotGuide && !inkExportUiSuppressed ? (
+        <div className="map-3d-guide-shot-guide-warning">
+          当前浏览器窗口不是 1:1 时，请使用固定导出画布或调整窗口为正方形。
+        </div>
+      ) : null}
+      {exportInkBase && captureFrame && !inkExportUiSuppressed ? (
+        <div className="map-3d-guide-capture-frame-note">
+          <strong>固定 1:1 导出画布</strong>
+          <span>请只截取中间正方形地图容器；后续可放大到 4096×4096 或用设备像素比导出。</span>
+        </div>
+      ) : null}
       {loadingCurtainVisible ? (
         <div className={`map-3d-guide-loading-curtain ${isMapVisualReady ? 'is-hiding' : ''}`} aria-live="polite">
           <div>
@@ -4317,14 +6990,14 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               {mapReadyTimedOut
                 ? startupStage === 'failed'
                   ? '已保留浅色佛境兜底，可重新加载地图'
-                  : '正在继续展开佛境沙盘，底图可见后再显示路线与园林资产'
+                  : '正在继续展开佛境沙盘，底图可见后再显示路线与核心地标'
                 : startupStage === 'loadingSdk'
                   ? '加载腾讯地图 SDK'
                   : startupStage === 'creatingMap'
                     ? '创建地图实例与初始视角'
                     : startupStage === 'waitingBaseMap'
                       ? '等待底图瓦片完成首帧渲染'
-                      : '加载地图底图与园林资产'}
+                      : '加载地图底图与核心地标'}
             </span>
             {mapReadyTimedOut ? (
               <div className="map-3d-guide-loading-curtain__actions">
@@ -4339,50 +7012,256 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           </div>
         </div>
       ) : null}
-      {prototypeLabel ? <div className="map-3d-guide-prototype-badge">{prototypeLabel}</div> : null}
-      {visualVariant.id === 'prototype-c' && (gardenAssetLoading || gardenModelReport.unavailable || gardenModelReport.errorIds.length > 0) ? (
-        <div className={`map-3d-guide-garden-load ${gardenModelReport.unavailable || gardenModelReport.errorIds.length ? 'is-warning' : ''}`}>
-          {gardenModelReport.unavailable
-            ? '园林资产加载不可用'
-            : gardenModelReport.errorIds.length
-              ? `园林资产部分失败 ${gardenModelReport.errorIds.length}`
-              : gardenAssetProgressText}
-        </div>
+      {debugInkBounds && !inkExportUiSuppressed ? (
+        <aside className="map-3d-guide-ink-tool map-3d-guide-ink-tool--bounds">
+          <div className="map-3d-guide-ink-tool__header">
+            <strong>水墨底图四角拾取</strong>
+            <span>{nextInkBoundsCorner ? `下一角：${inkMapBoundCornerLabels[nextInkBoundsCorner]}` : '四角已完成'}</span>
+          </div>
+          <p>依次点击 northwest、northeast、southeast、southwest。暖金框为当前正式边界，青绿点为正在重选的新边界。</p>
+          <div className="map-3d-guide-ink-tool__bounds-note">正式边界参考 · 水墨底图正式覆盖范围 / 4096×4096</div>
+          <dl>
+            {inkMapBoundCornerOrder.map((corner) => {
+              const point = configuredInkBoundsDraft[corner]
+              return (
+                <div key={`formal-${corner}`}>
+                  <dt>{inkMapBoundCornerShortLabels[corner]}</dt>
+                  <dd>{point ? `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}` : '未配置'}</dd>
+                </div>
+              )
+            })}
+          </dl>
+          <div className="map-3d-guide-ink-tool__bounds-note">正在拾取的新边界</div>
+          <dl>
+            {inkMapBoundCornerOrder.map((corner) => {
+              const point = inkBoundsDraft[corner]
+              return (
+                <div key={corner}>
+                  <dt>{inkMapBoundCornerLabels[corner]}</dt>
+                  <dd>{point ? `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}` : '待点击'}</dd>
+                </div>
+              )
+            })}
+          </dl>
+          <div className="map-3d-guide-ink-tool__actions">
+            <button type="button" onClick={copyInkBoundsConfig} disabled={!inkBoundsComplete}>
+              复制四角 JSON
+            </button>
+            <button type="button" onClick={clearInkBoundsDraft}>
+              清空重选
+            </button>
+          </div>
+          <small>{inkBoundsCopyStatus}</small>
+        </aside>
       ) : null}
+      {exportInkBase && !inkExportUiSuppressed ? (
+        <aside className="map-3d-guide-ink-tool map-3d-guide-ink-tool--export">
+          <div className="map-3d-guide-ink-tool__header">
+            <strong>腾讯无 POI 底图导出</strong>
+            <span>{showRoadCheck ? 'road check 占位已开' : 'exportInkBase=1'}</span>
+          </div>
+          <p>当前为正北俯视导出模式：已使用正式 V2 水墨边界，并隐藏项目 GLB、路线、POI 题签和佛境氛围层。</p>
+          <div className="map-3d-guide-ink-tool__bounds-note">水墨底图正式覆盖范围 / 4096×4096</div>
+          <dl>
+            {inkMapBoundCornerOrder.map((corner) => {
+              const point = configuredInkBoundsDraft[corner]
+              return (
+                <div key={`export-${corner}`}>
+                  <dt>{inkMapBoundCornerShortLabels[corner]}</dt>
+                  <dd>{point ? `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}` : '未配置'}</dd>
+                </div>
+              )
+            })}
+          </dl>
+          <ul>
+            <li>建议浏览器缩放 100%，用 DevTools 截取地图区域。</li>
+            <li>如需 4096×4096，可使用设备模式设置视口后截图。</li>
+            <li>检查边界：当前页面显示暖金边界框。</li>
+            <li>对齐校验：先打开 `inkSource=base` 贴回腾讯原始底图，再切 `inkSource=ai` / `inkSource=jimeng` 比较生成图是否漂移。</li>
+            <li>半透明对照：追加 `inkCompare=1`；临时微调可用 `inkOffsetX/Y` 与 `inkScaleX/Y`，不改正式边界。</li>
+            <li>查看截图范围：打开 `?exportInkBase=1&shotGuide=1`。</li>
+            <li>固定正方形画布：打开 `?exportInkBase=1&captureFrame=1`。</li>
+            <li>干净截图：打开 `?exportInkBase=1&cleanShot=1`。</li>
+            <li>本页仍用于无 POI 底图导出；本地瓦片仅调试备用，默认不启用。</li>
+          </ul>
+          <div className="map-3d-guide-ink-tool__actions">
+            <button type="button" onClick={prepareInkBaseScreenshot}>
+              准备截图
+            </button>
+            <button type="button" onClick={() => window.location.assign('/map-3d-guide-c?debugInkBounds=1')}>
+              去拾取四角
+            </button>
+          </div>
+          <small>准备截图后按 Esc 恢复 UI。</small>
+        </aside>
+      ) : null}
+      {(
+        <header className="map-3d-guide-mobile-topbar">
+          <div>
+            <strong>灵山胜境 AI 导览</strong>
+            <span>{currentRouteConfig.name} · {tourMode === 'buddhaRealmTour' ? '沉浸导览中' : guideStateText}</span>
+          </div>
+          <button type="button" onClick={() => setMobilePanelsCollapsed((collapsed) => !collapsed)} aria-expanded={!mobilePanelsCollapsed}>
+            {mobilePanelToggleLabel}
+          </button>
+        </header>
+      )}
+      {(
+        <section className={`map-3d-guide-mobile-guide ${mobilePanelsCollapsed ? 'is-collapsed' : 'is-expanded'}`}>
+          <div
+            className="map-3d-guide-mobile-guide__summary"
+            role="button"
+            tabIndex={0}
+            aria-expanded={!mobilePanelsCollapsed}
+            onClick={() => setMobilePanelsCollapsed((collapsed) => !collapsed)}
+            onKeyDown={handleMobileGuideSummaryKeyDown}
+          >
+            <div>
+              <span>当前站</span>
+              <strong>{currentStop?.name ?? '路线中段'}</strong>
+            </div>
+            <div>
+              <span>下一站</span>
+              <strong>{nextStopPoi?.name ?? '路线终点'}</strong>
+            </div>
+            <div>
+              <span>距离</span>
+              <strong>{distanceToNextStopText}</strong>
+            </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                moveToNextImmersiveStop()
+              }}
+              disabled={!canUseMapInteractions}
+            >
+              沉浸切换
+            </button>
+          </div>
 
-      {/* 移动端底部抽屉:把所有导览面板收进来。桌面端 dock 为 display:contents,等于不存在,
-          子面板照旧浮在四角;移动端 dock 变成可收起的底部 sheet,默认只露把手,地图全屏可见 */}
-      <div className="map-3d-guide-mobile-dock">
-        <button
-          type="button"
-          className="map-3d-guide-dock-handle"
-          onClick={() => setDockOpen((open) => !open)}
-          aria-expanded={dockOpen}
-          aria-label={dockOpen ? '收起导览面板' : '展开导览面板'}
-        >
-          <span className="map-3d-guide-dock-handle__bar" aria-hidden="true" />
-          <span className="map-3d-guide-dock-handle__label">
-            {dockOpen ? '收起导览面板' : `导览面板 · 下一站 ${nextStopPoi?.name ?? '路线终点'}`}
-          </span>
-          <span className="map-3d-guide-dock-handle__chevron" aria-hidden="true">
-            {dockOpen ? '▾' : '▴'}
-          </span>
-        </button>
-      {!debugGarden ? (
+          {!mobilePanelsCollapsed ? (
+            <div className="map-3d-guide-mobile-guide__drawer">
+              <div className="map-3d-guide-mobile-guide__handle" aria-hidden="true" />
+              <div className="map-3d-guide-mobile-guide__section map-3d-guide-mobile-guide__route-head">
+                <div>
+                  <span>当前路线</span>
+                  <strong>{currentRouteConfig.name}</strong>
+                  <small>{currentRouteConfig.subtitle} · {currentRouteConfig.guideRoute.durationLabel}</small>
+                </div>
+                <button type="button" onClick={() => setMobilePanelsCollapsed(true)}>
+                  收起
+                </button>
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__routes" aria-label="移动端路线切换">
+                {routeOptions.map((route) => (
+                  <button
+                    key={route.id}
+                    type="button"
+                    className={route.id === currentRouteConfig.id ? 'is-active' : ''}
+                    onClick={() => switchScenicRoute(route.id)}
+                    disabled={!canUseMapInteractions && mapStatus !== 'ready'}
+                  >
+                    <strong>{route.name}</strong>
+                    <span>{route.theme}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__stations" aria-label="移动端站点切换">
+                {routeStops.map((stop, index) => {
+                  const poi = getPoiDisplay(stop.spotId)
+                  const active = index === selectedStopIndex
+                  const isNext = stop.spotId === nextStop.nextStopId
+
+                  return (
+                    <button
+                      key={stop.spotId}
+                      type="button"
+                      className={[active ? 'is-active' : '', isNext ? 'is-next' : ''].filter(Boolean).join(' ')}
+                      onClick={() => moveToStop(index)}
+                    >
+                      <span>{index + 1}</span>
+                      {poi?.name ?? stop.spotId}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__camera" aria-label="移动端相机控制">
+                {visibleCameraPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={preset.id === activeCameraMode ? 'is-active' : ''}
+                    onClick={() => applyGuideCamera(preset.id)}
+                    disabled={!canUseMapInteractions}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__status">
+                <span>{mobilePanelSummary}</span>
+                <span>进度 {routeProgressPercent}%</span>
+                <span>{isTourPlaying ? tourStateLabel : guideStateText}</span>
+              </div>
+
+              <div className="map-3d-guide-mobile-guide__actions">
+                <button type="button" onClick={() => moveToStop(selectedStopIndex - 1)}>
+                  上一站
+                </button>
+                <button type="button" onClick={() => moveToStop(selectedStopIndex + 1)}>
+                  下一站
+                </button>
+                <button type="button" onClick={returnToRoute}>
+                  回到路线
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      )}
+      {(
         <section className="map-3d-guide-hero">
           <div className="map-3d-guide-kicker">{visualVariant.kicker}</div>
           <h1>{visualVariant.title}</h1>
-          <p>{visualVariant.subtitle}</p>
+          <p>{currentRouteConfig.name} · {visualVariant.subtitle}</p>
           <div className="map-3d-guide-top-actions">
             <button type="button" onClick={() => navigate('/map')}>
               进入真实地图
             </button>
-            <button type="button" onClick={() => navigate('/map-3d-guide')}>
+            <button type="button" onClick={() => navigate('/scenic-3d-map-prototype')}>
               进入文化沙盘
             </button>
           </div>
         </section>
-      ) : null}
+      )}
+
+      {(
+        <section className="map-3d-guide-routes" aria-label="3D 导览路线切换">
+          <div className="map-3d-guide-routes__header">
+            <strong>主题路线</strong>
+            <span>{currentRouteConfig.subtitle} · {currentRouteConfig.theme}</span>
+          </div>
+          <div className="map-3d-guide-routes__list">
+            {routeOptions.map((route) => (
+              <button
+                key={route.id}
+                type="button"
+                className={route.id === currentRouteConfig.id ? 'is-active' : ''}
+                onClick={() => switchScenicRoute(route.id)}
+                disabled={!canUseMapInteractions && mapStatus !== 'ready'}
+              >
+                <strong>{route.name}</strong>
+                <span>{route.theme} · {route.durationLabel}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="map-3d-guide-camera">
         <div>
@@ -4403,19 +7282,10 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           ))}
           <button
             type="button"
-            className={tourMode === 'buddhaRealmTour' ? 'is-active' : ''}
-            onClick={startBuddhaRealmTourPlayback}
+            onClick={moveToNextImmersiveStop}
             disabled={!canUseMapInteractions}
           >
-            {tourMode === 'buddhaRealmTour' ? '停止巡游' : '佛境巡游'}
-          </button>
-          <button
-            type="button"
-            className={tourMode === 'routePreview' ? 'is-active' : ''}
-            onClick={startRoutePreviewPlayback}
-            disabled={!canUseMapInteractions}
-          >
-            {tourMode === 'routePreview' ? '停止预演' : '路线预演'}
+            沉浸切换
           </button>
         </div>
       </section>
@@ -4529,7 +7399,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
                 <input
                   type="number"
                   min="0"
-                  max={Math.max(0, demoRoutePath.length - 1)}
+                  max={Math.max(0, currentRoutePath.length - 1)}
                   value={selectedDecor.routeIndex}
                   onChange={(event) => updateSelectedDecor({ routeIndex: Number(event.target.value) })}
                 />
@@ -4562,124 +7432,16 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
         </section>
       ) : null}
 
-      {debugGarden ? (
-        <Suspense
-          fallback={
-            <section className="map-3d-guide-garden-debug map-3d-guide-garden-debug--editor">
-              <small className="map-3d-guide-garden-debug__status">正在加载 debugGarden 工作台...</small>
-            </section>
-          }
-        >
-          <GardenDebugWizard
-            applyFilteredGardenHeight={applyFilteredGardenHeight}
-            applyFilteredGardenOffset={applyFilteredGardenOffset}
-            applyFilteredGardenOpacity={applyFilteredGardenOpacity}
-            applyFilteredGardenScale={applyFilteredGardenScale}
-            applyFilteredGardenVisibility={applyFilteredGardenVisibility}
-            applyGardenPreviewAsGlb={applyGardenPreviewAsGlb}
-            beginKeepoutZoneDrawing={beginKeepoutZoneDrawing}
-            beginVegetationZoneDrawing={beginVegetationZoneDrawing}
-            cancelDraftGardenPolygon={cancelDraftGardenPolygon}
-            clearGardenLocalDraft={clearGardenLocalDraft}
-            clearGardenPreviewAssets={clearGardenPreviewAssets}
-            clearTreeCandidateDraft={clearTreeCandidateDraft}
-            clearTreeCandidateTestTrees={clearTreeCandidateTestTrees}
-            copyCompleteGardenSourceSnippet={copyCompleteGardenSourceSnippet}
-            copyEditorAssetsConfig={copyEditorAssetsConfig}
-            copyGardenSummary={copyGardenSummary}
-            copyTreeCandidateAssets={copyTreeCandidateAssets}
-            defaultGardenHidden={defaultGardenHidden}
-            deleteSelectedEditorZone={deleteSelectedEditorZone}
-            deleteSelectedGardenAsset={deleteSelectedGardenAsset}
-            deleteSelectedKeepoutZone={deleteSelectedKeepoutZone}
-            deleteSelectedTreeCandidate={deleteSelectedTreeCandidate}
-            deleteSelectedTreeCandidateCluster={deleteSelectedTreeCandidateCluster}
-            editorAddAssetKind={editorAddAssetKind}
-            filteredGardenAssets={filteredGardenAssets}
-            finishDraftGardenPolygon={finishDraftGardenPolygon}
-            forestPatchesVisible={forestPatchesVisible}
-            gardenAssetEditDraft={gardenAssetEditDraft}
-            gardenAssetKindOptions={gardenAssetKindOptions}
-            gardenAssetSourceMode={gardenAssetSourceMode}
-            gardenAssets={gardenAssets}
-            gardenBatchAdjust={gardenBatchAdjust}
-            gardenCopyStatus={gardenCopyStatus}
-            gardenDraftPolygon={gardenDraftPolygon}
-            gardenEditorMode={gardenEditorMode}
-            gardenEditorState={gardenEditorState}
-            gardenEditorUsesStoredDraft={gardenEditorUsesStoredDraft}
-            gardenFilters={gardenFilters}
-            gardenModelReport={gardenModelReport}
-            generateGardenPreviewAssets={generateGardenPreviewAssets}
-            landmarkReferenceLoaded={treeCandidateLabState.landmarkReferenceLoaded}
-            liveDefaultGardenOverlayCount={liveDefaultGardenOverlayCount}
-            liveTestTreeOverlayCount={liveTestTreeOverlayCount}
-            loadCoreLandmarkReferences={loadCoreLandmarkReferences}
-            resetGardenEditorState={resetGardenEditorState}
-            saveGardenAssetEditDraft={saveGardenAssetEditDraft}
-            saveGardenEditorStateToLocalStorage={saveGardenEditorStateToLocalStorage}
-            saveTreeCandidateDraft={saveTreeCandidateDraft}
-            selectedEditorZone={selectedEditorZone}
-            selectedEditorZoneId={selectedEditorZoneId}
-            selectedGardenAsset={selectedGardenAsset}
-            selectedGardenAssetDraft={selectedGardenAssetDraft}
-            selectedGardenId={selectedGardenId}
-            selectedGardenVertexId={selectedGardenVertexId}
-            selectedKeepoutZone={selectedKeepoutZone}
-            selectedKeepoutZoneId={selectedKeepoutZoneId}
-            selectedTreeCandidateAsset={selectedTreeCandidateAsset}
-            selectedTreeCandidateId={selectedTreeCandidateId}
-            selectEditorZone={selectEditorZone}
-            selectGardenAssetForEditing={selectGardenAssetForEditing}
-            selectFirstFilteredGardenAsset={selectFirstFilteredGardenAsset}
-            selectKeepoutZone={selectKeepoutZone}
-            setDefaultGardenHidden={setDefaultGardenHidden}
-            setEditorAddAssetKind={setEditorAddAssetKind}
-            setForestPatchesVisible={setForestPatchesVisible}
-            setGardenAssetSource={setGardenAssetSource}
-            setGardenDraftPolygon={setGardenDraftPolygon}
-            setGardenEditorMode={setGardenEditorMode}
-            setGardenFilters={setGardenFilters}
-            setSelectedTreeCandidateId={setSelectedTreeCandidateId}
-            setTreeCandidateClusterMode={setTreeCandidateClusterMode}
-            startAddTreeCandidateCluster={startAddTreeCandidateCluster}
-            startCompareTreeCandidates={startCompareTreeCandidates}
-            treeCandidateClusterLabels={treeCandidateClusterLabels}
-            treeCandidateDescriptions={treeCandidateDescriptions}
-            treeCandidateLabClickMode={treeCandidateLabClickMode}
-            treeCandidateLabState={treeCandidateLabState}
-            treeCandidateLabels={treeCandidateLabels}
-            treeCandidateLegacyTypes={legacyTreeCandidateTypes}
-            treeCandidateRecommendedModes={treeCandidateRecommendedModes}
-            treeCandidateRecommendedTypes={recommendedTreeCandidateTypes}
-            treeCandidateTypes={treeCandidateTypes}
-            unloadCoreLandmarkReferences={unloadCoreLandmarkReferences}
-            updateGardenAssetEditDraft={updateGardenAssetEditDraft}
-            updateGardenBatchAdjust={updateGardenBatchAdjust}
-            updateGardenFilter={updateGardenFilter}
-            updateSelectedTreeCandidateAsset={updateSelectedTreeCandidateAsset}
-            updateTreeCandidateLab={updateTreeCandidateLab}
-            updateTreeCandidateLabParams={updateTreeCandidateLabParams}
-            updateSelectedEditorZone={updateSelectedEditorZone}
-            updateSelectedKeepoutZone={updateSelectedKeepoutZone}
-          />
-        </Suspense>
-      ) : null}
-
       {debugPerf ? <Map3DPerfPanel landmarkInspector={landmarkInspector} recorder={perfRecorder} /> : null}
 
       <aside className="map-3d-guide-status">
         <span className="map-3d-guide-beta">Beta</span>
         <h2>{visualVariant.statusTitle}</h2>
-        {debugGarden ? (
-          <button type="button" className="map-3d-guide-debug-exit" onClick={() => navigate('/map-3d-guide')}>
-            退出调试 / 返回普通导览页
-          </button>
-        ) : null}
+        {null}
         <dl>
           <div>
             <dt>当前路线</dt>
-            <dd>{demoGuideRoute.name}</dd>
+            <dd>{currentRouteConfig.name}</dd>
           </div>
           <div>
             <dt>当前站点</dt>
@@ -4698,7 +7460,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
             <dd>{guideStateText}</dd>
           </div>
           <div>
-            <dt>巡游状态</dt>
+            <dt>导览状态</dt>
             <dd>{tourStateLabel}</dd>
           </div>
         </dl>
@@ -4753,37 +7515,6 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               ) : null}
             </div>
           ) : null}
-          {visualVariant.id === 'prototype-c' ? (
-            <div className="map-3d-guide-style-audit">
-              <strong>3D 园林资产烟测</strong>
-              <span>当前原型类型：C</span>
-              <span>配置 3D 资产数量：{gardenAssets.length}</span>
-              <span>林地 patch 数量：{gardenModelReport.patchCount}/{lingshanMap3DForestPatches.length}</span>
-              <span>林地 patch fallback：{gardenModelReport.patchFallback ? 'true' : 'false'}</span>
-              <span>已唤醒资产数量：{gardenModelReport.visibleCount}</span>
-              <span>成功创建 GLTFModel：{gardenModelReport.createdCount}</span>
-              <span>GLTFModel 可用：{gardenModelReport.unavailable ? 'false' : 'true'}</span>
-              <span>loaded 事件：{gardenModelReport.loadedIds.length}</span>
-              <span>error 事件：{gardenModelReport.errorIds.length}</span>
-              <p>C 版禁用 PNG/SVG 贴片装饰，使用项目自制低模 GLB 园林资产作为地图坐标锚定层。</p>
-              {gardenModelReport.assetUrls.length ? (
-                <ul>
-                  {gardenModelReport.assetUrls.map((assetUrl) => (
-                    <li key={assetUrl}>
-                      <code>{assetUrl}</code>
-                      <em>
-                        {gardenModelReport.errorIds.some((id) => gardenAssets.find((asset) => asset.id === id)?.assetUrl === assetUrl)
-                          ? 'error'
-                          : gardenModelReport.loadedIds.some((id) => gardenAssets.find((asset) => asset.id === id)?.assetUrl === assetUrl)
-                            ? 'loaded'
-                            : 'created'}
-                      </em>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
           <div className="map-3d-guide-style-audit">
             <strong>个性化地图样式</strong>
             <span>当前 mapStyleId：{MAP_3D_GUIDE_STYLE_ID}</span>
@@ -4823,18 +7554,21 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           </div>
 
           <div className="map-3d-guide-render-audit">
-            <strong>3D 氛围实验</strong>
+            <strong>3D 渲染状态</strong>
             <span>
               enableBloom：{MAP_3D_GUIDE_RENDER_OPTIONS.enableBloom ? '开启，泛光实验中' : '关闭'}
             </span>
-            <span>fogOptions：未配置，等待确认 Tencent JS API GL 字段</span>
-            <span>skyOptions：未配置，等待确认 Tencent JS API GL 字段</span>
-            <p>本阶段仅实验腾讯地图原生 3D 渲染氛围，不使用固定大图层覆盖地图。</p>
+            <span>persistent fog / mountain / canvas mist：已移除</span>
+            <span>仅 2D / 3D 切换时显示短暂云层转场。</span>
+            <p>
+              腾讯地图平台托管自定义图层已默认启用：{TENCENT_CUSTOM_LAYER_NAME}（layerId {TENCENT_CUSTOM_LAYER_ID}）；
+              `noInkTiles=1` 可临时回到腾讯原底图。
+            </p>
           </div>
         </details>
       </aside>
 
-      {!debugGarden ? (
+      {(
       <section className="map-3d-guide-pois">
         <strong>{visualVariant.stationPanelTitle}</strong>
         <div>
@@ -4867,9 +7601,9 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           })}
         </div>
       </section>
-      ) : null}
+      )}
 
-      {!debugGarden ? (
+      {(
       <footer className="map-3d-guide-controlbar">
         <div className="map-3d-guide-progress">
           <span style={{ width: `${routeProgressPercent}%` }} />
@@ -4879,7 +7613,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           <div className="map-3d-guide-console-grid">
             <span>
               <em>当前路线</em>
-              {demoGuideRoute.name}
+              {currentRouteConfig.name}
             </span>
             <span>
               <em>当前站点</em>
@@ -4898,7 +7632,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
               {guideStateText}
             </span>
             <span>
-              <em>巡游状态</em>
+              <em>导览状态</em>
               {isTourPlaying ? tourStateLabel : '待命'}
             </span>
           </div>
@@ -4921,8 +7655,7 @@ export function Map3DGuideExperience({ variant = 'default' }: { variant?: Map3DG
           </button>
         </div>
       </footer>
-      ) : null}
-      </div>
+      )}
 
       <style>{map3DGuideCss}</style>
     </main>
@@ -4954,12 +7687,15 @@ function buildLandmarkCameraPreset(id: string, closeInspect: boolean): Map3DCame
   }
 }
 
-function buildBuddhaRealmTimelineTourConfig(): BuddhaRealmTimelineTourConfig | null {
-  if (!demoRouteGeometry?.path.length || demoRoutePath.length < 2) {
+function buildBuddhaRealmTimelineTourConfig(
+  routePath: LatLngPoint[],
+  routeStops: GuideRoute['stops']
+): BuddhaRealmTimelineTourConfig | null {
+  if (routePath.length < 2) {
     return null
   }
 
-  const path = demoRoutePath
+  const path = buildBuddhaRealmTourCameraPath(routePath)
   const cumulative = buildPathCumulativeDistances(path)
   const totalDistance = cumulative[cumulative.length - 1] ?? 0
 
@@ -4967,7 +7703,7 @@ function buildBuddhaRealmTimelineTourConfig(): BuddhaRealmTimelineTourConfig | n
     return null
   }
 
-  const pauses = buildBuddhaRealmInterestPoints(path, cumulative, totalDistance).map((landmark) => ({
+  const pauses = buildBuddhaRealmInterestPoints(path, cumulative, totalDistance, routeStops).map((landmark) => ({
     id: `buddha-realm-pause-${landmark.id}`,
     label: landmark.label,
     progress: landmark.progress,
@@ -4989,8 +7725,50 @@ function buildBuddhaRealmTimelineTourConfig(): BuddhaRealmTimelineTourConfig | n
   }
 }
 
-function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourConfig) {
+function buildBuddhaRealmTourCameraPath(routePath: LatLngPoint[]) {
+  const deduped = routePath.reduce<LatLngPoint[]>((points, point) => {
+    const previous = points[points.length - 1]
+    if (!previous || haversineDistanceMeters(previous, point) >= 2) {
+      points.push(point)
+    }
+    return points
+  }, [])
+
+  const cleaned: LatLngPoint[] = []
+
+  for (let index = 0; index < deduped.length; index += 1) {
+    const current = deduped[index]
+    const previous = cleaned[cleaned.length - 1]
+    const next = deduped[index + 1]
+
+    if (previous && next) {
+      const previousToCurrent = haversineDistanceMeters(previous, current)
+      const currentToNext = haversineDistanceMeters(current, next)
+      const previousToNext = haversineDistanceMeters(previous, next)
+      const isOutAndBack =
+        previousToNext <= 6 &&
+        previousToCurrent <= 95 &&
+        currentToNext <= 95 &&
+        Math.abs(previousToCurrent - currentToNext) <= Math.max(8, previousToCurrent * 0.24)
+
+      if (isOutAndBack) {
+        index += 1
+        continue
+      }
+    }
+
+    cleaned.push(current)
+  }
+
+  return cleaned.length >= 2 ? cleaned : routePath
+}
+
+function createBuddhaRealmTimelineFrameSampler(
+  config: BuddhaRealmTimelineTourConfig,
+  profile: 'desktop-cinematic' | 'mobile-stable' = 'desktop-cinematic'
+) {
   let smoothedBearing: number | undefined
+  const mobileStable = profile === 'mobile-stable'
 
   return (
     progress: number,
@@ -5028,7 +7806,7 @@ function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourCo
         : lerpAngle(
             smoothedBearing,
             targetBearing,
-            context.isPaused ? 0.032 : lerpNumber(0.082, 0.052, landmarkInfluence)
+            (context.isPaused ? 0.032 : lerpNumber(0.082, 0.052, landmarkInfluence)) * (mobileStable ? 0.78 : 1)
           )
     const baseLateralOffsetMeters = context.isPaused
       ? BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.pause
@@ -5037,37 +7815,57 @@ function createBuddhaRealmTimelineFrameSampler(config: BuddhaRealmTimelineTourCo
           BUDDHA_REALM_TOUR_CONFIG.lateralOffsetMeters.slow,
           landmarkInfluence
         )
-    const sideCenter = offsetLatLngByBearing(sample, smoothedBearing + 90, baseLateralOffsetMeters)
+    const midRouteTighten =
+      smoothstep(0.1, 0.22, progress) *
+      (1 - smoothstep(0.78, 0.94, progress))
+    const tourCameraTightenMode = context.isPaused ? 'pause' : midRouteTighten > 0.45 ? 'tight' : 'open'
+    const lateralOffsetMeters = context.isPaused
+      ? mobileStable
+        ? Math.min(3.5, baseLateralOffsetMeters)
+        : baseLateralOffsetMeters
+      : mobileStable
+        ? lerpNumber(Math.min(8, baseLateralOffsetMeters * 0.52), 4, midRouteTighten)
+        : lerpNumber(baseLateralOffsetMeters, Math.max(4, baseLateralOffsetMeters * 0.38), midRouteTighten)
+    const sideCenter = offsetLatLngByBearing(sample, smoothedBearing + 90, lateralOffsetMeters)
     const pausePhase = context.pauseElapsedMs / 1000
-    const pauseDriftMeters = context.isPaused
+    const pauseDriftMeters = context.isPaused && !mobileStable
       ? Math.sin(pausePhase * 0.78) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftCenterMeters
       : 0
     const cameraCenter = pauseDriftMeters
       ? offsetLatLngByBearing(sideCenter, smoothedBearing + 178 + Math.sin(pausePhase * 0.52) * 16, pauseDriftMeters)
       : sideCenter
-    const pauseDriftRotation = context.isPaused
+    const pauseDriftRotation = context.isPaused && !mobileStable
       ? Math.sin(pausePhase * 0.58) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftRotationDeg
       : 0
-    const pauseDriftZoom = context.isPaused
+    const pauseDriftZoom = context.isPaused && !mobileStable
       ? Math.sin(Math.min(Math.PI, pausePhase * Math.PI * 0.72)) * BUDDHA_REALM_TOUR_CONFIG.pauseDriftZoom
       : 0
-    const pauseDriftPitch = context.isPaused ? Math.sin(pausePhase * 0.64) * 0.18 : 0
-    const routeBreathing = Math.sin(progress * Math.PI * 3.4) * 0.035
+    const pauseDriftPitch = context.isPaused && !mobileStable ? Math.sin(pausePhase * 0.64) * 0.18 : 0
+    const routeBreathing = mobileStable ? 0 : Math.sin(progress * Math.PI * 3.4) * 0.035
+    const baseZoom = mobileStable ? lerpNumber(18.08, 18.24, midRouteTighten) : lerpNumber(17.92, 18.32, midRouteTighten)
+    const basePitch = mobileStable ? lerpNumber(58.2, 60.4, midRouteTighten) : lerpNumber(59.2, 62.8, midRouteTighten)
+    const landmarkZoomInfluence = mobileStable ? landmarkInfluence * 0.18 : landmarkInfluence * 0.48
+    const landmarkPitchInfluence = mobileStable ? landmarkInfluence * 1.35 : landmarkInfluence * 4.2
 
     return {
       t: context.elapsedMs,
       lat: cameraCenter.lat,
       lng: cameraCenter.lng,
       bearing: roundNumber(smoothedBearing, 1),
-      zoom: roundNumber(17.58 + routeBreathing + landmarkInfluence * 0.52 + pauseDriftZoom, 3),
-      pitch: roundNumber(58.2 + Math.sin(progress * Math.PI * 2.4) * 0.45 + landmarkInfluence * 4.8 + pauseDriftPitch, 2),
+      zoom: roundNumber(baseZoom + routeBreathing + landmarkZoomInfluence + pauseDriftZoom, 3),
+      pitch: roundNumber(
+        basePitch + (mobileStable ? 0 : Math.sin(progress * Math.PI * 2.4) * 0.35) + landmarkPitchInfluence + pauseDriftPitch,
+        2
+      ),
       rotation: normalizeRotation(getRouteCameraRotation(smoothedBearing) + pauseDriftRotation),
       progress: roundNumber(progress, 4),
       routeProgressIndex: sample.pathIndex,
       nearbyLandmarkId: nearbyPause?.nearbyLandmarkId,
       smoothingEnabled: true,
       lookAheadProgress: roundNumber(lookAheadProgress, 4),
-      lateralOffsetMeters: roundNumber(baseLateralOffsetMeters, 1)
+      lateralOffsetMeters: roundNumber(lateralOffsetMeters, 1),
+      tourCameraTightenMode,
+      tourCameraTightenStrength: roundNumber(midRouteTighten, 3)
     }
   }
 }
@@ -5118,12 +7916,16 @@ function getNearbyTourPause(pauses: Map3DRouteTourPause[], progress: number, act
   return pauses.find((pause) => Math.abs(progress - pause.progress) <= BUDDHA_REALM_TOUR_CONFIG.landmarkInfluenceProgress)
 }
 
-function buildBuddhaRealmTourSteps(): Map3DTourStep[] {
-  if (demoRouteGeometry?.path.length && demoRouteGeometry.path.length > 1) {
-    return buildRouteFollowingBuddhaRealmTourSteps(demoRoutePath)
+function buildBuddhaRealmTourSteps(
+  routePath: LatLngPoint[],
+  routeStops: GuideRoute['stops'],
+  fallbackRouteCenter: LatLngPoint
+): Map3DTourStep[] {
+  if (routePath.length > 1) {
+    return buildRouteFollowingBuddhaRealmTourSteps(routePath)
   }
 
-  return buildBuddhaRealmPoiFallbackSteps()
+  return buildBuddhaRealmPoiFallbackSteps(routeStops, fallbackRouteCenter)
 }
 
 function buildRouteFollowingBuddhaRealmTourSteps(path: LatLngPoint[]): Map3DTourStep[] {
@@ -5163,98 +7965,132 @@ function buildRouteFollowingBuddhaRealmTourSteps(path: LatLngPoint[]): Map3DTour
   })
 }
 
-function buildBuddhaRealmPoiFallbackSteps(): Map3DTourStep[] {
-  const southGate = getRouteStopLocation('south_gate')
-  const shengjingSquare = getRouteStopLocation('shengjing_square')
-  const entryAxisTarget = getPathCenter([southGate, shengjingSquare].filter((point): point is LatLngPoint => Boolean(point))) ?? shengjingSquare ?? routeCenter
-  const specs = [
-    {
-      id: 'buddha-realm-entry-axis',
-      label: '南门 / 胜境广场',
-      target: entryAxisTarget,
-      activeLandmarkId: 'shengjing_square',
-      targetPoiId: 'south_gate',
-      targetLandmarkId: 'shengjing_square',
-      zoom: 17.38,
-      pitch: 61,
-      rotation: -34,
-      durationMs: 1550,
-      holdMs: 1650
-    },
-    {
-      id: 'buddha-realm-foshou-square',
-      label: '佛手广场',
-      poiId: 'foshou_square',
-      zoom: 18.34,
-      pitch: 65,
-      rotation: -22,
-      durationMs: 1480,
-      holdMs: 1650
-    },
-    {
-      id: 'buddha-realm-fan-gong',
-      label: '梵宫',
-      poiId: 'fan_gong',
-      zoom: 18.12,
-      pitch: 64,
-      rotation: 18,
-      durationMs: 1650,
-      holdMs: 1750
-    },
-    {
-      id: 'buddha-realm-wuyin-tancheng',
-      label: '五印坛城',
-      poiId: 'wuyin_tancheng',
-      zoom: 18.18,
-      pitch: 62,
-      rotation: 38,
-      durationMs: 1550,
-      holdMs: 1650
-    },
-    {
-      id: 'buddha-realm-giant-buddha',
-      label: '灵山大佛',
-      poiId: 'giant_buddha',
-      zoom: 18.48,
-      pitch: 66,
-      rotation: -18,
-      durationMs: 1700,
-      holdMs: 1900
+function buildBuddhaRealmPoiFallbackSteps(
+  routeStops: GuideRoute['stops'],
+  fallbackRouteCenter: LatLngPoint
+): Map3DTourStep[] {
+  const previewPoints = routeStops
+    .map((stop) => ({
+      stop,
+      location: getRouteStopLocation(stop.spotId)
+    }))
+    .filter((item): item is { stop: GuideRoute['stops'][number]; location: LatLngPoint } => Boolean(item.location))
+
+  if (!previewPoints.length) {
+    return [
+      {
+        id: 'buddha-realm-route-center',
+        label: '路线总览',
+        target: fallbackRouteCenter,
+        presetId: 'routeOverview',
+        zoom: 17.38,
+        pitch: 58,
+        rotation: -30,
+        durationMs: 1200,
+        holdMs: 900,
+        twoStage: false
+      }
+    ]
+  }
+
+  const sampledStops = sampleTourFallbackStops(previewPoints)
+
+  return sampledStops.map((item, index) => {
+    const display = getPoiDisplay(item.stop.spotId)
+    const previous = sampledStops[Math.max(0, index - 1)]?.location ?? item.location
+    const next = sampledStops[Math.min(sampledStops.length - 1, index + 1)]?.location ?? item.location
+    const isEndpoint = index === 0 || index === sampledStops.length - 1
+
+    return {
+      id: `buddha-realm-${item.stop.spotId}`,
+      label: display?.name ?? item.stop.spotId,
+      target: item.location,
+      activeLandmarkId: item.stop.spotId,
+      targetPoiId: item.stop.spotId,
+      targetLandmarkId: item.stop.spotId,
+      presetId: isEndpoint ? 'routeOverview' : 'landmarkFocus',
+      zoom: isEndpoint ? 17.42 : getFallbackTourStopZoom(item.stop.spotId),
+      pitch: isEndpoint ? 58 : 63,
+      rotation: getRouteTourRotation(previous, next, index),
+      durationMs: isEndpoint ? 1180 : 1450,
+      holdMs: getLandmarkPauseMs(item.stop.spotId),
+      twoStage: !isEndpoint
     }
-  ]
+  })
+}
 
-  const steps: Map3DTourStep[] = []
+function sampleTourFallbackStops<T extends { stop: GuideRoute['stops'][number]; location: LatLngPoint }>(items: T[]): T[] {
+  if (items.length <= 7) {
+    return items
+  }
 
-  specs.forEach((spec) => {
-    const poiId = 'poiId' in spec ? spec.poiId : undefined
-    const target = 'target' in spec ? spec.target : getRouteStopLocation(poiId)
+  const priorityIds = new Set([
+    'jiulong_guanyu',
+    'foshou_square',
+    'xiangfu_temple',
+    'foqian_square',
+    'giant_buddha',
+    'fan_gong',
+    'wuyin_tancheng',
+    'baizi_mile',
+    'puti_avenue',
+    'lingshan_jingshe'
+  ])
+  const selected = new Set<number>([0, items.length - 1])
 
-    if (!target) {
-      return
+  items.forEach((item, index) => {
+    if (priorityIds.has(item.stop.spotId)) {
+      selected.add(index)
     }
-
-    const activeLandmarkId = ('activeLandmarkId' in spec ? spec.activeLandmarkId : undefined) ?? poiId
-    const targetPoiId = ('targetPoiId' in spec ? spec.targetPoiId : undefined) ?? poiId
-    const targetLandmarkId = ('targetLandmarkId' in spec ? spec.targetLandmarkId : undefined) ?? activeLandmarkId
-
-    steps.push({
-      id: spec.id,
-      label: spec.label,
-      target,
-      activeLandmarkId,
-      targetPoiId,
-      targetLandmarkId,
-      presetId: 'landmarkFocus',
-      zoom: spec.zoom,
-      pitch: spec.pitch,
-      rotation: spec.rotation,
-      durationMs: spec.durationMs,
-      holdMs: spec.holdMs,
-      twoStage: true
-    })
   })
 
-  return steps
+  while (selected.size < Math.min(7, items.length)) {
+    const largestGap = Array.from(selected)
+      .sort((a, b) => a - b)
+      .reduce(
+        (best, index, orderedIndex, ordered) => {
+          const nextIndex = ordered[orderedIndex + 1]
+          const gap = nextIndex !== undefined ? nextIndex - index : 0
+          return gap > best.gap ? { gap, index, nextIndex } : best
+        },
+        { gap: 0, index: 0, nextIndex: undefined as number | undefined }
+      )
+
+    if (largestGap.nextIndex === undefined || largestGap.gap <= 1) {
+      break
+    }
+
+    selected.add(Math.round((largestGap.index + largestGap.nextIndex) / 2))
+  }
+
+  return Array.from(selected)
+    .sort((a, b) => a - b)
+    .map((index) => items[index])
+}
+
+function getFallbackTourStopZoom(spotId: string) {
+  const largeLandmarks = new Set(['giant_buddha', 'fan_gong', 'wuyin_tancheng', 'xiangfu_temple'])
+
+  return largeLandmarks.has(spotId) ? 18.24 : 18.42
+}
+
+function getLandmarkPauseMs(spotId: string) {
+  const pauseMs: Record<string, number> = {
+    giant_buddha: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.buddha,
+    fan_gong: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.fanGong,
+    wuyin_tancheng: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.wuyin,
+    foshou_square: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.foshou,
+    shengjing_square: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.entry,
+    south_gate: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.entry,
+    jiulong_guanyu: 1700,
+    xiangfu_temple: 1700,
+    foqian_square: 1450,
+    baizi_mile: 1350,
+    puti_avenue: 1250,
+    lingshan_jingshe: 1450
+  }
+
+  return pauseMs[spotId] ?? 1300
 }
 
 function buildBuddhaRealmTourWaypoints(path: LatLngPoint[]): TourWaypoint[] {
@@ -5345,14 +8181,39 @@ function buildBuddhaRealmTourWaypoints(path: LatLngPoint[]): TourWaypoint[] {
   return smoothTourWaypointBearings(waypoints)
 }
 
-function buildBuddhaRealmInterestPoints(path: LatLngPoint[], cumulative: number[], totalDistance: number) {
-  const specs = [
-    { id: 'shengjing_square', label: '南门 / 胜境广场', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.entry },
-    { id: 'foshou_square', label: '佛手广场', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.foshou },
-    { id: 'fan_gong', label: '梵宫', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.fanGong },
-    { id: 'wuyin_tancheng', label: '五印坛城', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.wuyin },
-    { id: 'giant_buddha', label: '灵山大佛', holdMs: BUDDHA_REALM_TOUR_CONFIG.landmarkPauseMs.buddha }
+function buildBuddhaRealmInterestPoints(
+  path: LatLngPoint[],
+  cumulative: number[],
+  totalDistance: number,
+  routeStops?: GuideRoute['stops']
+) {
+  const stopIds = routeStops?.map((stop) => stop.spotId) ?? [
+    'shengjing_square',
+    'foshou_square',
+    'fan_gong',
+    'wuyin_tancheng',
+    'giant_buddha'
   ]
+  const priorityIds = new Set([
+    'shengjing_square',
+    'jiulong_guanyu',
+    'foshou_square',
+    'xiangfu_temple',
+    'foqian_square',
+    'giant_buddha',
+    'fan_gong',
+    'wuyin_tancheng',
+    'baizi_mile',
+    'puti_avenue',
+    'lingshan_jingshe'
+  ])
+  const specs = stopIds
+    .filter((id, index) => index === 0 || index === stopIds.length - 1 || priorityIds.has(id))
+    .map((id) => ({
+      id,
+      label: getPoiDisplay(id)?.name ?? id,
+      holdMs: getLandmarkPauseMs(id)
+    }))
 
   return specs
     .map((spec) => {
@@ -5588,43 +8449,7 @@ function smoothTourWaypointBearings(waypoints: TourWaypoint[]) {
   })
 }
 
-function buildRoutePreviewSteps(routeStops: GuideRoute['stops'], selectedStopIndex: number): Map3DTourStep[] {
-  const startIndex = Math.max(0, Math.min(routeStops.length - 1, selectedStopIndex))
-  const previewStops = routeStops.slice(startIndex)
-  const previewPoints = previewStops
-    .map((stop) => ({
-      stop,
-      location: getRouteStopLocation(stop.spotId)
-    }))
-    .filter((item): item is { stop: GuideRoute['stops'][number]; location: LatLngPoint } => Boolean(item.location))
-
-  return previewPoints.map((item, index) => {
-    const previous = previewPoints[Math.max(0, index - 1)]?.location ?? item.location
-    const next = previewPoints[Math.min(previewPoints.length - 1, index + 1)]?.location ?? item.location
-    const routeProgressIndex = findNearestRoutePoint(item.location, demoRoutePath)?.nearestIndex ?? demoRoutePath.length - 1
-    const display = getPoiDisplay(item.stop.spotId)
-    const isEndpoint = index === 0 || index === previewPoints.length - 1
-
-    return {
-      id: `route-preview-${item.stop.spotId}`,
-      label: display?.name ?? item.stop.spotId,
-      target: item.location,
-      activeLandmarkId: item.stop.spotId,
-      targetPoiId: item.stop.spotId,
-      targetLandmarkId: item.stop.spotId,
-      presetId: isEndpoint ? 'routeOverview' : 'guideFollow',
-      zoom: isEndpoint ? 17.42 : 18.08,
-      pitch: isEndpoint ? 57 : 61,
-      rotation: getRoutePreviewRotation(previous, next, index),
-      durationMs: isEndpoint ? 980 : 860,
-      holdMs: isEndpoint ? 720 : 560,
-      routeProgressIndex,
-      twoStage: false
-    }
-  })
-}
-
-function getRoutePreviewRotation(from: LatLngPoint, to: LatLngPoint, index: number) {
+function getRouteTourRotation(from: LatLngPoint, to: LatLngPoint, index: number) {
   if (isSameLatLngPoint(from, to)) {
     return -30 + (index % 3) * 8
   }
@@ -5707,6 +8532,72 @@ function getPathCenter(path: LatLngPoint[]) {
   }
 }
 
+function getRouteOverviewTarget(path: LatLngPoint[]) {
+  if (!path.length) {
+    return scenicCenter
+  }
+
+  const bounds = getPathBounds(path)
+  return {
+    lat: (bounds.north + bounds.south) / 2,
+    lng: (bounds.east + bounds.west) / 2
+  }
+}
+
+function getPathBounds(path: LatLngPoint[]) {
+  return path.reduce(
+    (bounds, point) => ({
+      north: Math.max(bounds.north, point.lat),
+      south: Math.min(bounds.south, point.lat),
+      east: Math.max(bounds.east, point.lng),
+      west: Math.min(bounds.west, point.lng)
+    }),
+    {
+      north: Number.NEGATIVE_INFINITY,
+      south: Number.POSITIVE_INFINITY,
+      east: Number.NEGATIVE_INFINITY,
+      west: Number.POSITIVE_INFINITY
+    }
+  )
+}
+
+function buildRouteOverviewCameraPreset(
+  routePath: LatLngPoint[],
+  viewport: HTMLElement | null,
+  options: {
+    minZoom: number
+    maxZoom: number
+    presentation: ScenicMapPresentation
+  }
+): Map3DCameraPreset {
+  const base = MAP_3D_GUIDE_CAMERA_PRESETS.routeOverview
+  if (routePath.length < 2) {
+    return options.presentation === 'ink2d' ? getInk2DCameraPreset(base) : base
+  }
+
+  const bounds = getPathBounds(routePath)
+  const northWest = latLngToWorldPixel({ lat: bounds.north, lng: bounds.west }, 0)
+  const southEast = latLngToWorldPixel({ lat: bounds.south, lng: bounds.east }, 0)
+  const routeWorldWidth = Math.max(1, Math.abs(southEast.x - northWest.x))
+  const routeWorldHeight = Math.max(1, Math.abs(southEast.y - northWest.y))
+  const viewportWidth = Math.max(320, Number(viewport?.clientWidth) || 390)
+  const viewportHeight = Math.max(320, Number(viewport?.clientHeight) || 760)
+  const horizontalPadding = options.presentation === 'ink2d' ? 52 : 96
+  const verticalPadding = options.presentation === 'ink2d' ? 140 : 180
+  const availableWidth = Math.max(160, viewportWidth - horizontalPadding * 2)
+  const availableHeight = Math.max(160, viewportHeight - verticalPadding * 2)
+  const rawZoom = Math.log2(Math.min(availableWidth / routeWorldWidth, availableHeight / routeWorldHeight))
+  const perspectiveCompensation = options.presentation === 'scenic3d' ? 0.58 : 0.08
+  const zoom = clampNumber(rawZoom - perspectiveCompensation, options.minZoom, options.maxZoom)
+  const preset: Map3DCameraPreset = {
+    ...base,
+    zoom,
+    durationMs: options.presentation === 'scenic3d' ? 980 : 520
+  }
+
+  return options.presentation === 'ink2d' ? getInk2DCameraPreset(preset) : preset
+}
+
 function getRouteStopLocation(spotId?: string | null): LatLngPoint | null {
   if (!spotId) {
     return null
@@ -5751,7 +8642,74 @@ function getBestPoiLocation(poi: LingshanPoi) {
   return poi.navLocation ?? poi.displayLocation
 }
 
+function getRouteInitialPosition(routeConfig: ScenicRouteConfig, routePath: LatLngPoint[]) {
+  return routeConfig.stops[0]?.location ?? getRouteStopLocation(routeConfig.guideRoute.stops[0]?.spotId) ?? routePath[0] ?? scenicCenter
+}
+
+function normalizePoiBillboardActiveId(id?: string) {
+  if (!id) {
+    return undefined
+  }
+
+  const alias: Record<string, string> = {
+    lingshan_dazhaobi: 'lingshan_wall',
+    manlong_flying_tower: 'manfeilong_tower'
+  }
+
+  return alias[id] ?? id
+}
+
+function getLandmarkSceneModelId(id: string) {
+  return `model_landmark:${id}`
+}
+
+function getCompanionSceneModelId(parentId: string, companionId: string) {
+  return `model_landmark_companion:${parentId}::${companionId}`
+}
+
+function resolveLandmarkInspectorIdFromRouteId(routeId: string | undefined, overlays: LingshanMapModelOverlay[]) {
+  if (!routeId) {
+    return undefined
+  }
+
+  const overlay = overlays.find(
+    (item) => item.poiId === routeId || getMapModelOverlayInspectorId(item) === routeId
+  )
+
+  return overlay ? getMapModelOverlayInspectorId(overlay) : undefined
+}
+
+function getPoiBillboardMode({
+  currentZoom,
+  focus,
+  tourMode
+}: {
+  currentZoom?: number
+  focus: boolean
+  tourMode: Map3DTourMode | 'idle'
+}): ScenicPoiBillboardMode {
+  if (focus || tourMode === 'buddhaRealmTour') {
+    return 'activeTag'
+  }
+
+  const zoom = currentZoom ?? MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom
+
+  if (zoom >= 18.35) {
+    return 'activeTag'
+  }
+
+  if (zoom >= 17.35) {
+    return 'titleTag'
+  }
+
+  return 'dot'
+}
+
 function getModelOverlayLocation(overlay: LingshanMapModelOverlay): LatLngPoint | null {
+  const catalogCoordinate = getScenicPoiCoordinate(overlay.poiId)
+  if (catalogCoordinate) {
+    return catalogCoordinate
+  }
   const poi = lingshanPois.find((item) => item.id === overlay.poiId)
 
   if (!poi) {
@@ -5761,6 +8719,25 @@ function getModelOverlayLocation(overlay: LingshanMapModelOverlay): LatLngPoint 
   return overlay.positionSource === 'displayLocation'
     ? poi.displayLocation ?? poi.navLocation
     : poi.navLocation ?? poi.displayLocation
+}
+
+function getSceneWindowRouteProgress(
+  position: LatLngPoint,
+  routePath: LatLngPoint[],
+  cumulativeDistances: number[]
+) {
+  if (!routePath.length || !cumulativeDistances.length) {
+    return undefined
+  }
+
+  const nearest = findNearestRoutePoint(position, routePath)
+  const totalDistance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0
+
+  if (!nearest || totalDistance <= 0) {
+    return undefined
+  }
+
+  return clampNumber((cumulativeDistances[nearest.nearestIndex] ?? 0) / totalDistance, 0, 1)
 }
 
 function getNearestStopIndex(position: LatLngPoint, routeStops: GuideRoute['stops']) {
@@ -5785,8 +8762,1329 @@ function getNearestStopIndex(position: LatLngPoint, routeStops: GuideRoute['stop
   return nearestIndex
 }
 
+function getTourPreloadStopIdsByProgress({
+  progress,
+  routeStops,
+  routePath,
+  cumulative,
+  count
+}: {
+  progress: number
+  routeStops: GuideRoute['stops']
+  routePath: LatLngPoint[]
+  cumulative: number[]
+  count: number
+}) {
+  const totalDistance = cumulative[cumulative.length - 1] ?? 0
+  const stopProgress = routeStops
+    .map((stop, index) => {
+      const location = getRouteStopLocation(stop.spotId)
+      const nearest = location ? findNearestRoutePoint(location, routePath) : null
+      const routeProgress =
+        nearest && totalDistance > 0
+          ? clampNumber((cumulative[nearest.nearestIndex] ?? 0) / totalDistance, 0, 1)
+          : index / Math.max(1, routeStops.length - 1)
+
+      return {
+        id: stop.spotId,
+        index,
+        progress: routeProgress
+      }
+    })
+    .sort((a, b) => a.progress - b.progress || a.index - b.index)
+
+  const startIndex = stopProgress.findIndex((stop) => stop.progress >= progress - 0.018)
+  const normalizedStartIndex = startIndex < 0 ? Math.max(0, stopProgress.length - count) : startIndex
+
+  return stopProgress
+    .slice(normalizedStartIndex, normalizedStartIndex + count)
+    .map((stop) => stop.id)
+}
+
 function toTMapLatLng(point: LatLngPoint) {
   return new window.TMap.LatLng(point.lat, point.lng)
+}
+
+function createEmptyInkMapBoundsDraft(): InkMapBoundsDraft {
+  return {
+    northWest: null,
+    northEast: null,
+    southEast: null,
+    southWest: null
+  }
+}
+
+function getConfiguredInkBoundsDraft(): InkMapBoundsDraft {
+  return {
+    northWest: LINGSHAN_INK_MAP_BOUNDS.northWest,
+    northEast: LINGSHAN_INK_MAP_BOUNDS.northEast,
+    southEast: LINGSHAN_INK_MAP_BOUNDS.southEast,
+    southWest: LINGSHAN_INK_MAP_BOUNDS.southWest
+  }
+}
+
+function getNextInkMapBoundsCorner(bounds: InkMapBoundsDraft) {
+  return inkMapBoundCornerOrder.find((corner) => !bounds[corner])
+}
+
+function getInkBoundsBoundaryPath(bounds: InkMapBoundsDraft) {
+  const points = inkMapBoundCornerOrder.map((corner) => bounds[corner]).filter((point): point is LatLngPoint => Boolean(point))
+
+  if (points.length >= 4) {
+    return [...points, points[0]]
+  }
+
+  return points
+}
+
+function buildInkBoundsExportSnippet(bounds: InkMapBoundsDraft) {
+  const resolvePoint = (corner: InkMapBoundCorner) => bounds[corner] ?? { lat: 0, lng: 0 }
+
+  return [
+    'export const LINGSHAN_INK_MAP_BOUNDS = {',
+    `  northWest: ${formatInkBoundsPoint(resolvePoint('northWest'))},`,
+    `  northEast: ${formatInkBoundsPoint(resolvePoint('northEast'))},`,
+    `  southEast: ${formatInkBoundsPoint(resolvePoint('southEast'))},`,
+    `  southWest: ${formatInkBoundsPoint(resolvePoint('southWest'))}`,
+    '} as const'
+  ].join('\n')
+}
+
+function formatInkBoundsPoint(point: LatLngPoint) {
+  return `{ lat: ${Number(point.lat.toFixed(6))}, lng: ${Number(point.lng.toFixed(6))} }`
+}
+
+function formatConfiguredInkBoundsForPerf() {
+  return inkMapBoundCornerOrder
+    .map((corner) => {
+      const point = LINGSHAN_INK_MAP_BOUNDS[corner]
+      return `${inkMapBoundCornerShortLabels[corner]}:${point.lat.toFixed(6)},${point.lng.toFixed(6)}`
+    })
+    .join(' | ')
+}
+
+function getConfiguredInkBoundsCenter() {
+  const bounds = LINGSHAN_INK_MAP_BOUNDS
+  const points = [bounds.northWest, bounds.northEast, bounds.southEast, bounds.southWest]
+  const hasConfiguredBounds = points.every((point) => Math.abs(point.lat) > 0.000001 && Math.abs(point.lng) > 0.000001)
+
+  if (!hasConfiguredBounds) {
+    return null
+  }
+
+  return {
+    lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length,
+    lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length
+  }
+}
+
+function getInkOverlaySourceFromQuery(): InkOverlaySource {
+  if (typeof window === 'undefined') {
+    return 'ai'
+  }
+
+  const value = new URLSearchParams(window.location.search).get('inkSource')
+
+  if (value === 'base' || value === 'jimeng') {
+    return value
+  }
+
+  return 'ai'
+}
+
+function getInkTileSourceFromQuery(): InkTileSource {
+  return 'v3'
+}
+
+function getInkTileVariantFromQuery(): InkTileVariant {
+  return 'v3'
+}
+
+function getLingshanInkTileSourceConfig(source: InkTileSource, variant: InkTileVariant) {
+  const sourceConfig = LINGSHAN_INK_TILE_SOURCE_CONFIGS[source]
+
+  const variantConfig = LINGSHAN_INK_TILE_VARIANT_CONFIGS[variant]
+
+  return {
+    ...sourceConfig,
+    ...variantConfig,
+    variant,
+    tileUrlTemplate: `/map/ink/tiles/${variantConfig.tileDir}/{z}/{x}/{y}.png`
+  }
+}
+
+function getInkOverlaySourceLabel(source: InkOverlaySource) {
+  if (source === 'base') {
+    return '腾讯原始底图'
+  }
+
+  if (source === 'jimeng') {
+    return '即梦水墨图'
+  }
+
+  return 'GPT 水墨图'
+}
+
+function getInkOverlayOpacityFromQuery(compareMode = false) {
+  if (typeof window === 'undefined') {
+    return compareMode ? LINGSHAN_INK_OVERLAY_COMPARE_OPACITY : LINGSHAN_INK_OVERLAY_DEFAULT_OPACITY
+  }
+
+  const rawValue = new URLSearchParams(window.location.search).get('inkOpacity')
+  const value = rawValue !== null ? Number(rawValue) : Number.NaN
+
+  if (!Number.isFinite(value)) {
+    return compareMode ? LINGSHAN_INK_OVERLAY_COMPARE_OPACITY : LINGSHAN_INK_OVERLAY_DEFAULT_OPACITY
+  }
+
+  return clampNumber(value, 0.05, 1)
+}
+
+function getInkOverlayAdjustmentsFromQuery(): InkOverlayAdjustments {
+  if (typeof window === 'undefined') {
+    return LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS
+  }
+
+  return {
+    offsetX: roundNumber(getQueryNumber('inkOffsetX', LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS.offsetX, -240, 240), 2),
+    offsetY: roundNumber(getQueryNumber('inkOffsetY', LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS.offsetY, -240, 240), 2),
+    scaleX: roundNumber(getQueryNumber('inkScaleX', LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS.scaleX, 0.85, 1.15), 4),
+    scaleY: roundNumber(getQueryNumber('inkScaleY', LINGSHAN_INK_OVERLAY_DEFAULT_ADJUSTMENTS.scaleY, 0.85, 1.15), 4)
+  }
+}
+
+function getQueryNumber(name: string, fallback: number, min: number, max: number) {
+  const value = Number(new URLSearchParams(window.location.search).get(name))
+  return Number.isFinite(value) ? clampNumber(value, min, max) : fallback
+}
+
+function getInkTileOpacityFromQuery() {
+  if (typeof window === 'undefined') {
+    return LINGSHAN_INK_TILE_DEFAULT_OPACITY
+  }
+
+  const rawValue = new URLSearchParams(window.location.search).get('inkTileOpacity')
+  const value = rawValue !== null ? Number(rawValue) : Number.NaN
+
+  if (!Number.isFinite(value)) {
+    return LINGSHAN_INK_TILE_DEFAULT_OPACITY
+  }
+
+  return clampNumber(value, 0.05, 1)
+}
+
+function getInkTileZoomFade(zoom: number) {
+  if (!Number.isFinite(zoom)) {
+    return 1
+  }
+
+  if (zoom >= 22) {
+    return 0.7
+  }
+
+  if (zoom >= 21) {
+    return 0.85
+  }
+
+  return 1
+}
+
+function getInkTileEffectiveOpacity(baseOpacity: number, zoom: number) {
+  return roundNumber(clampNumber(baseOpacity, 0.05, 1) * getInkTileZoomFade(zoom), 4)
+}
+
+function getLingshanInkTileUrlFromArgs(
+  args: unknown[],
+  sourceConfig: ReturnType<typeof getLingshanInkTileSourceConfig>
+) {
+  const tile = parseImageTileLayerArgs(args)
+  const resolvedTile = tile ? resolveLingshanInkTileRequest(tile.x, tile.y, tile.z) : null
+
+  if (!resolvedTile) {
+    return sourceConfig.blankUrl
+  }
+
+  return sourceConfig.tileUrlTemplate
+    .replace('{z}', String(resolvedTile.z))
+    .replace('{x}', String(resolvedTile.x))
+    .replace('{y}', String(resolvedTile.y))
+}
+
+function parseImageTileLayerArgs(args: unknown[]): { x: number; y: number; z: number } | null {
+  const first = args[0] as any
+
+  if (first && typeof first === 'object') {
+    const x = Number(first.x ?? first.tileX ?? first.col ?? (typeof first.getX === 'function' ? first.getX() : Number.NaN))
+    const y = Number(first.y ?? first.tileY ?? first.row ?? (typeof first.getY === 'function' ? first.getY() : Number.NaN))
+    const z = Number(first.z ?? first.zoom ?? first.level ?? args[1])
+
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      return {
+        x: Math.trunc(x),
+        y: Math.trunc(y),
+        z: Math.trunc(z)
+      }
+    }
+  }
+
+  if (args.length >= 3) {
+    const x = Number(args[0])
+    const y = Number(args[1])
+    const z = Number(args[2])
+
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      return {
+        x: Math.trunc(x),
+        y: Math.trunc(y),
+        z: Math.trunc(z)
+      }
+    }
+  }
+
+  return null
+}
+
+function isLingshanInkTileInRange(x: number, y: number, z: number) {
+  if (!LINGSHAN_INK_TILE_ZOOM_LEVELS.includes(z as (typeof LINGSHAN_INK_TILE_ZOOM_LEVELS)[number])) {
+    return false
+  }
+
+  const range = getLingshanInkTileRange(z)
+  return x >= range.minX && x <= range.maxX && y >= range.minY && y <= range.maxY
+}
+
+function resolveLingshanInkTileRequest(x: number, y: number, z: number) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null
+  }
+
+  const minZoom = LINGSHAN_INK_TILE_ZOOM_LEVELS[0]
+
+  if (z < minZoom) {
+    return null
+  }
+
+  if (z <= LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM) {
+    return isLingshanInkTileInRange(x, y, z) ? { x, y, z } : null
+  }
+
+  const factor = 2 ** (z - LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM)
+  const fallbackX = Math.floor(x / factor)
+  const fallbackY = Math.floor(y / factor)
+
+  return isLingshanInkTileInRange(fallbackX, fallbackY, LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM)
+    ? {
+        x: fallbackX,
+        y: fallbackY,
+        z: LINGSHAN_INK_TILE_MAX_NATIVE_ZOOM
+      }
+    : null
+}
+
+function getLingshanInkTileRange(z: number) {
+  const bounds = getConfiguredInkBoundsExtent()
+  const corners = [
+    { lat: bounds.north, lng: bounds.west },
+    { lat: bounds.north, lng: bounds.east },
+    { lat: bounds.south, lng: bounds.east },
+    { lat: bounds.south, lng: bounds.west }
+  ].map((point) => latLngToWorldPixel(point, z))
+  const minX = Math.floor(Math.min(...corners.map((point) => point.x)) / 256)
+  const maxX = Math.floor((Math.max(...corners.map((point) => point.x)) - 0.000001) / 256)
+  const minY = Math.floor(Math.min(...corners.map((point) => point.y)) / 256)
+  const maxY = Math.floor((Math.max(...corners.map((point) => point.y)) - 0.000001) / 256)
+
+  return { minX, maxX, minY, maxY }
+}
+
+function formatLingshanInkTileXRangeByZoom() {
+  return LINGSHAN_INK_TILE_ZOOM_LEVELS.map((zoom) => {
+    const range = getLingshanInkTileRange(zoom)
+    return `z${zoom}:${range.minX}-${range.maxX}`
+  }).join(' | ')
+}
+
+function formatLingshanInkTileYRangeByZoom() {
+  return LINGSHAN_INK_TILE_ZOOM_LEVELS.map((zoom) => {
+    const range = getLingshanInkTileRange(zoom)
+    return `z${zoom}:${range.minY}-${range.maxY}`
+  }).join(' | ')
+}
+
+function getConfiguredInkBoundsExtent() {
+  const points = [
+    LINGSHAN_INK_MAP_BOUNDS.northWest,
+    LINGSHAN_INK_MAP_BOUNDS.northEast,
+    LINGSHAN_INK_MAP_BOUNDS.southEast,
+    LINGSHAN_INK_MAP_BOUNDS.southWest
+  ]
+
+  return {
+    north: Math.max(...points.map((point) => point.lat)),
+    south: Math.min(...points.map((point) => point.lat)),
+    east: Math.max(...points.map((point) => point.lng)),
+    west: Math.min(...points.map((point) => point.lng))
+  }
+}
+
+function getExpandedInkMapBounds(paddingRatio: number) {
+  const bounds = getConfiguredInkBoundsExtent()
+  const latPadding = (bounds.north - bounds.south) * paddingRatio
+  const lngPadding = (bounds.east - bounds.west) * paddingRatio
+
+  return {
+    north: bounds.north + latPadding,
+    south: bounds.south - latPadding,
+    east: bounds.east + lngPadding,
+    west: bounds.west - lngPadding
+  }
+}
+
+function getScaledInkMapBounds(ratio: number) {
+  const bounds = getConfiguredInkBoundsExtent()
+  const centerLat = (bounds.north + bounds.south) / 2
+  const centerLng = (bounds.east + bounds.west) / 2
+  const latHalf = ((bounds.north - bounds.south) * ratio) / 2
+  const lngHalf = ((bounds.east - bounds.west) * ratio) / 2
+
+  return {
+    north: centerLat + latHalf,
+    south: centerLat - latHalf,
+    east: centerLng + lngHalf,
+    west: centerLng - lngHalf
+  }
+}
+
+function clampPointToBounds(point: LatLngPoint, bounds: { north: number; south: number; east: number; west: number }) {
+  return {
+    lat: roundNumber(clampNumber(point.lat, bounds.south, bounds.north), 6),
+    lng: roundNumber(clampNumber(point.lng, bounds.west, bounds.east), 6)
+  }
+}
+
+function getEffectiveInkMapMinZoom(enabled: boolean) {
+  return enabled ? INK_MAP_MIN_ZOOM : INK_MAP_DEBUG_MIN_ZOOM
+}
+
+function getEffectiveInkMapMaxZoom(enabled: boolean) {
+  return enabled ? INK_MAP_MAX_ZOOM : INK_MAP_DEBUG_MAX_ZOOM
+}
+
+function isZoomNearLimit(zoom: number, minZoom: number, maxZoom: number) {
+  if (!Number.isFinite(zoom)) {
+    return false
+  }
+
+  return zoom <= minZoom + 0.04 || zoom >= maxZoom - 0.04
+}
+
+function formatInkMapBoundsForPerf(bounds: { north: number; south: number; east: number; west: number }) {
+  return `N${bounds.north.toFixed(6)} S${bounds.south.toFixed(6)} E${bounds.east.toFixed(6)} W${bounds.west.toFixed(6)}`
+}
+
+function formatLatLngForPerf(point: LatLngPoint) {
+  return `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`
+}
+
+function shouldAllowInkTileSingleImageFallback(map: any) {
+  return readMapPitch(map) <= LINGSHAN_INK_OVERLAY_TOPDOWN_PITCH_MAX
+}
+
+function getInkOverlayCameraState(map: any, targetOpacity: number): InkOverlayCameraState {
+  const pitch = readMapPitch(map)
+  const rotation = normalizeRotation(readMapRotation(map))
+
+  if (pitch <= LINGSHAN_INK_OVERLAY_TOPDOWN_PITCH_MAX) {
+    return {
+      mode: 'topdown',
+      effectiveOpacity: targetOpacity,
+      pitch: roundNumber(pitch, 2),
+      rotation: roundNumber(rotation, 2)
+    }
+  }
+
+  if (pitch <= LINGSHAN_INK_OVERLAY_REDUCED_PITCH_MAX) {
+    return {
+      mode: 'reduced',
+      effectiveOpacity: Math.min(targetOpacity, LINGSHAN_INK_OVERLAY_REDUCED_MAX_OPACITY),
+      pitch: roundNumber(pitch, 2),
+      rotation: roundNumber(rotation, 2),
+      reason: 'tilted-camera'
+    }
+  }
+
+  return {
+    mode: 'disabled3d',
+    effectiveOpacity: 0,
+    pitch: roundNumber(pitch, 2),
+    rotation: roundNumber(rotation, 2),
+    reason: '3d-camera'
+  }
+}
+
+function updateInkOverlayCameraSnapshot(
+  next: InkOverlayCameraState,
+  ref: { current: InkOverlayCameraState },
+  setSnapshot: (value: InkOverlayCameraState) => void
+) {
+  const current = ref.current
+  const unchanged =
+    current.mode === next.mode &&
+    Math.abs(current.effectiveOpacity - next.effectiveOpacity) < 0.005 &&
+    Math.abs(current.pitch - next.pitch) < 0.1 &&
+    Math.abs(current.rotation - next.rotation) < 0.1 &&
+    current.reason === next.reason
+
+  if (unchanged) {
+    return
+  }
+
+  ref.current = next
+  setSnapshot(next)
+}
+
+function readMapPitch(map: any) {
+  const candidates = [
+    () => map?.getPitch?.(),
+    () => map?.getView?.()?.pitch,
+    () => map?.getCamera?.()?.pitch,
+    () => map?.pitch
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      const value = Number(candidate())
+
+      if (Number.isFinite(value)) {
+        return value
+      }
+    } catch {
+      // Tencent GL camera getters vary between versions; try the next candidate.
+    }
+  }
+
+  return MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.pitch
+}
+
+function readMapRotation(map: any) {
+  const candidates = [
+    () => map?.getRotation?.(),
+    () => map?.getBearing?.(),
+    () => map?.getView?.()?.rotation,
+    () => map?.getView?.()?.bearing,
+    () => map?.getCamera?.()?.rotation,
+    () => map?.getCamera?.()?.bearing,
+    () => map?.rotation,
+    () => map?.bearing
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      const value = Number(candidate())
+
+      if (Number.isFinite(value)) {
+        return value
+      }
+    } catch {
+      // Tencent GL camera getters vary between versions; try the next candidate.
+    }
+  }
+
+  return 0
+}
+
+function getInkOverlayCameraModeLabel(mode: InkOverlayCameraMode) {
+  if (mode === 'topdown') {
+    return '俯视对齐中'
+  }
+
+  if (mode === 'reduced') {
+    return '倾斜视角已降透明'
+  }
+
+  if (mode === 'disabled3d') {
+    return '3D 视角已隐藏'
+  }
+
+  return '未启用'
+}
+
+function getConfiguredInkBoundsCamera(viewport?: HTMLElement | null, options: { squareViewport?: boolean } = {}) {
+  const center = getConfiguredInkBoundsCenter()
+
+  if (!center) {
+    return null
+  }
+
+  const bounds = LINGSHAN_INK_MAP_BOUNDS
+  const lats = [bounds.northWest.lat, bounds.northEast.lat, bounds.southEast.lat, bounds.southWest.lat]
+  const lngs = [bounds.northWest.lng, bounds.northEast.lng, bounds.southEast.lng, bounds.southWest.lng]
+  const widthMeters = haversineDistanceMeters(
+    { lat: center.lat, lng: Math.min(...lngs) },
+    { lat: center.lat, lng: Math.max(...lngs) }
+  )
+  const heightMeters = haversineDistanceMeters(
+    { lat: Math.min(...lats), lng: center.lng },
+    { lat: Math.max(...lats), lng: center.lng }
+  )
+  const rawViewportWidth = Math.max(320, Number(viewport?.clientWidth) || 1440)
+  const rawViewportHeight = Math.max(320, Number(viewport?.clientHeight) || 1440)
+  const squareViewportSide = Math.min(rawViewportWidth, rawViewportHeight)
+  const cameraViewportWidth = options.squareViewport ? squareViewportSide : rawViewportWidth
+  const cameraViewportHeight = options.squareViewport ? squareViewportSide : rawViewportHeight
+  const viewportWidth = Math.max(320, cameraViewportWidth - INK_EXPORT_CAMERA_PADDING_PX * 2)
+  const viewportHeight = Math.max(320, cameraViewportHeight - INK_EXPORT_CAMERA_PADDING_PX * 2)
+  const requiredMetersPerPixel = Math.max(widthMeters / viewportWidth, heightMeters / viewportHeight)
+  const mercatorMetersPerPixelAtZoom0 = 156543.03392 * Math.cos((center.lat * Math.PI) / 180)
+  const rawZoom =
+    requiredMetersPerPixel > 0 && Number.isFinite(requiredMetersPerPixel)
+      ? Math.log2(mercatorMetersPerPixelAtZoom0 / requiredMetersPerPixel)
+      : SCENIC_CAMERA_BOUNDS.minZoom
+
+  return {
+    center,
+    zoom: clampNumber(rawZoom, SCENIC_CAMERA_BOUNDS.minZoom, SCENIC_CAMERA_BOUNDS.maxZoom)
+  }
+}
+
+function positionInkOverlayDomLayer({
+  layer,
+  map,
+  TMap,
+  mapElement,
+  adjustments
+}: {
+  layer: HTMLDivElement | null
+  map: any
+  TMap: any
+  mapElement: HTMLElement | null
+  adjustments: InkOverlayAdjustments
+}): { ok: true; mode: 'dom' } | { ok: false; mode: 'dom' | 'none'; error: string } {
+  if (!layer || !map || !TMap || !mapElement) {
+    return { ok: false, mode: 'none', error: 'ink overlay DOM 或地图实例未就绪' }
+  }
+
+  const shellRect = mapElement.parentElement?.getBoundingClientRect()
+  const mapRect = mapElement.getBoundingClientRect()
+  const offsetX = shellRect ? mapRect.left - shellRect.left : 0
+  const offsetY = shellRect ? mapRect.top - shellRect.top : 0
+  const bounds = LINGSHAN_INK_MAP_BOUNDS
+  const points = [bounds.northWest, bounds.northEast, bounds.southEast, bounds.southWest]
+  const projected = points.map((point) => projectLatLngToMapContainer(map, TMap, point, mapElement)).filter((point): point is { x: number; y: number } => Boolean(point))
+
+  if (projected.length !== points.length) {
+    layer.style.display = 'none'
+    return { ok: false, mode: 'dom', error: '无法把水墨边界投影到地图容器' }
+  }
+
+  const minX = Math.min(...projected.map((point) => point.x))
+  const maxX = Math.max(...projected.map((point) => point.x))
+  const minY = Math.min(...projected.map((point) => point.y))
+  const maxY = Math.max(...projected.map((point) => point.y))
+  const width = Math.max(2, maxX - minX)
+  const height = Math.max(2, maxY - minY)
+  const adjustedWidth = Math.max(2, width * adjustments.scaleX)
+  const adjustedHeight = Math.max(2, height * adjustments.scaleY)
+  const centerX = minX + width / 2
+  const centerY = minY + height / 2
+  const adjustedLeft = centerX - adjustedWidth / 2 + adjustments.offsetX
+  const adjustedTop = centerY - adjustedHeight / 2 + adjustments.offsetY
+
+  layer.style.display = 'block'
+  layer.style.left = `${offsetX + adjustedLeft}px`
+  layer.style.top = `${offsetY + adjustedTop}px`
+  layer.style.width = `${adjustedWidth}px`
+  layer.style.height = `${adjustedHeight}px`
+  return { ok: true, mode: 'dom' }
+}
+
+function projectLatLngToMapContainer(map: any, TMap: any, point: LatLngPoint, mapElement: HTMLElement) {
+  const latLng = new TMap.LatLng(point.lat, point.lng)
+  const projection = typeof map?.getProjection === 'function' ? map.getProjection() : undefined
+  const candidates = [
+    () => map?.projectToContainer?.(latLng),
+    () => map?.projectToContainerPixel?.(latLng),
+    () => map?.latLngToContainerPoint?.(latLng),
+    () => map?.fromLatLngToContainerPixel?.(latLng),
+    () => projection?.latLngToContainerPixel?.(latLng),
+    () => projection?.fromLatLngToContainerPixel?.(latLng),
+    () => projection?.projectToContainer?.(latLng)
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      const projected = normalizeProjectedPoint(candidate())
+
+      if (projected) {
+        return projected
+      }
+    } catch {
+      // Projection APIs differ between Tencent JS GL versions; try the next candidate.
+    }
+  }
+
+  return projectLatLngToMapContainerWithMercator(map, point, mapElement)
+}
+
+function normalizeProjectedPoint(value: any): { x: number; y: number } | null {
+  if (!value) {
+    return null
+  }
+
+  const x =
+    typeof value.getX === 'function'
+      ? Number(value.getX())
+      : typeof value.x === 'number'
+        ? Number(value.x)
+        : typeof value.left === 'number'
+          ? Number(value.left)
+          : Array.isArray(value)
+            ? Number(value[0])
+            : Number.NaN
+  const y =
+    typeof value.getY === 'function'
+      ? Number(value.getY())
+      : typeof value.y === 'number'
+        ? Number(value.y)
+        : typeof value.top === 'number'
+          ? Number(value.top)
+          : Array.isArray(value)
+            ? Number(value[1])
+            : Number.NaN
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null
+  }
+
+  return { x, y }
+}
+
+function projectLatLngToMapContainerWithMercator(map: any, point: LatLngPoint, mapElement: HTMLElement) {
+  const center = readMapCenterForProjection(map) ?? getConfiguredInkBoundsCenter() ?? routeCenter
+  const zoom = readMapZoomForProjection(map) ?? SCENIC_CAMERA_BOUNDS.defaultZoom
+  const pointPixel = latLngToWorldPixel(point, zoom)
+  const centerPixel = latLngToWorldPixel(center, zoom)
+
+  return {
+    x: mapElement.clientWidth / 2 + pointPixel.x - centerPixel.x,
+    y: mapElement.clientHeight / 2 + pointPixel.y - centerPixel.y
+  }
+}
+
+function readMapCenterForProjection(map: any): LatLngPoint | null {
+  let center: any
+  try {
+    center = typeof map?.getCenter === 'function' ? map.getCenter() : undefined
+  } catch {
+    return null
+  }
+
+  if (!center) {
+    return null
+  }
+
+  const lat = typeof center.getLat === 'function' ? Number(center.getLat()) : Number(center.lat)
+  const lng = typeof center.getLng === 'function' ? Number(center.getLng()) : Number(center.lng)
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null
+  }
+
+  return { lat, lng }
+}
+
+function readMapZoomForProjection(map: any) {
+  let zoom = Number.NaN
+  try {
+    zoom = typeof map?.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+  } catch {
+    return null
+  }
+  return Number.isFinite(zoom) ? zoom : null
+}
+
+function latLngToWorldPixel(point: LatLngPoint, zoom: number) {
+  const sinLat = Math.sin((point.lat * Math.PI) / 180)
+  const clampedSinLat = clampNumber(sinLat, -0.9999, 0.9999)
+  const scale = 256 * 2 ** zoom
+
+  return {
+    x: ((point.lng + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + clampedSinLat) / (1 - clampedSinLat)) / (4 * Math.PI)) * scale
+  }
+}
+
+/**
+ * QQ's embedded browser can mount the React shell before its map container has
+ * a measurable layout. Wait for two paint frames and an actual rectangle,
+ * rather than guessing with a fixed startup delay.
+ */
+function waitForMapContainerLayout(element: HTMLElement, isCurrent: () => boolean, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    let firstFrame = 0
+    let secondFrame = 0
+    let pollTimer: number | undefined
+    let deadlineTimer: number | undefined
+    let observer: ResizeObserver | undefined
+
+    const hasUsableSize = () => {
+      const rect = element.getBoundingClientRect()
+      return rect.width >= 120 && rect.height >= 120
+    }
+    const cleanup = () => {
+      if (firstFrame) window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+      if (pollTimer !== undefined) window.clearInterval(pollTimer)
+      if (deadlineTimer !== undefined) window.clearTimeout(deadlineTimer)
+      observer?.disconnect()
+      signal?.removeEventListener('abort', handleAbort)
+    }
+    const finish = (ready: boolean) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(ready)
+    }
+    const handleAbort = () => finish(false)
+    const check = () => {
+      if (!isCurrent()) {
+        finish(false)
+        return
+      }
+      if (hasUsableSize()) {
+        finish(true)
+      }
+    }
+    const beginObservation = () => {
+      check()
+      if (settled) return
+      if (typeof ResizeObserver !== 'undefined') {
+        observer = new ResizeObserver(check)
+        observer.observe(element)
+      }
+      pollTimer = window.setInterval(check, 80)
+      deadlineTimer = window.setTimeout(() => finish(false), 2200)
+    }
+
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(beginObservation)
+    })
+    signal?.addEventListener('abort', handleAbort, { once: true })
+    if (signal?.aborted) {
+      finish(false)
+    }
+  })
+}
+
+function inkBoundsCornerSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+    <circle cx="17" cy="17" r="14" fill="rgba(245,241,232,.92)" stroke="#2f8f7a" stroke-width="3"/>
+    <circle cx="17" cy="17" r="5" fill="#1f3b31"/>
+  </svg>`
+}
+
+function formalInkBoundsCornerSvg(label: string) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="34" viewBox="0 0 42 34">
+    <rect x="3" y="5" width="36" height="24" rx="12" fill="rgba(245,241,232,.94)" stroke="#c9a86a" stroke-width="3"/>
+    <circle cx="12" cy="17" r="4" fill="#1f3b31"/>
+    <text x="24" y="21" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="700" fill="#1f3b31">${label}</text>
+  </svg>`
+}
+
+function applyInkCleanMapCamera(map: any, TMap: any, center: LatLngPoint, zoom: number) {
+  const targetCenter = new TMap.LatLng(center.lat, center.lng)
+  const cameraOptions = {
+    center: targetCenter,
+    zoom,
+    pitch: 0,
+    rotation: 0,
+    bearing: 0
+  }
+
+  try {
+    if (typeof map?.easeTo === 'function') {
+      map.easeTo(cameraOptions, { duration: 0 })
+    }
+  } catch {
+    // Optional camera methods differ between Tencent GL versions; fall through to direct setters.
+  }
+
+  try {
+    if (typeof map?.setCenter === 'function') {
+      map.setCenter(targetCenter)
+    }
+    if (typeof map?.setZoom === 'function') {
+      map.setZoom(zoom)
+    }
+    if (typeof map?.setPitch === 'function') {
+      map.setPitch(0)
+    }
+    if (typeof map?.setRotation === 'function') {
+      map.setRotation(0)
+    }
+    if (typeof map?.setBearing === 'function') {
+      map.setBearing(0)
+    }
+  } catch {
+    // The constructor already requests the same clean camera; unsupported setters are safe to ignore.
+  }
+}
+
+function readMapCameraState(map: any, fallbackCenter: LatLngPoint): CameraState {
+  return {
+    center: readMapCenterForProjection(map) ?? fallbackCenter,
+    zoom: readMapZoomForProjection(map) ?? MAP_3D_GUIDE_INITIAL_ZOOM,
+    pitch: readMapPitch(map),
+    rotation: readMapRotation(map)
+  }
+}
+
+function emptyActualTencentCameraState(): ActualTencentCameraState {
+  return { viewMode: null, rawPitch: null, rawRotation: null, center: null, zoom: null }
+}
+
+function normalizeTencentViewMode(value: unknown): '2D' | '3D' | null {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  return normalized === '2D' || normalized === '3D' ? normalized : null
+}
+
+function readActualTencentCameraState(map: any): ActualTencentCameraState {
+  const readNumber = (getter: (() => unknown) | undefined) => {
+    try {
+      const value = Number(getter?.())
+      return Number.isFinite(value) ? value : null
+    } catch {
+      return null
+    }
+  }
+
+  let viewMode: '2D' | '3D' | null = null
+  try {
+    viewMode = typeof map?.getViewMode === 'function' ? normalizeTencentViewMode(map.getViewMode()) : null
+  } catch {
+    viewMode = null
+  }
+
+  return {
+    viewMode,
+    rawPitch: readNumber(typeof map?.getPitch === 'function' ? () => map.getPitch() : undefined),
+    rawRotation: readNumber(typeof map?.getRotation === 'function' ? () => map.getRotation() : undefined),
+    center: readMapCenterForProjection(map),
+    zoom: readMapZoomForProjection(map)
+  }
+}
+
+function cameraStateFromActual(
+  actual: ActualTencentCameraState,
+  fallback: CameraState,
+  presentation: ScenicMapPresentation
+): CameraState {
+  return {
+    center: actual.center ?? fallback.center,
+    zoom: actual.zoom ?? fallback.zoom,
+    // QQ WebView can retain the prior 3D camera values in getPitch/getRotation
+    // after getViewMode() has already switched to 2D. The 2D effective camera
+    // is therefore deterministic and does not mirror those stale raw getters.
+    pitch: presentation === 'ink2d' ? 0 : actual.rawPitch ?? fallback.pitch,
+    rotation: presentation === 'ink2d' ? 0 : actual.rawRotation ?? fallback.rotation
+  }
+}
+
+function waitForMapAnimationFrames(isCurrent: () => boolean) {
+  return new Promise<boolean>((resolve) => {
+    if (!isCurrent()) {
+      resolve(false)
+      return
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve(isCurrent()))
+    })
+  })
+}
+
+function circularRotationDistance(left: number, right: number) {
+  const distance = Math.abs(((left - right + 540) % 360) - 180)
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY
+}
+
+function waitForCameraOrientation(
+  map: any,
+  expectedPitch: number,
+  expectedRotation: number,
+  isCurrent: () => boolean,
+  timeoutMs = 900
+) {
+  return new Promise<{ matched: boolean; camera: ActualTencentCameraState }>((resolve) => {
+    let settled = false
+    let timer: number | undefined
+    let pollTimer: number | undefined
+    const eventNames = ['pitchend', 'rotateend', 'idle']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (matched: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+      }
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The map can be destroyed while this presentation transition exits.
+        }
+      })
+      resolve({ matched, camera: readActualTencentCameraState(map) })
+    }
+    const check = () => {
+      if (!isCurrent()) {
+        finish(false)
+        return
+      }
+      const camera = readActualTencentCameraState(map)
+      const pitchMatched = camera.rawPitch !== null && Math.abs(camera.rawPitch - expectedPitch) <= 0.75
+      const rotationMatched =
+        camera.rawRotation !== null && circularRotationDistance(camera.rawRotation, expectedRotation) <= 0.75
+      if (pitchMatched && rotationMatched) {
+        finish(true)
+      }
+    }
+
+    eventNames.forEach((eventName) => {
+      const handler = () => check()
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // Polling below is the portable fallback for embedded WebViews.
+      }
+    })
+    pollTimer = window.setInterval(check, 48)
+    timer = window.setTimeout(() => finish(false), timeoutMs)
+    void waitForMapAnimationFrames(isCurrent).then(() => check())
+    check()
+  })
+}
+
+function waitForRouteCameraIntentTarget(options: {
+  map: any
+  target: CameraState
+  requireOrientation: boolean
+  requireZoom: boolean
+  isCurrent: () => boolean
+  timeoutMs: number
+}) {
+  const { map, target, requireOrientation, requireZoom, isCurrent, timeoutMs } = options
+  return new Promise<{ matched: boolean; camera: ActualTencentCameraState }>((resolve) => {
+    let settled = false
+    let timeoutId: number | undefined
+    let pollId: number | undefined
+    const eventNames = ['idle', 'moveend', 'zoomend', 'pitchend', 'rotateend']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (matched: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
+      if (pollId !== undefined) {
+        window.clearInterval(pollId)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The current intent owns cleanup even if Tencent has already detached the map.
+        }
+      })
+      resolve({ matched, camera: readActualTencentCameraState(map) })
+    }
+    const check = () => {
+      if (!isCurrent()) {
+        finish(false)
+        return
+      }
+      const camera = readActualTencentCameraState(map)
+      const centerMatched =
+        camera.center !== null && haversineDistanceMeters(camera.center, target.center) <= 14
+      const zoomMatched =
+        !requireZoom || (camera.zoom !== null && Math.abs(camera.zoom - target.zoom) <= 0.1)
+      const pitchMatched =
+        !requireOrientation || (camera.rawPitch !== null && Math.abs(camera.rawPitch - target.pitch) <= 0.9)
+      const rotationMatched =
+        !requireOrientation ||
+        (camera.rawRotation !== null && circularRotationDistance(camera.rawRotation, target.rotation) <= 0.9)
+      if (centerMatched && zoomMatched && pitchMatched && rotationMatched) {
+        finish(true)
+      }
+    }
+
+    eventNames.forEach((eventName) => {
+      const handler = () => check()
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // Polling covers embedded SDK builds with incomplete event support.
+      }
+    })
+    pollId = window.setInterval(check, 48)
+    timeoutId = window.setTimeout(() => finish(false), timeoutMs)
+    check()
+  })
+}
+
+function describeRouteCameraMismatch(camera: ActualTencentCameraState, target: CameraState) {
+  const centerDistance = camera.center ? Math.round(haversineDistanceMeters(camera.center, target.center)) : 'unknown'
+  const zoom = camera.zoom === null ? 'unknown' : camera.zoom.toFixed(2)
+  const pitch = camera.rawPitch === null ? 'unknown' : camera.rawPitch.toFixed(2)
+  const rotation = camera.rawRotation === null ? 'unknown' : camera.rawRotation.toFixed(2)
+  return `center ${centerDistance}m / zoom ${zoom} / pitch ${pitch} / rotation ${rotation}`
+}
+
+function getRouteCameraZoomConstraints(map: any) {
+  const readConstraint = (getter: unknown) => {
+    try {
+      const value = Number(typeof getter === 'function' ? getter() : Number.NaN)
+      return Number.isFinite(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+  // These fallbacks are the values used by the long-lived TMap constructor.
+  // The hosted ImageTileLayer has its own 15–20 coverage range, but it does
+  // not control the map camera's legal zoom interval.
+  const reportedMin = readConstraint(map?.getMinZoom?.bind(map))
+  const reportedMax = readConstraint(map?.getMaxZoom?.bind(map))
+  const minZoom = Math.max(INK_2D_MIN_ZOOM, reportedMin ?? INK_2D_MIN_ZOOM)
+  const maxZoom = Math.min(INK_MAP_MAX_ZOOM, reportedMax ?? INK_MAP_MAX_ZOOM)
+
+  return maxZoom >= minZoom
+    ? { minZoom, maxZoom }
+    : { minZoom: INK_2D_MIN_ZOOM, maxZoom: INK_MAP_MAX_ZOOM }
+}
+
+function waitForTencentMapRender(map: any, isCurrent: () => boolean, timeoutMs = 700) {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    let timer: number | undefined
+    const eventNames = ['rendercomplete', 'idle', 'tilesloaded']
+    const handlers: Array<{ eventName: string; handler: () => void }> = []
+    const finish = (rendered: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+      }
+      handlers.forEach(({ eventName, handler }) => {
+        try {
+          map?.off?.(eventName, handler)
+        } catch {
+          // The owner generation may have been destroyed during transition.
+        }
+      })
+      resolve(rendered && isCurrent())
+    }
+    if (!isCurrent()) {
+      finish(false)
+      return
+    }
+    eventNames.forEach((eventName) => {
+      const handler = () => finish(true)
+      handlers.push({ eventName, handler })
+      try {
+        map?.on?.(eventName, handler)
+      } catch {
+        // A short frame/timeout fallback still validates real getters below.
+      }
+    })
+    void waitForMapAnimationFrames(isCurrent).then((current) => {
+      if (!current) {
+        finish(false)
+      }
+    })
+    timer = window.setTimeout(() => finish(isCurrent()), timeoutMs)
+  })
+}
+
+async function applyPresentationToExistingMap(options: {
+  map: any
+  TMap: any
+  presentation: ScenicMapPresentation
+  requestedCamera: CameraState
+  isCurrent: () => boolean
+  onPhase?: (phase: CameraTransitionPhase) => void
+}): Promise<PresentationApplyResult> {
+  const { map, TMap, presentation, requestedCamera, isCurrent, onPhase } = options
+  const requestedViewMode = presentation === 'ink2d' ? '2D' : '3D'
+  const targetCamera: CameraState = {
+    center: requestedCamera.center,
+    zoom: requestedViewMode === '2D'
+      ? clampNumber(requestedCamera.zoom, INK_2D_MIN_ZOOM, INK_2D_MAX_ZOOM)
+      : clampNumber(requestedCamera.zoom, INK_MAP_MIN_ZOOM, INK_MAP_MAX_ZOOM),
+    pitch: requestedViewMode === '2D' ? 0 : requestedCamera.pitch,
+    rotation: requestedViewMode === '2D' ? 0 : requestedCamera.rotation
+  }
+  const failed = (error: string): PresentationApplyResult => ({
+    ok: false,
+    requestedPresentation: presentation,
+    requestedCamera: targetCamera,
+    actualCamera: readActualTencentCameraState(map),
+    error
+  })
+
+  if (!map || !TMap?.LatLng || !isCurrent()) {
+    return failed('地图实例在视图模式切换前不可用')
+  }
+  if (typeof map.setViewMode !== 'function' || typeof map.getViewMode !== 'function') {
+    return failed('当前腾讯地图 SDK 未提供可验证的 setViewMode/getViewMode API')
+  }
+
+  const currentCamera = readActualTencentCameraState(map)
+  if (requestedViewMode === '2D' && currentCamera.viewMode === '3D') {
+    onPhase?.('flattening-3d')
+    const flattenTarget = {
+      center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
+      zoom: targetCamera.zoom,
+      pitch: 0,
+      rotation: 0,
+      bearing: 0
+    }
+    let usedEaseTo = false
+    try {
+      if (typeof map.easeTo === 'function') {
+        map.easeTo(flattenTarget, { duration: 280 })
+        usedEaseTo = true
+      }
+    } catch {
+      usedEaseTo = false
+    }
+    if (!usedEaseTo) {
+      try {
+        map.setCenter?.(flattenTarget.center)
+        map.setZoom?.(flattenTarget.zoom)
+        map.setPitch?.(0)
+        map.setRotation?.(0)
+        map.setBearing?.(0)
+      } catch {
+        // The verification below decides whether the 3D camera actually flattened.
+      }
+    }
+
+    const flattened = await waitForCameraOrientation(map, 0, 0, isCurrent)
+    if (!isCurrent()) {
+      return failed('地图实例已过期，忽略 3D 相机拍平结果')
+    }
+    if (!flattened.matched) {
+      return {
+        ok: false,
+        requestedPresentation: presentation,
+        requestedCamera: targetCamera,
+        actualCamera: flattened.camera,
+        error: `3D 相机拍平超时：raw pitch ${flattened.camera.rawPitch ?? 'unknown'} / raw rotation ${flattened.camera.rawRotation ?? 'unknown'}`
+      }
+    }
+  }
+
+  onPhase?.('switching-view-mode')
+  try {
+    map.setViewMode(requestedViewMode)
+    map.setPitchable?.(requestedViewMode === '3D')
+    map.setRotatable?.(requestedViewMode === '3D')
+  } catch (error) {
+    return failed(error instanceof Error ? error.message : '腾讯地图 setViewMode 调用失败')
+  }
+
+  // Do not wait for a tile success signal here. On QQ WebView a failed image
+  // request can coexist with a successful view-mode transition.
+  await waitForTencentMapRender(map, isCurrent)
+  if (!isCurrent()) {
+    return failed('地图实例已过期，忽略视图模式切换结果')
+  }
+
+  const modeCamera = readActualTencentCameraState(map)
+  if (modeCamera.viewMode !== requestedViewMode) {
+    return {
+      ok: false,
+      requestedPresentation: presentation,
+      requestedCamera: targetCamera,
+      actualCamera: modeCamera,
+      error: `腾讯地图真实视图未收敛：期望 ${requestedViewMode}，实际 ${modeCamera.viewMode ?? 'unknown'}`
+    }
+  }
+
+  const target = {
+    center: new TMap.LatLng(targetCamera.center.lat, targetCamera.center.lng),
+    zoom: targetCamera.zoom,
+    pitch: targetCamera.pitch,
+    rotation: targetCamera.rotation,
+    bearing: 0
+  }
+  let usedEaseTo = false
+  try {
+    // QQ WebView ignores pitch changes after entering 2D. The 3D -> 2D path
+    // above applies and verifies those values while the map is still 3D.
+    if (requestedViewMode === '3D' && typeof map.easeTo === 'function') {
+      map.easeTo(target, { duration: 280 })
+      usedEaseTo = true
+    }
+    if (!usedEaseTo) {
+      map.setCenter?.(target.center)
+      map.setZoom?.(target.zoom)
+      if (requestedViewMode === '3D') {
+        map.setPitch?.(target.pitch)
+        map.setRotation?.(target.rotation)
+        map.setBearing?.(0)
+      }
+    }
+  } catch {
+    // A view mode already verified by getViewMode() remains valid even when a
+    // WebView ignores an optional camera setter.
+  }
+
+  if (requestedViewMode === '3D') {
+    const restored = await waitForCameraOrientation(map, targetCamera.pitch, targetCamera.rotation, isCurrent)
+    if (!isCurrent()) {
+      return failed('地图实例已过期，忽略 3D 相机恢复结果')
+    }
+    if (!restored.matched) {
+      return {
+        ok: false,
+        requestedPresentation: presentation,
+        requestedCamera: targetCamera,
+        actualCamera: restored.camera,
+        error: `3D 相机恢复超时：raw pitch ${restored.camera.rawPitch ?? 'unknown'} / raw rotation ${restored.camera.rawRotation ?? 'unknown'}`
+      }
+    }
+  } else {
+    await waitForMapAnimationFrames(isCurrent)
+  }
+  if (!isCurrent()) {
+    return failed('地图实例已过期，忽略视图模式切换结果')
+  }
+
+  const actualCamera = readActualTencentCameraState(map)
+  const viewModeMatches = actualCamera.viewMode === requestedViewMode
+  const ok = viewModeMatches
+
+  return {
+    ok,
+    requestedPresentation: presentation,
+    requestedCamera: targetCamera,
+    actualCamera,
+    error: ok
+      ? undefined
+      : `腾讯地图真实视图未收敛：期望 ${requestedViewMode}，实际 ${actualCamera.viewMode ?? 'unknown'}`
+  }
 }
 
 function inspectMapStyleSupport(map: any, TMap?: any): MapStyleSupportReport {
@@ -5845,10 +10143,6 @@ function clearGltfModel(model: any) {
   model?.destroy?.()
 }
 
-function clearGltfModels(models: Map<string, any>) {
-  models.forEach((model) => clearGltfModel(model))
-}
-
 function orderMapModelOverlaysForLoading(overlays: LingshanMapModelOverlay[]) {
   const priorityWeight: Record<LingshanMapModelOverlay['priority'], number> = {
     high: 0,
@@ -5871,6 +10165,93 @@ function isQueryEnabled(name: string) {
   return value === '1' || value === 'true'
 }
 
+function isStaleTencentLayerError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /cannot read properties of null.*getLayer/i.test(message) || /null.*getLayer/i.test(message)
+}
+
+function clampRouteStopIndex(stopIndex: number | undefined, stopCount: number) {
+  if (!stopCount) {
+    return 0
+  }
+
+  return Math.min(Math.max(stopIndex ?? 0, 0), stopCount - 1)
+}
+
+/** Temporary compatibility for the pending shared `joining` state contract. */
+function getJoiningStopIndexFromQuery(stopCount: number) {
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('stage') !== 'joining') {
+    return undefined
+  }
+
+  const joinStop = Number(params.get('joinStop'))
+  if (!Number.isInteger(joinStop) || joinStop <= 0) {
+    return 0
+  }
+
+  return clampRouteStopIndex(joinStop - 1, stopCount)
+}
+
+function getPoiReturnStage(stage: string): PoiReturnStage {
+  return stage === 'joining' || stage === 'active' || stage === 'arrived' ? stage : 'preview'
+}
+
+function getRouteProgressPois(currentStopId?: string, nextStopId?: string, nearbyCoreLimit = 3) {
+  const selectedIds = new Set([currentStopId, nextStopId].filter((id): id is string => Boolean(id)))
+  const current = lingshanPois.find((poi) => poi.id === currentStopId)
+  const next = lingshanPois.find((poi) => poi.id === nextStopId)
+  const focus = current && next
+    ? {
+        lat: (current.displayLocation.lat + next.displayLocation.lat) / 2,
+        lng: (current.displayLocation.lng + next.displayLocation.lng) / 2
+      }
+    : current?.displayLocation ?? next?.displayLocation ?? scenicCenter
+  const nearbyCore = getLingshanPoisForLayer('core')
+    .filter((poi) => !selectedIds.has(poi.id))
+    .sort((a, b) => haversineDistanceMeters(focus, a.displayLocation) - haversineDistanceMeters(focus, b.displayLocation))
+    .slice(0, nearbyCoreLimit)
+
+  return [
+    ...lingshanPois.filter((poi) => selectedIds.has(poi.id)),
+    ...nearbyCore
+  ]
+}
+
+function getInitialScenicRouteIdFromQuery() {
+  if (typeof window === 'undefined') {
+    return getDefaultScenicRouteId()
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const routeId = params.get('routeId') ?? params.get('guideRouteId') ?? params.get('scenicRouteId')
+
+  if (!routeId) {
+    return getDefaultScenicRouteId()
+  }
+
+  const knownRouteIds = new Set(getScenicRouteOptions().map((route) => route.id))
+  return knownRouteIds.has(routeId) ? routeId : getDefaultScenicRouteId()
+}
+
+function replaceMapPresentationInUrl(navigate: ReturnType<typeof useNavigate>, presentation: ScenicMapPresentation) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const url = new URL(window.location.href)
+  if (url.searchParams.get('presentation') === presentation) {
+    return
+  }
+
+  url.searchParams.set('presentation', presentation)
+  navigate(`${url.pathname}${url.search}${url.hash}`, { replace: true })
+}
+
 function shouldUseCanonicalLocalhostForTMap() {
   return typeof window !== 'undefined' && window.location.hostname === MAP_3D_GUIDE_LOCAL_TMAP_HOST
 }
@@ -5885,596 +10266,6 @@ function buildCanonicalLocalhostUrl() {
   return url.toString()
 }
 
-function stashLocalhostTransferDrafts() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    const items = MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.reduce<Record<string, string>>((drafts, key) => {
-      const value = window.localStorage.getItem(key)
-      if (value) {
-        drafts[key] = value
-      }
-      return drafts
-    }, {})
-
-    if (!Object.keys(items).length) {
-      return
-    }
-
-    window.name = `${MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX}${JSON.stringify({
-      fromHost: window.location.host,
-      transferredAt: new Date().toISOString(),
-      items
-    })}`
-  } catch {
-    // Redirect should still proceed; losing a local debug draft is better than blocking the map.
-  }
-}
-
-function restoreLocalhostTransferDrafts() {
-  if (typeof window === 'undefined' || window.location.hostname !== MAP_3D_GUIDE_LOCAL_TMAP_CANONICAL_HOST) {
-    return
-  }
-
-  if (!window.name.startsWith(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX)) {
-    return
-  }
-
-  try {
-    const payload = JSON.parse(window.name.slice(MAP_3D_GUIDE_LOCALHOST_TRANSFER_PREFIX.length)) as {
-      items?: Record<string, string>
-    }
-    Object.entries(payload.items ?? {}).forEach(([key, value]) => {
-      if (MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS.includes(key as (typeof MAP_3D_GUIDE_LOCALHOST_TRANSFER_KEYS)[number])) {
-        window.localStorage.setItem(key, value)
-      }
-    })
-  } catch {
-    // Ignore malformed transfer payloads; the page can fall back to default debugGarden state.
-  } finally {
-    window.name = ''
-  }
-}
-
-function loadStoredGardenAssets(variant: Map3DGuideVariant = 'default') {
-  restoreLocalhostTransferDrafts()
-  const defaults = getDefaultMap3DGardenAssets()
-
-  if (variant !== 'prototype-c' || typeof window === 'undefined') {
-    return defaults
-  }
-
-  try {
-    const stored = window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-
-    if (!stored) {
-      return defaults
-    }
-
-    const parsed = JSON.parse(stored) as LingshanMap3DGardenAsset[]
-
-    if (!Array.isArray(parsed) || !parsed.length) {
-      return defaults
-    }
-
-    return parsed.map((asset) => ({
-      ...asset,
-      location: { ...asset.location }
-    }))
-  } catch {
-    return defaults
-  }
-}
-
-function hasStoredGardenEditorDraft() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  try {
-    return Boolean(
-      window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY) ||
-        window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-    )
-  } catch {
-    return false
-  }
-}
-
-function clearGardenEditorLocalStorage() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
-    window.localStorage.removeItem(MAP_3D_GUIDE_GARDEN_STORAGE_KEY)
-
-    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-      const key = window.localStorage.key(index)
-      if (key?.startsWith('lingshan-map-3d-guide-garden-editor-') || key?.startsWith('lingshan-map-3d-guide-garden-assets-')) {
-        window.localStorage.removeItem(key)
-      }
-    }
-  } catch {
-    // Browser storage can be disabled; reset still works for in-memory state.
-  }
-}
-
-function buildDefaultGardenEditorState(): GardenEditorState {
-  return {
-    zones: [
-      {
-        id: 'editor-zone-buddha-north-forest',
-        name: '大佛背后密林编辑区',
-        kind: 'forest',
-        vertices: [
-          { lat: 31.43038, lng: 120.09435 },
-          { lat: 31.43222, lng: 120.09505 },
-          { lat: 31.43212, lng: 120.09808 },
-          { lat: 31.43018, lng: 120.09818 },
-          { lat: 31.42946, lng: 120.09642 }
-        ],
-        density: 42,
-        assetPool: ['pine_cluster', 'mixed_grove', 'bamboo_grove', 'forest_edge', 'shrub_mass', 'rock_cluster'],
-        assetRatios: {
-          pine_cluster: 34,
-          mixed_grove: 26,
-          bamboo_grove: 12,
-          forest_edge: 16,
-          shrub_mass: 8,
-          rock_cluster: 4
-        },
-        minScale: 118,
-        maxScale: 198,
-        minHeight: 5,
-        maxHeight: 14,
-        opacity: 0.92,
-        priority: 'high',
-        visible: true
-      },
-      {
-        id: 'editor-zone-central-axis-belts',
-        name: '中轴两侧林带编辑区',
-        kind: 'axis_grove',
-        vertices: [
-          { lat: 31.42378, lng: 120.09812 },
-          { lat: 31.42798, lng: 120.09784 },
-          { lat: 31.42828, lng: 120.09963 },
-          { lat: 31.42398, lng: 120.10012 }
-        ],
-        density: 34,
-        assetPool: ['forest_edge', 'pine_cluster', 'mixed_grove', 'shrub_mass', 'rock_cluster'],
-        assetRatios: {
-          forest_edge: 32,
-          pine_cluster: 24,
-          mixed_grove: 18,
-          shrub_mass: 20,
-          rock_cluster: 6
-        },
-        minScale: 72,
-        maxScale: 138,
-        minHeight: 2,
-        maxHeight: 7,
-        opacity: 0.82,
-        priority: 'medium',
-        visible: true
-      },
-      {
-        id: 'editor-zone-fangong-tancheng-edge',
-        name: '梵宫坛城边缘绿化编辑区',
-        kind: 'node_green',
-        vertices: [
-          { lat: 31.4259, lng: 120.10035 },
-          { lat: 31.4295, lng: 120.1001 },
-          { lat: 31.42918, lng: 120.10242 },
-          { lat: 31.42562, lng: 120.10262 }
-        ],
-        density: 24,
-        assetPool: ['mixed_grove', 'forest_edge', 'shrub_mass', 'bamboo_grove', 'stone_mass'],
-        assetRatios: {
-          mixed_grove: 28,
-          forest_edge: 24,
-          shrub_mass: 26,
-          bamboo_grove: 12,
-          stone_mass: 10
-        },
-        minScale: 54,
-        maxScale: 116,
-        minHeight: 1,
-        maxHeight: 5,
-        opacity: 0.76,
-        priority: 'medium',
-        visible: true
-      }
-    ],
-    keepouts: [
-      {
-        id: 'editor-keepout-main-route',
-        name: '主路线与中轴留白',
-        reason: 'route',
-        vertices: [
-          { lat: 31.42342, lng: 120.09872 },
-          { lat: 31.42972, lng: 120.09582 },
-          { lat: 31.43002, lng: 120.09655 },
-          { lat: 31.42372, lng: 120.09948 }
-        ],
-        visible: true
-      },
-      {
-        id: 'editor-keepout-jiulong-plaza',
-        name: '九龙灌浴广场留白',
-        reason: 'plaza',
-        vertices: [
-          { lat: 31.42392, lng: 120.0987 },
-          { lat: 31.42508, lng: 120.09855 },
-          { lat: 31.42528, lng: 120.09975 },
-          { lat: 31.42402, lng: 120.10002 }
-        ],
-        visible: true
-      },
-      {
-        id: 'editor-keepout-buddha-plaza',
-        name: '佛前广场留白',
-        reason: 'plaza',
-        vertices: [
-          { lat: 31.42838, lng: 120.09544 },
-          { lat: 31.42972, lng: 120.09528 },
-          { lat: 31.42986, lng: 120.09698 },
-          { lat: 31.4285, lng: 120.09705 }
-        ],
-        visible: true
-      }
-    ],
-    previewAssets: [],
-    appliedAssets: []
-  }
-}
-
-function loadStoredGardenEditorState(): GardenEditorState {
-  const defaults = buildDefaultGardenEditorState()
-
-  if (typeof window === 'undefined') {
-    return defaults
-  }
-
-  try {
-    const stored = window.localStorage.getItem(MAP_3D_GUIDE_GARDEN_EDITOR_STORAGE_KEY)
-
-    if (!stored) {
-      return defaults
-    }
-
-    const parsed = JSON.parse(stored) as Partial<GardenEditorState>
-
-    if (!Array.isArray(parsed.zones) || !Array.isArray(parsed.keepouts)) {
-      return defaults
-    }
-
-    return {
-      zones: parsed.zones.filter((zone) => Array.isArray(zone.vertices) && zone.vertices.length >= 3) as GardenEditorVegetationZone[],
-      keepouts: parsed.keepouts.filter((zone) => Array.isArray(zone.vertices) && zone.vertices.length >= 3) as GardenEditorKeepoutZone[],
-      previewAssets: Array.isArray(parsed.previewAssets) ? parsed.previewAssets as LingshanMap3DGardenAsset[] : [],
-      appliedAssets: Array.isArray(parsed.appliedAssets) ? parsed.appliedAssets as LingshanMap3DGardenAsset[] : []
-    }
-  } catch {
-    return defaults
-  }
-}
-
-function createEditorVegetationZone(vertices: LatLngPoint[], index: number): GardenEditorVegetationZone {
-  return {
-    id: `editor-zone-manual-${Date.now()}-${index + 1}`,
-    name: `手绘林地 ${index + 1}`,
-    kind: 'forest',
-    vertices: vertices.map((vertex) => ({ lat: roundNumber(vertex.lat, 6), lng: roundNumber(vertex.lng, 6) })),
-    density: 24,
-    assetPool: [...defaultEditorAssetPool],
-    assetRatios: { ...defaultEditorAssetRatios },
-    minScale: 72,
-    maxScale: 150,
-    minHeight: 2,
-    maxHeight: 8,
-    opacity: 0.82,
-    priority: 'medium',
-    visible: true
-  }
-}
-
-function createEditorKeepoutZone(vertices: LatLngPoint[], index: number): GardenEditorKeepoutZone {
-  return {
-    id: `editor-keepout-manual-${Date.now()}-${index + 1}`,
-    name: `手绘留白 ${index + 1}`,
-    reason: 'plaza',
-    vertices: vertices.map((vertex) => ({ lat: roundNumber(vertex.lat, 6), lng: roundNumber(vertex.lng, 6) })),
-    visible: true
-  }
-}
-
-function getEditorAssetDefaults(kind: Map3DGardenAssetKind) {
-  if (kind === 'rock_cluster' || kind === 'stone_mass') {
-    return { scale: 62, height: 0.8, opacity: 0.9 }
-  }
-
-  if (kind === 'fluffy_bodhi_grove') {
-    return { scale: 62, height: 2.5, opacity: 0.92 }
-  }
-
-  if (kind === 'dense_shrub_cluster') {
-    return { scale: 74, height: 1.2, opacity: 0.88 }
-  }
-
-  if (
-    kind === 'fluffy_round_tree' ||
-    kind === 'bushy_canopy_tree' ||
-    kind === 'soft_forest_clump' ||
-    kind === 'fluffy_tree_mix'
-  ) {
-    return { scale: 88, height: 2.2, opacity: 0.88 }
-  }
-
-  return { scale: 112, height: 3, opacity: 0.9 }
-}
-
-function createSingleEditorAsset(point: LatLngPoint, kind: Map3DGardenAssetKind, index: number): LingshanMap3DGardenAsset {
-  const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
-  const assetDefaults = getEditorAssetDefaults(kind)
-
-  return {
-    id: `editor-single-${kind}-${Date.now()}-${index + 1}`,
-    zoneId: 'editor-single-assets',
-    kind,
-    name: `单点 ${kind} ${index + 1}`,
-    assetUrl: getMap3DGardenAssetUrl(kind),
-    location: {
-      lat: roundNumber(point.lat, 6),
-      lng: roundNumber(point.lng, 6)
-    },
-    scale: assetDefaults.scale,
-    height: assetDefaults.height,
-    yaw: 0,
-    opacity: assetDefaults.opacity,
-    visible: true,
-    priority: 'medium',
-    routeFraction: roundNumber(routeProgress, 3),
-    licenseId: getMap3DGardenLicenseId(),
-    note: '由 debugGarden 图形化编辑器单点添加。'
-  }
-}
-
-function buildDefaultTreeCandidateLabState(): TreeCandidateLabState {
-  return {
-    selectedCandidateType: 'fluffy_bodhi_grove',
-    clusterMode: 'smallCluster',
-    params: { ...getTreeCandidateRecommendedParams('fluffy_bodhi_grove', 'smallCluster') },
-    testTrees: [],
-    defaultGardenHidden: true,
-    landmarkReferenceLoaded: false
-  }
-}
-
-function loadTreeCandidateLabDraft(enabled: boolean): TreeCandidateLabState {
-  const fallback = buildDefaultTreeCandidateLabState()
-
-  if (!enabled || typeof window === 'undefined') {
-    return fallback
-  }
-
-  try {
-    const stored = window.localStorage.getItem(TREE_CANDIDATE_LAB_STORAGE_KEY)
-
-    if (!stored) {
-      return fallback
-    }
-
-    const parsed = JSON.parse(stored) as Partial<TreeCandidateLabState>
-    const selectedCandidateType = sanitizeTreeCandidateType(parsed.selectedCandidateType)
-    const clusterMode = sanitizeTreeCandidateClusterMode(parsed.clusterMode)
-
-    return {
-      selectedCandidateType,
-      clusterMode,
-      params: sanitizeTreeCandidateParams(parsed.params, clusterMode, selectedCandidateType),
-      testTrees: Array.isArray(parsed.testTrees) ? parsed.testTrees.filter(isTreeCandidateAsset).map(cloneGardenAsset).map(normalizeLingshanTreeAssetScale) : [],
-      defaultGardenHidden: parsed.defaultGardenHidden !== false,
-      landmarkReferenceLoaded: false
-    }
-  } catch {
-    return fallback
-  }
-}
-
-function sanitizeTreeCandidateType(value: unknown): TreeCandidateType {
-  return treeCandidateTypes.includes(value as TreeCandidateType) ? (value as TreeCandidateType) : 'fluffy_bodhi_grove'
-}
-
-function sanitizeTreeCandidateClusterMode(value: unknown): TreeCandidateClusterMode {
-  const modes = Object.keys(treeCandidateClusterDefaults) as TreeCandidateClusterMode[]
-  return modes.includes(value as TreeCandidateClusterMode) ? (value as TreeCandidateClusterMode) : 'single'
-}
-
-function getTreeCandidateRecommendedParams(candidateType: TreeCandidateType, mode: TreeCandidateClusterMode) {
-  return treeCandidateRecommendedDefaults[candidateType]?.[mode] ?? treeCandidateClusterDefaults[mode]
-}
-
-function sanitizeTreeCandidateParams(
-  value: unknown,
-  mode: TreeCandidateClusterMode,
-  candidateType: TreeCandidateType = 'fluffy_bodhi_grove'
-): TreeCandidateLabParams {
-  const defaults = getTreeCandidateRecommendedParams(candidateType, mode)
-  const params = typeof value === 'object' && value ? (value as Partial<TreeCandidateLabParams>) : {}
-  const scaleMin = clampNumber(Number(params.scaleMin ?? defaults.scaleMin), 0.1, 220)
-  const scaleMax = clampNumber(Number(params.scaleMax ?? defaults.scaleMax), 0.1, 240)
-  const normalizedScaleRange = normalizeLingshanTreeScaleRange(candidateType, scaleMin, scaleMax)
-
-  return {
-    count: Math.round(clampNumber(Number(params.count ?? defaults.count), 1, 40)),
-    radiusMeters: clampNumber(Number(params.radiusMeters ?? defaults.radiusMeters), 0, 90),
-    minDistanceMeters: clampNumber(Number(params.minDistanceMeters ?? defaults.minDistanceMeters), 0, 28),
-    scaleMin: roundNumber(Math.min(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
-    scaleMax: roundNumber(Math.max(normalizedScaleRange.scaleMin, normalizedScaleRange.scaleMax), 2),
-    heightOffset: roundNumber(clampNumber(Number(params.heightOffset ?? defaults.heightOffset), -5, 16), 1),
-    randomSeed: Math.round(clampNumber(Number(params.randomSeed ?? defaults.randomSeed), 1, 999999))
-  }
-}
-
-function isTreeCandidateAsset(asset: unknown): asset is LingshanMap3DGardenAsset {
-  if (!asset || typeof asset !== 'object') {
-    return false
-  }
-
-  const candidate = asset as Partial<LingshanMap3DGardenAsset>
-  return (
-    typeof candidate.id === 'string' &&
-    sanitizeTreeCandidateType(candidate.kind) === candidate.kind &&
-    typeof candidate.assetUrl === 'string' &&
-    typeof candidate.location?.lat === 'number' &&
-    typeof candidate.location?.lng === 'number'
-  )
-}
-
-function buildTreeCandidateClusterAssets({
-  center,
-  candidateType,
-  clusterId,
-  clusterIndex,
-  clusterMode,
-  params
-}: {
-  center: LatLngPoint
-  candidateType: TreeCandidateType
-  clusterId: string
-  clusterIndex: number
-  clusterMode: TreeCandidateClusterMode
-  params: TreeCandidateLabParams
-}): LingshanMap3DGardenAsset[] {
-  const sanitizedParams = sanitizeTreeCandidateParams(params, clusterMode, candidateType)
-  const points = sampleTreeCandidateClusterPoints(center, sanitizedParams)
-
-  return points.map((point, index) => {
-    const seedIndex = clusterIndex + index + 1
-    const scale = roundNumber(lerpNumber(sanitizedParams.scaleMin, sanitizedParams.scaleMax, seeded01(sanitizedParams.randomSeed, seedIndex, 71)), 2)
-    const height = roundNumber(sanitizedParams.heightOffset + (seeded01(sanitizedParams.randomSeed, seedIndex, 73) - 0.5) * 0.8, 1)
-    const yaw = roundNumber(-180 + seeded01(sanitizedParams.randomSeed, seedIndex, 79) * 360, 0)
-    const routeProgress = findNearestRoutePoint(point, demoRoutePath)?.progressRatio ?? 0
-
-    return normalizeLingshanTreeAssetScale({
-      id: `${clusterId}-${index + 1}`,
-      zoneId: TREE_CANDIDATE_LAB_ZONE_ID,
-      kind: candidateType,
-      name: `候选树 ${treeCandidateLabels[candidateType]} ${treeCandidateClusterLabels[clusterMode]} ${index + 1}`,
-      assetUrl: getMap3DGardenAssetUrl(candidateType),
-      location: {
-        lat: roundNumber(point.lat, 6),
-        lng: roundNumber(point.lng, 6)
-      },
-      scale,
-      height,
-      yaw,
-      opacity: 0.92,
-      visible: true,
-      priority: 'high',
-      routeFraction: roundNumber(routeProgress, 3),
-      licenseId: getMap3DGardenLicenseId(),
-      note: buildTreeCandidateNote({ clusterId, clusterMode, candidateType })
-    })
-  })
-}
-
-function sampleTreeCandidateClusterPoints(center: LatLngPoint, params: TreeCandidateLabParams): LatLngPoint[] {
-  const count = Math.max(1, Math.round(params.count))
-
-  if (count === 1 || params.radiusMeters <= 0) {
-    return [center]
-  }
-
-  const points: LatLngPoint[] = []
-  const maxAttempts = Math.max(count * 80, 80)
-
-  for (let attempt = 0; attempt < maxAttempts && points.length < count; attempt += 1) {
-    const angle = seeded01(params.randomSeed, attempt, 83) * Math.PI * 2
-    const radius = Math.sqrt(seeded01(params.randomSeed, attempt, 89)) * params.radiusMeters
-    const point = offsetLatLngMeters(center, Math.cos(angle) * radius, Math.sin(angle) * radius)
-    const farEnough = points.every((existing) => haversineDistanceMeters(existing, point) >= params.minDistanceMeters)
-
-    if (farEnough) {
-      points.push(point)
-    }
-  }
-
-  if (!points.length) {
-    points.push(center)
-  }
-
-  return points
-}
-
-function getTreeCandidateCompareSpacing(mode: TreeCandidateClusterMode) {
-  if (mode === 'backgroundGrove') {
-    return 72
-  }
-
-  if (mode === 'mediumCluster') {
-    return 58
-  }
-
-  if (mode === 'smallCluster') {
-    return 46
-  }
-
-  return 36
-}
-
-function buildTreeCandidateNote({
-  clusterId,
-  clusterMode,
-  candidateType
-}: {
-  clusterId: string
-  clusterMode: TreeCandidateClusterMode
-  candidateType: TreeCandidateType
-}) {
-  return `treeCandidateLab|source=treeCandidateLab|clusterId=${clusterId}|clusterMode=${clusterMode}|candidateType=${candidateType}`
-}
-
-function parseTreeCandidateNote(note: string | undefined) {
-  const fallback = {
-    clusterId: '',
-    clusterMode: 'single' as TreeCandidateClusterMode,
-    candidateType: 'fluffy_bodhi_grove' as TreeCandidateType
-  }
-
-  if (!note?.startsWith('treeCandidateLab|')) {
-    return fallback
-  }
-
-  const entries = Object.fromEntries(
-    note
-      .split('|')
-      .slice(1)
-      .map((item) => {
-        const [key, value] = item.split('=')
-        return [key, value]
-      })
-  )
-
-  return {
-    clusterId: entries.clusterId ?? '',
-    clusterMode: sanitizeTreeCandidateClusterMode(entries.clusterMode),
-    candidateType: sanitizeTreeCandidateType(entries.candidateType)
-  }
-}
-
-function cloneGardenAsset(asset: LingshanMap3DGardenAsset): LingshanMap3DGardenAsset {
-  return {
-    ...asset,
-    location: { ...asset.location }
-  }
-}
-
 function isSameLatLngPoint(a: LatLngPoint | undefined, b: LatLngPoint | undefined) {
   if (!a || !b) {
     return false
@@ -6483,211 +10274,12 @@ function isSameLatLngPoint(a: LatLngPoint | undefined, b: LatLngPoint | undefine
   return Math.abs(a.lat - b.lat) < 0.000001 && Math.abs(a.lng - b.lng) < 0.000001
 }
 
-function buildGardenGenerationParamsSnapshot(state: GardenEditorState) {
-  return {
-    generator: 'generateGardenAssetsFromEditor',
-    trigger: 'manual preview button',
-    seed: 'hashString(zone.id)',
-    maxAttempts: 'Math.max(80, zone.density * 28)',
-    routeKeepoutMetersByZoneKind: {
-      forest: 18,
-      axis_grove: 13,
-      water_edge: 10,
-      node_green: 18
-    },
-    assetKindOptions: gardenAssetKindOptions,
-    zones: state.zones.map((zone) => ({
-      id: zone.id,
-      kind: zone.kind,
-      density: zone.density,
-      assetPool: zone.assetPool,
-      assetRatios: zone.assetRatios,
-      minScale: zone.minScale,
-      maxScale: zone.maxScale,
-      minHeight: zone.minHeight,
-      maxHeight: zone.maxHeight,
-      opacity: zone.opacity,
-      priority: zone.priority,
-      visible: zone.visible
-    })),
-    keepoutCount: state.keepouts.length
-  }
-}
-
-function generateGardenAssetsFromEditor(
-  zones: GardenEditorVegetationZone[],
-  keepouts: GardenEditorKeepoutZone[]
-): LingshanMap3DGardenAsset[] {
-  const activeKeepouts = keepouts.filter((zone) => zone.visible && zone.vertices.length >= 3)
-  const assets: LingshanMap3DGardenAsset[] = []
-
-  zones
-    .filter((zone) => zone.visible && zone.vertices.length >= 3 && zone.density > 0)
-    .forEach((zone) => {
-      const bounds = getPolygonBounds(zone.vertices)
-      const seed = hashString(zone.id)
-      let created = 0
-      let attempt = 0
-      const maxAttempts = Math.max(80, zone.density * 28)
-
-      while (created < zone.density && attempt < maxAttempts) {
-        const candidate = {
-          lat: roundNumber(bounds.minLat + (bounds.maxLat - bounds.minLat) * seeded01(seed, attempt, 7), 6),
-          lng: roundNumber(bounds.minLng + (bounds.maxLng - bounds.minLng) * seeded01(seed, attempt, 13), 6)
-        }
-        attempt += 1
-
-        if (!isPointInPolygon(candidate, zone.vertices)) {
-          continue
-        }
-
-        if (activeKeepouts.some((keepout) => isPointInPolygon(candidate, keepout.vertices))) {
-          continue
-        }
-
-        const routeDistance = findNearestRoutePoint(candidate, demoRoutePath)?.distanceMeters ?? Number.POSITIVE_INFINITY
-        const routeKeepout = zone.kind === 'axis_grove' ? 13 : zone.kind === 'water_edge' ? 10 : 18
-
-        if (routeDistance < routeKeepout) {
-          continue
-        }
-
-        const kind = chooseEditorAssetKind(zone, seed, attempt)
-        const routeProgress = findNearestRoutePoint(candidate, demoRoutePath)?.progressRatio ?? 0
-        const scale = roundNumber(lerpNumber(zone.minScale, zone.maxScale, seeded01(seed, attempt, 19)), 0)
-        const height = roundNumber(lerpNumber(zone.minHeight, zone.maxHeight, seeded01(seed, attempt, 23)), 1)
-        const yaw = roundNumber(-180 + seeded01(seed, attempt, 31) * 360, 0)
-        const opacity = clampNumber(roundNumber(zone.opacity * (0.86 + seeded01(seed, attempt, 37) * 0.2), 2), 0.2, 1)
-
-        assets.push({
-          id: `editor-${zone.id}-${created + 1}`,
-          zoneId: zone.id,
-          kind,
-          name: `${zone.name} ${created + 1}`,
-          assetUrl: getMap3DGardenAssetUrl(kind),
-          location: candidate,
-          scale,
-          height,
-          yaw,
-          opacity,
-          visible: true,
-          priority: zone.priority,
-          routeFraction: roundNumber(routeProgress, 3),
-          licenseId: getMap3DGardenLicenseId(),
-          note: `由 debugGarden 图形化编辑器基于 ${zone.name} 生成。`
-        })
-        created += 1
-      }
-    })
-
-  return assets
-}
-
-function chooseEditorAssetKind(zone: GardenEditorVegetationZone, seed: number, attempt: number) {
-  const pool = zone.assetPool.length ? zone.assetPool : defaultEditorAssetPool
-  const weightedPool = pool.map((kind) => ({
-    kind,
-    weight: Math.max(1, Number(zone.assetRatios[kind] ?? 1))
-  }))
-  const total = weightedPool.reduce((sum, item) => sum + item.weight, 0)
-  const pick = seeded01(seed, attempt, 41) * total
-  let cursor = 0
-
-  for (const item of weightedPool) {
-    cursor += item.weight
-    if (pick <= cursor) {
-      return item.kind
-    }
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false
   }
 
-  return weightedPool[0]?.kind ?? 'mixed_grove'
-}
-
-function buildGardenEditorPolygonItems(
-  state: GardenEditorState,
-  draft: GardenDraftPolygon,
-  selectedZoneId: string,
-  selectedKeepoutZoneId: string
-) {
-  const items = [
-    ...state.zones
-      .filter((zone) => zone.id === selectedZoneId && zone.vertices.length >= 3)
-      .map((zone) => ({
-        id: `zone-${zone.id}`,
-        type: 'vegetation' as const,
-        name: zone.name,
-        vertices: zone.vertices,
-        fill: 'rgba(38, 92, 63, 0)',
-        border: zone.kind === 'forest' ? 'rgba(31, 106, 72, 0.92)' : zone.kind === 'axis_grove' ? 'rgba(75, 111, 61, 0.90)' : 'rgba(48, 122, 99, 0.88)',
-        dashed: false
-      })),
-    ...state.keepouts
-      .filter((zone) => zone.id === selectedKeepoutZoneId && zone.vertices.length >= 3)
-      .map((zone) => ({
-        id: `keepout-${zone.id}`,
-        type: 'keepout' as const,
-        name: zone.name,
-        vertices: zone.vertices,
-        fill: 'rgba(180, 83, 9, 0)',
-        border: 'rgba(158, 67, 32, 0.94)',
-        dashed: true
-      }))
-  ]
-
-  if (draft && draft.vertices.length >= 3) {
-    items.push({
-      id: `draft-${draft.mode}`,
-      type: draft.mode === 'vegetation' ? 'vegetation' : 'keepout',
-      name: draft.mode === 'vegetation' ? '绘制中的 vegetation zone' : '绘制中的 keepout zone',
-      vertices: draft.vertices,
-      fill: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0)' : 'rgba(217, 119, 6, 0)',
-      border: draft.mode === 'vegetation' ? 'rgba(37, 99, 235, 0.90)' : 'rgba(217, 119, 6, 0.90)',
-      dashed: draft.mode === 'keepout'
-    })
-  }
-
-  return items
-}
-
-function buildGardenEditorVertexItems(
-  state: GardenEditorState,
-  draft: GardenDraftPolygon,
-  selectedZoneId: string,
-  selectedKeepoutZoneId: string
-) {
-  const vertices: Array<{ id: string; styleId: 'vegetationVertex' | 'keepoutVertex' | 'draftVertex'; position: LatLngPoint }> = []
-
-  state.zones.filter((zone) => zone.id === selectedZoneId).forEach((zone) => {
-    zone.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `zone:${zone.id}:${index}`,
-        styleId: 'vegetationVertex',
-        position
-      })
-    })
-  })
-
-  state.keepouts.filter((zone) => zone.id === selectedKeepoutZoneId).forEach((zone) => {
-    zone.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `keepout:${zone.id}:${index}`,
-        styleId: 'keepoutVertex',
-        position
-      })
-    })
-  })
-
-  if (draft) {
-    draft.vertices.forEach((position, index) => {
-      vertices.push({
-        id: `draft:${draft.mode}:${index}`,
-        styleId: 'draftVertex',
-        position
-      })
-    })
-  }
-
-  return vertices
+  return left.every((value, index) => value === right[index])
 }
 
 function extractMapEventLatLng(event: any): LatLngPoint | null {
@@ -6777,160 +10369,6 @@ function editorVertexSvg(fill: string, stroke: string) {
     <circle cx="12" cy="12" r="7" fill="${fill}" stroke="${stroke}" stroke-width="3"/>
     <circle cx="12" cy="12" r="2.6" fill="${stroke}" opacity=".9"/>
   </svg>`
-}
-
-function gardenPreviewPointSvg(kind: Map3DGardenAssetKind) {
-  const isStone = kind === 'rock_cluster' || kind === 'stone_mass'
-  const isCandidateTree =
-    kind === 'fluffy_bodhi_grove' ||
-    kind === 'fluffy_round_tree' ||
-    kind === 'bushy_canopy_tree' ||
-    kind === 'dense_shrub_cluster' ||
-    kind === 'soft_forest_clump' ||
-    kind === 'fluffy_tree_mix'
-  const fill = isStone ? '#7b8174' : kind === 'shrub_mass' ? '#527e5d' : isCandidateTree ? '#6f8e73' : '#2f6f54'
-  const stroke = isStone ? '#ede7d3' : '#f8efd1'
-  const shape = isStone
-    ? '<path d="M6 15.5 9 7.5l6-2 4 6.5-3.5 5.5H9z"/>'
-    : '<path d="M12 3c3.6 1.8 6 4.6 6 7.5 0 3.6-2.6 6.5-6 6.5s-6-2.9-6-6.5C6 7.6 8.4 4.8 12 3Z"/><path d="M12 10v9"/>'
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
-    <g fill="${fill}" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
-      ${shape}
-    </g>
-  </svg>`
-}
-
-function getGardenAssetZoneId(asset: LingshanMap3DGardenAsset) {
-  if (asset.zoneId) {
-    return asset.zoneId
-  }
-
-  const match = asset.id.match(/^c-zone-(.*)-\d+$/)
-  return match?.[1] ?? 'manual'
-}
-
-function matchesGardenFilters(asset: LingshanMap3DGardenAsset, filters: GardenAssetFilterState) {
-  if (filters.zoneId !== 'all' && getGardenAssetZoneId(asset) !== filters.zoneId) {
-    return false
-  }
-
-  if (filters.kind !== 'all' && asset.kind !== filters.kind) {
-    return false
-  }
-
-  if (filters.priority !== 'all' && asset.priority !== filters.priority) {
-    return false
-  }
-
-  if (filters.visible !== 'all' && String(asset.visible) !== filters.visible) {
-    return false
-  }
-
-  return true
-}
-
-function selectMobileGardenOverlayAssets(assets: LingshanMap3DGardenAsset[]) {
-  const visibleAssets = assets.filter((asset) => asset.visible)
-
-  if (visibleAssets.length <= MOBILE_GARDEN_ASSET_LIMIT) {
-    return assets
-  }
-
-  const selectedIds = new Set(
-    visibleAssets
-      .map((asset, index) => ({ asset, index }))
-      .sort((a, b) => {
-        const priorityDelta =
-          MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT[a.asset.priority] - MOBILE_GARDEN_ASSET_PRIORITY_WEIGHT[b.asset.priority]
-
-        if (priorityDelta) {
-          return priorityDelta
-        }
-
-        const distanceDelta = getMobileGardenAssetDistanceScore(a.asset) - getMobileGardenAssetDistanceScore(b.asset)
-
-        if (Math.abs(distanceDelta) > 0.1) {
-          return distanceDelta
-        }
-
-        const routeDelta = getMobileGardenAssetRouteScore(a.asset) - getMobileGardenAssetRouteScore(b.asset)
-
-        if (Math.abs(routeDelta) > 0.0001) {
-          return routeDelta
-        }
-
-        return a.index - b.index
-      })
-      .slice(0, MOBILE_GARDEN_ASSET_LIMIT)
-      .map(({ asset }) => asset.id)
-  )
-
-  return assets.map((asset) => {
-    if (!asset.visible || selectedIds.has(asset.id)) {
-      return asset
-    }
-
-    return {
-      ...asset,
-      visible: false
-    }
-  })
-}
-
-function getMobileGardenAssetDistanceScore(asset: LingshanMap3DGardenAsset) {
-  return haversineDistanceMeters(asset.location, routeCenter)
-}
-
-function getMobileGardenAssetRouteScore(asset: LingshanMap3DGardenAsset) {
-  return Number.isFinite(asset.routeFraction) ? Math.abs(asset.routeFraction - 0.5) : 1
-}
-
-function getGardenLodState({
-  currentZoom,
-  debugGarden,
-  isInteracting
-}: {
-  currentZoom: number
-  debugGarden: boolean
-  isInteracting: boolean
-}): GardenLodState {
-  const zoom = Number.isFinite(currentZoom) ? currentZoom : SCENIC_CAMERA_BOUNDS.defaultZoom
-  const lod = SCENIC_CAMERA_BOUNDS.lod
-
-  if (zoom <= lod.farZoom) {
-    return {
-      opacity: debugGarden ? lod.farDebugGardenOpacity : lod.farOpacity,
-      visibleTier: 'none',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  if (isInteracting) {
-    return {
-      opacity: debugGarden ? lod.interactionDebugGardenOpacity : lod.interactionOpacity,
-      visibleTier: 'reduced',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  if (zoom <= lod.reducedZoom) {
-    return {
-      opacity: debugGarden ? lod.reducedDebugGardenOpacity : lod.reducedOpacity,
-      visibleTier: 'reduced',
-      isInteracting,
-      currentZoom: roundNumber(zoom, 2)
-    }
-  }
-
-  return {
-    opacity: lod.normalOpacity,
-    visibleTier: 'full',
-    isInteracting,
-    currentZoom: roundNumber(zoom, 2)
-  }
 }
 
 function clampScenicCenter(center: LatLngPoint) {
@@ -7042,7 +10480,7 @@ function buildDefaultDecorOverlays(variant: Map3DGuideVariant = 'default'): InkD
       rotation: spec.rotation,
       opacity: spec.opacity,
       zIndex: spec.zIndex,
-      note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
+      note: spec.note ?? '沿文化探秘路线生成的水墨导览装饰。'
     }
   })
 }
@@ -7249,44 +10687,8 @@ function materializeDecorSpec(spec: DecorSpec): InkDecorOverlay {
     zIndex: spec.zIndex,
     assetUrl: spec.assetUrl,
     assetSource: spec.assetSource,
-    note: spec.note ?? '沿历史文化路线生成的水墨导览装饰。'
+    note: spec.note ?? '沿文化探秘路线生成的水墨导览装饰。'
   }
-}
-
-function buildForestPatchPath(patch: LingshanMap3DForestPatch) {
-  const steps = 28
-  const rotation = (patch.rotation * Math.PI) / 180
-  const points: any[] = []
-
-  for (let index = 0; index < steps; index += 1) {
-    const angle = (index / steps) * Math.PI * 2
-    const x = Math.cos(angle) * patch.radiusX
-    const y = Math.sin(angle) * patch.radiusY
-    const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation)
-    const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation)
-    const point = offsetLatLngMeters(patch.center, rotatedX, rotatedY)
-    points.push(toTMapLatLng(point))
-  }
-
-  return points
-}
-
-function getForestPatchOpacity(
-  patch: LingshanMap3DForestPatch,
-  options: {
-    debugGarden: boolean
-    routeProgressRatio: number
-    rerouteActive: boolean
-  }
-) {
-  if (options.debugGarden) {
-    return Math.min(0.42, Math.max(patch.opacity, 0.22))
-  }
-
-  const distanceFromProgress = patch.routeFraction - Math.max(0, Math.min(1, options.routeProgressRatio))
-  const currentBoost = Math.abs(distanceFromProgress) <= 0.14 ? 1.18 : distanceFromProgress < -0.14 ? 1.04 : 0.9
-  const rerouteDimming = options.rerouteActive && patch.priority !== 'high' ? 0.82 : 1
-  return Number(Math.max(0.08, Math.min(0.38, patch.opacity * currentBoost * rerouteDimming)).toFixed(3))
 }
 
 function offsetLatLngMeters(origin: LatLngPoint, eastMeters: number, northMeters: number): LatLngPoint {
@@ -7314,31 +10716,6 @@ function colorWithOpacity(color: string, opacity: number) {
   const green = parseInt(normalized.slice(2, 4), 16)
   const blue = parseInt(normalized.slice(4, 6), 16)
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`
-}
-
-function forestPatchSvg(options: {
-  color: string
-  opacity: number
-  rotation: number
-  width: number
-  height: number
-}) {
-  const width = Math.max(80, options.width)
-  const height = Math.max(50, options.height)
-  const cx = width / 2
-  const cy = height / 2
-  const rx = width * 0.44
-  const ry = height * 0.38
-  const wash = colorWithOpacity(options.color, options.opacity)
-  const inner = colorWithOpacity(options.color, Math.min(0.42, options.opacity * 1.2))
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <g transform="rotate(${options.rotation} ${cx} ${cy})">
-      <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${wash}"/>
-      <ellipse cx="${cx - width * 0.08}" cy="${cy - height * 0.06}" rx="${rx * 0.54}" ry="${ry * 0.48}" fill="${inner}" opacity=".42"/>
-      <ellipse cx="${cx + width * 0.14}" cy="${cy + height * 0.05}" rx="${rx * 0.42}" ry="${ry * 0.38}" fill="${inner}" opacity=".30"/>
-    </g>
-  </svg>`
 }
 
 function buildVisibleDecorGeometries(
@@ -7582,27 +10959,27 @@ function inkDecorSvg(
 function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', index: number) {
   const palette = {
     route: {
-      jade: '#1f5a4d',
-      gold: '#f0cf72',
+      jade: '#B7842A',
+      gold: '#E7D09A',
       paper: '#fff8df',
-      glow: 'rgba(240, 207, 114, .28)',
-      text: '#20483f',
+      glow: 'rgba(231, 208, 154, .34)',
+      text: '#79551A',
       badge: ''
     },
     current: {
-      jade: '#7a4f0f',
-      gold: '#ffd96a',
+      jade: '#9C6815',
+      gold: '#F2C14E',
       paper: '#fff4c7',
       glow: 'rgba(255, 217, 106, .58)',
       text: '#6c3f08',
       badge: '当前'
     },
     next: {
-      jade: '#0f766e',
-      gold: '#b7f3df',
-      paper: '#e8fff7',
-      glow: 'rgba(45, 212, 191, .42)',
-      text: '#0f5f56',
+      jade: '#F2C14E',
+      gold: '#9C6815',
+      paper: '#fff8df',
+      glow: 'rgba(242, 193, 78, .48)',
+      text: '#79551A',
       badge: '下一'
     },
     terminal: {
@@ -7639,6 +11016,34 @@ function routePoiMarkerSvg(state: 'route' | 'current' | 'next' | 'terminal', ind
   </svg>`
 }
 
+function browsePoiMarkerSvg(name: string, isCore: boolean, subdued = false) {
+  const label = escapeSvgText(name.length > 8 ? `${name.slice(0, 8)}…` : name)
+  const ink = isCore ? '#1f5a4d' : '#52776c'
+  const paper = subdued ? 'rgba(245,241,232,.82)' : 'rgba(255,250,235,.94)'
+  const gold = isCore ? '#c9a86a' : '#b9aa87'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="42" viewBox="0 0 96 42">
+    <defs><filter id="s" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="3" stdDeviation="2" flood-color="rgba(22,56,47,.22)"/></filter></defs>
+    <g filter="url(#s)" opacity="${subdued ? '.78' : '1'}">
+      <circle cx="13" cy="20" r="8" fill="${ink}" stroke="#f7edd5" stroke-width="2"/>
+      <path d="M13 15.5v9M8.5 20h9" stroke="#f7edd5" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M24 7h62l5 13-5 13H24l-5-13 5-13Z" fill="${paper}" stroke="${gold}" stroke-width="1.5"/>
+      <text x="56" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="${ink}">${label}</text>
+    </g>
+  </svg>`
+}
+
+function escapeSvgText(value: string) {
+  const entities: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;'
+  }
+  return value.replace(/[&<>"']/g, (character) => entities[character] ?? character)
+}
+
 function userLocationSvg() {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="rgba(20,184,166,.22)" stroke="rgba(240,253,250,.94)" stroke-width="2"/><circle cx="22" cy="22" r="8" fill="#0f766e" stroke="#fef3c7" stroke-width="3"/><path d="M22 5l4 11-4 3-4-3 4-11Z" fill="#d6a832"/></svg>'
 }
@@ -7653,41 +11058,6 @@ const map3DGuideCss = `
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.map-3d-guide-home-btn {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
-  left: calc(env(safe-area-inset-left, 0px) + 12px);
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 36px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #19372f;
-  background: rgba(255, 255, 255, .82);
-  box-shadow: 0 4px 14px rgba(25, 55, 47, .18), inset 0 0 0 1px rgba(255, 255, 255, .6);
-  backdrop-filter: blur(6px);
-  cursor: pointer;
-}
-
-.map-3d-guide-home-btn:active {
-  background: rgba(255, 255, 255, .95);
-}
-
-/* 桌面端:dock 为 display:contents,布局上等于不存在,子面板照旧浮在四角;把手隐藏。
-   仅移动端 media query 内把 dock 变成底部抽屉。 */
-.map-3d-guide-mobile-dock {
-  display: contents;
-}
-
-.map-3d-guide-dock-handle {
-  display: none;
-}
-
 .map-3d-guide-map {
   position: absolute;
   inset: 0;
@@ -7695,7 +11065,189 @@ const map3DGuideCss = `
     radial-gradient(circle at 50% 42%, rgba(242, 235, 216, .92), rgba(221, 233, 217, .88) 52%, rgba(207, 222, 209, .96) 100%),
     #dde9d9;
   opacity: .98;
-  filter: saturate(.84) sepia(.08) contrast(.96) brightness(1.04);
+  filter: none;
+}
+
+.map-presentation-cloud {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  overflow: hidden;
+  pointer-events: auto;
+  background: rgba(241, 240, 228, .18);
+  opacity: 1;
+  transition: opacity 360ms ease;
+}
+
+.map-3d-guide-map-runtime-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #e8eadf;
+  color: #365348;
+  font-size: 14px;
+}
+
+.map-presentation-cloud--opening {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.map-presentation-cloud__bank {
+  position: absolute;
+  top: -18%;
+  bottom: -18%;
+  width: 64%;
+  background:
+    radial-gradient(circle at 28% 26%, rgba(255,255,255,.98) 0 12%, transparent 29%),
+    radial-gradient(circle at 58% 42%, rgba(245,244,233,.96) 0 18%, transparent 38%),
+    radial-gradient(circle at 36% 70%, rgba(226,232,218,.92) 0 16%, transparent 36%);
+  filter: blur(12px);
+  will-change: transform, opacity;
+}
+
+.map-presentation-cloud__bank--left {
+  left: -12%;
+  animation: map-presentation-cloud-left 820ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud__bank--center {
+  left: 18%;
+  width: 66%;
+  opacity: .82;
+  animation: map-presentation-cloud-center 860ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud__bank--right {
+  right: -12%;
+  transform: scaleX(-1);
+  animation: map-presentation-cloud-right 820ms cubic-bezier(.2,.72,.2,1) both;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--left {
+  transform: translateX(-72%);
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--center {
+  transform: translateY(-48%) scale(.88);
+  opacity: 0;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__bank--right {
+  transform: translateX(72%) scaleX(-1);
+}
+
+.map-presentation-cloud__label {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -50%);
+  color: #365348;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 1px 8px rgba(255,255,255,.96);
+  transition: opacity 180ms ease;
+}
+
+.map-presentation-cloud--opening .map-presentation-cloud__label {
+  opacity: 0;
+}
+
+@keyframes map-presentation-cloud-left {
+  from { transform: translateX(-58%); opacity: .45; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes map-presentation-cloud-center {
+  from { transform: translateY(20%) scale(.84); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: .82; }
+}
+
+@keyframes map-presentation-cloud-right {
+  from { transform: translateX(58%) scaleX(-1); opacity: .45; }
+  to { transform: translateX(0) scaleX(-1); opacity: 1; }
+}
+
+.map-3d-guide-ink-overlay {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  overflow: hidden;
+  mix-blend-mode: multiply;
+  transform-origin: 0 0;
+}
+
+.map-3d-guide-ink-overlay[data-camera-mode="reduced"] {
+  mix-blend-mode: soft-light;
+}
+
+.map-3d-guide-ink-overlay[data-camera-mode="disabled3d"],
+.map-3d-guide-ink-overlay[data-camera-mode="off"] {
+  display: none !important;
+}
+
+.map-3d-guide-ink-tile-fallback {
+  z-index: 1;
+  mix-blend-mode: multiply;
+}
+
+.map-3d-guide-ink-tile-fallback img {
+  filter: saturate(.86) contrast(.92) brightness(1.06);
+}
+
+.map-3d-guide-ink-overlay img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: saturate(.82) contrast(.9) brightness(1.08);
+}
+
+.map-3d-guide-ink-overlay[data-camera-mode="reduced"] img {
+  filter: saturate(.64) contrast(.82) brightness(1.16);
+}
+
+.map-3d-guide-ink-overlay-note {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  z-index: 18;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid rgba(201, 168, 106, .45);
+  border-radius: 14px;
+  background: rgba(245, 241, 232, .9);
+  box-shadow: 0 14px 34px rgba(33, 58, 49, .13);
+  color: #1f3b31;
+  pointer-events: none;
+  display: grid;
+  gap: 3px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.map-3d-guide-ink-overlay-note strong {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.map-3d-guide-ink-overlay-note span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #8b6a2d;
+}
+
+.map-3d-guide-ink-overlay-note small {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(31, 59, 49, .68);
 }
 
 .map-3d-guide-skin,
@@ -7742,6 +11294,499 @@ const map3DGuideCss = `
 .map-3d-guide-shell.is-map-visual-loading .map-3d-guide-paperedge {
   box-shadow: inset 0 0 42px rgba(91, 117, 84, .08);
   opacity: .44;
+}
+
+.map-3d-guide-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: .94;
+  --buddha-clear-mask: radial-gradient(ellipse at 52% 54%, transparent 0 40%, rgba(0, 0, 0, .34) 55%, #000 74%);
+  transition: opacity 700ms ease;
+}
+
+.map-3d-guide-atmosphere > div {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 900ms ease, transform 900ms ease;
+}
+
+.map-3d-guide-atmosphere__sky {
+  height: 50%;
+  bottom: auto;
+  background:
+    radial-gradient(ellipse at 52% 2%, rgba(245, 241, 232, .72), rgba(234, 230, 210, .36) 34%, transparent 76%),
+    radial-gradient(ellipse at 18% 8%, rgba(45, 74, 62, .22), transparent 44%),
+    radial-gradient(ellipse at 82% 6%, rgba(31, 59, 49, .20), transparent 42%),
+    linear-gradient(180deg, rgba(45, 74, 62, .42), rgba(245, 241, 232, .36) 40%, rgba(126, 157, 139, .18) 74%, transparent 100%);
+  filter: blur(3px);
+  opacity: .82;
+}
+
+.map-3d-guide-atmosphere__ink-horizon {
+  height: 54%;
+  bottom: auto;
+  background:
+    radial-gradient(ellipse at 8% 43%, rgba(31, 59, 49, .48), transparent 24%),
+    radial-gradient(ellipse at 27% 35%, rgba(45, 74, 62, .44), transparent 27%),
+    radial-gradient(ellipse at 54% 39%, rgba(70, 99, 83, .40), transparent 26%),
+    radial-gradient(ellipse at 78% 34%, rgba(31, 59, 49, .42), transparent 24%),
+    radial-gradient(ellipse at 96% 42%, rgba(45, 74, 62, .34), transparent 20%),
+    linear-gradient(180deg, rgba(31, 59, 49, .36), rgba(126, 157, 139, .26) 50%, transparent 94%);
+  clip-path: polygon(0 19%, 10% 28%, 18% 21%, 26% 31%, 36% 22%, 48% 34%, 58% 26%, 68% 37%, 80% 24%, 90% 32%, 100% 21%, 100% 100%, 0 100%);
+  filter: blur(18px);
+  mix-blend-mode: multiply;
+  opacity: .74;
+  transform: translateY(-8%);
+}
+
+.map-3d-guide-atmosphere__forest {
+  inset: 34% -6% 0;
+  background:
+    radial-gradient(ellipse at 4% 70%, rgba(31, 59, 49, .42), transparent 25%),
+    radial-gradient(ellipse at 18% 66%, rgba(45, 74, 62, .30), transparent 20%),
+    radial-gradient(ellipse at 82% 62%, rgba(31, 59, 49, .32), transparent 22%),
+    radial-gradient(ellipse at 96% 74%, rgba(45, 74, 62, .40), transparent 25%),
+    radial-gradient(ellipse at 50% 96%, rgba(31, 59, 49, .28), transparent 32%),
+    linear-gradient(90deg, rgba(45, 74, 62, .28), transparent 24%, transparent 76%, rgba(45, 74, 62, .26));
+  filter: blur(24px);
+  mix-blend-mode: multiply;
+  opacity: .58;
+}
+
+.map-3d-guide-atmosphere__water {
+  inset: 34% 8% 18%;
+  background:
+    radial-gradient(ellipse at 39% 58%, rgba(182, 213, 201, .24), rgba(245, 241, 232, .12) 28%, transparent 52%),
+    radial-gradient(ellipse at 57% 46%, rgba(126, 157, 139, .18), rgba(245, 241, 232, .10) 30%, transparent 58%),
+    radial-gradient(ellipse at 70% 61%, rgba(182, 213, 201, .16), transparent 44%),
+    repeating-radial-gradient(ellipse at 52% 54%, rgba(245, 241, 232, .12) 0 2px, transparent 2px 18px);
+  filter: blur(8px);
+  mix-blend-mode: screen;
+  opacity: .22;
+  transform: rotate(-8deg);
+}
+
+.map-3d-guide-atmosphere__dynamic-mist {
+  position: absolute;
+  inset: -4%;
+  width: 108%;
+  height: 108%;
+  pointer-events: none;
+  opacity: .56;
+  mix-blend-mode: soft-light;
+  filter: blur(.2px) saturate(.92);
+  transform: translateZ(0);
+}
+
+.map-3d-guide-atmosphere__edge {
+  background:
+    radial-gradient(ellipse at 52% 54%, transparent 34%, rgba(245, 241, 226, .36) 58%, rgba(31, 59, 49, .46) 100%),
+    linear-gradient(90deg, rgba(31, 59, 49, .42), rgba(245, 241, 226, .22) 18%, transparent 35%, transparent 65%, rgba(245, 241, 226, .24) 82%, rgba(31, 59, 49, .40)),
+    linear-gradient(180deg, rgba(31, 59, 49, .38), rgba(245, 241, 226, .16) 22%, transparent 48%, rgba(245, 241, 226, .18) 76%, rgba(31, 59, 49, .38));
+  opacity: .94;
+}
+
+.map-3d-guide-atmosphere--edge-strong .map-3d-guide-atmosphere__edge {
+  background:
+    radial-gradient(ellipse at 52% 54%, transparent 25%, rgba(245, 241, 226, .48) 50%, rgba(31, 59, 49, .62) 100%),
+    linear-gradient(90deg, rgba(31, 59, 49, .58), rgba(245, 241, 226, .34) 20%, transparent 38%, transparent 62%, rgba(245, 241, 226, .34) 80%, rgba(31, 59, 49, .56)),
+    linear-gradient(180deg, rgba(31, 59, 49, .52), rgba(245, 241, 226, .24) 24%, transparent 46%, rgba(245, 241, 226, .26) 74%, rgba(31, 59, 49, .52));
+  opacity: 1;
+}
+
+.map-3d-guide-atmosphere--edge-strong .map-3d-guide-atmosphere__forest {
+  opacity: .88;
+}
+
+.map-3d-guide-atmosphere--edge-strong .map-3d-guide-atmosphere__ink-horizon {
+  opacity: .88;
+}
+
+.map-3d-guide-atmosphere--edge-strong .map-3d-guide-atmosphere__vignette {
+  opacity: .88;
+}
+
+.map-3d-guide-atmosphere__forest,
+.map-3d-guide-atmosphere__water,
+.map-3d-guide-atmosphere__dynamic-mist,
+.map-3d-guide-atmosphere__edge,
+.map-3d-guide-atmosphere__route,
+.map-3d-guide-atmosphere__glow,
+.map-3d-guide-atmosphere__gold-dust,
+.map-3d-guide-atmosphere__vignette {
+  -webkit-mask-image: var(--buddha-clear-mask);
+  mask-image: var(--buddha-clear-mask);
+}
+
+.map-3d-guide-atmosphere--clear-wide {
+  --buddha-clear-mask: radial-gradient(ellipse at 52% 54%, transparent 0 40%, rgba(0, 0, 0, .34) 55%, #000 74%);
+}
+
+.map-3d-guide-atmosphere--clear-balanced {
+  --buddha-clear-mask: radial-gradient(ellipse at 52% 54%, transparent 0 34%, rgba(0, 0, 0, .42) 50%, #000 68%);
+}
+
+.map-3d-guide-atmosphere--clear-compact {
+  --buddha-clear-mask: radial-gradient(ellipse at 52% 55%, transparent 0 28%, rgba(0, 0, 0, .50) 44%, #000 62%);
+}
+
+.map-3d-guide-atmosphere--clear-route-ellipse.map-3d-guide-atmosphere--clear-balanced {
+  --buddha-clear-mask: radial-gradient(ellipse 48% 34% at 52% 56%, transparent 0 58%, rgba(0, 0, 0, .46) 75%, #000 100%);
+}
+
+.map-3d-guide-atmosphere--clear-route-ellipse.map-3d-guide-atmosphere--clear-compact {
+  --buddha-clear-mask: radial-gradient(ellipse 44% 30% at 52% 56%, transparent 0 54%, rgba(0, 0, 0, .54) 72%, #000 100%);
+}
+
+.map-3d-guide-atmosphere__route {
+  inset: 22% 10% 16%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 58% 62%, rgba(245, 241, 226, .34), rgba(142, 173, 154, .16) 36%, transparent 70%),
+    radial-gradient(ellipse at 36% 54%, rgba(214, 180, 106, .12), transparent 58%);
+  filter: blur(18px);
+  opacity: .28;
+  transform: rotate(-8deg);
+}
+
+.map-3d-guide-atmosphere__glow {
+  inset: 20% 18% 20%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 52% 44%, rgba(201, 168, 106, .13), transparent 42%),
+    radial-gradient(circle at 42% 58%, rgba(126, 157, 139, .16), transparent 52%);
+  filter: blur(20px);
+  opacity: .34;
+}
+
+.map-3d-guide-atmosphere__gold-dust {
+  background:
+    radial-gradient(circle at 72% 18%, rgba(201, 168, 106, .13) 0 1px, transparent 2px),
+    radial-gradient(circle at 82% 24%, rgba(201, 168, 106, .10) 0 1px, transparent 2px),
+    radial-gradient(circle at 67% 34%, rgba(245, 241, 232, .13) 0 1px, transparent 2px);
+  background-size: 72px 72px, 92px 92px, 116px 116px;
+  opacity: .26;
+}
+
+.map-3d-guide-atmosphere__vignette {
+  background:
+    radial-gradient(ellipse at center, transparent 48%, rgba(126, 157, 139, .16) 72%, rgba(31, 59, 49, .34) 100%);
+  mix-blend-mode: multiply;
+  opacity: .62;
+}
+
+.map-3d-guide-atmosphere--intro {
+  opacity: .98;
+}
+
+.map-3d-guide-atmosphere--intro .map-3d-guide-atmosphere__sky {
+  opacity: .74;
+}
+
+.map-3d-guide-atmosphere--intro .map-3d-guide-atmosphere__ink-horizon {
+  opacity: .64;
+}
+
+.map-3d-guide-atmosphere--intro .map-3d-guide-atmosphere__edge {
+  opacity: .88;
+}
+
+.map-3d-guide-atmosphere--intro .map-3d-guide-atmosphere__dynamic-mist {
+  opacity: .68;
+}
+
+.map-3d-guide-atmosphere--normal {
+  opacity: .76;
+}
+
+.map-3d-guide-atmosphere--normal .map-3d-guide-atmosphere__dynamic-mist {
+  opacity: .48;
+}
+
+.map-3d-guide-atmosphere--normal .map-3d-guide-atmosphere__water {
+  opacity: .18;
+}
+
+.map-3d-guide-atmosphere--tour {
+  opacity: .90;
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__route {
+  opacity: .58;
+  transform: rotate(-8deg) scale(1.06);
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__ink-horizon {
+  opacity: .56;
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__forest {
+  opacity: .50;
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__water {
+  opacity: .26;
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__dynamic-mist {
+  opacity: .50;
+}
+
+.map-3d-guide-atmosphere--tour .map-3d-guide-atmosphere__glow {
+  opacity: .46;
+}
+
+.map-3d-guide-atmosphere--focus {
+  opacity: .82;
+}
+
+.map-3d-guide-atmosphere--focus .map-3d-guide-atmosphere__glow {
+  opacity: .56;
+  transform: scale(.92);
+}
+
+.map-3d-guide-shell--ink-clean-mode .map-3d-guide-skin,
+.map-3d-guide-shell--ink-clean-mode .map-3d-guide-mist,
+.map-3d-guide-shell--ink-clean-mode .map-3d-guide-paperedge {
+  display: none;
+}
+
+.map-3d-guide-shell--ink2d .map-3d-guide-skin,
+.map-3d-guide-shell--ink2d .map-3d-guide-mist,
+.map-3d-guide-shell--ink2d .map-3d-guide-paperedge {
+  display: none;
+}
+
+.map-3d-guide-shell--ink2d .map-3d-guide-map {
+  opacity: 1;
+  filter: none;
+}
+
+/* showControl:false is the primary API-level switch. QQ WebView can still
+   inject its own TMap control DOM, so this map-container-only fallback keeps
+   native zoom/compass chrome out of both 2D and 3D without touching the
+   application's portal-based tool rail. */
+.map-3d-guide-map .tmap-control,
+.map-3d-guide-map .tmap-control-container,
+.map-3d-guide-map .tmap-zoom-control,
+.map-3d-guide-map .tmap-rotate-control,
+.map-3d-guide-map .tmap-compass,
+.map-3d-guide-map .tmap-scale-control,
+.map-3d-guide-map .TMap-control,
+.map-3d-guide-map .TMap-zoom,
+.map-3d-guide-map .TMap-compass,
+.map-3d-guide-map [class*="tmap" i][class*="zoom" i],
+.map-3d-guide-map [class*="tmap" i][class*="compass" i],
+.map-3d-guide-map [class*="tmap" i][class*="rotate" i] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.map-3d-guide-shell.is-ink-export-ui-hidden > :not(.map-3d-guide-map) {
+  display: none !important;
+}
+
+.map-3d-guide-shell--ink-capture-frame {
+  background: #111914;
+}
+
+.map-3d-guide-shell--ink-capture-frame .map-3d-guide-map {
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  width: min(100vw, 100vh, 1536px);
+  height: min(100vw, 100vh, 1536px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+}
+
+.map-3d-guide-shell--ink-capture-frame-guide .map-3d-guide-map {
+  box-shadow: 0 0 0 2px rgba(201, 168, 106, .72), 0 22px 80px rgba(0, 0, 0, .34);
+}
+
+.map-3d-guide-shell--clean-shot .map-3d-guide-map,
+.map-3d-guide-shell--ink-capture-frame.is-ink-export-ui-hidden .map-3d-guide-map {
+  box-shadow: none;
+}
+
+.map-3d-guide-shot-guide-frame {
+  position: absolute;
+  z-index: 17;
+  left: 50%;
+  top: 50%;
+  width: min(calc(100vw - 64px), calc(100vh - 64px), 1536px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 2px dashed rgba(201, 168, 106, .94);
+  box-shadow: inset 0 0 0 1px rgba(31, 59, 49, .56), 0 0 0 9999px rgba(17, 25, 20, .18);
+  pointer-events: none;
+}
+
+.map-3d-guide-shot-guide-frame strong,
+.map-3d-guide-shot-guide-frame span {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 32px));
+  text-align: center;
+  color: #1f3b31;
+  background: rgba(245, 241, 232, .92);
+  border: 1px solid rgba(201, 168, 106, .58);
+  border-radius: 999px;
+  padding: 7px 12px;
+}
+
+.map-3d-guide-shot-guide-frame strong {
+  top: 12px;
+  font-size: 14px;
+}
+
+.map-3d-guide-shot-guide-frame span {
+  bottom: 12px;
+  color: rgba(31, 59, 49, .74);
+  font-size: 12px;
+}
+
+.map-3d-guide-shot-guide-warning,
+.map-3d-guide-capture-frame-note {
+  position: absolute;
+  z-index: 18;
+  left: 24px;
+  bottom: 24px;
+  width: min(380px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border: 1px solid rgba(201, 168, 106, .46);
+  border-radius: 8px;
+  background: rgba(245, 241, 232, .92);
+  color: rgba(31, 59, 49, .78);
+  box-shadow: 0 18px 46px rgba(31, 59, 49, .14);
+  font-weight: 700;
+}
+
+.map-3d-guide-capture-frame-note {
+  display: grid;
+  gap: 4px;
+}
+
+.map-3d-guide-capture-frame-note strong {
+  color: #1f3b31;
+}
+
+.map-3d-guide-capture-frame-note span {
+  line-height: 1.5;
+}
+
+.map-3d-guide-ink-tool {
+  position: absolute;
+  z-index: 18;
+  left: 24px;
+  top: 24px;
+  width: min(380px, calc(100vw - 48px));
+  padding: 16px;
+  border: 1px solid rgba(201, 168, 106, .46);
+  border-radius: 8px;
+  background: rgba(245, 241, 232, .92);
+  box-shadow: 0 18px 46px rgba(31, 59, 49, .16);
+  color: #1f3b31;
+  pointer-events: auto;
+}
+
+.map-3d-guide-ink-tool--export {
+  left: auto;
+  right: 24px;
+}
+
+.map-3d-guide-ink-tool__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.map-3d-guide-ink-tool__header strong {
+  font-size: 16px;
+}
+
+.map-3d-guide-ink-tool__header span,
+.map-3d-guide-ink-tool small,
+.map-3d-guide-ink-tool p,
+.map-3d-guide-ink-tool li {
+  color: rgba(31, 59, 49, .72);
+  line-height: 1.55;
+}
+
+.map-3d-guide-ink-tool__bounds-note {
+  margin-top: 10px;
+  color: #7a5d1f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.map-3d-guide-ink-tool dl {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.map-3d-guide-ink-tool dl div {
+  display: grid;
+  grid-template-columns: 94px 1fr;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgba(255, 252, 238, .62);
+}
+
+.map-3d-guide-ink-tool dt {
+  font-weight: 800;
+  color: #2d4a3e;
+}
+
+.map-3d-guide-ink-tool dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1f3b31;
+}
+
+.map-3d-guide-ink-tool__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+
+.map-3d-guide-ink-tool button {
+  border: 1px solid rgba(201, 168, 106, .62);
+  border-radius: 6px;
+  background: rgba(255, 252, 238, .88);
+  color: #1f3b31;
+  font-weight: 800;
+  padding: 8px 12px;
+}
+
+.map-3d-guide-ink-tool button:disabled {
+  opacity: .46;
+}
+
+.map-3d-guide-ink-road-check {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: grid;
+  place-items: end center;
+  padding: 28px;
+  color: rgba(31, 59, 49, .76);
+  font-weight: 800;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 96px, rgba(169, 71, 63, .10) 96px 98px),
+    repeating-linear-gradient(90deg, transparent 0 96px, rgba(169, 71, 63, .10) 96px 98px);
 }
 
 .map-3d-guide-loading-curtain {
@@ -7858,6 +11903,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-shell--prototype-a .map-3d-guide-hero,
+.map-3d-guide-shell--prototype-a .map-3d-guide-routes,
 .map-3d-guide-shell--prototype-a .map-3d-guide-camera,
 .map-3d-guide-shell--prototype-a .map-3d-guide-status,
 .map-3d-guide-shell--prototype-a .map-3d-guide-pois,
@@ -7911,6 +11957,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-shell--prototype-b .map-3d-guide-hero,
+.map-3d-guide-shell--prototype-b .map-3d-guide-routes,
 .map-3d-guide-shell--prototype-b .map-3d-guide-camera,
 .map-3d-guide-shell--prototype-b .map-3d-guide-status,
 .map-3d-guide-shell--prototype-b .map-3d-guide-pois,
@@ -7939,7 +11986,12 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-map {
-  filter: saturate(.70) sepia(.10) contrast(.98) brightness(1.02);
+  filter: none;
+}
+
+.map-3d-guide-shell--prototype-c.map-3d-guide-shell--ink2d .map-3d-guide-map {
+  opacity: 1;
+  filter: none;
 }
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-skin {
@@ -7959,6 +12011,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-shell--prototype-c .map-3d-guide-hero,
+.map-3d-guide-shell--prototype-c .map-3d-guide-routes,
 .map-3d-guide-shell--prototype-c .map-3d-guide-camera,
 .map-3d-guide-shell--prototype-c .map-3d-guide-status,
 .map-3d-guide-shell--prototype-c .map-3d-guide-pois,
@@ -7983,6 +12036,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-hero,
+.map-3d-guide-routes,
 .map-3d-guide-camera,
 .map-3d-guide-status,
 .map-3d-guide-pois,
@@ -8037,6 +12091,7 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-top-actions button,
+.map-3d-guide-routes button,
 .map-3d-guide-camera button,
 .map-3d-guide-controlbar button,
 .map-3d-guide-pois button {
@@ -8057,8 +12112,68 @@ const map3DGuideCss = `
   background: rgba(234, 246, 239, .84);
 }
 
+.map-3d-guide-routes {
+  top: 174px;
+  left: 18px;
+  width: 330px;
+  max-width: calc(100vw - 36px);
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.map-3d-guide-routes__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.map-3d-guide-routes__header strong {
+  color: #25463b;
+}
+
+.map-3d-guide-routes__header span {
+  color: #798276;
+  font-size: 12px;
+  text-align: right;
+}
+
+.map-3d-guide-routes__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.map-3d-guide-routes button {
+  display: grid;
+  gap: 2px;
+  min-height: 52px;
+  padding: 7px 8px;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.map-3d-guide-routes button strong {
+  color: inherit;
+  font-size: 12px;
+}
+
+.map-3d-guide-routes button span {
+  color: rgba(74, 88, 76, .72);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.map-3d-guide-routes button.is-active {
+  border-color: rgba(213, 166, 45, .70);
+  background: linear-gradient(135deg, rgba(255, 244, 202, .98), rgba(230, 246, 238, .94));
+  color: #7a4f0f;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
+}
+
 .map-3d-guide-camera {
-  top: 178px;
+  top: 348px;
   left: 18px;
   width: 330px;
   max-width: calc(100vw - 36px);
@@ -8113,8 +12228,7 @@ const map3DGuideCss = `
   border-right: 5px solid rgba(33, 91, 75, .58);
 }
 
-.map-3d-guide-decor-debug,
-.map-3d-guide-garden-debug {
+.map-3d-guide-decor-debug {
   position: absolute;
   z-index: 6;
   top: 320px;
@@ -8132,237 +12246,9 @@ const map3DGuideCss = `
   backdrop-filter: blur(18px);
 }
 
-.map-3d-guide-garden-debug {
-  border-color: rgba(83, 89, 67, .24);
-  background:
-    linear-gradient(135deg, rgba(250, 247, 232, .96), rgba(229, 238, 224, .92));
-}
-
-.map-3d-guide-garden-debug--editor {
-  position: absolute;
-  z-index: 18;
-  top: auto;
-  left: auto;
-  width: 390px;
-  max-height: calc(100vh - 96px);
-  resize: both;
-}
-
-.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-garden-debug--editor {
-  max-height: min(calc(100vh - 356px), 404px);
-}
-
-.map-3d-guide-garden-debug__drag-handle {
-  cursor: move;
-  user-select: none;
-}
-
-.map-3d-guide-shell--debug-garden .map-3d-guide-camera {
-  top: 18px;
-}
-
-.map-3d-guide-shell--debug-garden .map-3d-guide-status {
-  top: 118px;
-}
-
 .map-3d-guide-debug-exit {
   width: 100%;
   margin: 0 0 10px;
-}
-
-.map-3d-guide-garden-debug__steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 5px;
-  margin: 10px 0;
-}
-
-.map-3d-guide-garden-debug__steps button {
-  min-height: 34px;
-  padding: 0 5px;
-  font-size: 11px;
-}
-
-.map-3d-guide-garden-debug__object-lists {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.map-3d-guide-garden-debug__list-group {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .32);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.54);
-}
-
-.map-3d-guide-garden-debug__list-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.map-3d-guide-garden-debug__list-heading strong {
-  font-size: 13px;
-}
-
-.map-3d-guide-garden-debug__list-heading span {
-  display: inline-grid;
-  place-items: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: rgba(36, 72, 60, .10);
-  color: #24483c;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-debug__list-scroll {
-  display: grid;
-  gap: 5px;
-  max-height: 86px;
-  overflow: auto;
-}
-
-.map-3d-guide-garden-debug__list-scroll--assets {
-  max-height: 118px;
-}
-
-.map-3d-guide-garden-debug__list-scroll button {
-  display: grid;
-  justify-items: start;
-  gap: 2px;
-  min-height: 38px;
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.map-3d-guide-garden-debug__list-scroll button span {
-  width: 100%;
-  overflow: hidden;
-  color: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-guide-garden-debug__list-scroll button small {
-  width: 100%;
-  overflow: hidden;
-  color: #7b8176;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-guide-garden-debug__section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.map-3d-guide-garden-debug__primary {
-  border-color: rgba(32, 96, 72, .40) !important;
-  background: rgba(220, 241, 226, .96) !important;
-  color: #245640 !important;
-}
-
-.map-3d-guide-garden-debug__danger {
-  border-color: rgba(185, 74, 40, .34) !important;
-  background: rgba(255, 239, 229, .96) !important;
-  color: #9a3412 !important;
-}
-
-.map-3d-guide-garden-debug__draft-state,
-.map-3d-guide-garden-debug__stat-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 10px;
-}
-
-.map-3d-guide-garden-debug__draft-state span,
-.map-3d-guide-garden-debug__stat-row span {
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: rgba(255, 249, 229, .78);
-  color: #6f4a12;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-debug__advanced {
-  margin-top: 10px;
-  border-top: 1px solid rgba(94, 112, 102, .12);
-}
-
-.map-3d-guide-garden-debug__advanced summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  color: #6d756e;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-  list-style: none;
-}
-
-.map-3d-guide-garden-debug__advanced summary::-webkit-details-marker {
-  display: none;
-}
-
-.map-3d-guide-garden-debug__advanced summary::after {
-  content: "展开";
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255, 249, 229, .72);
-  color: #8a6a28;
-  font-size: 11px;
-}
-
-.map-3d-guide-garden-debug__advanced[open] summary::after {
-  content: "收起";
-}
-
-.map-3d-guide-garden-debug__status {
-  display: block;
-  margin-top: 10px;
-  padding: 8px 9px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .42);
-  color: #24483c;
-  font-weight: 900;
-}
-
-.map-3d-guide-garden-load {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  z-index: 9;
-  padding: 8px 11px;
-  border-radius: 10px;
-  border: 1px solid rgba(50, 88, 75, .16);
-  background: rgba(250, 252, 238, .88);
-  color: #24483c;
-  font-size: 12px;
-  font-weight: 900;
-  box-shadow: 0 10px 28px rgba(20, 45, 36, .14), inset 0 0 0 1px rgba(255,255,255,.52);
-  backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-
-.map-3d-guide-garden-load.is-warning {
-  color: #8a3512;
-  border-color: rgba(182, 83, 24, .26);
-  background: rgba(255, 244, 228, .90);
 }
 
 .map-3d-guide-perf-panel {
@@ -8380,11 +12266,6 @@ const map3DGuideCss = `
   color: #24483c;
   box-shadow: 0 18px 48px rgba(20, 45, 36, .18), inset 0 0 0 1px rgba(255,255,255,.58);
   backdrop-filter: blur(16px);
-}
-
-.map-3d-guide-shell--debug-garden.map-3d-guide-shell--debug-perf .map-3d-guide-perf-panel {
-  bottom: 18px;
-  max-height: min(46vh, 420px);
 }
 
 .map-3d-guide-perf-panel__header {
@@ -8713,14 +12594,6 @@ const map3DGuideCss = `
   font-size: 11px;
 }
 
-.map-3d-guide-garden-debug__subsection {
-  margin: 12px 0;
-  padding: 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .34);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.58);
-}
-
 .map-3d-guide-decor-debug__header {
   display: flex;
   align-items: flex-start;
@@ -8730,14 +12603,12 @@ const map3DGuideCss = `
 }
 
 .map-3d-guide-decor-debug__header div,
-.map-3d-guide-decor-debug label,
-.map-3d-guide-garden-debug label {
+.map-3d-guide-decor-debug label {
   display: grid;
   gap: 5px;
 }
 
-.map-3d-guide-decor-debug strong,
-.map-3d-guide-garden-debug strong {
+.map-3d-guide-decor-debug strong {
   color: #24483c;
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
   font-size: 15px;
@@ -8746,20 +12617,14 @@ const map3DGuideCss = `
 .map-3d-guide-decor-debug span,
 .map-3d-guide-decor-debug label,
 .map-3d-guide-decor-debug p,
-.map-3d-guide-decor-debug small,
-.map-3d-guide-garden-debug span,
-.map-3d-guide-garden-debug label,
-.map-3d-guide-garden-debug p,
-.map-3d-guide-garden-debug small {
+.map-3d-guide-decor-debug small {
   color: #68746c;
   font-size: 12px;
   line-height: 1.45;
 }
 
 .map-3d-guide-decor-debug select,
-.map-3d-guide-decor-debug input,
-.map-3d-guide-garden-debug select,
-.map-3d-guide-garden-debug input {
+.map-3d-guide-decor-debug input {
   width: 100%;
   min-height: 30px;
   border: 1px solid rgba(50, 88, 75, .18);
@@ -8776,8 +12641,7 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug button,
-.map-3d-guide-garden-debug button {
+.map-3d-guide-decor-debug button {
   border: 1px solid rgba(143, 101, 28, .24);
   border-radius: 9px;
   background: rgba(255, 249, 229, .90);
@@ -8789,8 +12653,7 @@ const map3DGuideCss = `
   cursor: pointer;
 }
 
-.map-3d-guide-decor-debug button.is-active,
-.map-3d-guide-garden-debug button.is-active {
+.map-3d-guide-decor-debug button.is-active {
   border-color: rgba(42, 96, 72, .50);
   background: rgba(218, 238, 220, .94);
   color: #245640;
@@ -8804,8 +12667,7 @@ const map3DGuideCss = `
   margin-top: 10px;
 }
 
-.map-3d-guide-decor-debug p,
-.map-3d-guide-garden-debug p {
+.map-3d-guide-decor-debug p {
   margin: 10px 0 4px;
 }
 
@@ -9167,127 +13029,313 @@ const map3DGuideCss = `
   background: rgba(224, 249, 243, .92);
 }
 
+.map-3d-guide-routes button:disabled,
 .map-3d-guide-camera button:disabled,
 .map-3d-guide-controlbar button:disabled {
   cursor: wait;
   opacity: .58;
 }
 
+.map-3d-guide-mobile-topbar,
+.map-3d-guide-mobile-guide {
+  display: none;
+}
+
 @media (max-width: 880px) {
-  /* 移动端:3D 地图全屏可见,所有导览面板收进底部抽屉(默认收起,只露 56px 把手) */
-  .map-3d-guide-mobile-dock {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    max-height: 82vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(180deg, rgba(245, 249, 239, 0) 0, rgba(245, 249, 239, .97) 56px);
-    transform: translateY(calc(100% - 56px - env(safe-area-inset-bottom, 0px)));
-    transition: transform .34s cubic-bezier(.22, .61, .36, 1);
-  }
-
-  .map-3d-guide-shell.is-dock-open .map-3d-guide-mobile-dock {
-    transform: translateY(0);
-  }
-
-  /* 把手:吸顶常驻,收起态即这 56px;展开后仍可点击回收 */
-  .map-3d-guide-dock-handle {
-    position: sticky;
-    top: 0;
-    z-index: 2;
+  .map-3d-guide-mobile-topbar {
+    position: absolute;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: 12px;
+    right: 12px;
+    z-index: 16;
     display: flex;
     align-items: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 56px;
-    padding: 14px 18px 10px;
-    border: none;
-    border-radius: 18px 18px 0 0;
-    background: linear-gradient(180deg, rgba(252, 250, 240, .98), rgba(244, 248, 238, .98));
-    box-shadow: 0 -14px 40px rgba(20, 45, 36, .18);
-    color: #19372f;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 7px 10px 7px 13px;
+    border: 1px solid rgba(201, 168, 106, .44);
+    border-radius: 12px;
+    background:
+      linear-gradient(135deg, rgba(31, 59, 49, .92), rgba(45, 74, 62, .84));
+    color: #f5f1e8;
+    box-shadow: 0 12px 34px rgba(18, 39, 32, .22), inset 0 0 0 1px rgba(255,255,255,.08);
+    backdrop-filter: blur(14px);
   }
 
-  .map-3d-guide-dock-handle__bar {
+  .map-3d-guide-mobile-topbar div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .map-3d-guide-mobile-topbar strong {
+    overflow: hidden;
+    color: #fff7df;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 15px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-topbar span {
+    overflow: hidden;
+    color: rgba(245, 241, 232, .72);
+    font-size: 11px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-topbar button {
+    flex: 0 0 auto;
+    min-height: 32px;
+    border: 1px solid rgba(201, 168, 106, .52);
+    border-radius: 9px;
+    padding: 0 11px;
+    background: rgba(255, 247, 223, .12);
+    color: #fff7df;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-hero,
+  .map-3d-guide-routes,
+  .map-3d-guide-camera,
+  .map-3d-guide-status,
+  .map-3d-guide-pois,
+  .map-3d-guide-controlbar {
+    display: none;
+  }
+
+  .map-3d-guide-mobile-guide {
     position: absolute;
-    top: 7px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 40px;
+    left: 12px;
+    right: 12px;
+    z-index: 16;
+    display: block;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    color: #1f3b31;
+  }
+
+  .map-3d-guide-mobile-guide button {
+    border: 1px solid rgba(143, 101, 28, .22);
+    border-radius: 9px;
+    background: rgba(255, 249, 229, .86);
+    color: #6f4a12;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr minmax(54px, .7fr) auto;
+    gap: 7px;
+    align-items: center;
+    min-height: 62px;
+    padding: 8px 9px;
+    border: 1px solid rgba(201, 168, 106, .58);
+    border-radius: 12px;
+    background:
+      linear-gradient(135deg, rgba(255, 250, 232, .96), rgba(229, 240, 231, .94));
+    box-shadow: 0 16px 42px rgba(18, 39, 32, .24), inset 0 0 0 1px rgba(255,255,255,.62);
+    backdrop-filter: blur(14px);
+  }
+
+  .map-3d-guide-mobile-guide__summary div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .map-3d-guide-mobile-guide__summary span {
+    color: rgba(31, 59, 49, .58);
+    font-size: 10px;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__summary strong {
+    overflow: hidden;
+    color: #1f3b31;
+    font-size: 13px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-3d-guide-mobile-guide__summary > button {
+    min-width: 74px;
+    min-height: 42px;
+    padding: 0 9px;
+    background: #1f3b31;
+    border-color: rgba(201, 168, 106, .46);
+    color: #fff7df;
+  }
+
+  .map-3d-guide-mobile-guide__summary > button.is-active {
+    background: #7b2f1f;
+    color: #fff7df;
+  }
+
+  .map-3d-guide-mobile-guide__drawer {
+    display: grid;
+    gap: 10px;
+    max-height: min(48vh, 420px);
+    margin-top: 8px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 8px 10px 12px;
+    border: 1px solid rgba(201, 168, 106, .46);
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255, 250, 232, .98), rgba(242, 238, 220, .96));
+    box-shadow: 0 20px 54px rgba(18, 39, 32, .28), inset 0 0 0 1px rgba(255,255,255,.62);
+    backdrop-filter: blur(18px);
+  }
+
+  .map-3d-guide-mobile-guide__handle {
+    justify-self: center;
+    width: 42px;
     height: 4px;
     border-radius: 999px;
-    background: rgba(25, 55, 47, .26);
+    background: rgba(31, 59, 49, .24);
   }
 
-  .map-3d-guide-dock-handle__label {
-    flex: 1;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+  .map-3d-guide-mobile-guide__section,
+  .map-3d-guide-mobile-guide__route-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .map-3d-guide-mobile-guide__route-head div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .map-3d-guide-mobile-guide__route-head span,
+  .map-3d-guide-mobile-guide__route-head small {
+    color: rgba(31, 59, 49, .58);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .map-3d-guide-mobile-guide__route-head strong {
+    color: #1f3b31;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 17px;
+  }
+
+  .map-3d-guide-mobile-guide__route-head button {
+    min-height: 32px;
+    padding: 0 11px;
+  }
+
+  .map-3d-guide-mobile-guide__routes,
+  .map-3d-guide-mobile-guide__camera {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .map-3d-guide-mobile-guide__routes button,
+  .map-3d-guide-mobile-guide__camera button {
+    display: grid;
+    gap: 2px;
+    min-height: 42px;
+    padding: 6px 8px;
     text-align: left;
   }
 
-  .map-3d-guide-dock-handle__chevron {
-    font-size: 12px;
-    opacity: .7;
+  .map-3d-guide-mobile-guide__routes button span {
+    overflow: hidden;
+    color: rgba(31, 59, 49, .58);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* 抽屉内面板回归普通流:纵向堆叠、占满宽度,不再绝对定位盖住地图 */
-  .map-3d-guide-mobile-dock > .map-3d-guide-hero,
-  .map-3d-guide-mobile-dock > .map-3d-guide-camera,
-  .map-3d-guide-mobile-dock > .map-3d-guide-status,
-  .map-3d-guide-mobile-dock > .map-3d-guide-pois,
-  .map-3d-guide-mobile-dock > .map-3d-guide-controlbar {
-    position: static;
-    inset: auto;
-    top: auto;
-    right: auto;
-    bottom: auto;
-    left: auto;
-    width: auto;
-    max-width: none;
-    margin: 0 12px;
+  .map-3d-guide-mobile-guide__routes button.is-active,
+  .map-3d-guide-mobile-guide__camera button.is-active,
+  .map-3d-guide-mobile-guide__stations button.is-active {
+    border-color: rgba(201, 168, 106, .72);
+    background: linear-gradient(135deg, rgba(255, 239, 181, .98), rgba(239, 247, 235, .94));
+    color: #6f4a12;
   }
 
-  .map-3d-guide-camera__buttons {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .map-3d-guide-pois div {
-    flex-wrap: nowrap;
+  .map-3d-guide-mobile-guide__stations {
+    display: flex;
+    gap: 7px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
   }
 
-  .map-3d-guide-pois button {
+  .map-3d-guide-mobile-guide__stations button {
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 34px;
+    padding: 0 10px 0 7px;
+    color: #24483c;
   }
 
-  .map-3d-guide-console-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .map-3d-guide-mobile-guide__stations button span {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    background: rgba(31, 59, 49, .12);
+    font-size: 11px;
   }
 
-  .map-3d-guide-controlbar__actions {
-    justify-content: flex-start;
+  .map-3d-guide-mobile-guide__stations button.is-next {
+    border-color: rgba(20, 118, 110, .32);
+    background: rgba(229, 246, 239, .92);
+  }
+
+  .map-3d-guide-mobile-guide__status {
+    display: flex;
     flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .map-3d-guide-mobile-guide__status span {
+    padding: 5px 8px;
+    border-radius: 8px;
+    background: rgba(31, 59, 49, .08);
+    color: rgba(31, 59, 49, .68);
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .map-3d-guide-mobile-guide__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .map-3d-guide-mobile-guide__actions button {
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 360px) {
+  .map-3d-guide-mobile-guide__summary {
+    grid-template-columns: 1fr 1fr auto;
+  }
+
+  .map-3d-guide-mobile-guide__summary div:nth-child(3) {
+    display: none;
   }
 }
 `
 
 function Map3DGuidePage() {
-  // prototype-c 是唯一会加载自制 GLB 园林资产(殿顶/树/莲台/法轮等)的变体;
-  // 之前接的是 default,导致实景地图上看不到任何 3D 资产。
-  return <Map3DGuideExperience variant="prototype-c" />
+  return <Map3DGuideExperience />
 }
 
 export default Map3DGuidePage

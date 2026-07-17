@@ -1,7 +1,15 @@
 import { create } from 'zustand'
-import { connectFayWS, extractAudioUrl, extractRobotState, registerFayUsername, sendTextToFay, type FayMessage } from '../api/fay'
+import { connectFayWS, extractAudioUrl, extractRobotState, registerFayUsername, sendTextToFay, stopFayTalking, type FayMessage } from '../api/fay'
 import { playWithLipsync } from '../lib/audioLipsync'
-import type { RobotState } from '../lib/live2dManager'
+import { buildGuidePrompt } from '../lib/guidePrompt'
+import {
+  addEmotionInstructionToPrompt,
+  createFayEmotionCue,
+  getReplyEmotionStateForUserText,
+  resolveReplyRobotState
+} from '../lib/fayEmotion'
+import { FAY_SEND_TIMEOUT_MS, isFayReplyComplete } from '../lib/fayReplyLifecycle'
+import { getAudioPlaybackState, type RobotState } from '../lib/live2dManager'
 import { getFayUsername, getSceneIdFromFayUsername } from '../lib/fayIdentity'
 import {
   appendAssistantChunkToScene,
@@ -18,6 +26,8 @@ import {
   type GuideContext
 } from './chatSessions'
 import { useGuideStore } from './useGuideStore'
+import { useGuideSessionStore } from '../guide/useGuideSessionStore'
+import { getGuideRouteById, getGuideSpotById } from '../data/guideData'
 import {
   capture, EVENT,
   captureSessionStart, captureSessionEnd,
@@ -43,6 +53,7 @@ interface ChatState {
   handleFayMessage: (message: FayMessage) => void
   sendMessage: (value?: string, sceneId?: string) => Promise<void>
   sendQuickAsk: (question: string, sceneId?: string) => Promise<void>
+  interruptReply: (sceneId?: string, options?: { notifyBackend?: boolean; keepalive?: boolean }) => Promise<void>
   clearSession: (sceneId?: string) => void
   startRecord: (sceneId?: string) => void
   stopRecord: (sceneId?: string) => void
@@ -50,22 +61,46 @@ interface ChatState {
   clearGuideContext: (sceneId?: string) => void
   setRobotState: (state: RobotState, sceneId?: string) => void
   setMouthOpen: (value: number, sceneId?: string) => void
-  enqueueAudio: (url: string, sceneId?: string) => void
+  enqueueAudio: (url: string, sceneId?: string, state?: RobotState) => void
 }
 
 type AudioQueue = {
   chain: Promise<void>
   pending: number
+  generation: number
+  controllers: Set<AbortController>
 }
 
 const audioQueues = new Map<string, AudioQueue>()
+const sendControllers = new Map<string, AbortController>()
+const interruptedSendControllers = new WeakSet<AbortController>()
 
 function getAudioQueue(sceneId: string): AudioQueue {
   const existing = audioQueues.get(sceneId)
   if (existing) return existing
-  const created = { chain: Promise.resolve(), pending: 0 }
+  const created = {
+    chain: Promise.resolve(),
+    pending: 0,
+    generation: 0,
+    controllers: new Set<AbortController>()
+  }
   audioQueues.set(sceneId, created)
   return created
+}
+
+function stopAudioQueue(sceneId: string) {
+  const queue = getAudioQueue(sceneId)
+  queue.generation += 1
+  queue.pending = 0
+  queue.controllers.forEach((controller) => controller.abort())
+  queue.controllers.clear()
+  queue.chain = Promise.resolve()
+}
+
+function decodeFayDisplayNewlines(value: string): string {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\r\\n|\\n|\\r/g, '\n')
 }
 
 // 剥掉 Fay 后端流里给 LLM 用的 grounding 标记,避免显示到对话框
@@ -73,7 +108,7 @@ function getAudioQueue(sceneId: string): AudioQueue {
 // - _<isfirst> / _<isend>:句子流的首尾标记
 // - <think>...</think>:思考模型的思考段(若有)
 const stripBackendMarkup = (s: string): string => {
-  let t = s
+  let t = decodeFayDisplayNewlines(s)
   // 已闭合的 prestart 块(支持任意属性,跨行)
   t = t.replace(/<prestart\b[^>]*>[\s\S]*?<\/prestart>/gi, '')
   // 流式中未闭合的 prestart 前缀(从 <prestart...> 一直到字符串末尾):避免半截泄漏
@@ -113,24 +148,6 @@ const getRawFayText = (message: FayMessage): string => {
   return text ?? ''
 }
 
-const buildGuidePrompt = (content: string, guideContext: GuideContext | null) => {
-  if (!guideContext?.spotName && !guideContext?.routeName) {
-    return content
-  }
-
-  return [
-    '你是灵山胜境的数字人讲解员，请优先围绕当前场景回答游客问题。',
-    guideContext.routeName ? `当前路线：${guideContext.routeName}` : '',
-    guideContext.spotName ? `当前景点：${guideContext.spotName}` : '',
-    guideContext.spotIntro ? `景点简介：${guideContext.spotIntro}` : '',
-    guideContext.spotNarrative ? `当前讲解重点：${guideContext.spotNarrative}` : '',
-    '如果游客问题偏离当前场景，也请先简短回答，再自然地把话题拉回当前导览场景。',
-    `游客问题：${content}`
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
 function getMessageSceneId(message: FayMessage): string | null {
   const username =
     typeof message.Username === 'string'
@@ -141,6 +158,47 @@ function getMessageSceneId(message: FayMessage): string | null {
           ? message.panelReply.username
           : null
   return getSceneIdFromFayUsername(username)
+}
+
+function getPendingRobotState(content: string): RobotState {
+  return getReplyEmotionStateForUserText(content) ?? 'thinking'
+}
+
+function buildPromptForFay(content: string, guideContext: GuideContext | null): string {
+  const guidePrompt = buildGuidePrompt(content, guideContext)
+  return addEmotionInstructionToPrompt(guidePrompt, content)
+}
+
+function resolveCurrentGuideContext(existing: GuideContext | null): GuideContext {
+  const routeState = useGuideStore.getState()
+  const mapContext = useGuideSessionStore.getState().context
+  const routeId = existing?.routeId ?? mapContext.routeId ?? routeState.activeRouteId
+  const routeName = existing?.routeName
+    ?? mapContext.routeName
+    ?? (routeId ? getGuideRouteById(routeId).name : undefined)
+  const explicitMapSpotId = mapContext.selectedPoiId
+  const routeProgressSpotId = mapContext.currentStopPoiId
+  const spotId = existing?.spotId ?? explicitMapSpotId ?? routeProgressSpotId ?? routeState.selectedSpotId
+  const spot = spotId ? getGuideSpotById(spotId) : undefined
+  const locationSource = existing?.locationSource
+    ?? (explicitMapSpotId ? 'map-selection' : routeProgressSpotId ? 'route-progress' : 'route-default')
+  const locationConfidence = existing?.locationConfidence
+    ?? (mapContext.location.available ? 1 : locationSource === 'route-default' ? 0.35 : 0.85)
+
+  return {
+    ...existing,
+    routeId,
+    routeName,
+    spotId,
+    spotName: existing?.spotName ?? mapContext.selectedPoiName ?? mapContext.currentStopName ?? spot?.name,
+    spotIntro: existing?.spotIntro ?? spot?.intro,
+    locationSource,
+    locationConfidence,
+    latitude: existing?.latitude ?? mapContext.location.latitude ?? spot?.lat,
+    longitude: existing?.longitude ?? mapContext.location.longitude ?? spot?.lng,
+    currentRouteStopIndex: existing?.currentRouteStopIndex ?? mapContext.currentStopIndex,
+    visitedSpotIds: existing?.visitedSpotIds ?? routeState.visitedStops
+  }
 }
 
 // ===== WebSocket 重连 & 发送离线队列(模块级,跨 store 实例稳定) =====
@@ -308,9 +366,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       //    Fay 流式协议:每句话首块带 _<isfirst>,末块带 _<isend>
       //    见到 isFirst 时开新气泡;否则把内容追加到最后一个 assistant 气泡
       const rawText = getRawFayText(message)
+      const isReplyComplete = isFayReplyComplete(message, rawText)
       if (rawText) {
         const isFirst = /_<isfirst>/.test(rawText)
-        const isEnd = /_<isend>/.test(rawText)
+        const isEnd = isReplyComplete
         const clean = stripBackendMarkup(rawText)
         if (clean) {
           const session = getSession(get().sessions, sceneId)
@@ -325,20 +384,39 @@ export const useChatStore = create<ChatState>((set, get) => {
           const messages = getSession(get().sessions, sceneId).messages
           const assistant = messages[messages.length - 1]
           captureAiReply(assistant?.role === 'assistant' ? assistant.content : clean, getSession(get().sessions, sceneId)._lastSendTime)
-          patchSession(sceneId, (session) => ({ ...session, _lastSendTime: 0 }))
+          patchSession(sceneId, (session) => ({
+            ...session,
+            isSending: false,
+            _lastSendTime: 0
+          }))
         }
+      } else if (isReplyComplete) {
+        patchSession(sceneId, (session) => ({ ...session, isSending: false, _lastSendTime: 0 }))
       }
 
       // 2. 数字人状态
+      const emotionCue = createFayEmotionCue(message, rawText)
       const robot = extractRobotState(message)
-      if (robot) {
-        get().setRobotState(robot, sceneId)
+      const currentReplyEmotionState = getSession(get().sessions, sceneId).replyEmotionState
+      const replyRobotState = resolveReplyRobotState(
+        currentReplyEmotionState,
+        robot,
+        emotionCue
+      )
+      if (robot || rawText || emotionCue.tone !== 'neutral') {
+        patchSession(sceneId, (session) => ({
+          ...session,
+          robotState: replyRobotState,
+          replyEmotionState:
+            currentReplyEmotionState ??
+            (emotionCue.tone === 'neutral' ? null : emotionCue.robotState)
+        }))
       }
 
       // 3. 音频(可能多段,串行入队)
       const audioUrl = extractAudioUrl(message)
       if (audioUrl) {
-        get().enqueueAudio(audioUrl, sceneId)
+        get().enqueueAudio(audioUrl, sceneId, replyRobotState)
       }
     },
     sendMessage: async (value, sceneId) => {
@@ -350,6 +428,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         return
       }
 
+      void get().interruptReply(id)
+
+      const guideContext = resolveCurrentGuideContext(currentSession.guideContext)
+
       get().appendMessage('user', content, id)
       const _lastSendTime = Date.now()
       captureUserMessage(content)
@@ -358,29 +440,50 @@ export const useChatStore = create<ChatState>((set, get) => {
         inputText: '',
         isSending: true,
         lastError: '',
-        robotState: 'thinking',
+        robotState: getPendingRobotState(content),
+        replyEmotionState: getReplyEmotionStateForUserText(content),
+        guideContext,
         _lastSendTime
       }))
 
+      let sendController: AbortController | null = null
       try {
         registerScene(id)
-        const prompt = buildGuidePrompt(content, getSession(get().sessions, id).guideContext)
-        const response = await sendTextToFay(prompt, getFayUsername(id))
+        const prompt = buildPromptForFay(content, guideContext)
+        const controller = new AbortController()
+        sendController = controller
+        sendControllers.set(id, controller)
+        const timeout = window.setTimeout(() => controller.abort(), FAY_SEND_TIMEOUT_MS)
+        let response: Response
+        try {
+          response = await sendTextToFay(prompt, getFayUsername(id), controller.signal)
+        } finally {
+          window.clearTimeout(timeout)
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
         }
       } catch (error) {
+        if (sendController && interruptedSendControllers.has(sendController)) return
         const message =
           error instanceof Error ? error.message : '消息发送失败，请稍后重试。'
+
+        // Fay 已通过 WS 返回完整回复时，HTTP 连接即使随后超时也不能再次排队，
+        // 否则同一问题会在重连后被重复发送。
+        const settledSession = getSession(get().sessions, id)
+        if (!settledSession.isSending && settledSession._lastSendTime === 0) {
+          return
+        }
 
         // 网络断/服务暂时不可达 → 入离线队列,等 WS 重连成功后自动重发
         const isNetworkLike =
           (typeof navigator !== 'undefined' && !navigator.onLine) ||
           (error instanceof TypeError) || // fetch 网络错误典型是 TypeError
+          (error instanceof DOMException && error.name === 'AbortError') ||
           /Failed to fetch|NetworkError|HTTP 5\d\d/.test(message)
         if (isNetworkLike) {
-          const prompt = buildGuidePrompt(content, getSession(get().sessions, id).guideContext)
+          const prompt = buildPromptForFay(content, guideContext)
           _pendingSends.push({ sceneId: id, prompt, username: getFayUsername(id) })
           patchSession(id, (session) => ({
             ...session,
@@ -395,12 +498,44 @@ export const useChatStore = create<ChatState>((set, get) => {
           )
         }
       } finally {
-        patchSession(id, (session) => ({ ...session, isSending: false }))
+        if (!sendController || sendControllers.get(id) === sendController) {
+          if (sendController) sendControllers.delete(id)
+          patchSession(id, (session) => ({ ...session, isSending: false }))
+        }
       }
     },
     sendQuickAsk: async (question, sceneId) => {
       captureQuickAsk(question)
       await get().sendMessage(question, sceneId)
+    },
+    interruptReply: async (sceneId, options = {}) => {
+      const id = targetScene(sceneId)
+      const sendController = sendControllers.get(id)
+      if (sendController) {
+        interruptedSendControllers.add(sendController)
+        sendController.abort()
+        sendControllers.delete(id)
+      }
+      for (let index = _pendingSends.length - 1; index >= 0; index -= 1) {
+        if (_pendingSends[index].sceneId === id) _pendingSends.splice(index, 1)
+      }
+      stopAudioQueue(id)
+      patchSession(id, (session) => ({
+        ...session,
+        isSending: false,
+        mouthOpen: 0,
+        mouthForm: 0,
+        robotState: 'normal',
+        replyEmotionState: null,
+        _lastSendTime: 0
+      }))
+
+      if (!options.notifyBackend) return
+      try {
+        await stopFayTalking(getFayUsername(id), { keepalive: options.keepalive })
+      } catch (error) {
+        if (!options.keepalive) console.warn('停止 Fay 输出失败:', error)
+      }
     },
     clearSession: (sceneId) => {
       const id = targetScene(sceneId)
@@ -413,7 +548,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           inputText: '',
           isRecording: false,
           isSending: false,
-          robotState: 'normal',
+          robotState: 'happy',
+          replyEmotionState: null,
           lastError: ''
         }))
       }))
@@ -452,27 +588,45 @@ export const useChatStore = create<ChatState>((set, get) => {
       patchSession(sceneId, (session) => ({ ...session, robotState })),
     setMouthOpen: (mouthOpen, sceneId) =>
       patchSession(sceneId, (session) => ({ ...session, mouthOpen })),
-    enqueueAudio: (url, sceneId) => {
+    enqueueAudio: (url, sceneId, state = 'speaking') => {
       const id = targetScene(sceneId)
       const queue = getAudioQueue(id)
+      const generation = queue.generation
+      const speakingState = getAudioPlaybackState(state)
       queue.pending += 1
-      get().setRobotState('speaking', id)
+      get().setRobotState(speakingState, id)
       capture(EVENT.AUDIO_PLAY_START, {})
       queue.chain = queue.chain
-        .then(() =>
-          playWithLipsync(url, (open, form) => {
-            // 每帧同时更新张开度与嘴形(粗略元音);合并为一次 patch,少一次 store 写入
-            patchSession(id, (session) => ({ ...session, mouthOpen: open, mouthForm: form }))
-          })
-        )
+        .then(async () => {
+          if (generation !== queue.generation) return
+          const controller = new AbortController()
+          queue.controllers.add(controller)
+          try {
+            await playWithLipsync(url, (open, form) => {
+              if (generation !== queue.generation) return
+              // 每帧同时更新张开度与嘴形(粗略元音);合并为一次 patch,少一次 store 写入
+              patchSession(id, (session) => ({ ...session, mouthOpen: open, mouthForm: form }))
+            }, controller.signal)
+          } finally {
+            queue.controllers.delete(controller)
+          }
+        })
         .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
           console.warn('音频播放失败:', err)
         })
         .finally(() => {
+          if (generation !== queue.generation) return
           queue.pending -= 1
           if (queue.pending <= 0) {
             queue.pending = 0
-            patchSession(id, (session) => ({ ...session, mouthOpen: 0, mouthForm: 0, robotState: 'normal' }))
+            patchSession(id, (session) => ({
+              ...session,
+              mouthOpen: 0,
+              mouthForm: 0,
+              robotState: 'normal',
+              replyEmotionState: null
+            }))
             capture(EVENT.AUDIO_PLAY_END, {})
           }
         })

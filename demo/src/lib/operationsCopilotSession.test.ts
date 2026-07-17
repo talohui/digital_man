@@ -103,6 +103,18 @@ test('stores and restores only the session id and safe turns', () => {
   })
 })
 
+test('redacts credential values accidentally pasted into a persisted conversation', () => {
+  const [turn] = trimOperationsCopilotHistory([{
+    role: 'user',
+    content: '检查配置 password=secret-pass Authorization: Bearer live-token api_key: actual-key',
+  }])
+
+  assert.match(turn?.content ?? '', /password=\[已隐藏\]/)
+  assert.match(turn?.content ?? '', /Authorization: \[已隐藏\]/)
+  assert.match(turn?.content ?? '', /api_key: \[已隐藏\]/)
+  assert.doesNotMatch(turn?.content ?? '', /secret-pass|live-token|actual-key/)
+})
+
 test('returns null when stored session JSON is damaged', () => {
   const storage = new MemoryStorage()
   storage.setItem(OPERATIONS_COPILOT_SESSION_STORAGE_KEY, '{damaged')

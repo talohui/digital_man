@@ -172,7 +172,7 @@ public class PersonaEngine {
             case "route_click" -> {
                 String rid = strProp(props, "target_id");
                 if ("historical_culture".equals(rid)) { bump(s, "culture", 0.25); bump(s, "ritual", 0.15); bump(s, "deep_guide", 0.20); }
-                if ("natural_scenery".equals(rid))    { bump(s, "walk_light", 0.25); bump(s, "photo", 0.20); }
+                if ("prayer_meditation".equals(rid))  { bump(s, "walk_light", 0.25); bump(s, "ritual", 0.24); }
                 if ("family".equals(rid))             { bump(s, "family", 0.30); bump(s, "photo", 0.15); }
             }
             case "ticket_purchase" -> {

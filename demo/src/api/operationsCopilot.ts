@@ -25,12 +25,21 @@ export type OperationsCopilotProposal = {
 export type OperationsCopilotResponse = {
   id: string
   answer: string
+  evidence: string[]
+  recommendedActions: string[]
+  risks: string[]
   sources: string[]
   generationSource: 'llm' | 'rules' | string
+  fallbackReason?: string | null
   proposal: OperationsCopilotProposal | null
-  proposalStatus?: 'DRAFT' | 'CONFIRMED' | 'DISCARDED' | 'FAILED' | null
+  proposalRevision?: string | null
+  sessionId?: string | null
+  contextUpdatedAt?: string | null
+  proposalStatus?: 'DRAFT' | 'CONFIRMED' | 'DISCARDED' | 'FAILED' | 'RECONCILING' | null
   executionResult?: Record<string, unknown>
 }
+
+export type OperationsCopilotProposalUpdate = Pick<OperationsCopilotProposal, 'title' | 'summary' | 'payload'>
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
@@ -52,15 +61,30 @@ export function queryOperationsCopilot(input: string | OperationsCopilotQueryInp
 export function confirmOperationsCopilotProposal(
   proposalId: string,
   fayAdminSessionToken: string,
+  proposalRevision: string,
 ): Promise<OperationsCopilotResponse> {
   return request(
     `/dashboard/operations-copilot/${encodeURIComponent(proposalId)}/confirm`,
-    buildOperationsCopilotConfirmRequest(fayAdminSessionToken),
+    buildOperationsCopilotConfirmRequest(fayAdminSessionToken, proposalRevision),
   )
 }
 
 export function discardOperationsCopilotProposal(proposalId: string): Promise<OperationsCopilotResponse> {
   return request(`/dashboard/operations-copilot/${encodeURIComponent(proposalId)}/discard`, {
     method: 'POST',
+  })
+}
+
+export function updateOperationsCopilotProposal(
+  proposalId: string,
+  update: OperationsCopilotProposalUpdate,
+): Promise<OperationsCopilotResponse> {
+  return request(`/dashboard/operations-copilot/${encodeURIComponent(proposalId)}/proposal`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      title: update.title,
+      summary: update.summary,
+      payload: update.payload,
+    }),
   })
 }

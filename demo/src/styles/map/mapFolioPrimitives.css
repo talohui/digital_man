@@ -1,0 +1,100 @@
+@import './mapTokens.css';
+
+.map-folio-surface[data-map-folio='true'] {
+  --map-folio-ink: #203b33;
+  --map-folio-green: var(--map-green-deep, #214a3b);
+  --map-folio-gold: var(--map-gold, #c9a86a);
+  --map-folio-paper: rgba(251, 248, 239, 0.985);
+  position: relative;
+  border: 1px solid rgba(45, 74, 62, 0.78);
+  border-radius: 2px;
+  color: var(--map-folio-ink);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 28px, rgba(45, 74, 62, 0.026) 29px),
+    linear-gradient(180deg, var(--map-folio-paper), rgba(245, 239, 226, 0.985));
+  box-shadow:
+    inset 0 0 0 3px rgba(251, 248, 239, 0.96),
+    inset 0 0 0 4px rgba(201, 168, 106, 0.5),
+    5px 6px 0 rgba(45, 74, 62, 0.13),
+    var(--map-shadow-soft);
+  font-kerning: normal;
+}
+
+.map-folio-header,
+.map-folio-header__copy {
+  min-width: 0;
+}
+
+.map-folio-header__eyebrow,
+.map-folio-header__meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.map-folio-metrics {
+  font-variant-numeric: tabular-nums;
+}
+
+.map-folio-metrics__item > small,
+.map-folio-metrics__item > b {
+  color: inherit;
+  font: inherit;
+}
+
+.navigation-beta-card .map-folio-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.navigation-beta-card .map-folio-metrics__item {
+  display: grid;
+  gap: 2px;
+}
+
+.navigation-beta-card .map-folio-metrics__item:last-child {
+  justify-items: end;
+  text-align: right;
+}
+
+.navigation-beta-card .map-folio-metrics__item + .map-folio-metrics__item::before {
+  display: none;
+}
+
+.navigation-beta-card .map-folio-metrics__item > small {
+  color: rgba(32, 59, 51, 0.6);
+  font-size: var(--map-type-eyebrow, 10px);
+  font-weight: 700;
+}
+
+.navigation-beta-card .map-folio-metrics__item > b {
+  color: var(--map-folio-ink);
+  font-size: var(--map-type-body, 12px);
+  font-weight: 800;
+}
+
+.map-folio-action-pair button:focus-visible {
+  outline: 2px solid var(--map-folio-gold);
+  outline-offset: 2px;
+}
+
+/* Keep long navigation actions inside narrow phone sheets and match the folio frame. */
+.map-folio-surface[data-map-folio='true'] .map-folio-action-pair button {
+  min-width: 0;
+  min-height: 44px;
+  border-radius: 1px;
+  padding-inline: 8px;
+  box-shadow:
+    inset 0 0 0 2px rgba(201, 168, 106, 0.14),
+    2px 3px 0 rgba(45, 74, 62, 0.1);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-folio-surface *,
+  .map-folio-surface *::before,
+  .map-folio-surface *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

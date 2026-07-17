@@ -99,6 +99,42 @@ class QwenAsrFallbackTest(unittest.TestCase):
 
         self.assertNotIn("top-secret", str(caught.exception))
 
+    @patch.object(ali_nls_file.requests, "post")
+    def test_qwen_asr_translates_empty_audio_error(self, post):
+        post.return_value = Mock(
+            status_code=400,
+            text='{"error":{"message":"The audio is empty"}}',
+        )
+
+        with self.assertRaisesRegex(ValueError, "请按住至少 1 秒") as caught:
+            ali_nls_file._transcribe_with_qwen(
+                b"header-only",
+                "recording.webm",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "secret",
+            )
+
+        message = str(caught.exception)
+        self.assertNotIn("InternalError", message)
+        self.assertNotIn("audio is empty", message.lower())
+
+    @patch.object(ali_nls_file.requests, "post")
+    def test_qwen_asr_translates_unopenable_audio_error(self, post):
+        post.return_value = Mock(
+            status_code=400,
+            text='{"error":{"message":"The audio format is illegal and cannot be opened"}}',
+        )
+
+        with self.assertRaisesRegex(ValueError, "请按住至少 1 秒") as caught:
+            ali_nls_file._transcribe_with_qwen(
+                b"header-only",
+                "recording.wav",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "secret",
+            )
+
+        self.assertNotIn("cannot be opened", str(caught.exception).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

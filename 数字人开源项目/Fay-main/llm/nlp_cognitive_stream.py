@@ -58,6 +58,7 @@ from llm.execution_manager import (
     ExecutionManager, ExecutionState, ExecutionStatus,
     get_execution_manager, _get_llm_instance,
 )
+from llm.lingshan_weather_context import get_weather_context, weather_notice_registry
 
 # 加载配置
 cfg.load_config()
@@ -91,6 +92,33 @@ def _normalize_short_greeting_text(content: Any) -> str:
     return re.sub(r"[\s`~!@#$%^&*()\-_=+\[\]{}\\|;:'\",<.>/?，。！？、；：‘’“”（）【】《》…·～]+", "", text)
 
 
+def _extract_current_user_text(content: Any) -> str:
+    text = "" if content is None else str(content).strip()
+    for marker in ("游客问题：", "游客问题:", "用户问题：", "用户问题:"):
+        if marker in text:
+            text = text.rsplit(marker, 1)[-1].strip()
+            break
+    if text.startswith("情绪提示：") and "\n" in text:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line and not line.startswith("情绪提示："):
+                return line
+    return text
+
+
+def _is_emotional_support_turn(content: Any) -> bool:
+    text = _extract_current_user_text(content)
+    if not text or len(text) > 30:
+        return False
+    guide_terms = (
+        "灵山", "大佛", "梵宫", "景点", "路线", "怎么走", "在哪里",
+        "下一站", "门票", "开放", "演出", "交通", "导航", "讲解",
+    )
+    if any(term in text for term in guide_terms):
+        return False
+    return bool(re.search(r"痛苦|绝望|崩溃|撑不住|想哭|难受|难过|伤心|焦虑|害怕|不开心|生气", text))
+
+
 def _is_current_only_turn(content: Any, observation: Any = None) -> bool:
     normalized = _normalize_short_greeting_text(content)
     if not normalized or len(normalized) > 8:
@@ -122,8 +150,38 @@ def _is_current_only_turn(content: Any, observation: Any = None) -> bool:
         "下午好",
         "晚上好",
         "晚安",
+        "你是谁",
+        "你叫什么",
+        "你叫什么名字",
+        "你是做什么的",
+        "你是fay吗",
     }
     return normalized in short_greetings
+
+
+def _should_use_current_turn_only(content: Any, observation: Any = None) -> bool:
+    return _is_current_only_turn(content, observation) or _is_emotional_support_turn(content)
+
+
+def _history_for_current_turn(history_records, current_only_turn: bool):
+    return [] if current_only_turn else history_records
+
+
+def _should_verify_long_finish(
+    has_tools: bool,
+    finish_msg: str,
+    content: Any,
+    current_only_turn: bool,
+) -> bool:
+    if current_only_turn:
+        return False
+    user_msg_stripped = "" if content is None else str(content).strip()
+    return bool(has_tools and len(finish_msg) > 80 and len(user_msg_stripped) > 3)
+
+
+def _should_run_prestart_tools(user_question: Any) -> bool:
+    """Only knowledge-seeking turns may trigger prestart retrieval."""
+    return not _should_use_current_turn_only(user_question)
 
 
 # 小模型实例（流式，面向用户的快速回复）
@@ -461,6 +519,10 @@ def _format_conversation_block(conversation: List[Dict], username: str = "User")
 
 def _run_prestart_tools(user_question: str) -> List[Dict[str, Any]]:
     """Call configured prestart MCP tools and return a list of result objects."""
+    if not _should_run_prestart_tools(user_question):
+        util.log(1, "闲聊问候跳过预启动知识库")
+        return []
+
     try:
         tools = mcp_runtime.list_runnable_prestart_tools()
     except Exception as exc:
@@ -2332,6 +2394,18 @@ def _lat_log(text: str) -> None:
         pass
 
 
+def _build_lingshan_identity_prompt():
+    """Return the visitor-facing identity that overrides generic Fay attributes."""
+    return """
+**灵山小灵身份约束（优先级最高）**
+- 你的名字是“灵山小灵”，性别为女性，身份是“灵山胜境数字人导游”。
+- 当游客询问“你是谁、你叫什么、你的身份”等问题时，只能以灵山小灵的身份自然回答。
+- “Fay”仅是内部技术框架名称，面向游客时不得自称 Fay，也不得提及或暴露该名称。
+- 不得自称通用助手、助理或其他与灵山导游冲突的身份。
+- 如果前面的通用角色字段或历史信息与本约束冲突，一律以本约束为准。
+"""
+
+
 def question(content, username, observation=None):
     """处理用户提问并返回回复。工具执行统一走后台线程，所有接口行为一致。"""
     global agents, current_username
@@ -2375,7 +2449,8 @@ def question(content, username, observation=None):
     ]
     memory_context = ""
     _t_mem0 = time.perf_counter()
-    skip_memory_retrieve = _is_current_only_turn(content, observation)
+    current_only_turn = _should_use_current_turn_only(content, observation)
+    skip_memory_retrieve = current_only_turn
     if agent.memory_stream and len(agent.memory_stream.seq_nodes) > 0 and content and not skip_memory_retrieve:
         current_time_step = get_current_time_step(username)
         query = content.strip() if isinstance(content, str) else str(content)
@@ -2498,6 +2573,14 @@ def question(content, username, observation=None):
 ---
 **当前时间**：{current_time}
 """
+    system_prompt += _build_lingshan_identity_prompt()
+
+    weather_context = get_weather_context()
+    if weather_context is not None:
+        system_prompt += (
+            "\n**实时天气导览上下文**\n"
+            f"{weather_context.prompt_text}\n"
+        )
 
     # 获取当前对话用户的补充信息
     display_username = "主人" if username == "User" else username
@@ -2539,6 +2622,8 @@ def question(content, username, observation=None):
     except Exception as exc:
         util.log(1, f"加载历史消息失败: {exc}")
         history_records = []
+
+    history_records = _history_for_current_turn(history_records, current_only_turn)
 
     messages_buffer: List[ConversationMessage] = []
 
@@ -2671,6 +2756,22 @@ def question(content, username, observation=None):
             marked_text = f"{prefix}{text}{suffix}"
         stream_manager.new_instance().write_sentence(username, marked_text, conversation_id=conversation_id)
 
+    weather_notice_sent = False
+
+    def send_weather_notice() -> None:
+        nonlocal full_response_text, is_first_sentence, weather_notice_sent
+        if weather_notice_sent or weather_context is None:
+            return
+        weather_notice = weather_notice_registry.notice_for(
+            username, weather_context.risk_key, weather_context.safety_notice
+        )
+        if not weather_notice:
+            return
+        write_sentence(weather_notice, force_first=is_first_sentence)
+        full_response_text += weather_notice
+        is_first_sentence = False
+        weather_notice_sent = True
+
     def stream_response_chunks(chunks, prepend_text: str = "") -> None:
         nonlocal accumulated_text, full_response_text, is_first_sentence
         if prepend_text:
@@ -2724,6 +2825,7 @@ def question(content, username, observation=None):
     def send_prestart_content() -> None:
         """在LLM生成之前先发送预启动工具结果"""
         nonlocal accumulated_text, full_response_text, is_first_sentence
+        send_weather_notice()
         if prestart_stream_text and prestart_stream_text.strip():
             # prestart_stream_text 已经包含标签
             write_sentence(prestart_stream_text, force_first=is_first_sentence)
@@ -3207,10 +3309,12 @@ def question(content, username, observation=None):
         # 超过说明弱模型在 finish 里编造事实性内容，追加工具核实
         # 条件：有任何可用工具 + finish 内容超过 80 字 + 用户消息非纯语气词（>3字）
         has_tools = bool(tool_registry)
-        user_msg_stripped = content.strip()
-        need_verify = (has_tools
-                       and len(finish_msg) > 80
-                       and len(user_msg_stripped) > 3)
+        need_verify = _should_verify_long_finish(
+            has_tools,
+            finish_msg,
+            content,
+            current_only_turn,
+        )
         if need_verify:
             util.log(1, f"[大小模型] {username}: 闲聊判断器 finish 过长({len(finish_msg)}字)，追加核实")
             if accumulated_text:

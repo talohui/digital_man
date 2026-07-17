@@ -4,16 +4,25 @@ import com.lingshan.analytics.dto.GuideFeedbackRequest;
 import com.lingshan.analytics.dto.GuideRecommendationRequest;
 import com.lingshan.analytics.dto.GuideRecommendationResponse;
 import com.lingshan.analytics.dto.GuideRouteCard;
+import com.lingshan.analytics.dto.ScenicWeatherDto;
+import com.lingshan.analytics.entity.AnalyticsEvent;
+import com.lingshan.analytics.repository.EventRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -24,10 +33,58 @@ public class GuideRecommendationService {
 
     private final GorseClient gorseClient;
     private final LocalScoreEngine localScoreEngine;
+    private final RouteConstraintEvaluator constraintEvaluator;
+    private final EmergencyEventService emergencyEventService;
+    private final EventRepository eventRepository;
+    private final VisitorPrivacyService visitorPrivacyService;
+    private final TencentWeatherService weatherService;
+    private final WeatherRouteAdvisor weatherRouteAdvisor;
 
     public GuideRecommendationService(GorseClient gorseClient, LocalScoreEngine localScoreEngine) {
+        this(gorseClient, localScoreEngine, new RouteConstraintEvaluator(), null, null, null, null, null);
+    }
+
+    @Autowired
+    public GuideRecommendationService(
+            GorseClient gorseClient,
+            LocalScoreEngine localScoreEngine,
+            RouteConstraintEvaluator constraintEvaluator,
+            EmergencyEventService emergencyEventService,
+            EventRepository eventRepository,
+            VisitorPrivacyService visitorPrivacyService,
+            TencentWeatherService weatherService,
+            WeatherRouteAdvisor weatherRouteAdvisor
+    ) {
         this.gorseClient = gorseClient;
         this.localScoreEngine = localScoreEngine;
+        this.constraintEvaluator = constraintEvaluator;
+        this.emergencyEventService = emergencyEventService;
+        this.eventRepository = eventRepository;
+        this.visitorPrivacyService = visitorPrivacyService;
+        this.weatherService = weatherService;
+        this.weatherRouteAdvisor = weatherRouteAdvisor;
+    }
+
+    public GuideRecommendationService(
+            GorseClient gorseClient,
+            LocalScoreEngine localScoreEngine,
+            RouteConstraintEvaluator constraintEvaluator,
+            EmergencyEventService emergencyEventService,
+            EventRepository eventRepository,
+            VisitorPrivacyService visitorPrivacyService
+    ) {
+        this(gorseClient, localScoreEngine, constraintEvaluator, emergencyEventService, eventRepository,
+                visitorPrivacyService, null, null);
+    }
+
+    public GuideRecommendationService(
+            GorseClient gorseClient,
+            LocalScoreEngine localScoreEngine,
+            RouteConstraintEvaluator constraintEvaluator,
+            EmergencyEventService emergencyEventService,
+            EventRepository eventRepository
+    ) {
+        this(gorseClient, localScoreEngine, constraintEvaluator, emergencyEventService, eventRepository, null);
     }
 
     @PostConstruct
@@ -43,8 +100,8 @@ public class GuideRecommendationService {
             List<SeedUser> seedUsers = List.of(
                     new SeedUser("seed-culture-1", List.of("文化探秘", "祈福静心"), "historical_culture"),
                     new SeedUser("seed-culture-2", List.of("文化探秘"), "historical_culture"),
-                    new SeedUser("seed-nature-1", List.of("轻松漫步", "拍照打卡"), "natural_scenery"),
-                    new SeedUser("seed-photo-1", List.of("拍照打卡"), "natural_scenery"),
+                    new SeedUser("seed-prayer-1", List.of("祈福静心", "轻松漫步"), "prayer_meditation"),
+                    new SeedUser("seed-prayer-2", List.of("祈福静心"), "prayer_meditation"),
                     new SeedUser("seed-family-1", List.of("亲子游", "拍照打卡"), "family"),
                     new SeedUser("seed-family-2", List.of("亲子游"), "family")
             );
@@ -71,15 +128,51 @@ public class GuideRecommendationService {
     public GuideRecommendationResponse recommend(GuideRecommendationRequest request) {
         String userId = sanitizeUserId(request.userId());
         List<String> selectedTags = normalizeTags(request.selectedTags());
+        Map<String, String> preferences = normalizePreferences(request.preferences());
         String requestId = "rec_" + Instant.now().toEpochMilli();
 
-        List<LocalScoreEngine.ScoredRoute> scoredRoutes = localScoreEngine.rank(userId, selectedTags, RECOMMENDATION_SIZE);
+        boolean personalized = visitorPrivacyService == null || visitorPrivacyService.personalizationEnabled(userId);
+        List<LocalScoreEngine.ScoredRoute> scoredRoutes = personalized
+                ? localScoreEngine.rank(userId, selectedTags, preferences, RECOMMENDATION_SIZE)
+                : defaultRoutes();
         List<GuideRouteCard> routes = scoredRoutes.stream()
                 .map(route -> toRouteCard(route, requestId))
                 .toList();
 
-        String topRouteId = routes.isEmpty() ? "" : routes.get(0).id();
-        return new GuideRecommendationResponse(userId, topRouteId, routes, requestId, LocalScoreEngine.ENGINE);
+        LocalDateTime now = LocalDateTime.now();
+        RouteConstraintEvaluator.Result constrained = constraintEvaluator.apply(
+                routes,
+                emergencyEventService == null ? List.of() : emergencyEventService.active(now),
+                recentSpotVisits(now),
+                now
+        );
+        ScenicWeatherDto weather = weatherService == null ? null : weatherService.current().orElse(null);
+        WeatherRouteAdvisor.Result weatherAdjusted = weatherRouteAdvisor == null
+                ? new WeatherRouteAdvisor.Result(constrained.routes(), List.of(), weather)
+                : weatherRouteAdvisor.apply(constrained.routes(), weather);
+        List<String> adjustmentReasons = new ArrayList<>(constrained.adjustmentReasons());
+        adjustmentReasons.addAll(weatherAdjusted.adjustmentReasons());
+        Map<String, String> dataFreshness = new LinkedHashMap<>(constrained.dataFreshness());
+        if (weatherAdjusted.weather() != null) {
+            dataFreshness.put("weatherSource", weatherAdjusted.weather().source());
+            dataFreshness.put("weatherUpdatedAt", weatherAdjusted.weather().updateTime());
+            dataFreshness.put("weatherStrategy", weatherAdjusted.weather().strategy());
+            dataFreshness.put("weatherCached", String.valueOf(weatherAdjusted.weather().cached()));
+        } else {
+            dataFreshness.put("weatherSource", "unavailable");
+        }
+        String topRouteId = weatherAdjusted.routes().isEmpty() ? "" : weatherAdjusted.routes().get(0).id();
+        return new GuideRecommendationResponse(
+                userId,
+                topRouteId,
+                weatherAdjusted.routes(),
+                requestId,
+                LocalScoreEngine.ENGINE,
+                List.copyOf(new java.util.LinkedHashSet<>(adjustmentReasons)),
+                Map.copyOf(dataFreshness),
+                constrained.fallbackUsed(),
+                personalized ? "personalized-local-score" : "default-no-personalization"
+        );
     }
 
     public void recordFeedback(GuideFeedbackRequest request) {
@@ -131,8 +224,34 @@ public class GuideRecommendationService {
                 scoredRoute.reasons(),
                 scoredRoute.matchedTags(),
                 scoredRoute.reasonCodes(),
+                route.stopIds(),
+                List.of(),
                 withRequestMetadata(scoredRoute.debug(), requestId)
         );
+    }
+
+    private List<LocalScoreEngine.ScoredRoute> defaultRoutes() {
+        String reason = "已关闭个性化推荐，按默认路线顺序展示";
+        return java.util.stream.IntStream.range(0, GuideRouteCatalog.ROUTES.size())
+                .mapToObj(index -> new LocalScoreEngine.ScoredRoute(
+                        GuideRouteCatalog.ROUTES.get(index),
+                        100.0 - index * 10.0,
+                        0.0,
+                        reason,
+                        List.of(reason),
+                        List.of(),
+                        List.of("personalization_disabled"),
+                        Map.of("engine", "default-catalog-v1")
+                ))
+                .toList();
+    }
+
+    private Map<String, Long> recentSpotVisits(LocalDateTime now) {
+        if (eventRepository == null) return Map.of();
+        return eventRepository.findByEventAndTsAfter("spot_enter", now.minusMinutes(5)).stream()
+                .map(AnalyticsEvent::getTargetId)
+                .filter(spotId -> spotId != null && !spotId.isBlank())
+                .collect(Collectors.groupingBy(spotId -> spotId, Collectors.counting()));
     }
 
     private String lightAlternativeId(String routeId) {
@@ -156,6 +275,27 @@ public class GuideRecommendationService {
                 .filter(GuideRouteCatalog.CANONICAL_TAGS::contains)
                 .distinct()
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, String> normalizePreferences(Map<String, String> preferences) {
+        if (preferences == null || preferences.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Set<String>> allowed = Map.of(
+                "duration", Set.of("quick", "half_day", "deep"),
+                "arrival", Set.of("morning", "noon", "afternoon"),
+                "companion", Set.of("solo", "friends", "family", "elder"),
+                "walk", Set.of("light", "normal", "deep"),
+                "show", Set.of("must", "flexible", "skip")
+        );
+
+        return preferences.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getValue() != null)
+                .map(entry -> Map.entry(entry.getKey().trim(), entry.getValue().trim()))
+                .filter(entry -> allowed.containsKey(entry.getKey()))
+                .filter(entry -> allowed.get(entry.getKey()).contains(entry.getValue()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (left, right) -> right));
     }
 
     private String sanitizeUserId(String userId) {

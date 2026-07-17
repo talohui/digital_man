@@ -29,6 +29,15 @@ export type PublicAvatarConfig = {
   updatedAt?: string | null
 }
 
+export const PUBLIC_AVATAR_CONFIG_UPDATED_EVENT = 'lingshan-avatar-config-updated'
+const PUBLIC_AVATAR_CONFIG_REVISION_KEY = 'lingshan-avatar-config-revision'
+
+export function notifyPublicAvatarConfigUpdated() {
+  const revision = String(Date.now())
+  window.localStorage.setItem(PUBLIC_AVATAR_CONFIG_REVISION_KEY, revision)
+  window.dispatchEvent(new CustomEvent(PUBLIC_AVATAR_CONFIG_UPDATED_EVENT, { detail: { revision } }))
+}
+
 export async function fetchPublicAvatarConfig(): Promise<PublicAvatarConfig | null> {
   try {
     const res = await fetch(`${BASE}/public/avatar-config`)

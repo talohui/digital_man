@@ -1,23 +1,34 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Col, ConfigProvider, Progress, Row, Segmented, Statistic, Tag, Typography, theme } from 'antd'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Card, Col, Progress, Row, Segmented, Statistic, Tag, Typography } from 'antd'
 import { Bar, Line, Pie } from '@ant-design/charts'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   AlertOutlined,
   AudioOutlined,
   ClockCircleOutlined,
-  DatabaseOutlined,
-  FileExcelOutlined,
+  CloudOutlined,
   FilePdfOutlined,
   FireOutlined,
   LikeOutlined,
   MessageOutlined,
-  SkinOutlined,
   SmileOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { exportDashboardExcel, exportDashboardPdf } from '../lib/reportExport'
 import { getAnalyticsApiBase } from '../lib/runtimeConfig'
+import { fetchScenicWeather, type ScenicWeather } from '../api/weather'
+import { fetchActiveEmergencies, type EmergencyEvent } from '../api/emergencies'
+import { useAdminOpsPageActions } from '../components/admin-ops/AdminOpsPageActions'
+import { useDemoTicker } from '../hooks/useDemoTicker'
+import { buildAdminDemoFrame, getAdminDemoSessionStartedAtMs } from '../lib/adminDemoTimeline'
+import {
+  isAdminDemoEnabled,
+  loadingResource,
+  settleResource,
+  type ResourceState,
+  type ResourceStatus,
+} from '../lib/adminDashboardResources'
+import { visibleRecommendationEngines } from '../lib/recommendationEngines'
 
 const { Title, Text } = Typography
 const BASE_URL = getAnalyticsApiBase()
@@ -237,6 +248,23 @@ type DashboardData = {
   official: OfficialBehavior
 }
 
+type DashboardResources = {
+  overview: ResourceState<Overview>
+  service: ResourceState<ServiceQuality>
+  chat: ResourceState<ChatInsights>
+  behavior: ResourceState<Behavior>
+  persona: ResourceState<Persona>
+  realtime: ResourceState<Realtime>
+  recommendation: ResourceState<Recommendation>
+  visitorBehavior: ResourceState<VisitorBehaviorDashboard>
+  sentimentTrend: ResourceState<SentimentTrend>
+  official: ResourceState<OfficialBehavior>
+  ticketing: ResourceState<Ticketing>
+  consumption: ResourceState<Consumption>
+  emergencies: ResourceState<EmergencyEvent[]>
+  weather: ResourceState<ScenicWeather | null>
+}
+
 type OpportunityLevel = 'warning' | 'info'
 
 const officialDisclaimer = '该数据来自官方示范景区历史行为样本，用作行业基线与推荐先验，不代表灵山实时客流。'
@@ -276,6 +304,29 @@ const emptyVisitorBehavior: VisitorBehaviorDashboard = {
     lowSatisfactionItems: [],
     spotFeedback: [],
   },
+}
+
+const emptyTicketing: Ticketing = {
+  ticketCount: 0,
+  expectedVisitors: 0,
+  avgGroupSize: 0,
+  ticketRevenue: 0,
+  visitDateDistribution: [],
+  ageBands: [],
+  genderDistribution: [],
+  groupSizeDistribution: [],
+  ticketTypes: [],
+}
+
+const emptyConsumption: Consumption = {
+  purchaseCount: 0,
+  totalAmount: 0,
+  avgPerPurchase: 0,
+  avgPerTicket: 0,
+  costMix: [],
+  topCategories: [],
+  trend: [],
+  recentPurchases: [],
 }
 
 const emptyData: DashboardData = {
@@ -376,9 +427,27 @@ const emptyData: DashboardData = {
   },
 }
 
-// B 端临时演示数据开关:用于比赛前快速检查大屏满数据状态。
-// 接回真实运营数据时改为 false 即可恢复接口结果。
-const ADMIN_DASHBOARD_DEMO_DATA_ENABLED = true
+function createInitialResources(): DashboardResources {
+  return {
+    overview: loadingResource(emptyData.overview),
+    service: loadingResource(emptyData.service),
+    chat: loadingResource(emptyData.chat),
+    behavior: loadingResource(emptyData.behavior),
+    persona: loadingResource(emptyData.persona),
+    realtime: loadingResource(emptyData.realtime),
+    recommendation: loadingResource(emptyData.recommendation),
+    visitorBehavior: loadingResource(emptyData.visitorBehavior),
+    sentimentTrend: loadingResource(emptyData.sentimentTrend),
+    official: loadingResource(emptyData.official),
+    ticketing: loadingResource(emptyTicketing),
+    consumption: loadingResource(emptyConsumption),
+    emergencies: loadingResource([]),
+    weather: loadingResource<ScenicWeather | null>(null),
+  }
+}
+
+// 演示数据必须显式开启，避免真实服务异常时被看似正常的样例掩盖。
+const ADMIN_DASHBOARD_DEMO_DATA_ENABLED = isAdminDemoEnabled(import.meta.env)
 const ACTIVE_WINDOW_STORAGE_KEY = 'lingshan_admin_active_window_minutes'
 const ACTIVE_WINDOW_OPTIONS = [1, 3, 4, 5, 10, 15, 30] as const
 type ActiveWindowMinutes = typeof ACTIVE_WINDOW_OPTIONS[number]
@@ -399,25 +468,39 @@ function readActiveWindowMinutes(): ActiveWindowMinutes {
   }
 }
 
-function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: ActiveWindowMinutes): DashboardData {
-  const now = dayjs()
+function buildDemoDashboardData(
+  visitorMode: VisitorMode,
+  activeWindowMinutes: ActiveWindowMinutes,
+  tick: number,
+  sessionStartedAtMs: number,
+): DashboardData {
+  const frame = buildAdminDemoFrame(tick, {
+    activeWindowMinutes,
+    sessionStartedAtMs,
+    mode: visitorMode,
+  })
+  const now = dayjs(frame.generatedAtMs)
   const at = (minutesAgo: number) => now.subtract(minutesAgo, 'minute').toISOString()
   const isHistory = visitorMode === 'history'
-  const demoActiveSessions = Math.max(1, Math.round(43 * Math.sqrt(activeWindowMinutes / 5)))
+  const demoActiveSessions = frame.activeSessions
+  const realtimeVisitorDelta = isHistory ? 0 : (frame.commerce.ticketCount - 164) * 3
+  const realtimeVisitorCount = 522 + realtimeVisitorDelta
+  const realtimeExpectedVisitors = 686 + realtimeVisitorDelta
+  const dynamicCostMix = new Map(frame.commerce.costMix.map((item) => [item.category, item.amount]))
 
   const visitorBehavior: VisitorBehaviorDashboard = {
     mode: visitorMode,
     sourceLabel: isHistory ? '灵山历史样本' : '实时游客数据',
-    sampleCount: isHistory ? 48620 : 522,
+    sampleCount: isHistory ? 48620 : realtimeVisitorCount,
     timeRangeLabel: isHistory ? '2026 春夏历史样本' : '近24小时 / 小程序采集',
     summary: {
-      visitorCount: isHistory ? 48620 : 522,
-      expectedVisitors: isHistory ? 51240 : 686,
+      visitorCount: isHistory ? 48620 : realtimeVisitorCount,
+      expectedVisitors: isHistory ? 51240 : realtimeExpectedVisitors,
       avgGroupSize: isHistory ? 2.8 : 3.1,
       avgStayHours: isHistory ? 5.6 : 4.7,
-      avgSpend: isHistory ? 318 : 896,
+      avgSpend: isHistory ? 318 : Math.round(frame.commerce.totalAmount / realtimeVisitorCount),
       avgSatisfaction: isHistory ? 91.8 : 88.6,
-      ticketRevenue: isHistory ? 6284600 : 106197,
+      ticketRevenue: isHistory ? 6284600 : frame.commerce.ticketRevenue,
     },
     demographics: {
       ageBands: [
@@ -440,19 +523,19 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
       ],
     },
     consumption: {
-      totalAmount: isHistory ? 15458760 : 467648,
-      avgPerVisitor: isHistory ? 318 : 896,
+      totalAmount: isHistory ? 15458760 : frame.commerce.totalAmount,
+      avgPerVisitor: isHistory ? 318 : Math.round(frame.commerce.totalAmount / realtimeVisitorCount),
       costMix: [
-        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : 106197, share: 0.23 },
-        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : 119108, share: 0.25 },
-        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : 123094, share: 0.26 },
-        { category: 'transport', label: '交通', amount: isHistory ? 2576460 : 66207, share: 0.14 },
-        { category: 'show', label: '演艺', amount: isHistory ? 1883306 : 53043, share: 0.12 },
+        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : dynamicCostMix.get('ticket') ?? 0, share: 0.23 },
+        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : dynamicCostMix.get('food') ?? 0, share: 0.25 },
+        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : dynamicCostMix.get('creative') ?? 0, share: 0.26 },
+        { category: 'transport', label: '交通', amount: isHistory ? 2576460 : dynamicCostMix.get('transport') ?? 0, share: 0.14 },
+        { category: 'show', label: '演艺', amount: isHistory ? 1883306 : dynamicCostMix.get('show') ?? 0, share: 0.12 },
       ],
       topCategories: [
-        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : 123094, share: 0.26 },
-        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : 119108, share: 0.25 },
-        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : 106197, share: 0.23 },
+        { category: 'creative', label: '文创', amount: isHistory ? 4792216 : dynamicCostMix.get('creative') ?? 0, share: 0.26 },
+        { category: 'food', label: '餐饮', amount: isHistory ? 4637628 : dynamicCostMix.get('food') ?? 0, share: 0.25 },
+        { category: 'ticket', label: '门票', amount: isHistory ? 5565150 : dynamicCostMix.get('ticket') ?? 0, share: 0.23 },
       ],
       trend: [
         { bucket: '09:00', amount: isHistory ? 920000 : 26800, count: 48 },
@@ -515,16 +598,16 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
 
   return {
     overview: {
-      totalMessages: 1846,
-      totalAiReplies: 1762,
+      totalMessages: frame.cumulative.totalMessages,
+      totalAiReplies: frame.cumulative.totalAiReplies,
       activeSessions5min: demoActiveSessions,
       activeWindowMinutes,
-      positiveRatio: 0.87,
-      avgLatencyMs: 1260,
-      p90LatencyMs: 2860,
-      quickAskCount: 624,
-      voiceUseCount: 318,
-      routeClickCount: 276,
+      positiveRatio: frame.quality.positiveRatio,
+      avgLatencyMs: frame.quality.avgLatencyMs,
+      p90LatencyMs: frame.quality.p90LatencyMs,
+      quickAskCount: frame.cumulative.quickAskCount,
+      voiceUseCount: frame.cumulative.voiceUseCount,
+      routeClickCount: frame.cumulative.routeClickCount,
       feedbackCount: demoFeedbackCount,
       feedbackPositiveCount: demoFeedbackPositiveCount,
       feedbackNegativeCount: demoFeedbackNegativeCount,
@@ -532,9 +615,9 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
     },
     service: {
       p50LatencyMs: 820,
-      p90LatencyMs: 2860,
-      maxLatencyMs: 6420,
-      avgLatencyMs: 1260,
+      p90LatencyMs: frame.quality.p90LatencyMs,
+      maxLatencyMs: frame.quality.maxLatencyMs,
+      avgLatencyMs: frame.quality.avgLatencyMs,
       voiceStartCount: 358,
       voiceEndCount: 331,
       voiceCompletionRate: 0.925,
@@ -586,11 +669,9 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
     },
     behavior: {
       routeClicks: [
-        { routeId: 'historical_culture', name: '历史文化路线', count: 214 },
-        { routeId: 'pray-calm', name: '祈福静心路线', count: 188 },
-        { routeId: 'family', name: '亲子轻游路线', count: 146 },
-        { routeId: 'photo', name: '拍照打卡路线', count: 132 },
-        { routeId: 'natural_scenery', name: '自然风光路线', count: 86 },
+        { routeId: 'historical_culture', name: '文化探秘路线', count: 214 },
+        { routeId: 'prayer_meditation', name: '祈福静心路线', count: 188 },
+        { routeId: 'family', name: '亲子游路线', count: 146 },
       ],
       spotVisits: visitorBehavior.attractions.visits.map((item) => ({
         spotId: item.spotId ?? item.name,
@@ -603,9 +684,9 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
         avgSeconds: item.avgSeconds ?? Math.round((item.avgStayHours ?? 0) * 3600),
       })),
       routeRatings: [
-        { routeId: 'historical_culture', name: '历史文化路线', avgRating: 4.7, count: 86 },
-        { routeId: 'pray-calm', name: '祈福静心路线', avgRating: 4.8, count: 74 },
-        { routeId: 'family', name: '亲子轻游路线', avgRating: 3.2, count: 58 },
+        { routeId: 'historical_culture', name: '文化探秘路线', avgRating: 4.7, count: 86 },
+        { routeId: 'prayer_meditation', name: '祈福静心路线', avgRating: 4.8, count: 74 },
+        { routeId: 'family', name: '亲子游路线', avgRating: 3.2, count: 58 },
       ],
       spotFeedback: visitorBehavior.satisfaction.spotFeedback,
       lowSatisfactionItems: visitorBehavior.satisfaction.lowSatisfactionItems,
@@ -629,32 +710,24 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
     realtime: {
       activeSessions5min: demoActiveSessions,
       activeWindowMinutes,
-      recentEvents: [
-        { event: 'ask', label: '问答', timestamp: at(1), target: '灵山大佛讲解' },
-        { event: 'route', label: '路线', timestamp: at(3), target: '祈福静心路线' },
-        { event: 'purchase', label: '消费', timestamp: at(5), target: '梵宫文创' },
-        { event: 'voice', label: '语音', timestamp: at(7), target: '小灵讲解' },
-        { event: 'feedback', label: '反馈', timestamp: at(9), target: '九龙灌浴' },
-        { event: 'ticket', label: '票务', timestamp: at(12), target: '3人入园' },
-      ],
+      recentEvents: frame.recentEvents,
       alerts: [
         { level: 'warning', message: '亲子轻游路线评分低于 3.5' },
         { level: 'info', message: '梵宫相关问询进入高峰' },
       ],
     },
     recommendation: {
-      exposureCount: 2386,
-      clickCount: 286,
-      ctr: 0.12,
+      exposureCount: frame.recommendation.exposureCount,
+      clickCount: frame.recommendation.clickCount,
+      ctr: frame.recommendation.ctr,
       engineDistribution: [
         { engine: '规则推荐', count: 1024 },
-        { engine: 'Gorse 协同过滤', count: 856 },
         { engine: 'RAG 场景召回', count: 506 },
       ],
       topRoutes: [
-        { routeId: 'history-culture', name: '历史文化路线', exposureCount: 632, clickCount: 86, ctr: 0.136 },
-        { routeId: 'pray-calm', name: '祈福静心路线', exposureCount: 598, clickCount: 81, ctr: 0.135 },
-        { routeId: 'family', name: '亲子轻松路线', exposureCount: 482, clickCount: 56, ctr: 0.116 },
+        { routeId: 'historical_culture', name: '文化探秘路线', exposureCount: 632, clickCount: 86, ctr: 0.136 },
+        { routeId: 'prayer_meditation', name: '祈福静心路线', exposureCount: 598, clickCount: 81, ctr: 0.135 },
+        { routeId: 'family', name: '亲子游路线', exposureCount: 482, clickCount: 56, ctr: 0.116 },
       ],
     },
     visitorBehavior,
@@ -766,25 +839,25 @@ function buildDemoDashboardData(visitorMode: VisitorMode, activeWindowMinutes: A
 }
 
 const palette = {
-  bg: '#08111f',
-  panel: '#101b2e',
-  panel2: '#0d1727',
-  border: '#233653',
-  gold: '#d7a955',
-  green: '#5ee6a8',
-  cyan: '#5ad7ff',
-  red: '#ff7b7b',
-  text: '#edf5ff',
-  muted: '#b5c6dc',
-  dim: '#8ca0ba',
+  bg: '#f5f1e8',
+  panel: 'rgba(232, 240, 226, 0.82)',
+  panel2: 'rgba(218, 231, 212, 0.76)',
+  border: '#ddd4c4',
+  gold: '#a87c34',
+  green: '#3f7d5b',
+  cyan: '#2f766c',
+  red: '#a34a3f',
+  text: '#263730',
+  muted: '#728078',
+  dim: '#8a948e',
 }
 
 const panelStyle: React.CSSProperties = {
   height: '100%',
-  borderRadius: 8,
+  borderRadius: 16,
   border: `1px solid ${palette.border}`,
   background: `linear-gradient(180deg, ${palette.panel}, ${palette.panel2})`,
-  boxShadow: '0 12px 30px rgba(0,0,0,0.26)',
+  boxShadow: '0 12px 30px rgba(52,58,48,0.08)',
 }
 
 const chartTheme = {
@@ -870,14 +943,33 @@ function asCompactDonut(data: Array<Record<string, unknown>>, angleField = 'valu
   }
 }
 
-async function fetchJson<T>(path: string, fallback: T): Promise<T> {
+async function fetchJson<T>(path: string): Promise<T> {
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), 8000)
   try {
-    const res = await fetch(`${BASE_URL}${path}`)
-    if (!res.ok) return fallback
+    const res = await fetch(`${BASE_URL}${path}`, { signal: controller.signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return (await res.json()) as T
-  } catch {
-    return fallback
+  } finally {
+    globalThis.clearTimeout(timeout)
   }
+}
+
+async function fetchWeatherRequired(): Promise<ScenicWeather | null> {
+  const value = await fetchScenicWeather()
+  if (!value) throw new Error('weather unavailable')
+  return value
+}
+
+async function fetchOfficialBehavior(): Promise<OfficialBehavior> {
+  const [summary, demographics, attractionTypes, satisfaction, spending] = await Promise.all([
+    fetchJson<OfficialSummary>('/official-behavior/summary'),
+    fetchJson<OfficialDemographics>('/official-behavior/demographics'),
+    fetchJson<OfficialAttractionTypes>('/official-behavior/attraction-types'),
+    fetchJson<OfficialSatisfaction>('/official-behavior/satisfaction'),
+    fetchJson<OfficialSpending>('/official-behavior/spending'),
+  ])
+  return { summary, demographics, attractionTypes, satisfaction, spending }
 }
 
 function formatPct(value: number) {
@@ -917,8 +1009,8 @@ function asLongBar<T extends Record<string, unknown>>(data: T[], xField: keyof T
       x: {
         labelFill: palette.muted,
         label: { style: chartMutedTextStyle },
-        gridStroke: '#2a3d5c',
-        grid: { line: { style: { stroke: '#2a3d5c', lineWidth: 1 } } },
+        gridStroke: '#e4dccd',
+        grid: { line: { style: { stroke: '#e4dccd', lineWidth: 1 } } },
       },
       y: {
         labelFill: palette.muted,
@@ -932,6 +1024,26 @@ function asLongBar<T extends Record<string, unknown>>(data: T[], xField: keyof T
 const EmptyState = ({ text = '暂无数据，等待游客互动接入' }: { text?: string }) => (
   <div style={{ height: '100%', minHeight: 120, display: 'grid', placeItems: 'center', color: '#62758d', fontSize: 13 }}>{text}</div>
 )
+
+const resourceStatusMeta: Record<ResourceStatus, { label: string; color: string }> = {
+  loading: { label: '正在同步', color: 'processing' },
+  ready: { label: '已同步', color: 'success' },
+  stale: { label: '数据暂旧', color: 'warning' },
+  error: { label: '服务不可用', color: 'error' },
+}
+
+const ResourceStatusTag = ({ resource, showReady = false }: { resource: ResourceState<unknown>; showReady?: boolean }) => {
+  if (resource.status === 'ready' && !showReady) return null
+  const meta = resourceStatusMeta[resource.status]
+  return <Tag color={meta.color}>{meta.label}</Tag>
+}
+
+function resourceEmptyText(resource: ResourceState<unknown>, fallback: string) {
+  if (resource.status === 'loading') return '正在同步数据…'
+  if (resource.status === 'error') return resource.error || '服务暂不可用'
+  if (resource.status === 'stale') return `数据暂旧 · ${resource.error || '同步失败'}`
+  return fallback
+}
 
 const Panel = ({ title, extra, children, minHeight }: { title: string; extra?: React.ReactNode; children: React.ReactNode; minHeight?: number }) => (
   <Card
@@ -971,7 +1083,7 @@ const MetricCard = ({
   tone?: string
   footer?: React.ReactNode
 }) => (
-  <Card style={{ ...panelStyle, background: '#0d1a2f' }} bordered={false} bodyStyle={{ padding: '14px 16px' }}>
+  <Card style={{ ...panelStyle, background: palette.panel }} bordered={false} bodyStyle={{ padding: '14px 16px' }}>
     <Statistic
       title={<span style={{ color: palette.muted }}>{title}</span>}
       value={value}
@@ -996,7 +1108,7 @@ function RankedList<T extends Record<string, unknown>>({ data, nameKey, valueKey
               <span><Text style={{ color: palette.gold, marginRight: 8 }}>{index + 1}</Text>{String(item[nameKey])}</span>
               <span style={{ color: palette.cyan }}>{value}{suffix}</span>
             </div>
-            <div style={{ height: 5, borderRadius: 999, background: '#1c2a3f', marginTop: 6, overflow: 'hidden' }}>
+            <div style={{ height: 5, borderRadius: 999, background: '#e8e0d2', marginTop: 6, overflow: 'hidden' }}>
               <div style={{ width: `${Math.max(8, (value / max) * 100)}%`, height: '100%', background: `linear-gradient(90deg, ${palette.gold}, ${palette.cyan})` }} />
             </div>
           </div>
@@ -1007,10 +1119,37 @@ function RankedList<T extends Record<string, unknown>>({ data, nameKey, valueKey
 }
 
 function AdminDashboard() {
+  const navigate = useNavigate()
   const [currentTime, setCurrentTime] = useState(dayjs().format('YYYY-MM-DD HH:mm:ss'))
-  const [data, setData] = useState<DashboardData>(emptyData)
+  const [resources, setResources] = useState<DashboardResources>(createInitialResources)
   const [visitorMode, setVisitorMode] = useState<VisitorMode>('realtime')
   const [activeWindowMinutes, setActiveWindowMinutes] = useState<ActiveWindowMinutes>(readActiveWindowMinutes)
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshedAt, setRefreshedAt] = useState('')
+  const demoSessionStartedAtMs = useMemo(() => getAdminDemoSessionStartedAtMs(), [])
+  const demoTick = useDemoTicker(ADMIN_DASHBOARD_DEMO_DATA_ENABLED && visitorMode === 'realtime')
+  const demoData = useMemo(
+    () => buildDemoDashboardData(visitorMode, activeWindowMinutes, demoTick, demoSessionStartedAtMs),
+    [activeWindowMinutes, demoSessionStartedAtMs, demoTick, visitorMode],
+  )
+  const liveData = useMemo<DashboardData>(() => ({
+    overview: resources.overview.data,
+    service: resources.service.data,
+    chat: resources.chat.data,
+    behavior: resources.behavior.data,
+    persona: resources.persona.data,
+    realtime: resources.realtime.data,
+    recommendation: resources.recommendation.data,
+    visitorBehavior: resources.visitorBehavior.data,
+    sentimentTrend: resources.sentimentTrend.data,
+    official: resources.official.data,
+  }), [resources])
+  const data = ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? demoData : liveData
+  const weather = resources.weather.data
+  const ticketing = resources.ticketing.data
+  const consumption = resources.consumption.data
+  const activeEmergencies = resources.emergencies.data
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(dayjs().format('YYYY-MM-DD HH:mm:ss')), 1000)
@@ -1020,64 +1159,65 @@ function AdminDashboard() {
   useEffect(() => {
     let stopped = false
     const load = async () => {
+      setRefreshing(true)
       const activeWindowQuery = `activeWindowMinutes=${activeWindowMinutes}`
       const [
-        overview,
-        service,
-        chat,
-        behavior,
-        persona,
-        realtime,
-        recommendation,
-        visitorBehavior,
-        sentimentTrend,
-        officialSummary,
-        officialDemographics,
-        officialAttractionTypes,
-        officialSatisfaction,
-        officialSpending,
-      ] = await Promise.all([
-        fetchJson<Overview>(`/dashboard/overview?${activeWindowQuery}`, emptyData.overview),
-        fetchJson<ServiceQuality>('/dashboard/service-quality', emptyData.service),
-        fetchJson<ChatInsights>('/dashboard/chat-insights', emptyData.chat),
-        fetchJson<Behavior>('/dashboard/behavior', emptyData.behavior),
-        fetchJson<Persona>('/dashboard/persona', emptyData.persona),
-        fetchJson<Realtime>(`/dashboard/realtime?${activeWindowQuery}`, emptyData.realtime),
-        fetchJson<Recommendation>('/dashboard/recommendation', emptyData.recommendation),
-        fetchJson<VisitorBehaviorDashboard>(`/dashboard/visitor-behavior?mode=${visitorMode}`, emptyVisitorBehavior),
-        fetchJson<SentimentTrend>('/sentiment-trend?hours=12', []),
-        fetchJson<OfficialSummary>('/official-behavior/summary', emptyData.official.summary),
-        fetchJson<OfficialDemographics>('/official-behavior/demographics', emptyData.official.demographics),
-        fetchJson<OfficialAttractionTypes>('/official-behavior/attraction-types', emptyData.official.attractionTypes),
-        fetchJson<OfficialSatisfaction>('/official-behavior/satisfaction', emptyData.official.satisfaction),
-        fetchJson<OfficialSpending>('/official-behavior/spending', emptyData.official.spending),
+        overviewResult,
+        serviceResult,
+        chatResult,
+        behaviorResult,
+        personaResult,
+        realtimeResult,
+        recommendationResult,
+        visitorBehaviorResult,
+        sentimentTrendResult,
+        officialResult,
+        ticketingResult,
+        consumptionResult,
+        emergenciesResult,
+        weatherResult,
+      ] = await Promise.allSettled([
+        fetchJson<Overview>(`/dashboard/overview?${activeWindowQuery}`),
+        fetchJson<ServiceQuality>('/dashboard/service-quality'),
+        fetchJson<ChatInsights>('/dashboard/chat-insights'),
+        fetchJson<Behavior>('/dashboard/behavior'),
+        fetchJson<Persona>('/dashboard/persona'),
+        fetchJson<Realtime>(`/dashboard/realtime?${activeWindowQuery}`),
+        fetchJson<Recommendation>('/dashboard/recommendation'),
+        fetchJson<VisitorBehaviorDashboard>(`/dashboard/visitor-behavior?mode=${visitorMode}`),
+        fetchJson<SentimentTrend>('/sentiment-trend?hours=12'),
+        fetchOfficialBehavior(),
+        fetchJson<Ticketing>('/dashboard/ticketing'),
+        fetchJson<Consumption>('/dashboard/consumption'),
+        fetchActiveEmergencies(),
+        fetchWeatherRequired(),
       ])
       if (!stopped) {
-        const liveData = {
-          overview,
-          service,
-          chat,
-          behavior,
-          persona,
-          realtime,
-          recommendation,
-          visitorBehavior,
-          sentimentTrend,
-          official: {
-            summary: officialSummary,
-            demographics: officialDemographics,
-            attractionTypes: officialAttractionTypes,
-            satisfaction: officialSatisfaction,
-            spending: officialSpending,
-          },
-        }
-        setData(ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? buildDemoDashboardData(visitorMode, activeWindowMinutes) : liveData)
+        const fetchedAt = new Date().toISOString()
+        setResources((previous) => ({
+          overview: settleResource(previous.overview, overviewResult as PromiseSettledResult<Overview>, '运营概览', fetchedAt),
+          service: settleResource(previous.service, serviceResult as PromiseSettledResult<ServiceQuality>, 'AI 服务质量', fetchedAt),
+          chat: settleResource(previous.chat, chatResult as PromiseSettledResult<ChatInsights>, '聊天洞察', fetchedAt),
+          behavior: settleResource(previous.behavior, behaviorResult as PromiseSettledResult<Behavior>, '游客行为', fetchedAt),
+          persona: settleResource(previous.persona, personaResult as PromiseSettledResult<Persona>, '游客画像', fetchedAt),
+          realtime: settleResource(previous.realtime, realtimeResult as PromiseSettledResult<Realtime>, '实时事件', fetchedAt),
+          recommendation: settleResource(previous.recommendation, recommendationResult as PromiseSettledResult<Recommendation>, '推荐效果', fetchedAt),
+          visitorBehavior: settleResource(previous.visitorBehavior, visitorBehaviorResult as PromiseSettledResult<VisitorBehaviorDashboard>, '游客综合分析', fetchedAt),
+          sentimentTrend: settleResource(previous.sentimentTrend, sentimentTrendResult as PromiseSettledResult<SentimentTrend>, '情绪趋势', fetchedAt),
+          official: settleResource(previous.official, officialResult as PromiseSettledResult<OfficialBehavior>, '官方历史样本', fetchedAt),
+          ticketing: settleResource(previous.ticketing, ticketingResult as PromiseSettledResult<Ticketing>, '票务数据', fetchedAt),
+          consumption: settleResource(previous.consumption, consumptionResult as PromiseSettledResult<Consumption>, '消费数据', fetchedAt),
+          emergencies: settleResource(previous.emergencies, emergenciesResult as PromiseSettledResult<EmergencyEvent[]>, '应急事件', fetchedAt),
+          weather: settleResource(previous.weather, weatherResult as PromiseSettledResult<ScenicWeather | null>, '天气服务', fetchedAt),
+        }))
+        setRefreshedAt(dayjs().format('HH:mm:ss'))
+        setRefreshing(false)
       }
     }
     load()
     const timer = setInterval(load, 15000)
     return () => { stopped = true; clearInterval(timer) }
-  }, [visitorMode, activeWindowMinutes])
+  }, [visitorMode, activeWindowMinutes, refreshNonce])
 
   const activeWindowOptions = useMemo(() => ACTIVE_WINDOW_OPTIONS.map((minutes) => ({
     label: `${minutes}分钟`,
@@ -1100,9 +1240,9 @@ function AdminDashboard() {
     { hour: row.hour?.slice(-5) || row.hour, value: row.neutral, type: '中性' },
   ]), [data.sentimentTrend])
 
-  // 运营机会清单：把已有真实指标规则化成“运营该做什么”，不引入新数据源、不伪造实时。
-  const opportunities = useMemo<Array<{ level: OpportunityLevel; title: string; action: string }>>(() => {
-    const items: Array<{ level: OpportunityLevel; title: string; action: string }> = []
+  // 首页只承担“发现与分流”：保留真实异常/机会信号，策略和执行统一在 AI 决策中心完成。
+  const operationSignals = useMemo<Array<{ level: OpportunityLevel; title: string; evidence: string }>>(() => {
+    const items: Array<{ level: OpportunityLevel; title: string; evidence: string }> = []
 
     // 1) 推荐点击率偏低
     const ctrPct = Math.round((data.recommendation.ctr || 0) * 100)
@@ -1110,7 +1250,7 @@ function AdminDashboard() {
       items.push({
         level: 'warning',
         title: `首页推荐点击率偏低（${ctrPct}%）`,
-        action: '建议优化推荐卡文案与排序，突出适合人群与亮点。',
+        evidence: `已曝光 ${formatCount(data.recommendation.exposureCount)} 次，当前点击率 ${ctrPct}%。`,
       })
     }
 
@@ -1119,7 +1259,7 @@ function AdminDashboard() {
       items.push({
         level: 'warning',
         title: `回复延迟偏高（P90 ${formatLatency(data.service.p90LatencyMs)}）`,
-        action: '关注「AI 服务质量」，排查知识库召回、模型响应与语音合成耗时。',
+        evidence: `超过 ${formatLatency(LATENCY_ATTENTION_MS)} 的服务质量关注阈值。`,
       })
     }
 
@@ -1128,27 +1268,29 @@ function AdminDashboard() {
       items.push({
         level: 'warning',
         title: `${item.name} 满意度偏低`,
-        action: `${item.reason || '建议复核讲解内容与现场体验'}。`,
+        evidence: item.reason || `当前满意度评分 ${item.score.toFixed(1)}。`,
       })
     })
 
-    // 4) 停留时间最长的景点 —— 提示加强消费/导购引导（用真实停留排行，不伪造）
+    // 4) 停留时间最长的景点
     const topDwell = data.visitorBehavior.attractions.dwellRanking?.[0]
     if (topDwell?.name) {
       items.push({
         level: 'info',
         title: `${topDwell.name} 游客停留时间最长`,
-        action: '可在此点位增加消费/导购与拍照引导，提升停留转化。',
+        evidence: topDwell.avgStayHours != null
+          ? `平均停留 ${topDwell.avgStayHours.toFixed(1)} 小时，当前位居首位。`
+          : '当前位居景点停留时长排行首位。',
       })
     }
 
-    // 5) 高频问题 —— 提示补充知识库/快捷入口
+    // 5) 高频问题
     const topQuestion = data.chat.topQuestions?.[0]
     if (topQuestion?.question) {
       items.push({
         level: 'info',
         title: `高频主题：${topQuestion.question}`,
-        action: '可补充对应知识库内容或设置首页快捷入口。',
+        evidence: `近 24 小时出现 ${formatCount(topQuestion.count)} 次，位居咨询主题首位。`,
       })
     }
 
@@ -1181,6 +1323,13 @@ function AdminDashboard() {
   const feedbackNeutralCount = data.overview.feedbackNeutralCount ?? Math.max(0, data.overview.feedbackCount - feedbackPositiveCount - feedbackNegativeCount)
   const feedbackTotal = Math.max(data.overview.feedbackCount, feedbackPositiveCount + feedbackNegativeCount + feedbackNeutralCount)
   const feedbackPositiveRate = feedbackTotal > 0 ? Math.round((feedbackPositiveCount / feedbackTotal) * 100) : 0
+  const overviewReadable = ADMIN_DASHBOARD_DEMO_DATA_ENABLED || Boolean(resources.overview.fetchedAt)
+  const ticketingReadable = Boolean(resources.ticketing.fetchedAt)
+  const consumptionReadable = Boolean(resources.consumption.fetchedAt)
+  const emergenciesReadable = Boolean(resources.emergencies.fetchedAt)
+  const criticalEmergencyCount = activeEmergencies.filter((item) => item.severity === 'CRITICAL').length
+  const topConsumptionCategory = consumption.topCategories.find((item) => item.amount > 0)
+  const liveIssueCount = Object.values(resources).filter((resource) => resource.status === 'error' || resource.status === 'stale').length
 
   // FR-B3.4 导出运营报告:基于驾驶舱当前数据生成 Excel(多 Sheet)/ PDF
   const buildReportMeta = () => ({
@@ -1189,86 +1338,54 @@ function AdminDashboard() {
     visitorModeLabel: visitorMode === 'realtime' ? '实时' : '历史',
   })
 
+  const refreshDashboard = useCallback(() => setRefreshNonce((value) => value + 1), [])
+  const exportDashboard = useCallback(() => {
+    exportDashboardExcel(data, {
+      title: '灵山胜境 AI 导览 · 运营报告',
+      generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      visitorModeLabel: visitorMode === 'realtime' ? '实时' : '历史',
+    })
+  }, [data, visitorMode])
+
+  useAdminOpsPageActions({
+    refreshedAt,
+    refreshing,
+    onRefresh: refreshDashboard,
+    onExport: exportDashboard,
+  })
+
   return (
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
-      <main style={{ minHeight: '100vh', background: `radial-gradient(circle at top left, #183457 0, ${palette.bg} 38%, #050b14 100%)`, color: palette.text, padding: 22 }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+      <main className="admin-page admin-ops-dashboard">
+        <header className="admin-ops-page-intro">
           <div>
-            <Text style={{ color: palette.gold, letterSpacing: 0, fontWeight: 700 }}>AI GUIDE OPERATIONS</Text>
-            <Title level={2} style={{ color: palette.text, margin: '4px 0 0', fontSize: 30 }}>灵山胜境 · AI 导览运营驾驶舱</Title>
+            <Text className="admin-ops-page-intro__eyebrow">灵山智慧导览运营中心</Text>
+            <Title level={2}>今日运营态势</Title>
+            <Text className="admin-ops-page-intro__description">汇总数字人问答、推荐、客流、门票、消费与游客画像，辅助运营团队快速定位机会与风险。</Text>
           </div>
-          <div style={{ display: 'grid', justifyItems: 'end', gap: 8, textAlign: 'right' }}>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <Button
-                size="large"
-                icon={<FileExcelOutlined />}
-                onClick={() => exportDashboardExcel(data, buildReportMeta())}
-                style={{ color: palette.green, fontWeight: 700, borderColor: palette.green, background: 'rgba(94, 230, 168, 0.1)' }}
-              >
-                导出 Excel
-              </Button>
-              <Button
-                size="large"
-                icon={<FilePdfOutlined />}
-                onClick={() => exportDashboardPdf(data, buildReportMeta())}
-                style={{ color: palette.red, fontWeight: 700, borderColor: palette.red, background: 'rgba(255, 123, 123, 0.1)' }}
-              >
-                导出 PDF
-              </Button>
-              <Link to="/admin/kb">
-                <Button
-                  size="large"
-                  icon={<DatabaseOutlined />}
-                  style={{
-                    color: palette.gold,
-                    fontWeight: 700,
-                    borderColor: palette.gold,
-                    background: 'rgba(212, 175, 55, 0.1)',
-                  }}
-                >
-                  知识库管理
-                </Button>
-              </Link>
-              <Link to="/admin/avatar">
-                <Button
-                  size="large"
-                  icon={<SkinOutlined />}
-                  style={{
-                    color: palette.gold,
-                    fontWeight: 700,
-                    borderColor: palette.gold,
-                    background: 'rgba(212, 175, 55, 0.1)',
-                  }}
-                >
-                  数字人形象
-                </Button>
-              </Link>
-              <Link to="/admin/heatmap">
-                <Button
-                  type="primary"
-                  size="large"
-                  icon={<FireOutlined />}
-                  style={{
-                    color: '#1a1208',
-                    fontWeight: 800,
-                    borderColor: palette.gold,
-                    background: 'linear-gradient(135deg, #f3da80, #d4af37)',
-                    boxShadow: '0 6px 22px rgba(212, 175, 55, 0.5)',
-                  }}
-                >
-                  客流热力图
-                </Button>
-              </Link>
+          <div className="admin-ops-page-intro__meta">
+            <div>
+              {ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? (
+                visitorMode === 'realtime'
+                  ? <Tag color="gold">演示数据 · 非真实运营</Tag>
+                  : <Tag color="gold">官方历史样本</Tag>
+              ) : liveIssueCount > 0 ? <Tag color="warning">实时数据 · {liveIssueCount} 项异常</Tag> : <Tag color="green">实时数据</Tag>}
+              <Text>
+                {ADMIN_DASHBOARD_DEMO_DATA_ENABLED && visitorMode === 'realtime'
+                  ? `每 1 秒更新 · 数据截至 ${dayjs(demoTick * 1000).format('HH:mm:ss')}`
+                  : '每 15 秒自动刷新'}
+              </Text>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {ADMIN_DASHBOARD_DEMO_DATA_ENABLED ? <Tag color="purple">演示数据</Tag> : null}
-              <Text style={{ color: palette.muted }}>实时刷新 · 15s</Text>
-            </div>
-            <div style={{ color: palette.cyan, fontFamily: 'monospace', fontSize: 20 }}>{currentTime}</div>
+            <strong>{currentTime}</strong>
+            <Button
+              icon={<FilePdfOutlined />}
+              onClick={() => exportDashboardPdf(data, buildReportMeta())}
+            >
+              导出 PDF
+            </Button>
           </div>
         </header>
 
-        <SectionHeading eyebrow="REAL-TIME OVERVIEW" title="实时态势" note="近 24 小时小程序与数字人实时采集" />
+        <SectionHeading eyebrow="实时运营总览" title="实时态势" note="近 24 小时小程序与数字人实时采集" />
         <div style={{
           display: 'flex',
           justifyContent: 'flex-end',
@@ -1284,49 +1401,145 @@ function AdminDashboard() {
             options={activeWindowOptions}
             onChange={handleActiveWindowChange}
             style={{
-              background: '#0d1a2f',
+              background: '#eee8dc',
               border: `1px solid ${palette.border}`,
               color: palette.text,
             }}
           />
         </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginBottom: 12,
+          padding: '11px 14px',
+          border: `1px solid ${palette.border}`,
+          borderRadius: 12,
+          color: palette.text,
+          background: 'rgba(232, 240, 226, 0.72)',
+        }}>
+          <CloudOutlined style={{ color: palette.green, fontSize: 22 }} />
+          <div style={{ display: 'flex', flex: 1, flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 10px', minWidth: 0 }}>
+            <Text strong style={{ color: palette.text }}>当前景区天气</Text>
+            {weather ? (
+              <>
+                <Text style={{ color: palette.text }}>{weather.weather} · {weather.temperature}℃</Text>
+                <Text style={{ color: palette.muted }}>湿度 {weather.humidity}% · {weather.windDirection}{weather.windPower} · 更新于 {weather.updateTime}</Text>
+              </>
+            ) : (
+              <Text style={{ color: palette.muted }}>{resourceEmptyText(resources.weather, '天气服务暂不可用，不影响其他运营数据')}</Text>
+            )}
+          </div>
+          <ResourceStatusTag resource={resources.weather} />
+          {weather?.routeAdvice ? <Tag color="green">{weather.routeAdvice}</Tag> : null}
+        </div>
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
-          <Col span={4}><MetricCard title="近24h对话" value={data.overview.totalMessages} icon={<MessageOutlined />} tone={palette.cyan} /></Col>
-          <Col span={4}><MetricCard title={`近${activeWindowMinutes}分钟活跃`} value={data.overview.activeSessions5min} icon={<FireOutlined />} tone="#ffb86b" /></Col>
-          <Col span={4}><MetricCard title="正面情绪率" value={formatPct(data.overview.positiveRatio)} suffix="%" icon={<SmileOutlined />} tone={palette.green} /></Col>
-          <Col span={4}><MetricCard title="P90 响应" value={formatLatency(data.overview.p90LatencyMs)} icon={<ClockCircleOutlined />} tone={data.overview.p90LatencyMs > LATENCY_ATTENTION_MS ? palette.red : palette.gold} /></Col>
-          <Col span={4}><MetricCard title="语音使用" value={data.overview.voiceUseCount} icon={<AudioOutlined />} tone="#b69cff" /></Col>
+          <Col span={4}><MetricCard title="近24h对话" value={overviewReadable ? data.overview.totalMessages : '—'} icon={<MessageOutlined />} tone={palette.cyan} /></Col>
+          <Col span={4}><MetricCard title={`近${activeWindowMinutes}分钟活跃`} value={overviewReadable ? data.overview.activeSessions5min : '—'} icon={<FireOutlined />} tone="#ffb86b" /></Col>
+          <Col span={4}><MetricCard title="正面情绪率" value={overviewReadable ? formatPct(data.overview.positiveRatio) : '—'} suffix={overviewReadable ? '%' : undefined} icon={<SmileOutlined />} tone={palette.green} /></Col>
+          <Col span={4}><MetricCard title="P90 响应" value={overviewReadable ? formatLatency(data.overview.p90LatencyMs) : '—'} icon={<ClockCircleOutlined />} tone={data.overview.p90LatencyMs > LATENCY_ATTENTION_MS ? palette.red : palette.gold} /></Col>
+          <Col span={4}><MetricCard title="语音使用" value={overviewReadable ? data.overview.voiceUseCount : '—'} icon={<AudioOutlined />} tone="#b69cff" /></Col>
           <Col span={4}>
             <MetricCard
               title="游客反馈"
-              value={feedbackTotal}
+              value={overviewReadable ? feedbackTotal : '—'}
               icon={<LikeOutlined />}
               tone={feedbackNegativeCount > 0 ? palette.gold : palette.green}
-              footer={(
+              footer={overviewReadable ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', color: palette.muted, fontSize: 12, lineHeight: 1.4 }}>
                   <span style={{ color: palette.green }}>好评 {feedbackPositiveCount}</span>
                   <span style={{ color: feedbackNegativeCount > 0 ? palette.red : palette.muted }}>差评 {feedbackNegativeCount}</span>
                   <span>好评率 {feedbackPositiveRate}%</span>
                 </div>
-              )}
+              ) : <ResourceStatusTag resource={resources.overview} />}
             />
           </Col>
         </Row>
 
-        <SectionHeading eyebrow="OPERATION OPPORTUNITIES" title="今天该处理什么？" note="基于实时指标自动梳理的运营机会与待办，按真实数据触发" />
+        <SectionHeading eyebrow="经营与安全" title="实时经营摘要" note="票务、消费与应急事件分别来自真实接口，单项异常不影响其他数据" />
+        <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+          <Col xs={24} lg={8}>
+            <Panel title="今日票务" minHeight={178} extra={<ResourceStatusTag resource={resources.ticketing} showReady />}>
+              {ticketingReadable ? (
+                <Row gutter={[12, 12]}>
+                  <Col span={8}><Statistic title="订单" value={ticketing.ticketCount} suffix="单" valueStyle={{ color: palette.cyan, fontSize: 22 }} /></Col>
+                  <Col span={8}><Statistic title="预计入园" value={ticketing.expectedVisitors} suffix="人" valueStyle={{ color: palette.green, fontSize: 22 }} /></Col>
+                  <Col span={8}><Statistic title="门票收入" value={formatMoney(ticketing.ticketRevenue)} valueStyle={{ color: palette.gold, fontSize: 20 }} /></Col>
+                </Row>
+              ) : <EmptyState text={resourceEmptyText(resources.ticketing, '今日暂无票务数据')} />}
+            </Panel>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Panel title="今日消费" minHeight={178} extra={<ResourceStatusTag resource={resources.consumption} showReady />}>
+              {consumptionReadable ? (
+                <>
+                  <Row gutter={[12, 12]}>
+                    <Col span={8}><Statistic title="消费笔数" value={consumption.purchaseCount} suffix="笔" valueStyle={{ color: palette.cyan, fontSize: 22 }} /></Col>
+                    <Col span={8}><Statistic title="消费总额" value={formatMoney(consumption.totalAmount)} valueStyle={{ color: palette.gold, fontSize: 20 }} /></Col>
+                    <Col span={8}><Statistic title="平均客单" value={formatMoney(consumption.avgPerPurchase)} valueStyle={{ color: palette.green, fontSize: 20 }} /></Col>
+                  </Row>
+                  <Text style={{ display: 'block', marginTop: 10, color: palette.muted, fontSize: 12 }}>
+                    {topConsumptionCategory ? `当前主要品类：${topConsumptionCategory.label} · ${formatMoney(topConsumptionCategory.amount)}` : '当前无消费明细'}
+                  </Text>
+                </>
+              ) : <EmptyState text={resourceEmptyText(resources.consumption, '今日暂无消费数据')} />}
+            </Panel>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Panel
+              title="生效中应急事件"
+              minHeight={178}
+              extra={(
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ResourceStatusTag resource={resources.emergencies} showReady />
+                  <Button size="small" onClick={() => navigate('/admin/emergency')}>进入应急协同</Button>
+                </div>
+              )}
+            >
+              {emergenciesReadable ? (
+                <>
+                  <Row gutter={[12, 12]}>
+                    <Col span={12}><Statistic title="生效中" value={activeEmergencies.length} suffix="起" valueStyle={{ color: activeEmergencies.length ? palette.gold : palette.green, fontSize: 22 }} /></Col>
+                    <Col span={12}><Statistic title="紧急事件" value={criticalEmergencyCount} suffix="起" valueStyle={{ color: criticalEmergencyCount ? palette.red : palette.green, fontSize: 22 }} /></Col>
+                  </Row>
+                  <Text style={{ display: 'block', marginTop: 10, color: palette.muted, fontSize: 12 }} ellipsis>
+                    {activeEmergencies[0]?.title || '当前无生效中应急事件'}
+                  </Text>
+                </>
+              ) : <EmptyState text={resourceEmptyText(resources.emergencies, '当前无生效中应急事件')} />}
+            </Panel>
+          </Col>
+        </Row>
+
+        <SectionHeading eyebrow="今日运营信号" title="今日运营待办" note="仅展示实时异常与机会信号；策略、证据与执行统一在 AI 决策分析中处理" />
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
           <Col span={24}>
-            <Panel title="运营机会清单" extra={<Tag color={opportunities.some((o) => o.level === 'warning') ? 'warning' : 'success'}>{opportunities.length ? `${opportunities.length} 项待办` : '运行正常'}</Tag>}>
-              {opportunities.length ? (
+            <Panel
+              title="待办信号"
+              extra={(
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Tag color={operationSignals.some((signal) => signal.level === 'warning') ? 'warning' : 'success'}>
+                    {operationSignals.length ? `${operationSignals.length} 项待办` : '运行正常'}
+                  </Tag>
+                  <Button type="primary" size="small" onClick={() => navigate('/admin/decision')}>
+                    进入 AI 决策中心
+                  </Button>
+                </div>
+              )}
+            >
+              <Text style={{ display: 'block', marginBottom: 12, color: palette.muted, fontSize: 12 }}>
+                首页负责发现和分流；点击右上角可查看完整决策、证据和执行进度。
+              </Text>
+              {operationSignals.length ? (
                 <Row gutter={[12, 12]}>
-                  {opportunities.map((item, index) => (
-                    <Col span={8} key={`${item.title}-${index}`}>
+                  {operationSignals.map((item, index) => (
+                    <Col xs={24} md={12} xl={8} key={`${item.title}-${index}`}>
                       <div style={{
                         height: '100%',
                         padding: '12px 14px',
                         borderRadius: 8,
-                        background: '#0d1a2f',
-                        borderLeft: `3px solid ${item.level === 'warning' ? palette.red : palette.cyan}`,
+                        background: 'rgba(255,255,255,.46)',
+                        border: `1px solid ${item.level === 'warning' ? 'rgba(163,74,63,.28)' : 'rgba(47,118,108,.24)'}`,
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                           <Tag color={item.level === 'warning' ? 'error' : 'processing'} style={{ marginInlineEnd: 0 }}>
@@ -1334,19 +1547,19 @@ function AdminDashboard() {
                           </Tag>
                           <Text style={{ color: palette.text, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</Text>
                         </div>
-                        <Text style={{ color: palette.muted, fontSize: 12, lineHeight: 1.6 }}>{item.action}</Text>
+                        <Text style={{ color: palette.muted, fontSize: 12, lineHeight: 1.6 }}>{item.evidence}</Text>
                       </div>
                     </Col>
                   ))}
                 </Row>
               ) : (
-                <EmptyState text="当前各项指标正常，暂无需要处理的运营事项" />
+                <EmptyState text="当前各项指标正常，暂无需要处理的运营信号" />
               )}
             </Panel>
           </Col>
         </Row>
 
-        <SectionHeading eyebrow="CHAT & SERVICE INSIGHTS" title="聊天洞察与服务质量" note="基于实时问答日志，反映小灵的回答质量与游客情绪" />
+        <SectionHeading eyebrow="问答与服务洞察" title="聊天洞察与服务质量" note="基于实时问答日志，反映小灵的回答质量与游客情绪" />
         <Row gutter={[12, 12]}>
           <Col span={6}>
             <Panel title="AI 服务质量" minHeight={300} extra={<Tag color={data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? 'error' : 'success'}>{data.service.p90LatencyMs > LATENCY_ATTENTION_MS ? '需关注' : '稳定'}</Tag>}>
@@ -1357,9 +1570,9 @@ function AdminDashboard() {
               </Row>
               <div style={{ marginTop: 18 }}>
                 <Text style={{ color: palette.muted }}>语音完成率</Text>
-                <Progress percent={formatPct(data.service.voiceCompletionRate)} strokeColor={palette.cyan} trailColor="#1c2a3f" />
+                <Progress percent={formatPct(data.service.voiceCompletionRate)} strokeColor={palette.cyan} trailColor="#e8e0d2" />
                 <Text style={{ color: palette.muted }}>AI 回复率</Text>
-                <Progress percent={formatPct(data.service.estimatedAnswerRate)} strokeColor={palette.green} trailColor="#1c2a3f" />
+                <Progress percent={formatPct(data.service.estimatedAnswerRate)} strokeColor={palette.green} trailColor="#e8e0d2" />
               </div>
             </Panel>
           </Col>
@@ -1438,7 +1651,7 @@ function AdminDashboard() {
                       style={{
                         padding: '10px 12px',
                         borderRadius: 8,
-                        background: item.dislikes > 0 ? 'rgba(255, 123, 123, 0.08)' : '#0d1a2f',
+                        background: item.dislikes > 0 ? 'rgba(163, 74, 63, 0.07)' : '#f1ebdf',
                         border: `1px solid ${item.dislikes > 0 ? 'rgba(255, 123, 123, 0.28)' : palette.border}`,
                       }}
                     >
@@ -1448,7 +1661,7 @@ function AdminDashboard() {
                           {item.positiveRate}%
                         </span>
                       </div>
-                      <div style={{ height: 5, borderRadius: 999, background: '#1c2a3f', overflow: 'hidden', marginTop: 9 }}>
+                      <div style={{ height: 5, borderRadius: 999, background: '#e8e0d2', overflow: 'hidden', marginTop: 9 }}>
                         <div style={{ width: `${item.positiveRate}%`, height: '100%', borderRadius: 999, background: item.positiveRate < 80 ? palette.red : palette.green }} />
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8, color: palette.muted, fontSize: 12 }}>
@@ -1464,7 +1677,7 @@ function AdminDashboard() {
           </Col>
         </Row>
 
-        <SectionHeading eyebrow="RECOMMENDATION & OPS MONITOR" title="推荐与运营监控" note="推荐曝光点击与低满意风险提示" />
+        <SectionHeading eyebrow="推荐运营监测" title="推荐与运营监控" note="推荐曝光点击与低满意风险提示" />
         <Row gutter={[12, 12]} style={{ marginTop: 0 }}>
           <Col span={12}>
             <Panel title="推荐效果" minHeight={190} extra={<Tag color={data.recommendation.ctr > 0 ? (data.recommendation.ctr < 0.1 ? 'orange' : 'cyan') : 'default'}>{Math.round(data.recommendation.ctr * 100)}% CTR</Tag>}>
@@ -1480,8 +1693,8 @@ function AdminDashboard() {
                     : '点击率表现正常，推荐链路健康'}
               </div>
               <div style={{ marginBottom: 10 }}>
-                {data.recommendation.engineDistribution.length ? (
-                  data.recommendation.engineDistribution.slice(0, 2).map((item) => (
+                {visibleRecommendationEngines(data.recommendation.engineDistribution).length ? (
+                  visibleRecommendationEngines(data.recommendation.engineDistribution).slice(0, 2).map((item) => (
                     <Tag key={item.engine} color="geekblue">{item.engine} · {item.count}</Tag>
                   ))
                 ) : (
@@ -1515,7 +1728,7 @@ function AdminDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 10 }}>
             <div>
               <Text style={{ color: visitorMode === 'history' ? palette.gold : palette.green, letterSpacing: 0, fontWeight: 700 }}>
-                VISITOR BEHAVIOR ANALYSIS
+                游客行为综合分析
               </Text>
               <Title level={3} style={{ color: palette.text, margin: '2px 0 0', fontSize: 22 }}>
                 游客行为分析 · {data.visitorBehavior.sourceLabel}
@@ -1626,7 +1839,7 @@ function AdminDashboard() {
                                 </span>
                                 <span style={{ color: palette.muted, flex: '0 0 auto' }}>{percent}%</span>
                               </div>
-                              <div style={{ height: 4, borderRadius: 999, background: '#1c2a3f', marginTop: 4, overflow: 'hidden' }}>
+                              <div style={{ height: 4, borderRadius: 999, background: '#e8e0d2', marginTop: 4, overflow: 'hidden' }}>
                                 <div style={{ width: `${Math.max(4, percent)}%`, height: '100%', borderRadius: 999, background: color }} />
                               </div>
                             </div>
@@ -1678,7 +1891,6 @@ function AdminDashboard() {
           </Row>
         </section>
       </main>
-    </ConfigProvider>
   )
 }
 

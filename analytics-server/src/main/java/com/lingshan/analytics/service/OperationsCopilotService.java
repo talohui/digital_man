@@ -7,11 +7,13 @@ import com.lingshan.analytics.dto.OperationsCopilotMessage;
 import com.lingshan.analytics.dto.OperationsCopilotModelResponse;
 import com.lingshan.analytics.dto.OperationsCopilotPageContext;
 import com.lingshan.analytics.dto.OperationsCopilotProposalDraft;
+import com.lingshan.analytics.dto.OperationsCopilotProposalUpdateRequest;
 import com.lingshan.analytics.dto.OperationsCopilotQueryRequest;
 import com.lingshan.analytics.dto.OperationsCopilotResponse;
 import com.lingshan.analytics.entity.OperationsCopilotRecord;
 import com.lingshan.analytics.repository.OperationsCopilotRecordRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -53,6 +55,29 @@ public class OperationsCopilotService {
     private final AdminSessionVerifier adminSessionVerifier;
     private final OperationsCopilotActionExecutor actionExecutor;
     private final ObjectMapper objectMapper;
+    private final OperationsCopilotProposalValidator proposalValidator;
+    private final OperationsCopilotExecutionStateService executionStateService;
+
+    @Autowired
+    public OperationsCopilotService(
+            OperationsCopilotRecordRepository records,
+            OperationsCopilotContextProvider contextProvider,
+            OperationsCopilotGenerator generator,
+            AdminSessionVerifier adminSessionVerifier,
+            OperationsCopilotActionExecutor actionExecutor,
+            ObjectMapper objectMapper,
+            OperationsCopilotProposalValidator proposalValidator,
+            OperationsCopilotExecutionStateService executionStateService
+    ) {
+        this.records = records;
+        this.contextProvider = contextProvider;
+        this.generator = generator;
+        this.adminSessionVerifier = adminSessionVerifier;
+        this.actionExecutor = actionExecutor;
+        this.objectMapper = objectMapper;
+        this.proposalValidator = proposalValidator;
+        this.executionStateService = executionStateService;
+    }
 
     public OperationsCopilotService(
             OperationsCopilotRecordRepository records,
@@ -62,12 +87,9 @@ public class OperationsCopilotService {
             OperationsCopilotActionExecutor actionExecutor,
             ObjectMapper objectMapper
     ) {
-        this.records = records;
-        this.contextProvider = contextProvider;
-        this.generator = generator;
-        this.adminSessionVerifier = adminSessionVerifier;
-        this.actionExecutor = actionExecutor;
-        this.objectMapper = objectMapper;
+        this(records, contextProvider, generator, adminSessionVerifier, actionExecutor,
+                objectMapper, new OperationsCopilotProposalValidator(),
+                new OperationsCopilotExecutionStateService(records, objectMapper));
     }
 
     @Transactional
@@ -107,50 +129,133 @@ public class OperationsCopilotService {
             record.setProposalSummary(proposal.summary());
             record.setProposalPayloadJson(write(proposal.payload()));
             record.setProposalStatus("DRAFT");
+            record.setProposalRevision(UUID.randomUUID().toString());
         }
         record.setCreatedAt(now);
         record.setUpdatedAt(now);
         return response(records.save(record));
     }
 
-    @Transactional
-    public OperationsCopilotResponse confirm(String id, String fayAdminSessionToken) {
+    public OperationsCopilotResponse confirm(
+            String id,
+            String fayAdminSessionToken,
+            String proposalRevision
+    ) {
         OperationsCopilotRecord record = find(id);
         if (!"DRAFT".equals(record.getProposalStatus())) {
             throw new IllegalStateException("仅待确认草案可以执行");
         }
+        String expectedRevision = requiredRevision(proposalRevision);
+        if (!expectedRevision.equals(record.getProposalRevision())) {
+            throw new IllegalStateException("草案已更新，请重新审核后确认");
+        }
+        proposalValidator.validateForExecution(proposal(record));
         if (!adminSessionVerifier.verify(fayAdminSessionToken)) {
             throw new SecurityException("需要重新输入管理员密码以确认此操作");
         }
-        if (records.claimDraftForExecution(id, LocalDateTime.now()) != 1) {
-            throw new IllegalStateException("该草案正在执行或已处理，请勿重复提交");
-        }
-        record = find(id);
-        OperationsCopilotProposalDraft proposal = proposal(record);
+        OperationsCopilotRecord claimed = executionStateService.claim(id, expectedRevision);
+        OperationsCopilotProposalDraft proposal =
+                proposalValidator.validateForExecution(proposal(claimed));
+        Map<String, Object> target;
         try {
-            Map<String, Object> executionResult = sanitizeMap(actionExecutor.execute(proposal));
-            record.setExecutionResultJson(write(executionResult));
-            record.setProposalStatus("CONFIRMED");
-            record.setUpdatedAt(LocalDateTime.now());
-            return response(records.save(record));
+            target = sanitizeMap(actionExecutor.execute(id, proposal));
+        } catch (OperationsCopilotUncertainOutcomeException error) {
+            return response(executionStateService.reconcile(
+                    id,
+                    uncertainExecutionResult(sanitizeMap(error.target()))
+            ));
         } catch (RuntimeException error) {
-            record.setExecutionResultJson(write(Map.of("status", "failed")));
-            record.setProposalStatus("FAILED");
-            record.setUpdatedAt(LocalDateTime.now());
-            records.save(record);
+            executionStateService.fail(id, failedExecutionResult());
             throw new IllegalStateException("草案未执行，请检查应急或知识库服务后重试");
         }
+        return response(executionStateService.complete(id, completedExecutionResult(target)));
+    }
+
+    private Map<String, Object> completedExecutionResult(Map<String, Object> target) {
+        String syncStatus = stringValue(target.get("syncStatus"));
+        boolean partial = syncStatus != null
+                && !("SYNCED".equalsIgnoreCase(syncStatus) || "COMPLETED".equalsIgnoreCase(syncStatus));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", partial ? "PARTIAL" : "COMPLETED");
+        result.put("failedStage", partial ? "SYNC_DEPENDENCIES" : null);
+        result.put("stages", List.of(
+                stage("VALIDATE", "COMPLETED"),
+                stage("VERIFY_ADMIN", "COMPLETED"),
+                stage("WRITE_TARGET", "COMPLETED"),
+                stage("SYNC_DEPENDENCIES", partial ? "PARTIAL" : "COMPLETED")
+        ));
+        result.put("target", target);
+        return result;
+    }
+
+    private Map<String, Object> failedExecutionResult() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "FAILED");
+        result.put("failedStage", "WRITE_TARGET");
+        result.put("stages", List.of(
+                stage("VALIDATE", "COMPLETED"),
+                stage("VERIFY_ADMIN", "COMPLETED"),
+                stage("WRITE_TARGET", "FAILED"),
+                stage("SYNC_DEPENDENCIES", "SKIPPED")
+        ));
+        result.put("target", Map.of());
+        return result;
+    }
+
+    private Map<String, Object> uncertainExecutionResult(Map<String, Object> target) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "PARTIAL");
+        result.put("outcomeStatus", "UNKNOWN");
+        result.put("reconciliationStatus", "PENDING");
+        result.put("failedStage", "WRITE_TARGET");
+        result.put("stages", List.of(
+                stage("VALIDATE", "COMPLETED"),
+                stage("VERIFY_ADMIN", "COMPLETED"),
+                stage("WRITE_TARGET", "PARTIAL"),
+                stage("SYNC_DEPENDENCIES", "PENDING")
+        ));
+        result.put("target", target);
+        return result;
+    }
+
+    private Map<String, Object> stage(String name, String status) {
+        return Map.of("name", name, "status", status);
     }
 
     @Transactional
-    public OperationsCopilotResponse discard(String id) {
+    public OperationsCopilotResponse updateProposal(
+            String id,
+            OperationsCopilotProposalUpdateRequest request
+    ) {
         OperationsCopilotRecord record = find(id);
         if (!"DRAFT".equals(record.getProposalStatus())) {
-            throw new IllegalStateException("仅待确认草案可以忽略");
+            throw new IllegalStateException("仅待确认草案可以编辑");
         }
-        record.setProposalStatus("DISCARDED");
-        record.setUpdatedAt(LocalDateTime.now());
-        return response(records.save(record));
+        proposalValidator.validateUpdate(record.getProposalType(), request);
+        OperationsCopilotProposalDraft updated = proposalValidator.validateDraft(
+                new OperationsCopilotProposalDraft(
+                        record.getProposalType(),
+                        request.title() == null ? record.getProposalTitle() : request.title(),
+                        request.summary() == null ? record.getProposalSummary() : request.summary(),
+                        request.payload() == null
+                                ? readMap(record.getProposalPayloadJson())
+                                : sanitizeMap(request.payload())
+                ));
+        if (records.updateDraftProposal(
+                id,
+                updated.title(),
+                updated.summary(),
+                write(updated.payload()),
+                UUID.randomUUID().toString(),
+                LocalDateTime.now()
+        ) != 1) {
+            throw new IllegalStateException("该草案正在执行或已处理，不能继续编辑");
+        }
+        return response(find(id));
+    }
+
+    public OperationsCopilotResponse discard(String id) {
+        return response(executionStateService.discard(id));
     }
 
     private OperationsCopilotModelResponse safeGenerate(
@@ -214,12 +319,16 @@ public class OperationsCopilotService {
         String title = safeOutputText(proposal.title(), 160);
         String summary = safeOutputText(proposal.summary(), 600);
         if (blank(title) || blank(summary)) return null;
-        return new OperationsCopilotProposalDraft(
-                proposal.type(),
-                title,
-                summary,
-                sanitizeMap(proposal.payload())
-        );
+        try {
+            return proposalValidator.validateDraft(new OperationsCopilotProposalDraft(
+                    proposal.type(),
+                    title,
+                    summary,
+                    sanitizeMap(proposal.payload())
+            ));
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private List<String> safeSources(List<String> generated, Map<String, Object> context) {
@@ -278,6 +387,7 @@ public class OperationsCopilotService {
                 proposal,
                 safeOutputText(stringValue(structured.get("sessionId")), 64),
                 safeOutputText(stringValue(structured.get("contextUpdatedAt")), 64),
+                record.getProposalRevision(),
                 record.getProposalStatus(),
                 sanitizeMap(readMap(record.getExecutionResultJson()))
         );
@@ -290,6 +400,21 @@ public class OperationsCopilotService {
     private String requiredQuestion(String question) {
         if (blank(question)) throw new IllegalArgumentException("请输入运营问题");
         return safeOutputText(question, 600);
+    }
+
+    private String requiredRevision(String revision) {
+        if (blank(revision)) {
+            throw new IllegalArgumentException("缺少草案版本，请重新打开草案后确认");
+        }
+        String value = revision.trim();
+        if (value.startsWith("W/")) value = value.substring(2).trim();
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            value = value.substring(1, value.length() - 1);
+        }
+        if (value.length() != 36) {
+            throw new IllegalArgumentException("草案版本格式无效，请重新打开草案后确认");
+        }
+        return value;
     }
 
     private String safeSessionId(String sessionId) {
@@ -402,7 +527,7 @@ public class OperationsCopilotService {
         for (Map.Entry<?, ?> entry : value.entrySet()) {
             if (!(entry.getKey() instanceof String key) || sensitiveKey(key)) continue;
             Object item = sanitizeValue(entry.getValue(), depth + 1);
-            if (item != null) safe.put(key, item);
+            if (item != null || entry.getValue() == null) safe.put(key, item);
         }
         return Collections.unmodifiableMap(safe);
     }

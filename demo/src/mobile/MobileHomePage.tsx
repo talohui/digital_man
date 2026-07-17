@@ -1,17 +1,29 @@
-import { CompassOutlined, MessageOutlined, RightOutlined } from '@ant-design/icons'
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { getGuideRouteById, guideSpots } from '../data/guideData'
+import { RightOutlined } from '@ant-design/icons'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { fetchScenicWeather, type ScenicWeather } from '../api/weather'
+import { fetchRealtimeCrowd } from '../api/crowd'
+import { guideSpots } from '../data/guideData'
 import { DEFAULT_SCENE_ID } from '../store/chatSessions'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
+import { getPoiMedia } from '../data/scenicMediaCatalog'
+import {
+  consumeCAppReturnContext,
+  readCAppReturnContext,
+  saveCAppReturnContext
+} from '../lib/cAppReturnContext'
+import { getMapResumeUrl } from '../lib/mapResumeState'
+import PlaqueTitle from '../components/mobile/home/PlaqueTitle'
+import MountainGate from '../components/mobile/home/MountainGate'
+import '../styles/c-app/mobileHome.css'
 
 // 景区服务宫格(精美图标入口,放在 public/icons/)
 const SERVICES = [
-  { icon: 'cat-food', label: '餐饮斋茶', to: '/consume' },
-  { icon: 'cat-culture', label: '文创礼品', to: '/consume' },
-  { icon: 'cat-show', label: '演艺秀场', to: '/consume' },
-  { icon: 'cat-spot', label: '灵山景点', to: '/map' }
+  { icon: 'cat-food', label: '餐饮斋茶', to: '/consume?category=food' },
+  { icon: 'cat-culture', label: '文创礼品', to: '/consume?category=shopping' },
+  { icon: 'cat-show', label: '演艺秀场', to: '/consume?category=entertainment' },
+  { icon: 'cat-spot', label: '灵山景点', to: '/spots' }
 ]
 
 type CrowdTone = 'busy' | 'steady' | 'calm'
@@ -160,10 +172,11 @@ const CROWD_STATUS_BY_SPOT_ID: Record<string, CrowdStatus> = {
   }
 }
 
-const CROWD_SPOTS = guideSpots.map((spot) => ({
+const BASE_CROWD_SPOTS = guideSpots.map((spot) => ({
   id: spot.id,
   name: spot.name,
-  ...CROWD_STATUS_BY_SPOT_ID[spot.id]
+  ...CROWD_STATUS_BY_SPOT_ID[spot.id],
+  image: getPoiMedia(spot.id).thumbnail ?? getPoiMedia(spot.id).cover
 }))
 
 function formatCrowdUpdateTime() {
@@ -175,12 +188,70 @@ function formatCrowdUpdateTime() {
 }
 
 function MobileHomePage() {
+  const location = useLocation()
   const navigate = useNavigate()
-  const activeRouteId = useGuideStore((state) => state.activeRouteId)
   const ensureUserId = useGuideStore((state) => state.ensureUserId)
   const setActiveScene = useChatStore((state) => state.setActiveScene)
-  const route = getGuideRouteById(activeRouteId)
-  const crowdUpdateTime = formatCrowdUpdateTime()
+  const [weather, setWeather] = useState<ScenicWeather | null>(null)
+  const [weatherLoading, setWeatherLoading] = useState(true)
+  const [crowdSpots, setCrowdSpots] = useState(BASE_CROWD_SPOTS)
+  const [crowdUpdateTime, setCrowdUpdateTime] = useState(formatCrowdUpdateTime)
+  const [crowdSource, setCrowdSource] = useState<'实时埋点' | '基础客流模型'>('基础客流模型')
+
+  useEffect(() => {
+    let active = true
+    const refreshWeather = () => {
+      void fetchScenicWeather().then((nextWeather) => {
+        if (!active) return
+        setWeather(nextWeather)
+        setWeatherLoading(false)
+      })
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshWeather()
+    }
+    refreshWeather()
+    const timer = window.setInterval(refreshWeather, 5 * 60_000)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    let controller: AbortController | null = null
+    const refreshCrowd = async () => {
+      controller?.abort()
+      controller = new AbortController()
+      const snapshot = await fetchRealtimeCrowd(controller.signal)
+      if (!active || !snapshot) return
+      const recentEntries = (snapshot.recentEvents ?? []).filter((event) => event.event === 'spot_enter')
+      const counts = new Map<string, number>()
+      recentEntries.forEach((event) => {
+        const target = event.target?.trim()
+        if (target) counts.set(target, (counts.get(target) ?? 0) + 1)
+      })
+      setCrowdSpots(BASE_CROWD_SPOTS.map((spot) => {
+        const count = (counts.get(spot.id) ?? 0) + (counts.get(spot.name) ?? 0)
+        if (count >= 4) return { ...spot, level: '偏拥挤', people: 3 as const, tone: 'busy' as const, hint: `近 5 分钟记录到 ${count} 次到访，建议错峰` }
+        if (count >= 2) return { ...spot, level: '适中', people: 2 as const, tone: 'steady' as const, hint: `近 5 分钟记录到 ${count} 次到访，通行总体平稳` }
+        if (count === 1) return { ...spot, level: '舒适', people: 1 as const, tone: 'calm' as const, hint: '近 5 分钟有游客到访，当前停留分散' }
+        return spot
+      }))
+      setCrowdSource(recentEntries.length ? '实时埋点' : '基础客流模型')
+      setCrowdUpdateTime(formatCrowdUpdateTime())
+    }
+    void refreshCrowd()
+    const timer = window.setInterval(refreshCrowd, 5_000)
+    return () => {
+      active = false
+      controller?.abort()
+      window.clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     ensureUserId()
@@ -189,111 +260,179 @@ function MobileHomePage() {
     void import('../lib/prefetch').then((m) => m.prefetchHeavyTabs())
   }, [ensureUserId, setActiveScene])
 
+  useEffect(() => {
+    const context = readCAppReturnContext()
+    const currentUrl = `${location.pathname}${location.search}${location.hash}`
+    if (!context || !context.source.startsWith('home-') || context.returnTo !== currentUrl) return undefined
+
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (Number.isFinite(context.returnScrollY)) {
+          window.scrollTo({ top: context.returnScrollY, behavior: 'auto' })
+        } else if (context.returnAnchor) {
+          document.getElementById(context.returnAnchor)?.scrollIntoView({ block: 'start' })
+        }
+        consumeCAppReturnContext()
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      window.cancelAnimationFrame(secondFrame)
+    }
+  }, [location.hash, location.pathname, location.search])
+
+  const saveHomeReturn = (returnAnchor: string, poiId?: string) => {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`
+    saveCAppReturnContext({
+      source: 'home-crowd',
+      returnTo,
+      returnScrollY: window.scrollY,
+      returnAnchor,
+      poiId
+    })
+    return returnTo
+  }
+
   return (
-    <div className="mobile-home">
-      <section className="mobile-home__hero">
-        <div>
-          <span className="mobile-section-kicker">当前导览状态</span>
-          <h2>您好，我是您的数字向导</h2>
-          <p>先规划今天的行程，小灵会把路线、地图和景点讲解串成一条连续体验。</p>
-        </div>
-        <button
-          className="mobile-home__floating-guide"
-          type="button"
-          onClick={() => navigate('/guide')}
-          aria-label="打开灵山小灵"
-        >
-          <MessageOutlined />
-          <span>小灵</span>
-        </button>
-      </section>
+    <div className="home-v2-preview home-formal-preview c-app-root">
+      <div className="home-v2-device home-formal-device">
+        <main className="home-v2-page home-formal-page">
+          <div className="home-formal-artboard">
+            <img
+              className="home-formal-artboard__background"
+              src="/images/c-app/lingshan-home-scroll.webp"
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+            />
+            <svg className="home-v2-companion-path" viewBox="0 0 430 760" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="home-formal-companion-gold" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="#e4cf91" />
+                  <stop offset="0.52" stopColor="#c9a86a" />
+                  <stop offset="1" stopColor="#8e713b" />
+                </linearGradient>
+              </defs>
+              <path className="home-v2-companion-path__base" pathLength="1" d="M215 4 C104 24 42 82 42 154 C42 236 388 232 388 322 C388 408 42 407 42 500 C42 592 388 588 388 664 C388 713 294 741 215 756" />
+              <path className="home-v2-companion-path__light home-formal-companion-path__light" pathLength="1" d="M215 4 C104 24 42 82 42 154 C42 236 388 232 388 322 C388 408 42 407 42 500 C42 592 388 588 388 664 C388 713 294 741 215 756" />
+            </svg>
 
-      <button className="mobile-plan-entry" type="button" onClick={() => navigate('/plan')}>
-        <span className="mobile-plan-entry__icon">
-          <CompassOutlined />
-        </span>
-        <span className="mobile-plan-entry__text">
-          <strong>规划我的行程</strong>
-          <small>选游览期待 · 智能推荐路线</small>
-        </span>
-        <RightOutlined />
-      </button>
-
-      <section className="mobile-panel">
-        <div className="mobile-panel__head">
-          <div>
-            <span className="mobile-section-kicker">景区服务</span>
-            <h3>常用功能一键直达</h3>
-          </div>
-        </div>
-        <div className="mobile-service-grid">
-          {SERVICES.map((s) => (
-            <button
-              key={s.label}
-              type="button"
-              className="mobile-service-cell"
-              onClick={() => navigate(s.to)}
-            >
-              <img src={`/icons/${s.icon}.png`} alt="" loading="lazy" />
-              <span>{s.label}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="mobile-crowd-card" aria-label="实时客流">
-        <div className="mobile-crowd-card__top">
-          <div>
-            <span className="mobile-crowd-card__kicker">实时客流</span>
-            <h3>当前景区人流量适中</h3>
-            <p>更新于 {crowdUpdateTime}</p>
-          </div>
-          <button type="button" onClick={() => navigate('/map')}>
-            看地图
-            <RightOutlined />
-          </button>
-        </div>
-
-        <div className="mobile-crowd-card__panel">
-          <div className="mobile-crowd-card__panel-head">
-            <strong>景点实时客流情况</strong>
-            <span>{CROWD_SPOTS.length} 个点位</span>
-          </div>
-          <div className="mobile-crowd-list">
-            {CROWD_SPOTS.map((spot) => (
-              <button
-                key={spot.id}
-                type="button"
-                className="mobile-crowd-row"
-                onClick={() => navigate('/map')}
-              >
-                <img className="mobile-crowd-row__photo" src={spot.image} alt="" loading="lazy" />
-                <span className="mobile-crowd-row__main">
-                  <strong>{spot.name}</strong>
-                  <small>{spot.hint}</small>
-                </span>
-                <span
-                  className={`mobile-crowd-row__people is-${spot.tone}`}
-                  aria-label={`${spot.name}拥挤度：${spot.level}`}
+            <section className="home-v2-hero" aria-label="灵山胜境 AI 智能导览首页">
+              <header className="home-v2-header">
+                <div className="home-v2-brand">
+                  <span>灵山胜境</span>
+                  <strong>AI 智能导览</strong>
+                </div>
+                <button
+                  type="button"
+                  className="home-v2-weather mobile-weather-card"
+                  aria-label={weather
+                    ? `${weather.weather}，${weather.temperature} 摄氏度，湿度 ${weather.humidity}%，${weather.routeAdvice ?? '查看路线建议'}`
+                    : weatherLoading ? '正在同步灵山天气' : '天气服务暂不可用'}
+                  title={weather?.routeAdvice ?? '查看天气路线建议'}
+                  onClick={() => navigate('/plan')}
                 >
-                  {Array.from({ length: 3 }, (_, index) => (
-                    <span key={index} className={index < spot.people ? 'is-active' : ''} />
-                  ))}
-                </span>
-                <span className={`mobile-crowd-row__level is-${spot.tone}`}>
-                  {spot.level}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+                  <span className="home-v2-weather__icon" aria-hidden="true">☁</span>
+                  <span>
+                    <strong>{weather ? `${weather.weather} ${weather.temperature}℃` : weatherLoading ? '同步天气中' : '天气暂不可用'}</strong>
+                    <small>{weather ? `湿度 ${weather.humidity}% · 查看建议` : '基础导览可正常使用'}</small>
+                  </span>
+                </button>
+              </header>
 
-      <section className="mobile-home__status">
-        <span>当前路线</span>
-        <strong>{route.name}</strong>
-        <small>{route.description}</small>
-      </section>
+              <PlaqueTitle title="游览路线" className="home-v2-journey-title" />
+              <MountainGate
+                variant="route"
+                delay={580}
+                onClick={() => navigate('/plan')}
+                ariaLabel="规划我的游览路线"
+              >
+                <span className="home-v2-journey-gate__copy">
+                  <strong>规划我的游览路线</strong>
+                  <small>选择游览偏好，由小灵智能生成</small>
+                </span>
+                <span className="home-v2-journey-gate__arrow" aria-hidden="true">›</span>
+              </MountainGate>
+            </section>
+
+            <section className="home-v2-services" aria-labelledby="home-services-title">
+              <div className="home-v2-section-heading">
+                <PlaqueTitle title="景区服务" id="home-services-title" />
+              </div>
+              <MountainGate variant="services" delay={1445}>
+                <div className="home-v2-service-grid">
+                  {SERVICES.map((service) => (
+                    <button key={service.label} type="button" onClick={() => navigate(service.to)}>
+                      <span className="home-v2-service-icon">
+                        <img src={`/icons/${service.icon}.png`} alt="" />
+                      </span>
+                      <strong>{service.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              </MountainGate>
+            </section>
+
+            <section className="home-v2-crowd" id="home-crowd" aria-labelledby="home-crowd-title">
+              <div className="home-v2-section-heading">
+                <PlaqueTitle title="实时客流" id="home-crowd-title" />
+              </div>
+              <MountainGate variant="crowd" delay={2215}>
+                <div className="home-v2-crowd__panel home-formal-crowd-card">
+                  <div className="mobile-crowd-card__top">
+                    <div>
+                      <h3>当前景区人流量适中</h3>
+                      <p>更新于 {crowdUpdateTime}</p>
+                    </div>
+                    <button type="button" onClick={() => navigate(getMapResumeUrl())}>
+                      看地图
+                      <RightOutlined />
+                    </button>
+                  </div>
+
+                  <div className="mobile-crowd-card__panel">
+                    <div className="mobile-crowd-card__panel-head">
+                      <strong>景点实时客流情况</strong>
+                      <span>{crowdSource} · {crowdSpots.length} 个点位</span>
+                    </div>
+                    <div className="mobile-crowd-list" tabIndex={0} aria-label="景点客流演示列表，可上下滚动">
+                      {crowdSpots.map((spot) => (
+                        <button
+                          key={spot.id}
+                          type="button"
+                          className="mobile-crowd-row"
+                          onClick={() => {
+                            saveHomeReturn('home-crowd', spot.id)
+                            navigate(`/map-3d-guide-c/poi/${encodeURIComponent(spot.id)}?from=browse`)
+                          }}
+                        >
+                          <img className="mobile-crowd-row__photo" src={spot.image} alt="" loading="lazy" />
+                          <span className="mobile-crowd-row__main">
+                            <strong>{spot.name}</strong>
+                            <small>{spot.hint}</small>
+                          </span>
+                          <span
+                            className={`mobile-crowd-row__people is-${spot.tone}`}
+                            aria-label={`${spot.name}拥挤度：${spot.level}`}
+                          >
+                            {Array.from({ length: 3 }, (_, index) => (
+                              <span key={index} className={index < spot.people ? 'is-active' : ''} />
+                            ))}
+                          </span>
+                          <span className={`mobile-crowd-row__level is-${spot.tone}`}>
+                            {spot.level}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </MountainGate>
+            </section>
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

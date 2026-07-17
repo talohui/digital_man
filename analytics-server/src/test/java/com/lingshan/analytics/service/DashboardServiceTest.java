@@ -47,7 +47,7 @@ class DashboardServiceTest {
         assertThat(chat.get("spotMentionStats").toString()).contains("梵宫");
 
         Map<String, Object> behavior = service.behavior();
-        assertThat(behavior.get("routeClicks").toString()).contains("历史文化路线");
+        assertThat(behavior.get("routeClicks").toString()).contains("文化探秘路线");
         assertThat(behavior.get("spotDwellAvg").toString()).contains("90.0");
 
         Map<String, Object> persona = service.persona();
@@ -58,7 +58,7 @@ class DashboardServiceTest {
         assertThat(recommendation.get("clickCount")).isEqualTo(1L);
         assertThat(recommendation.get("ctr")).isEqualTo(0.5);
         assertThat(recommendation.get("engineDistribution").toString()).contains("local-score-v1");
-        assertThat(recommendation.get("topRoutes").toString()).contains("历史文化路线");
+        assertThat(recommendation.get("topRoutes").toString()).contains("文化探秘路线");
 
         Map<String, Object> ticketing = service.ticketing();
         assertThat(ticketing.get("ticketCount")).isEqualTo(1L);

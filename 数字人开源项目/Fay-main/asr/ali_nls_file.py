@@ -73,6 +73,13 @@ def _transcribe_with_qwen(
     )
     body_preview = (response.text or "")[:500]
     if not 200 <= response.status_code < 300:
+        invalid_audio_markers = (
+            "audio is empty",
+            "audio format is illegal",
+            "cannot be opened",
+        )
+        if any(marker in body_preview.lower() for marker in invalid_audio_markers):
+            raise ValueError("没有录到有效语音，请按住至少 1 秒再松手")
         util.log(2, f"Qwen ASR HTTP {response.status_code}: {body_preview}")
         raise ValueError(
             f"百炼语音识别 HTTP {response.status_code}: "

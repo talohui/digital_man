@@ -10,9 +10,10 @@
 
 import type { PostHog } from 'posthog-js'
 import { useGuideStore } from '../store/useGuideStore'
-import type { GuideRecommendationCard } from '../data/guideData'
+import type { GuidePreferenceContext, GuideRecommendationCard } from '../data/guideData'
 import { getAnalyticsApiBase } from './runtimeConfig'
 import type { PurchaseRecord, TicketProfile } from '../store/useTicketStore'
+import { readCachedConsent } from './privacyConsent'
 
 // ---- 配置 ----
 // 注册 https://app.posthog.com 后在 .env.local 里设置 VITE_POSTHOG_KEY=phc_xxx
@@ -28,7 +29,8 @@ const _phQueue: Array<[string, Record<string, unknown>]> = []
 
 /** 在浏览器空闲帧动态 import posthog-js 并 init,完成后回放队列 */
 export function initPostHogIdle(): void {
-  if (!POSTHOG_KEY || _phLoading || _phInstance) return
+  const state = useGuideStore.getState()
+  if (!readCachedConsent(state.userId).analyticsEnabled || !POSTHOG_KEY || _phLoading || _phInstance) return
   _phLoading = true
   const schedule =
     typeof (globalThis as any).requestIdleCallback === 'function'
@@ -46,6 +48,11 @@ export function initPostHogIdle(): void {
         persistence: 'localStorage'
       })
       _phInstance = ph
+      if (!readCachedConsent(useGuideStore.getState().userId).analyticsEnabled) {
+        ph.opt_out_capturing()
+        _phQueue.splice(0)
+        return
+      }
       for (const [name, props] of _phQueue.splice(0)) {
         try { ph.capture(name, props) } catch { /* noop */ }
       }
@@ -99,6 +106,8 @@ function pushToServer(eventName: string, properties: Record<string, unknown>): v
 
 // ---- 公开：capture ----
 export function capture(eventName: string, properties: Record<string, unknown> = {}): void {
+  const state = useGuideStore.getState()
+  if (!readCachedConsent(state.userId).analyticsEnabled) return
   // PostHog(Key 非空时才启用,SDK 未就绪先入队)
   if (POSTHOG_KEY) {
     if (_phInstance) {
@@ -110,6 +119,16 @@ export function capture(eventName: string, properties: Record<string, unknown> =
   }
   // 本地 analytics-server
   pushToServer(eventName, properties)
+}
+
+export function applyAnalyticsConsent(analyticsEnabled: boolean): void {
+  if (!analyticsEnabled) {
+    _phQueue.splice(0)
+    try { _phInstance?.opt_out_capturing() } catch { /* noop */ }
+    return
+  }
+  try { _phInstance?.opt_in_capturing() } catch { /* noop */ }
+  if (!_phInstance) initPostHogIdle()
 }
 
 // ---- 业务快捷方法 ----
@@ -192,8 +211,8 @@ export function captureTagToggle(tag: string, on: boolean): void {
   capture(EVENT.TAG_TOGGLE, { tag, on })
 }
 
-export function capturePreferenceUpdate(selectedTags: string[]): void {
-  capture(EVENT.PREFERENCE_UPDATE, { selectedTags })
+export function capturePreferenceUpdate(selectedTags: string[], preferences?: GuidePreferenceContext): void {
+  capture(EVENT.PREFERENCE_UPDATE, { selectedTags, preferences })
 }
 
 export function captureTicketPurchase(ticket: TicketProfile): void {

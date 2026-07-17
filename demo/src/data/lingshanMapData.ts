@@ -1,4 +1,8 @@
 import { guideRoutes, guideSpots, type GuideSpot, type LatLngPoint } from './guideData'
+import {
+  getScenicPoiCatalogItem,
+  LINGSHAN_CORE_SCENIC_POI_IDS
+} from './scenicPoiCatalog'
 
 export type LingshanPoiCategory =
   | 'spot'
@@ -67,6 +71,29 @@ export type LingshanPoi = {
   note?: string
 }
 
+/**
+ * Map rendering uses an explicit set instead of fuzzy name matching so the
+ * browse layer stays stable when editorial POI names change.
+ */
+export const LINGSHAN_CORE_POI_IDS = LINGSHAN_CORE_SCENIC_POI_IDS
+
+export type LingshanPoiLayerMode = 'core' | 'all' | 'services'
+
+/** Reserved contract for a future verified third-party scenic POI source. */
+export type ExternalPoi = {
+  id: string
+  name: string
+  location: LatLngPoint
+  category?: string
+}
+
+export type ExternalPoiProvider = {
+  searchWithinScenicArea: (options: {
+    bounds: { north: number; south: number; east: number; west: number }
+    categories?: string[]
+  }) => Promise<ExternalPoi[]>
+}
+
 export type LingshanRoutePath = {
   routeId: string
   path: LatLngPoint[]
@@ -99,6 +126,17 @@ const POI_CATEGORY_KEYWORDS: Array<{
 
 const CORE_SPOT_KEYWORDS = ['灵山大佛', '大佛', '九龙灌浴', '梵宫', '五印坛城', '祥符禅寺']
 const CORE_3D_SPOT_IDS = ['giant_buddha', 'jiulong_guanyu', 'fan_gong', 'wuyin_tancheng']
+const GUIDE_SPOT_ALIASES: Record<string, string[]> = {
+  lingshan_wall: ['大照壁', '灵山大照壁', '华夏第一壁'],
+  jiulong_guanyu: ['九龙灌浴广场'],
+  fan_gong: ['灵山梵宫', '梵宫圣坛'],
+  wuyin_tancheng: ['五印坛城景区', '坛城'],
+  xiangfu_temple: ['祥符寺', '祥符禅院'],
+  giant_buddha: ['大佛', '灵山大佛景区'],
+  foshou_square: ['佛手', '天下第一掌'],
+  foqian_square: ['大佛前广场'],
+  manfeilong_tower: ['曼飞龙佛塔', '曼飞龙塔']
+}
 
 // scenePosition 是艺术化 3D 导览坐标，不是经纬度，也不用于真实导航。
 const LINGSHAN_SCENE_POSITIONS: Record<string, NonNullable<LingshanPoi['scenePosition']>> = {
@@ -246,16 +284,17 @@ function inferPoiNote(spot: GuideSpot): string | undefined {
 }
 
 export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
+  const catalogItem = getScenicPoiCatalogItem(spot.id)
   const location: LatLngPoint = {
-    lat: spot.lat,
-    lng: spot.lng
+    lat: catalogItem?.coordinate?.lat ?? spot.lat,
+    lng: catalogItem?.coordinate?.lng ?? spot.lng
   }
   const category = inferPoiCategory(spot)
 
   return {
     id: spot.id,
     name: spot.name,
-    aliases: [],
+    aliases: catalogItem?.aliases ?? GUIDE_SPOT_ALIASES[spot.id] ?? [],
     category,
     bindingPriority: inferBindingPriority(category, spot),
     navPointStrategy: inferNavPointStrategy(category, spot),
@@ -273,6 +312,50 @@ export const lingshanPois: LingshanPoi[] = guideSpots.map((spot) => {
     note: inferPoiNote(spot)
   }
 })
+
+const corePoiIdSet = new Set<string>(LINGSHAN_CORE_POI_IDS)
+
+/** The public browse map's primary POI set. */
+export function isLingshanCorePoi(poi: Pick<LingshanPoi, 'id'>) {
+  return corePoiIdSet.has(poi.id)
+}
+
+export function hasValidLingshanPoiLocation(poi: Pick<LingshanPoi, 'displayLocation'>) {
+  const { lat, lng } = poi.displayLocation
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+}
+
+export function isLingshanServiceFacilityPoi(poi: Pick<LingshanPoi, 'category'>) {
+  return poi.category === 'service' || poi.category === 'toilet' || poi.category === 'food' || poi.category === 'bus'
+}
+
+/**
+ * Rendering-only POI filter. `services` deliberately returns no inferred
+ * points until verified service coordinates are available.
+ */
+export function getLingshanPoisForLayer(mode: LingshanPoiLayerMode): LingshanPoi[] {
+  if (mode === 'core') {
+    return lingshanPois.filter((poi) => isLingshanCorePoi(poi) && hasValidLingshanPoiLocation(poi))
+  }
+
+  if (mode === 'services') {
+    return []
+  }
+
+  return lingshanPois.filter((poi) => !isLingshanServiceFacilityPoi(poi) && hasValidLingshanPoiLocation(poi))
+}
+
+export function getLingshanPoiLayerSummary() {
+  const core = getLingshanPoisForLayer('core')
+  const all = getLingshanPoisForLayer('all')
+  const coreIds = new Set(core.map((poi) => poi.id))
+
+  return {
+    coreCount: core.length,
+    allCount: all.length,
+    difference: all.filter((poi) => !coreIds.has(poi.id)).map((poi) => ({ id: poi.id, name: poi.name }))
+  }
+}
 
 export const lingshanPresetRoutePaths: LingshanRoutePath[] = guideRoutes.map((route) => ({
   routeId: route.id,
@@ -316,23 +399,23 @@ export const lingshanSceneRoutes: LingshanSceneRoute[] = [
   },
   {
     id: 'historical_3d_scene',
-    name: '历史文化 3D 导览线',
+    name: '历史文化爱好者 3D 导览线',
     guideRouteId: 'historical_culture',
     description: '基于历史文化路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达佛教历史、建筑艺术和文化轴线，不等同真实步行路径。',
     poiSequence: historicalCulturePoiSequence
   },
   {
     id: 'natural_3d_scene',
-    name: '自然风光 3D 导览线',
+    name: '自然风光爱好者 3D 导览线',
     guideRouteId: 'natural_scenery',
-    description: '基于自然风光路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达太湖视野、山水格局和禅意园林节奏，不等同真实步行路径。',
+    description: '基于自然风光爱好者路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达太湖视野、山水格局和禅意园林节奏，不等同真实步行路径。',
     poiSequence: naturalSceneryPoiSequence
   },
   {
     id: 'family_3d_scene',
-    name: '亲子 3D 导览线',
+    name: '亲子家庭 3D 导览线',
     guideRouteId: 'family',
-    description: '基于亲子路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达亲子互动、表演打卡和轻松游览节奏，不等同真实步行路径。',
+    description: '基于亲子游路线 guideRoutes.stops 生成的艺术化 3D 导览路线，用于表达亲子互动、表演打卡和轻松游览节奏，不等同真实步行路径。',
     poiSequence: familyPoiSequence
   }
 ]
@@ -341,6 +424,8 @@ export const lingshanSceneRoutes: LingshanSceneRoute[] = [
 export const lingshanSceneRouteToGuideRouteMap: Record<string, string> = {
   classic_3d_scene: 'historical_culture',
   historical_3d_scene: 'historical_culture',
+  prayer_3d_scene: 'natural_scenery',
+  highlights_3d_scene: 'historical_culture',
   natural_3d_scene: 'natural_scenery',
   family_3d_scene: 'family'
 }

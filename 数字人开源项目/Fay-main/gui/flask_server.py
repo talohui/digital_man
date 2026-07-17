@@ -45,8 +45,13 @@ import fay_booter
 from flask_httpauth import HTTPBasicAuth
 from core import qa_service
 from core import stream_manager
+from gui.marketing_decision_api import register_marketing_decision_api
 from gui.operations_copilot_api import register_operations_copilot_api
+from gui.operations_report_api import register_operations_report_api
+from gui.service_config_api import register_service_config_api
+from utils.marketing_decision_llm import generate_marketing_decision
 from utils.operations_copilot_llm import generate_operations_copilot
+from utils.operations_report_llm import generate_operations_report
 
 # 全局变量，用于跟踪当前的genagents服务器
 genagents_server = None
@@ -75,6 +80,26 @@ def load_users():
 
 users = load_users()
 
+def runtime_secret(name):
+    """Read deployment env first, then the local ignored runtime file."""
+    value = os.getenv(name, '').strip()
+    if value:
+        return value
+    runtime_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config',
+        'runtime-secrets.env',
+    )
+    try:
+        with open(runtime_path, encoding='utf-8') as runtime_file:
+            for line in runtime_file:
+                key, separator, raw_value = line.strip().partition('=')
+                if separator and key.strip() == name:
+                    return raw_value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ''
+
 @auth.verify_password
 def verify_password(username, password):
     if not users or config_util.start_mode == 'common':
@@ -83,10 +108,30 @@ def verify_password(username, password):
         return username
 
 
+register_service_config_api(
+    __app,
+    config_path=os.path.join(os.getcwd(), 'system.conf'),
+    password_hash=runtime_secret('FAY_ADMIN_CONFIG_PASSWORD_HASH'),
+    reload_callback=lambda: config_util.load_config(force_reload=True),
+)
+register_marketing_decision_api(
+    __app,
+    generator=lambda decision_input: generate_marketing_decision(
+        decision_input,
+        config_util,
+    ),
+)
 register_operations_copilot_api(
     __app,
     generator=lambda copilot_input: generate_operations_copilot(
         copilot_input,
+        config_util,
+    ),
+)
+register_operations_report_api(
+    __app,
+    generator=lambda report_input: generate_operations_report(
+        report_input,
         config_util,
     ),
 )
@@ -1482,7 +1527,7 @@ def to_wake():
 @__app.route('/to-stop-talking', methods=['POST'])
 def to_stop_talking():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or request.form or {}
         username = data.get('username', 'User')
         stream_manager.new_instance().clear_Stream_with_audio(username)
 

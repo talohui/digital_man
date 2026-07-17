@@ -12,6 +12,8 @@ function read(relativeUrl: string) {
 const app = read('../App.tsx')
 const shell = read('../components/admin-ops/AdminOpsShell.tsx')
 const sidebar = read('../components/admin-ops/AdminOpsSidebar.tsx')
+const topbar = read('../components/admin-ops/AdminOpsTopbar.tsx')
+const healthPopover = read('../components/admin-ops/AdminOpsHealthPopover.tsx')
 const styles = read('../styles/admin-ops.css')
 const dashboard = read('./AdminDashboard.tsx')
 const decision = read('./AdminMarketingDecisionPage.tsx')
@@ -49,6 +51,15 @@ test('uses Chinese workflow headings for every admin destination', () => {
   assert.deepEqual(getAdminPageHeading('/admin/decision'), { parent: '分析与处置', title: 'AI 决策分析' })
   assert.deepEqual(getAdminPageHeading('/admin/reports'), { parent: '分析与处置', title: 'AI 运营报告' })
   assert.deepEqual(getAdminPageHeading('/admin/config'), { parent: '系统管理', title: 'AI 服务配置' })
+})
+
+test('uses the aggregated health endpoint and no longer hard-codes continuous sync', () => {
+  assert.match(shell, /getServiceHealth/)
+  assert.match(shell, /30_000/)
+  assert.match(topbar, /AdminOpsHealthPopover/)
+  assert.match(healthPopover, /recoveryPath/)
+  assert.doesNotMatch(sidebar, /数据服务持续同步/)
+  assert.doesNotMatch(shell, /\/summary/)
 })
 
 test('new admin styling is scoped away from the visitor app', () => {

@@ -27,7 +27,7 @@ export type Map3DCameraEvent = {
   finishedAt: string
 }
 
-export type Map3DTourMode = 'buddhaRealmTour' | 'routePreview'
+export type Map3DTourMode = 'buddhaRealmTour'
 
 export type Map3DTourStopReason = 'manual' | 'userStop' | 'completed' | 'interrupted' | 'replaced' | 'unmount'
 
@@ -68,6 +68,8 @@ export type Map3DRouteTourFrame = {
   smoothingEnabled?: boolean
   lookAheadProgress?: number
   lateralOffsetMeters?: number
+  tourCameraTightenMode?: 'open' | 'tight' | 'pause'
+  tourCameraTightenStrength?: number
 }
 
 export type Map3DRouteTourPause = {
@@ -185,8 +187,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'overviewEstate',
     label: '总览',
     description: '酒庄航拍式斜俯总览',
-    zoom: 16.85,
-    pitch: 58,
+    zoom: 17.72,
+    pitch: 63,
     rotation: -34,
     durationMs: 1600
   },
@@ -194,8 +196,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'axisCruise',
     label: '主轴漫游',
     description: '沿中轴线慢推游览',
-    zoom: 17.85,
-    pitch: 66,
+    zoom: 18.32,
+    pitch: 68,
     rotation: -24,
     durationMs: 1450
   },
@@ -203,8 +205,8 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
     id: 'routeOverview',
     label: '路线总览',
     description: '回看完整金色游线',
-    zoom: 17.18,
-    pitch: 56,
+    zoom: 17.9,
+    pitch: 62,
     rotation: -30,
     durationMs: 1350
   },
@@ -238,27 +240,19 @@ export const MAP_3D_GUIDE_CAMERA_PRESETS: Record<Map3DCameraPresetId, Map3DCamer
 }
 
 export const SCENIC_CAMERA_BOUNDS = {
-  minZoom: 16.72,
-  maxZoom: 19.78,
+  minZoom: 17.2,
+  maxZoom: 19.65,
   defaultZoom: MAP_3D_GUIDE_CAMERA_PRESETS.overviewEstate.zoom,
   maxCenterDistanceMeters: 1050,
   clampDurationMs: 620,
   interactionIdleDelayMs: 460,
-  // LOD 阈值必须落在可用 zoom 区间 [minZoom 16.72, maxZoom 19.78] 之下,
-  // 否则默认/总览视角(16.85,且可被相机回退到 minZoom)会落进 'none' 档,
-  // 869 个园林模型被压到 ~0.04 透明度 = 肉眼看不见(此前"地图上没有模型"的真因)。
-  // 这里把 far/reduced 阈值下移到 minZoom 以下,保证默认视角即 'full' 可见;
-  // 交互态透明度同步提高,拖动时模型不再闪没。LOD 仍保留,用于真正拉远时降载。
   lod: {
-    farZoom: 16.0,
-    reducedZoom: 16.7,
+    farZoom: 16.74,
+    reducedZoom: 16.82,
     normalOpacity: 1,
-    interactionOpacity: 0.82,
-    interactionDebugGardenOpacity: 0.9,
+    interactionOpacity: 0.36,
     farOpacity: 0.08,
-    farDebugGardenOpacity: 0.22,
-    reducedOpacity: 0.6,
-    reducedDebugGardenOpacity: 0.7
+    reducedOpacity: 0.18,
   }
 } as const
 
@@ -490,18 +484,6 @@ export function startBuddhaRealmTimelineTour({
   playback.frameId = window.requestAnimationFrame(tick)
 }
 
-export function startRoutePreview(options: StartSpecificMap3DTourOptions) {
-  return startMap3DTour({
-    ...options,
-    mode: 'routePreview',
-    defaultPresetId: 'guideFollow'
-  })
-}
-
-export function stopRoutePreview(playbackRef: Map3DTourPlaybackRef, reason: Map3DTourStopReason = 'manual') {
-  stopMap3DTour(playbackRef, 'routePreview', reason)
-}
-
 export function flyTourStep({
   map,
   TMap,
@@ -683,16 +665,6 @@ function applyCameraStep(map: any, TMap: any, target: LatLngPoint, preset: Map3D
 function applyCameraFrame(map: any, TMap: any, frame: Map3DRouteTourFrame) {
   const center = new TMap.LatLng(frame.lat, frame.lng)
 
-  if (typeof map.setCenter === 'function') {
-    map.setCenter(center)
-    if (typeof map.setZoom === 'function') {
-      map.setZoom(frame.zoom)
-    }
-    map.setPitch?.(frame.pitch)
-    map.setRotation?.(frame.rotation)
-    return
-  }
-
   if (typeof map.easeTo === 'function') {
     map.easeTo(
       {
@@ -703,6 +675,29 @@ function applyCameraFrame(map: any, TMap: any, frame: Map3DRouteTourFrame) {
       },
       { duration: 0 }
     )
+    return
+  }
+
+  if (typeof map.setCenter === 'function') {
+    map.setCenter(center)
+    if (typeof map.setZoom === 'function') {
+      const currentZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : Number.NaN
+      if (!Number.isFinite(currentZoom) || Math.abs(currentZoom - frame.zoom) > 0.01) {
+        map.setZoom(frame.zoom)
+      }
+    }
+    if (typeof map.setPitch === 'function') {
+      const currentPitch = typeof map.getPitch === 'function' ? Number(map.getPitch()) : Number.NaN
+      if (!Number.isFinite(currentPitch) || Math.abs(currentPitch - frame.pitch) > 0.08) {
+        map.setPitch(frame.pitch)
+      }
+    }
+    if (typeof map.setRotation === 'function') {
+      const currentRotation = typeof map.getRotation === 'function' ? Number(map.getRotation()) : Number.NaN
+      if (!Number.isFinite(currentRotation) || Math.abs(normalizeRotation(currentRotation - frame.rotation)) > 0.08) {
+        map.setRotation(frame.rotation)
+      }
+    }
   }
 }
 

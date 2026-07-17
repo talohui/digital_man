@@ -1,0 +1,19 @@
+:root {
+  --map-type-eyebrow: 10px;
+  --map-type-caption: 11px;
+  --map-type-body: 12px;
+  --map-green-deep: #214a3b;
+  --map-green-mid: #3f6f5a;
+  --map-cream: rgba(250, 246, 226, 0.94);
+  --map-gold: #c9a86a;
+  --map-shadow-soft: 0 12px 30px rgba(22, 55, 43, 0.16);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-synthesis-weight: none;
+}

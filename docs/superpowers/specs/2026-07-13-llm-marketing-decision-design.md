@@ -102,7 +102,7 @@ analytics 收到 Fay 结果后执行边界校验：
 以下情况直接回退 `MarketingDecisionEngine.generate(input)`：
 
 - Fay 不可达；
-- 请求超过约 8 秒；
+- 请求超过约 20 秒；analytics 读取超时为 25 秒，该数值来自当前 `qwen-plus` 真实请求验证；
 - Fay 未配置可用模型；
 - 大模型返回非 JSON、字段缺失或空结果；
 - 输出校验失败。

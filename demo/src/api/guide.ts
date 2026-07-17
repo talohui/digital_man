@@ -1,5 +1,6 @@
 import {
   buildLocalGuideRecommendations,
+  type GuidePreferenceContext,
   type GuideRecommendationCard,
   type UserProfileSnapshot
 } from '../data/guideData'
@@ -14,11 +15,16 @@ export type GuideRecommendationsResponse = {
   routes: GuideRecommendationCard[]
   requestId?: string
   engine?: string
+  adjustmentReasons?: string[]
+  dataFreshness?: Record<string, string>
+  fallbackUsed?: boolean
+  recommendationSource?: string
 }
 
 export async function fetchGuideRecommendations(payload: {
   userId: string
   selectedTags: string[]
+  preferences?: GuidePreferenceContext
 }): Promise<GuideRecommendationsResponse> {
   try {
     const response = await fetch(`${GUIDE_API}/recommendations`, {
@@ -37,15 +43,20 @@ export async function fetchGuideRecommendations(payload: {
       routes: data.routes.map((route) => ({
         ...route,
         recommendationRequestId: data.requestId,
-        recommendationEngine: data.engine ?? (route.debug?.engine as string | undefined)
+        recommendationEngine: data.engine ?? (route.debug?.engine as string | undefined),
+        adjustmentReasons: route.adjustmentReasons ?? []
       }))
     }
   } catch {
-    const routes = buildLocalGuideRecommendations(payload.selectedTags)
+    const routes = buildLocalGuideRecommendations(payload.selectedTags, payload.preferences)
     return {
       userId: payload.userId,
       recommendedRouteId: routes[0]?.id ?? 'historical_culture',
-      routes: routes.map((route) => ({ ...route, recommendationEngine: 'frontend-fallback' }))
+      routes: routes.map((route) => ({ ...route, recommendationEngine: 'frontend-fallback' })),
+      adjustmentReasons: [],
+      dataFreshness: {},
+      fallbackUsed: false,
+      recommendationSource: 'frontend-fallback'
     }
   }
 }

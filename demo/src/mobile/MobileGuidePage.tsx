@@ -22,6 +22,7 @@ import {
   getRouteStop
 } from '../data/guideData'
 import { captureRateSpot, captureSpotEnter, captureSpotLeave } from '../lib/analytics'
+import { resolveGuideSpotContext, TOUR_GUIDE_SCENE_ID } from '../lib/guideScene'
 import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
 
@@ -46,15 +47,16 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
   const routeHasSelectedSpot = Boolean(
     selectedSpotId && route.stops.some((stop) => stop.spotId === selectedSpotId)
   )
-  const currentSpotId = hasSpotScene
-    ? spotId as string
-    : routeHasSelectedSpot
-      ? selectedSpotId as string
-      : getDefaultSpotId(route.id)
+  const guideSpotContext = resolveGuideSpotContext({
+    spotPageId: hasSpotScene ? spotId : null,
+    mapSelectedId: !hasSpotScene && routeHasSelectedSpot ? selectedSpotId : null,
+    defaultSpotId: getDefaultSpotId(route.id)
+  })
+  const currentSpotId = guideSpotContext.spotId
   const spot = getGuideSpotById(currentSpotId)
   const { stop, stopIndex, nextStop } = getRouteStop(route.id, currentSpotId)
   const nextSpot = nextStop ? getGuideSpotById(nextStop.spotId) : null
-  const sceneId = `spot:${route.id}:${spot.id}`
+  const sceneId = TOUR_GUIDE_SCENE_ID
   const narrative = stop?.narrative ?? spot.intro
   const hasLikedSpot = Boolean(likedSpots[spot.id])
   const hasListened = listenedStops.includes(spot.id)
@@ -72,10 +74,15 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
     if (hasSpotScene) {
       setSelectedSpotId(spot.id)
       setActiveScene(sceneId, {
+        routeId: route.id,
         routeName: route.name,
+        spotId: spot.id,
         spotName: spot.name,
         spotIntro: spot.intro,
-        spotNarrative: narrative
+        spotNarrative: narrative,
+        locationSource: guideSpotContext.source,
+        locationConfidence: guideSpotContext.confidence,
+        visitedSpotIds: [...new Set([...useGuideStore.getState().visitedStops, spot.id])]
       })
       captureSpotEnter(spot.id, route.id)
       markStopVisited(spot.id)
@@ -86,14 +93,21 @@ function MobileGuidePage({ spotId }: MobileGuidePageProps) {
     }
 
     setActiveScene(sceneId, {
+      routeId: route.id,
       routeName: route.name,
+      spotId: spot.id,
       spotName: spot.name,
       spotIntro: spot.intro,
-      spotNarrative: narrative
+      spotNarrative: narrative,
+      locationSource: guideSpotContext.source,
+      locationConfidence: guideSpotContext.confidence,
+      visitedSpotIds: useGuideStore.getState().visitedStops
     })
     return undefined
   }, [
     hasSpotScene,
+    guideSpotContext.confidence,
+    guideSpotContext.source,
     markStopVisited,
     narrative,
     route.id,

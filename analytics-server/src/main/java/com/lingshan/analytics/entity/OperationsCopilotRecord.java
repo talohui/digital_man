@@ -48,6 +48,9 @@ public class OperationsCopilotRecord {
     @Column(length = 24)
     private String proposalStatus;
 
+    @Column(length = 36)
+    private String proposalRevision;
+
     @Column(columnDefinition = "TEXT")
     private String executionResultJson;
 
@@ -76,6 +79,8 @@ public class OperationsCopilotRecord {
     public void setProposalPayloadJson(String proposalPayloadJson) { this.proposalPayloadJson = proposalPayloadJson; }
     public String getProposalStatus() { return proposalStatus; }
     public void setProposalStatus(String proposalStatus) { this.proposalStatus = proposalStatus; }
+    public String getProposalRevision() { return proposalRevision; }
+    public void setProposalRevision(String proposalRevision) { this.proposalRevision = proposalRevision; }
     public String getExecutionResultJson() { return executionResultJson; }
     public void setExecutionResultJson(String executionResultJson) { this.executionResultJson = executionResultJson; }
     public LocalDateTime getCreatedAt() { return createdAt; }

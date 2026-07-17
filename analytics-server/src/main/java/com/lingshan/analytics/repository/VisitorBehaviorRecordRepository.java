@@ -16,4 +16,10 @@ public interface VisitorBehaviorRecordRepository extends JpaRepository<VisitorBe
     List<VisitorBehaviorRecord> findBySourceAndCreatedAtAfter(String source, LocalDateTime createdAt);
 
     Optional<VisitorBehaviorRecord> findFirstBySourceAndTicketIdOrderByUpdatedAtDesc(String source, String ticketId);
+
+    List<VisitorBehaviorRecord> findByVisitorId(String visitorId);
+
+    long countByVisitorId(String visitorId);
+
+    long deleteByVisitorId(String visitorId);
 }

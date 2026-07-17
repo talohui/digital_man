@@ -10,9 +10,11 @@ import { useChatStore } from '../store/useChatStore'
 import { useGuideStore } from '../store/useGuideStore'
 import { getSession } from '../store/chatSessions'
 import { getAnonymousSessionLabel } from '../lib/fayIdentity'
-import { getBrowserVoiceHint, type BrowserAsr } from '../lib/browserAsr'
+import { type BrowserAsr } from '../lib/browserAsr'
+import { unlockAudio } from '../lib/audioLipsync'
 import {
   createVoiceAsr,
+  getVoiceAsrEnvironmentHint,
   getVoiceAsrModeLabel,
   isVoiceAsrAvailable,
   shouldUseCloudAsr
@@ -34,19 +36,6 @@ const roleLabelMap = {
   system: '系'
 } as const
 
-async function ensureMicPermission(): Promise<boolean> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return true
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach((track) => track.stop())
-    return true
-  } catch {
-    return false
-  }
-}
-
 type ChatPanelProps = {
   sceneId?: string
 }
@@ -64,6 +53,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   const wsStatus = useChatStore((state) => state.wsStatus)
   const setInputText = useChatStore((state) => state.setInputText)
   const sendMessage = useChatStore((state) => state.sendMessage)
+  const interruptReply = useChatStore((state) => state.interruptReply)
   const clearSession = useChatStore((state) => state.clearSession)
   const startRecord = useChatStore((state) => state.startRecord)
   const stopRecord = useChatStore((state) => state.stopRecord)
@@ -83,6 +73,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   const holdActiveRef = useRef(false)
   const shouldStickToBottomRef = useRef(true)
   const releaseCleanupRef = useRef<(() => void) | null>(null)
+  const interruptPromiseRef = useRef<Promise<void>>(Promise.resolve())
   const [voiceDraft, setVoiceDraft] = useState('')
   const [justSent, setJustSent] = useState(false)
   const [localToast, setLocalToast] = useState<{ kind: 'warn' | 'error'; text: string } | null>(null)
@@ -92,7 +83,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
     window.setTimeout(() => setLocalToast(null), 3000)
   }
 
-  const voiceHint = useMemo(() => getBrowserVoiceHint(), [])
+  const voiceHint = useMemo(() => getVoiceAsrEnvironmentHint(), [])
 
   // textarea 自动撑高(代替 antd Input.TextArea autoSize)
   const autoSizeTextarea = (el: HTMLTextAreaElement | null) => {
@@ -105,6 +96,25 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   useEffect(() => {
     autoSizeTextarea(textareaRef.current)
   }, [inputText])
+
+  useEffect(() => {
+    const updateKeyboardViewport = () => {
+      const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight)
+      const keyboardOpen = viewportHeight < window.innerHeight - 120
+      document.documentElement.style.setProperty('--chat-visual-viewport-height', `${viewportHeight}px`)
+      document.documentElement.dataset.chatKeyboardOpen = keyboardOpen ? 'true' : 'false'
+    }
+    updateKeyboardViewport()
+    window.addEventListener('resize', updateKeyboardViewport)
+    window.visualViewport?.addEventListener('resize', updateKeyboardViewport)
+    window.visualViewport?.addEventListener('scroll', updateKeyboardViewport)
+    return () => {
+      window.removeEventListener('resize', updateKeyboardViewport)
+      window.visualViewport?.removeEventListener('resize', updateKeyboardViewport)
+      window.visualViewport?.removeEventListener('scroll', updateKeyboardViewport)
+      document.documentElement.dataset.chatKeyboardOpen = 'false'
+    }
+  }, [])
 
   const detachGlobalRelease = () => {
     releaseCleanupRef.current?.()
@@ -146,7 +156,6 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
     createVoiceAsr({
       onInterim: (text) => {
         setVoiceDraft(text)
-        setInputText(text, resolvedSceneId)
       },
       onFinal: (text) => {
         asrRef.current = null
@@ -162,7 +171,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
         }
 
         shouldStickToBottomRef.current = true
-        void sendMessage(trimmed, resolvedSceneId)
+        void interruptPromiseRef.current.then(() => sendMessage(trimmed, resolvedSceneId))
         setJustSent(true)
         window.setTimeout(() => setJustSent(false), 2000)
       },
@@ -177,18 +186,12 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
       }
     })
 
-  const startRecording = async () => {
+  const startRecording = () => {
     if (!isVoiceAsrAvailable()) {
       showToast('warn', '当前浏览器无法使用麦克风录音，请换 Chrome / Edge 或打字提问。')
       return
     }
     if (asrRef.current) return
-
-    const micOk = await ensureMicPermission()
-    if (!micOk) {
-      showToast('error', '无法使用麦克风：请在浏览器地址栏允许麦克风权限，或使用 localhost 访问。')
-      return
-    }
 
     setJustSent(false)
     setVoiceDraft('')
@@ -212,8 +215,9 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   const handleMicPointerDown = async (event: SyntheticEvent) => {
     event.preventDefault()
     if (isRecording) return
+    interruptPromiseRef.current = interruptReply(resolvedSceneId, { notifyBackend: true })
     holdActiveRef.current = true
-    await startRecording()
+    startRecording()
     if (!asrRef.current) {
       holdActiveRef.current = false
     }
@@ -243,7 +247,9 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
   }, [isRecording, wsStatus])
 
   const handleSend = async () => {
+    if (isRecording || voiceDraft) return
     shouldStickToBottomRef.current = true
+    void unlockAudio()
     await sendMessage(inputText, resolvedSceneId)
   }
 
@@ -252,6 +258,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
     const ok = window.confirm('确定清空当前会话吗？将开启一段新的匿名会话，历史对话不可恢复。')
     if (!ok) return
     shouldStickToBottomRef.current = true
+    void interruptReply(resolvedSceneId, { notifyBackend: true })
     clearSession(resolvedSceneId)
   }
 
@@ -379,6 +386,7 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
             className="chat-card__textarea"
             placeholder={isRecording ? '正在听您说话…' : '在这里输入您的问题'}
             value={inputText}
+            readOnly={isRecording}
             onChange={(event) => setInputText(event.target.value.slice(0, 500), resolvedSceneId)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -391,11 +399,11 @@ function ChatPanel({ sceneId }: ChatPanelProps) {
             type="button"
             className="chat-card__send"
             onClick={() => void handleSend()}
-            disabled={!inputText.trim() || isRecording || isSending}
+            disabled={!inputText.trim() || isRecording || Boolean(voiceDraft) || isSending}
             aria-label="发送"
           >
             {isSending ? <SyncOutlined spin /> : <SendOutlined />}
-            <span>发送</span>
+            <span className="chat-card__send-label">发送</span>
           </button>
         </div>
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test, { afterEach } from 'node:test'
 
 import { buildOperationsCopilotConfirmRequest, buildOperationsCopilotQueryRequest } from '../lib/operationsCopilotRequest.ts'
-import { confirmOperationsCopilotProposal, queryOperationsCopilot } from './operationsCopilot.ts'
+import { confirmOperationsCopilotProposal, queryOperationsCopilot, updateOperationsCopilotProposal } from './operationsCopilot.ts'
 
 type FetchCall = {
   input: string | URL | Request
@@ -128,10 +128,11 @@ test('applies 8 turn, 800 character, 4000 total, and Unicode boundaries to query
 })
 
 test('builds a confirmation with a temporary Fay admin session header, never in the request body', () => {
-  const request = buildOperationsCopilotConfirmRequest('temporary-fay-session')
+  const request = buildOperationsCopilotConfirmRequest('temporary-fay-session', 'revision-1')
   const headers = new Headers(request.headers)
 
   assert.equal(headers.get('X-Fay-Admin-Session'), 'temporary-fay-session')
+  assert.equal(headers.get('If-Match'), 'revision-1')
   assert.equal(request.body, undefined)
 })
 
@@ -186,11 +187,32 @@ test('confirmOperationsCopilotProposal keeps the Fay session only in the final r
   const calls: FetchCall[] = []
   captureFetch(calls)
 
-  await confirmOperationsCopilotProposal('proposal/1', 'temporary-fay-session')
+  await confirmOperationsCopilotProposal('proposal/1', 'temporary-fay-session', 'revision-1')
 
   assert.equal(String(calls[0]?.input), 'http://127.0.0.1:5002/api/dashboard/operations-copilot/proposal%2F1/confirm')
   assert.equal(calls[0]?.init?.method, 'POST')
   assert.equal(new Headers(calls[0]?.init?.headers).get('Content-Type'), 'application/json')
   assert.equal(new Headers(calls[0]?.init?.headers).get('X-Fay-Admin-Session'), 'temporary-fay-session')
+  assert.equal(new Headers(calls[0]?.init?.headers).get('If-Match'), 'revision-1')
   assert.equal(calls[0]?.init?.body, undefined)
+})
+
+test('updates only editable proposal content without sending its immutable type', async () => {
+  const calls: FetchCall[] = []
+  captureFetch(calls)
+
+  await updateOperationsCopilotProposal('proposal/1', {
+    title: '入口拥堵提醒',
+    summary: '请游客从东侧入口分流',
+    payload: { severity: 'WARNING', routePolicy: 'PENALIZE' },
+  })
+
+  assert.equal(String(calls[0]?.input), 'http://127.0.0.1:5002/api/dashboard/operations-copilot/proposal%2F1/proposal')
+  assert.equal(calls[0]?.init?.method, 'PATCH')
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+    title: '入口拥堵提醒',
+    summary: '请游客从东侧入口分流',
+    payload: { severity: 'WARNING', routePolicy: 'PENALIZE' },
+  })
+  assert.doesNotMatch(String(calls[0]?.init?.body), /"type"/)
 })

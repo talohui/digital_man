@@ -7,14 +7,14 @@ import {
   type CostumeId
 } from '../../lib/live2dCostume'
 import type { Live2DLikeModel } from '../../lib/live2dManager'
+import { destroyAdminLive2DPreview } from '../../lib/live2dPreviewLifecycle'
 
 ;(window as unknown as { PIXI: typeof PIXI }).PIXI = PIXI
 
-// 本地化模型路径：随包发布到 demo/public/live2d/haru，后台预览与保存都走本机，不依赖公网 CDN。
-export const HARU_MODEL_URL = '/live2d/haru/haru_greeter_t03.model3.json'
-
 type Props = {
+  modelUrl: string
   costumeId?: CostumeId | string | null
+  supportsCostumes?: boolean
   className?: string
 }
 
@@ -26,7 +26,12 @@ function measureContainer(el: HTMLElement) {
   }
 }
 
-function AdminLive2DPreview({ costumeId, className }: Props) {
+function AdminLive2DPreview({
+  modelUrl,
+  costumeId,
+  supportsCostumes = false,
+  className
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const appRef = useRef<PIXI.Application | null>(null)
@@ -61,7 +66,7 @@ function AdminLive2DPreview({ costumeId, className }: Props) {
       .then(async ({ Live2DModel }) => {
         if (cancelled) return
         Live2DModel.registerTicker(PIXI.Ticker)
-        const model = await Live2DModel.from(HARU_MODEL_URL, { autoInteract: true })
+        const model = await Live2DModel.from(modelUrl, { autoInteract: true })
         if (cancelled) {
           model.destroy()
           return
@@ -69,8 +74,10 @@ function AdminLive2DPreview({ costumeId, className }: Props) {
         app.stage.addChild(model as unknown as PIXI.DisplayObject)
         modelRef.current = model as unknown as Live2DLikeModel
 
-        const id = parseCostumeId(costumeId)
-        await applyCostumeTexture(model as Parameters<typeof applyCostumeTexture>[0], id)
+        if (supportsCostumes) {
+          const id = parseCostumeId(costumeId)
+          await applyCostumeTexture(model as Parameters<typeof applyCostumeTexture>[0], id)
+        }
 
         const fit = () => {
           const el = containerRef.current
@@ -101,7 +108,7 @@ function AdminLive2DPreview({ costumeId, className }: Props) {
       .catch((err) => {
         console.error('Admin Live2D 加载失败:', err)
         if (!cancelled) {
-          setError('模型加载失败')
+          setError('模型加载失败，请选择其他形象重试')
           setLoading(false)
         }
       })
@@ -111,20 +118,19 @@ function AdminLive2DPreview({ costumeId, className }: Props) {
       resizeObserver?.disconnect()
       fitRef.current = null
       modelRef.current = null
-      app.destroy(true, { children: true })
+      destroyAdminLive2DPreview(app)
       appRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次，服装由下方 effect 切换
-  }, [])
+  }, [modelUrl, supportsCostumes])
 
   useEffect(() => {
     const model = modelRef.current
-    if (!model || loading) return
+    if (!model || loading || !supportsCostumes) return
     const id = parseCostumeId(costumeId)
     applyCostumeTexture(model as Parameters<typeof applyCostumeTexture>[0], id)
       .then(() => fitRef.current?.())
       .catch((err) => console.error('Admin Live2D 换装失败:', err))
-  }, [costumeId, loading])
+  }, [costumeId, loading, supportsCostumes])
 
   return (
     <div ref={containerRef} className={`admin-live2d-preview ${className ?? ''}`}>

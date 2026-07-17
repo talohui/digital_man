@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -38,10 +39,28 @@ class LocalScoreEngineTest {
     }
 
     @Test
+    void shortFamilyLowWalkPreferencesCanRankFamilyRouteWithoutTags() {
+        LocalScoreEngine engine = new LocalScoreEngine(repository(List.of()));
+
+        List<LocalScoreEngine.ScoredRoute> routes = engine.rank(
+                "u1",
+                List.of(),
+                Map.of("duration", "quick", "companion", "family", "walk", "light"),
+                3
+        );
+
+        LocalScoreEngine.ScoredRoute top = routes.get(0);
+        assertThat(top.route().routeId()).isEqualTo("family");
+        assertThat(top.reasonCodes()).contains("PREFERENCE_CONTEXT");
+        assertThat(top.reason()).contains("短时游览");
+        assertThat((Double) top.debug().get("preferenceScore")).isGreaterThan(0.0);
+    }
+
+    @Test
     void lowRouteRatingPenalizesThatRouteForSameUser() {
         List<AnalyticsEvent> events = List.of(
                 event("rate_route", "u1", "family", 1.0, "{}"),
-                event("recommend_click", "u1", "natural_scenery", null, "{\"route_id\":\"natural_scenery\"}")
+                event("recommend_click", "u1", "prayer_meditation", null, "{\"route_id\":\"prayer_meditation\"}")
         );
         LocalScoreEngine engine = new LocalScoreEngine(repository(events));
 

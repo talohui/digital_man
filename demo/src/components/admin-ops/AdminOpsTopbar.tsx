@@ -1,18 +1,20 @@
 import { DownloadOutlined, MenuOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useLocation } from 'react-router-dom'
+import type { ServiceHealthResponse } from '../../api/serviceHealth'
 import type { AdminOpsActions } from './AdminOpsPageActions'
+import AdminOpsHealthPopover from './AdminOpsHealthPopover'
 import { getAdminPageHeading } from './adminOpsNavigation'
 
 type Props = {
   actions: AdminOpsActions
-  serviceHealthy: boolean | null
+  serviceHealth: ServiceHealthResponse | null
+  serviceHealthError?: string
   onOpenMenu: () => void
 }
 
-export default function AdminOpsTopbar({ actions, serviceHealthy, onOpenMenu }: Props) {
+export default function AdminOpsTopbar({ actions, serviceHealth, serviceHealthError, onOpenMenu }: Props) {
   const location = useLocation()
   const heading = getAdminPageHeading(location.pathname)
-  const statusLabel = serviceHealthy === null ? '服务检测中' : serviceHealthy ? '服务运行正常' : '服务连接异常'
 
   return (
     <header className="admin-ops-topbar">
@@ -27,10 +29,7 @@ export default function AdminOpsTopbar({ actions, serviceHealthy, onOpenMenu }: 
       </div>
 
       <div className="admin-ops-topbar__actions">
-        <span className={`admin-ops-health${serviceHealthy === false ? ' is-error' : serviceHealthy === null ? ' is-checking' : ''}`}>
-          <span className="admin-ops-health__dot" />
-          {statusLabel}
-        </span>
+        <AdminOpsHealthPopover health={serviceHealth} error={serviceHealthError} />
         {actions.refreshedAt && <span className="admin-ops-topbar__time">更新于 {actions.refreshedAt}</span>}
         {actions.onRefresh && (
           <button type="button" className="admin-ops-action-button" onClick={() => void actions.onRefresh?.()} disabled={actions.refreshing}>

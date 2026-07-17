@@ -1,4 +1,5 @@
 import type { RobotState } from '../lib/live2dManager'
+import type { GuideLocationSource } from '../lib/guideScene'
 
 export type ChatRole = 'assistant' | 'user' | 'system'
 
@@ -10,10 +11,27 @@ export interface ChatMessage {
 }
 
 export interface GuideContext {
+  /** A focused conversation can add product-specific guardrails without leaking them to visitors. */
+  conversationMode?: 'route-planning' | 'ticket-planning' | 'consume-assistant'
+  routeId?: string
   routeName?: string
+  routePlanningProfile?: string
+  ticketPlanningProfile?: string
+  ticketCatalogPrompt?: string
+  consumeAssistantProfile?: string
+  consumeCatalogPrompt?: string
+  spotId?: string
   spotName?: string
   spotIntro?: string
   spotNarrative?: string
+  locationSource?: GuideLocationSource
+  locationConfidence?: number
+  latitude?: number
+  longitude?: number
+  currentRouteStopIndex?: number
+  visitedSpotIds?: string[]
+  emergency?: boolean
+  emergencyReasons?: string[]
 }
 
 export interface ChatSession {
@@ -23,6 +41,7 @@ export interface ChatSession {
   isSending: boolean
   messages: ChatMessage[]
   robotState: RobotState
+  replyEmotionState: RobotState | null
   mouthOpen: number
   mouthForm: number
   guideContext: GuideContext | null
@@ -34,7 +53,7 @@ export type ChatSessions = Record<string, ChatSession>
 
 export const DEFAULT_SCENE_ID = 'main'
 export const DEFAULT_ASSISTANT_GREETING =
-  '您好！我是灵山小灵，欢迎来到无锡灵山胜境。您可以直接打字提问，也可以点击上方热门问题快速开始。'
+  '您好！我是灵山小灵，欢迎来到无锡灵山胜境。您可以直接打字提问，也可以按住麦克风和我说话。'
 
 export const createMessage = (role: ChatRole, content: string): ChatMessage => ({
   id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
@@ -58,7 +77,8 @@ export function createChatSession(
     isRecording: false,
     isSending: false,
     messages: [createMessage('assistant', DEFAULT_ASSISTANT_GREETING)],
-    robotState: 'normal',
+    robotState: 'happy',
+    replyEmotionState: null,
     mouthOpen: 0,
     mouthForm: 0,
     guideContext,

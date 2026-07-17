@@ -5,6 +5,7 @@ import com.lingshan.analytics.dto.OperationsCopilotMessage;
 import com.lingshan.analytics.dto.OperationsCopilotModelResponse;
 import com.lingshan.analytics.dto.OperationsCopilotPageContext;
 import com.lingshan.analytics.dto.OperationsCopilotProposalDraft;
+import com.lingshan.analytics.dto.OperationsCopilotProposalUpdateRequest;
 import com.lingshan.analytics.dto.OperationsCopilotQueryRequest;
 import com.lingshan.analytics.dto.OperationsCopilotResponse;
 import com.lingshan.analytics.entity.OperationsCopilotRecord;
@@ -47,7 +48,7 @@ class OperationsCopilotServiceTest {
                             "已读取最新数据", List.of("当前运营上下文"), "llm", null);
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
         );
 
@@ -140,7 +141,7 @@ class OperationsCopilotServiceTest {
                             "已读取最新数据", List.of("当前运营上下文"), "llm", null);
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
         );
 
@@ -169,7 +170,7 @@ class OperationsCopilotServiceTest {
                             "已读取最新数据", List.of("当前运营上下文"), "llm", null);
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
         );
 
@@ -249,7 +250,7 @@ class OperationsCopilotServiceTest {
                     );
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
         );
 
@@ -295,7 +296,7 @@ class OperationsCopilotServiceTest {
                     throw new IllegalStateException("apiKey=provider-secret");
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
         );
 
@@ -327,13 +328,13 @@ class OperationsCopilotServiceTest {
                                 "EMERGENCY_DRAFT",
                                 "入口道路绕行提醒",
                                 "需要管理员确认后发布。",
-                                Map.of("type", "ROAD_CLOSURE")
+                                validEmergencyPayload()
                         )
                 ),
                 "verified"::equals,
-                draft -> {
+                (operationId, proposal) -> {
                     executions.incrementAndGet();
-                    return Map.of("status", "ACTIVE", "eventId", "event-1");
+                    return Map.of("kind", "emergency", "id", "event-1", "status", "ACTIVE");
                 },
                 new ObjectMapper()
         );
@@ -342,24 +343,229 @@ class OperationsCopilotServiceTest {
 
         assertThat(draft.proposalStatus()).isEqualTo("DRAFT");
         assertThat(draft.proposal().type()).isEqualTo("EMERGENCY_DRAFT");
+        assertThat(draft.proposalRevision()).isNotBlank();
         assertThat(executions).hasValue(0);
         assertThat(stored).containsKey(draft.id());
 
-        assertThatThrownBy(() -> service.confirm(draft.id(), "not-verified"))
+        assertThatThrownBy(() -> service.confirm(
+                draft.id(), "not-verified", draft.proposalRevision()))
                 .isInstanceOf(SecurityException.class);
         assertThat(executions).hasValue(0);
 
-        OperationsCopilotResponse confirmed = service.confirm(draft.id(), "verified");
+        OperationsCopilotResponse confirmed = service.confirm(
+                draft.id(), "verified", draft.proposalRevision());
 
         assertThat(confirmed.proposalStatus()).isEqualTo("CONFIRMED");
-        assertThat(confirmed.executionResult()).containsEntry("eventId", "event-1");
+        assertThat(confirmed.executionResult()).containsEntry("status", "COMPLETED");
+        assertThat(confirmed.executionResult().get("target"))
+                .isEqualTo(Map.of("kind", "emergency", "id", "event-1", "status", "ACTIVE"));
         assertThat(confirmed.evidence()).isEqualTo(draft.evidence());
         assertThat(confirmed.recommendedActions()).isEqualTo(draft.recommendedActions());
         assertThat(confirmed.risks()).isEqualTo(draft.risks());
         assertThat(confirmed.contextUpdatedAt()).isEqualTo(draft.contextUpdatedAt());
         assertThat(executions).hasValue(1);
-        assertThatThrownBy(() -> service.confirm(draft.id(), "verified"))
+        assertThatThrownBy(() -> service.confirm(
+                draft.id(), "verified", draft.proposalRevision()))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void edits_only_a_draft_and_keeps_its_original_action_type() {
+        Map<String, OperationsCopilotRecord> stored = new ConcurrentHashMap<>();
+        OperationsCopilotService service = new OperationsCopilotService(
+                repository(stored),
+                () -> Map.of("dataSources", List.of("知识库摘要")),
+                context -> new OperationsCopilotModelResponse(
+                        "建议补充开放时间。",
+                        List.of("知识库摘要"),
+                        "llm",
+                        new OperationsCopilotProposalDraft(
+                                "KB_CREATE",
+                                "补充开放时间",
+                                "需要管理员确认",
+                                Map.of("question", "梵宫开放吗", "answer", "请以现场公告为准")
+                        )
+                ),
+                "verified"::equals,
+                (operationId, proposal) -> Map.of(),
+                new ObjectMapper()
+        );
+        OperationsCopilotResponse draft = service.ask(new OperationsCopilotQueryRequest("补充开放时间"));
+
+        OperationsCopilotResponse updated = service.updateProposal(
+                draft.id(),
+                new OperationsCopilotProposalUpdateRequest(
+                        "补充今日开放时间",
+                        "已核对官方公告",
+                        Map.of("question", "梵宫今天开放吗", "answer", "今日正常开放")
+                )
+        );
+
+        assertThat(updated.proposal().type()).isEqualTo("KB_CREATE");
+        assertThat(updated.proposal().title()).isEqualTo("补充今日开放时间");
+        assertThat(updated.proposal().payload())
+                .containsEntry("question", "梵宫今天开放吗")
+                .containsEntry("answer", "今日正常开放");
+
+        service.discard(draft.id());
+        assertThatThrownBy(() -> service.updateProposal(
+                draft.id(),
+                new OperationsCopilotProposalUpdateRequest("再次修改", null, null)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("待确认");
+    }
+
+    @Test
+    void persists_a_structured_failed_stage_when_target_execution_throws() throws Exception {
+        Map<String, OperationsCopilotRecord> stored = new ConcurrentHashMap<>();
+        OperationsCopilotService service = new OperationsCopilotService(
+                repository(stored),
+                () -> Map.of("dataSources", List.of("实时客流摘要")),
+                context -> emergencyDraftResponse(),
+                "verified"::equals,
+                (operationId, proposal) -> {
+                    throw new IllegalStateException("sensitive downstream detail");
+                },
+                new ObjectMapper()
+        );
+        OperationsCopilotResponse draft = service.ask(new OperationsCopilotQueryRequest("发布入口提醒"));
+
+        assertThatThrownBy(() -> service.confirm(
+                draft.id(), "verified", draft.proposalRevision()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("sensitive downstream detail");
+
+        OperationsCopilotRecord failed = stored.get(draft.id());
+        assertThat(failed.getProposalStatus()).isEqualTo("FAILED");
+        Map<?, ?> result = new ObjectMapper().readValue(failed.getExecutionResultJson(), Map.class);
+        assertThat(result.get("status")).isEqualTo("FAILED");
+        assertThat(result.get("failedStage")).isEqualTo("WRITE_TARGET");
+        assertThat(result.toString()).doesNotContain("sensitive downstream detail");
+    }
+
+    @Test
+    void persists_an_uncertain_result_instead_of_claiming_that_a_remote_write_failed() {
+        Map<String, OperationsCopilotRecord> stored = new ConcurrentHashMap<>();
+        OperationsCopilotService service = new OperationsCopilotService(
+                repository(stored),
+                () -> Map.of("dataSources", List.of("知识库摘要")),
+                context -> new OperationsCopilotModelResponse(
+                        "建议补充开放时间。",
+                        List.of("知识库摘要"),
+                        "llm",
+                        new OperationsCopilotProposalDraft(
+                                "KB_CREATE",
+                                "补充开放时间",
+                                "需要管理员确认",
+                                Map.of("question", "梵宫开放吗", "answer", "正常开放")
+                        )
+                ),
+                "verified"::equals,
+                (operationId, proposal) -> {
+                    throw new OperationsCopilotUncertainOutcomeException(Map.of(
+                            "kind", "knowledge",
+                            "operationId", operationId
+                    ));
+                },
+                new ObjectMapper()
+        );
+        OperationsCopilotResponse draft = service.ask(new OperationsCopilotQueryRequest("补充开放时间"));
+
+        OperationsCopilotResponse uncertain = service.confirm(
+                draft.id(), "verified", draft.proposalRevision());
+
+        assertThat(uncertain.proposalStatus()).isEqualTo("RECONCILING");
+        assertThat(uncertain.executionResult()).containsEntry("status", "PARTIAL");
+        assertThat(uncertain.executionResult()).containsEntry("outcomeStatus", "UNKNOWN");
+        assertThat(uncertain.executionResult()).containsEntry("failedStage", "WRITE_TARGET");
+        assertThat(uncertain.executionResult().get("target"))
+                .isEqualTo(Map.of("kind", "knowledge", "operationId", draft.id()));
+    }
+
+    @Test
+    void reports_partial_when_the_target_write_succeeds_but_dependency_sync_fails() {
+        Map<String, OperationsCopilotRecord> stored = new ConcurrentHashMap<>();
+        AtomicReference<String> operationId = new AtomicReference<>();
+        OperationsCopilotService service = new OperationsCopilotService(
+                repository(stored),
+                () -> Map.of("dataSources", List.of("实时客流摘要")),
+                context -> emergencyDraftResponse(),
+                "verified"::equals,
+                (id, proposal) -> {
+                    operationId.set(id);
+                    return Map.of(
+                            "kind", "emergency",
+                            "id", "event-1",
+                            "status", "ACTIVE",
+                            "syncStatus", "FAILED"
+                    );
+                },
+                new ObjectMapper()
+        );
+        OperationsCopilotResponse draft = service.ask(new OperationsCopilotQueryRequest("发布入口提醒"));
+
+        OperationsCopilotResponse confirmed = service.confirm(
+                draft.id(), "verified", draft.proposalRevision());
+
+        assertThat(operationId).hasValue(draft.id());
+        assertThat(confirmed.proposalStatus()).isEqualTo("CONFIRMED");
+        assertThat(confirmed.executionResult()).containsEntry("status", "PARTIAL");
+        assertThat(confirmed.executionResult()).containsEntry("failedStage", "SYNC_DEPENDENCIES");
+    }
+
+    @Test
+    void rejects_confirmation_when_the_reviewed_draft_changes_during_admin_verification() {
+        Map<String, OperationsCopilotRecord> stored = new ConcurrentHashMap<>();
+        AtomicReference<OperationsCopilotService> serviceRef = new AtomicReference<>();
+        AtomicInteger executions = new AtomicInteger();
+        ObjectMapper json = new ObjectMapper();
+        OperationsCopilotService service = new OperationsCopilotService(
+                repository(stored),
+                () -> Map.of("dataSources", List.of("知识库摘要")),
+                context -> new OperationsCopilotModelResponse(
+                        "建议补充开放时间。",
+                        List.of("知识库摘要"),
+                        "llm",
+                        new OperationsCopilotProposalDraft(
+                                "KB_CREATE",
+                                "补充开放时间",
+                                "需要管理员确认",
+                                Map.of("question", "梵宫开放吗", "answer", "旧答案")
+                        )
+                ),
+                token -> {
+                    OperationsCopilotRecord record = stored.values().iterator().next();
+                    serviceRef.get().updateProposal(
+                            record.getId(),
+                            new OperationsCopilotProposalUpdateRequest(
+                                    null,
+                                    null,
+                                    Map.of(
+                                            "question", "梵宫开放吗",
+                                            "answer", "管理员确认期间保存的新答案"
+                                    )
+                            )
+                    );
+                    return true;
+                },
+                (operationId, proposal) -> {
+                    executions.incrementAndGet();
+                    return Map.of("kind", "knowledge", "id", "faq-1", "status", "active");
+                },
+                json
+        );
+        serviceRef.set(service);
+        OperationsCopilotResponse draft = service.ask(new OperationsCopilotQueryRequest("补充开放时间"));
+
+        assertThatThrownBy(() -> service.confirm(
+                draft.id(), "verified", draft.proposalRevision()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("草案已更新");
+
+        assertThat(executions).hasValue(0);
+        assertThat(stored.get(draft.id()).getProposalStatus()).isEqualTo("DRAFT");
+        assertThat(stored.get(draft.id()).getProposalRevision())
+                .isNotEqualTo(draft.proposalRevision());
     }
 
     @Test
@@ -379,11 +585,11 @@ class OperationsCopilotServiceTest {
                                 "EMERGENCY_DRAFT",
                                 "入口道路绕行提醒",
                                 "需要管理员确认后发布。",
-                                Map.of("type", "ROAD_CLOSURE")
+                                validEmergencyPayload()
                         )
                 ),
                 "verified"::equals,
-                draft -> {
+                (operationId, proposal) -> {
                     executions.incrementAndGet();
                     firstExecutionStarted.countDown();
                     try {
@@ -394,7 +600,7 @@ class OperationsCopilotServiceTest {
                         Thread.currentThread().interrupt();
                         throw new IllegalStateException("test execution interrupted");
                     }
-                    return Map.of("status", "ACTIVE", "eventId", "event-1");
+                    return Map.of("kind", "emergency", "id", "event-1", "status", "ACTIVE");
                 },
                 new ObjectMapper()
         );
@@ -403,9 +609,11 @@ class OperationsCopilotServiceTest {
         Future<OperationsCopilotResponse> first = null;
         Future<OperationsCopilotResponse> second = null;
         try {
-            first = pool.submit(() -> service.confirm(draft.id(), "verified"));
+            first = pool.submit(() -> service.confirm(
+                    draft.id(), "verified", draft.proposalRevision()));
             assertThat(firstExecutionStarted.await(1, TimeUnit.SECONDS)).isTrue();
-            second = pool.submit(() -> service.confirm(draft.id(), "verified"));
+            second = pool.submit(() -> service.confirm(
+                    draft.id(), "verified", draft.proposalRevision()));
 
             Future<OperationsCopilotResponse> concurrentAttempt = second;
             assertThatThrownBy(() -> concurrentAttempt.get(600, TimeUnit.MILLISECONDS))
@@ -441,13 +649,39 @@ class OperationsCopilotServiceTest {
                     case "claimDraftForExecution" -> {
                         AtomicInteger claimed = new AtomicInteger();
                         records.computeIfPresent((String) args[0], (id, record) -> {
-                            if ("DRAFT".equals(record.getProposalStatus())) {
+                            if ("DRAFT".equals(record.getProposalStatus())
+                                    && args[1].equals(record.getProposalRevision())) {
                                 record.setProposalStatus("EXECUTING");
                                 claimed.set(1);
                             }
                             return record;
                         });
                         yield claimed.get();
+                    }
+                    case "discardDraft" -> {
+                        AtomicInteger discarded = new AtomicInteger();
+                        records.computeIfPresent((String) args[0], (id, record) -> {
+                            if ("DRAFT".equals(record.getProposalStatus())) {
+                                record.setProposalStatus("DISCARDED");
+                                discarded.set(1);
+                            }
+                            return record;
+                        });
+                        yield discarded.get();
+                    }
+                    case "updateDraftProposal" -> {
+                        AtomicInteger updated = new AtomicInteger();
+                        records.computeIfPresent((String) args[0], (id, record) -> {
+                            if ("DRAFT".equals(record.getProposalStatus())) {
+                                record.setProposalTitle((String) args[1]);
+                                record.setProposalSummary((String) args[2]);
+                                record.setProposalPayloadJson((String) args[3]);
+                                record.setProposalRevision((String) args[4]);
+                                updated.set(1);
+                            }
+                            return record;
+                        });
+                        yield updated.get();
                     }
                     case "toString" -> "OperationsCopilotRecordRepository";
                     default -> throw new UnsupportedOperationException(method.getName());
@@ -465,8 +699,32 @@ class OperationsCopilotServiceTest {
                             "已读取最新数据", List.of("当前运营上下文"), "llm", null);
                 },
                 token -> true,
-                proposal -> Map.of(),
+                (operationId, proposal) -> Map.of(),
                 new ObjectMapper()
+        );
+    }
+
+    private OperationsCopilotModelResponse emergencyDraftResponse() {
+        return new OperationsCopilotModelResponse(
+                "建议发布入口绕行提醒。",
+                List.of("实时客流摘要"),
+                "llm",
+                new OperationsCopilotProposalDraft(
+                        "EMERGENCY_DRAFT",
+                        "入口道路绕行提醒",
+                        "需要管理员确认后发布。",
+                        validEmergencyPayload()
+                )
+        );
+    }
+
+    private Map<String, Object> validEmergencyPayload() {
+        return Map.of(
+                "type", "ROAD_CLOSURE",
+                "title", "入口道路封闭",
+                "message", "请从东门绕行",
+                "severity", "WARNING",
+                "routePolicy", "EXCLUDE"
         );
     }
 }

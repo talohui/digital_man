@@ -27,7 +27,7 @@ public class AvatarConfigService {
     private static final Logger log = LoggerFactory.getLogger(AvatarConfigService.class);
 
     public static final String DEFAULT_MODEL_URL =
-            "https://fastly.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json";
+            "/live2d/haru_final/haru_final.model3.json";
 
     private final AvatarConfigRepository repository;
     private final LingshanPathsProperties paths;
@@ -96,7 +96,7 @@ public class AvatarConfigService {
             AvatarConfig cfg = new AvatarConfig();
             cfg.setId(1L);
             cfg.setLive2dModelUrl(DEFAULT_MODEL_URL);
-            cfg.setLive2dPresetName("默认·小灵");
+            cfg.setLive2dPresetName("小灵·雅致");
             cfg.setVoiceId("zhimiao_emo");
             cfg.setVoiceName("知妙");
             cfg.setDisplayName("小灵");
